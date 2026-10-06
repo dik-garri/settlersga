@@ -131,14 +131,75 @@ describe('World', () => {
     expect(hut.done).toBe(true);
     expect(world.getSettler(hut.workerId)?.kind).toBe('stonecutter');
     expect(world.stats.produced.stone).toBeGreaterThan(5);
-    expect(totalStone(world)).toBe(before - world.stats.produced.stone);
-    expect(goodsInWorld(world, 'stone')).toBe(START_STONE + world.stats.produced.stone);
+    // Every unit broken off a deposit exists as goods (possibly still in the stonecutter's hands).
+    const mined = before - totalStone(world);
+    const inHand = world.getSettler(hut.workerId)?.carrying === 'stone' ? 1 : 0;
+    expect(mined).toBe(world.stats.produced.stone + inHand);
+    expect(goodsInWorld(world, 'stone')).toBe(START_STONE + mined);
     // Deposits block movement only while stone is left.
     for (let i = 0; i < world.map.stone.length; i++) {
       const x = i % world.map.w;
       const y = Math.floor(i / world.map.w);
       if (world.map.stone[i] > 0) expect(world.map.isWalkable(x, y)).toBe(false);
     }
+  });
+
+  it('only allows building inside the territory', () => {
+    const world = new World(42);
+    const c = world.castle;
+    expect(world.map.owner[world.map.idx(c.x + 1, c.y + 1)]).toBe(1);
+    expect(world.map.owner[world.map.idx(0, 0)]).toBe(0);
+    for (let y = 0; y < world.map.h; y++) {
+      for (let x = 0; x < world.map.w; x++) {
+        if (world.canPlace('woodcutter', x, y)) {
+          expect(world.map.owner[world.map.idx(x, y)]).toBe(1);
+          expect(world.map.owner[world.map.idx(x + 1, y + 2)]).toBe(1);
+        }
+      }
+    }
+  });
+
+  it('a garrisoned guard tower pushes the border out', () => {
+    const world = new World(42);
+    const c = world.castle;
+    const owned = () => world.map.owner.reduce((sum, v) => sum + v, 0);
+    const before = owned();
+    // As far from the castle as the territory allows.
+    let spot: { x: number; y: number } | null = null;
+    let far = 0;
+    for (let y = 0; y < world.map.h; y++) {
+      for (let x = 0; x < world.map.w; x++) {
+        const d = Math.hypot(x - c.x, y - c.y);
+        if (d > far && world.canPlace('tower', x, y)) {
+          far = d;
+          spot = { x, y };
+        }
+      }
+    }
+    const tower = world.placeBuilding('tower', spot!.x, spot!.y)!;
+    expect(tower).not.toBeNull();
+
+    run(world, 3000);
+
+    expect(tower.done).toBe(true);
+    expect(world.getSettler(tower.workerId)?.kind).toBe('guard');
+    expect(owned()).toBeGreaterThan(before + 40);
+    expect(world.map.owner[world.map.idx(tower.x, tower.y)]).toBe(1);
+  });
+
+  it('gatherers leave trees outside the territory alone', () => {
+    const world = new World(42);
+    const outside = new Set<number>();
+    for (let i = 0; i < world.map.tree.length; i++) {
+      if (world.map.tree[i] && !world.map.owner[i]) outside.add(i);
+    }
+    // Woodcutter right at the border, next to the wild forest.
+    const c = world.castle;
+    const wc = findSpot(world, 'woodcutter', { x: c.x + 8, y: c.y - 2 });
+    world.placeBuilding('woodcutter', wc.x, wc.y);
+    run(world, 6000);
+    expect(world.stats.produced.log).toBeGreaterThan(0);
+    for (const i of outside) expect(world.map.tree[i], `tree ${i}`).toBeGreaterThan(0);
   });
 
   it('never leaves reservations negative', () => {

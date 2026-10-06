@@ -48,6 +48,8 @@ export class GameRenderer {
   /** World-space root; the camera moves and scales it. */
   readonly world = new Container();
   private readonly ground = new Container();
+  private readonly territory = new Graphics();
+  private territoryVersion = -1;
   private readonly marks = new Graphics();
   private readonly objects = new Container({ sortableChildren: true });
   private readonly ghostLayer = new Container();
@@ -66,7 +68,7 @@ export class GameRenderer {
     private readonly sim: World,
     private readonly atlas: SpriteAtlas,
   ) {
-    this.world.addChild(this.ground, this.marks, this.objects, this.ghostLayer);
+    this.world.addChild(this.ground, this.territory, this.marks, this.objects, this.ghostLayer);
     app.stage.addChild(this.world);
     this.ghostSprite = new Sprite();
     this.ghostSprite.alpha = 0.75;
@@ -116,6 +118,7 @@ export class GameRenderer {
 
   /** Brings sprites in line with the simulation. `alpha` ∈ [0,1) interpolates between ticks. */
   sync(alpha: number, timeMs: number, ghost: Ghost | null, selected: number | null, hover: { x: number; y: number } | null) {
+    this.syncTerritory();
     this.syncTrees();
     this.syncDeposits();
     this.syncBuildings();
@@ -151,6 +154,45 @@ export class GameRenderer {
       const flip = hash(i + 1) % 2 ? -1 : 1;
       s.scale.set(TREE_SCALE[Math.min(stage, TREE_MATURE)] * flip, TREE_SCALE[Math.min(stage, TREE_MATURE)]);
     }
+  }
+
+  /** Dims land outside the territory and outlines the border. Redrawn only when it changes. */
+  private syncTerritory(): void {
+    if (this.sim.territoryVersion === this.territoryVersion) return;
+    this.territoryVersion = this.sim.territoryVersion;
+    const { map } = this.sim;
+    const g = this.territory;
+    g.clear();
+    for (let y = 0; y < map.h; y++) {
+      for (let x = 0; x < map.w; x++) {
+        if (!map.owner[map.idx(x, y)]) g.poly(this.diamond(x, y));
+      }
+    }
+    g.fill({ color: 0x0b1420, alpha: 0.3 });
+
+    const owned = (x: number, y: number) => map.inBounds(x, y) && map.owner[map.idx(x, y)] === 1;
+    for (let y = 0; y < map.h; y++) {
+      for (let x = 0; x < map.w; x++) {
+        if (!owned(x, y)) continue;
+        const p = toScreen(x, y);
+        const top = [p.x, p.y - HALF_H] as const;
+        const right = [p.x + HALF_W, p.y] as const;
+        const bottom = [p.x, p.y + HALF_H] as const;
+        const left = [p.x - HALF_W, p.y] as const;
+        const edges: [readonly [number, number], readonly [number, number], boolean][] = [
+          [right, bottom, !owned(x + 1, y)],
+          [left, top, !owned(x - 1, y)],
+          [bottom, left, !owned(x, y + 1)],
+          [top, right, !owned(x, y - 1)],
+        ];
+        for (const [a, b, border] of edges) {
+          if (!border) continue;
+          g.moveTo(a[0], a[1]);
+          g.lineTo(b[0], b[1]);
+        }
+      }
+    }
+    g.stroke({ width: 3, color: 0x2b5fb4, alpha: 0.85 });
   }
 
   private syncDeposits(): void {

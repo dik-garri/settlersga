@@ -1,11 +1,11 @@
 import { buildingIcon } from '../render/atlas';
-import { BUILDINGS, costOf, GATHERERS, INPUT_CAP, OUTPUT_CAP, SETTLER_NAMES } from '../sim/config';
+import { BUILDINGS, costOf, GATHERERS, INPUT_CAP, OUTPUT_CAP, SETTLER_NAMES, TERRITORY_RADIUS } from '../sim/config';
 import { RESOURCES, type Building, type BuildingType, type Resource, type SettlerKind } from '../sim/types';
 import type { World } from '../sim/world';
 import type { GameState } from './state';
 
 const SPEEDS = [1, 2, 4];
-const PLAYER_BUILDINGS: BuildingType[] = ['woodcutter', 'sawmill', 'forester', 'stonecutter'];
+const PLAYER_BUILDINGS: BuildingType[] = ['woodcutter', 'sawmill', 'forester', 'stonecutter', 'tower'];
 
 const RESOURCE_UI: Record<Resource, { icon: string; name: string }> = {
   log: { icon: '🪵', name: 'Брёвна' },
@@ -117,6 +117,7 @@ export class Hud {
       sawmiller: 0,
       forester: 0,
       stonecutter: 0,
+      guard: 0,
     };
     let busy = 0;
     for (const s of world.settlers) {
@@ -126,7 +127,7 @@ export class Hud {
     this.popEl.textContent =
       `Поселенцы: ${world.settlers.length} · носильщики ${busy}/${counts.carrier} заняты · ` +
       `строители ${counts.builder} · лесорубы ${counts.woodcutter} · пильщики ${counts.sawmiller} · ` +
-      `лесничие ${counts.forester} · каменотёсы ${counts.stonecutter}`;
+      `лесничие ${counts.forester} · каменотёсы ${counts.stonecutter} · стражники ${counts.guard}`;
 
     for (const [key, b] of this.speedButtons) {
       b.classList.toggle('active', key === 'pause' ? state.paused : !state.paused && state.speed === key);
@@ -172,6 +173,8 @@ export class Hud {
         rows.push(['Доски', `${b.output.plank} / ${OUTPUT_CAP}`]);
       } else if (b.type === 'forester') {
         rows.push(['Посажено всего', String(this.world.stats.treesPlanted)]);
+      } else if (b.type === 'tower') {
+        rows.push(['Радиус земли', `${TERRITORY_RADIUS.tower} клеток`]);
       } else if (gather) {
         rows.push([RESOURCE_UI[gather.res].name, `${b.output[gather.res]} / ${OUTPUT_CAP}`]);
       }
@@ -193,6 +196,7 @@ export class Hud {
     const w = this.world.getSettler(b.workerId);
     const outside = w !== undefined && w.inside === null;
     if (b.type === 'forester') return outside ? 'сажает деревья' : 'отдыхает';
+    if (b.type === 'tower') return 'охраняет границу';
     const gather = GATHERERS[BUILDINGS[b.type].worker!];
     if (gather && b.output[gather.res] >= OUTPUT_CAP) return 'склад полон';
     return outside ? (GATHER_PLACE[b.type] ?? 'работает') : 'отдыхает';

@@ -86,7 +86,7 @@ export class SpriteAtlas {
         BUILDING_PAINTERS[type as BuildingType | 'site'](ctx);
       });
     }
-    for (const kind of ['carrier', 'builder', 'woodcutter', 'sawmiller', 'forester', 'stonecutter'] as SettlerKind[]) {
+    for (const kind of ['carrier', 'builder', 'woodcutter', 'sawmiller', 'forester', 'stonecutter', 'guard'] as SettlerKind[]) {
       for (const frame of ['stand', 'walk', 'work'] as SettlerFrame[]) {
         a.add(`settler:${kind}:${frame}`, 20, 32, 10, 29, (ctx) => paintSettler(ctx, kind, frame));
       }

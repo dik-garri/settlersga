@@ -8,6 +8,8 @@ export class GameMap {
   readonly tree: Uint8Array;
   /** Stone units left in a deposit on this tile, 0 if none. Deposits block movement. */
   readonly stone: Uint8Array;
+  /** 1 if the tile belongs to the player's territory, 0 otherwise. */
+  readonly owner: Uint8Array;
   /** Building id occupying the tile, 0 if none. */
   readonly building: Int32Array;
   /** Building id whose door is on this tile, 0 if none. */
@@ -21,6 +23,7 @@ export class GameMap {
     this.terrain = new Uint8Array(n).fill(Terrain.Grass);
     this.tree = new Uint8Array(n);
     this.stone = new Uint8Array(n);
+    this.owner = new Uint8Array(n);
     this.building = new Int32Array(n);
     this.door = new Int32Array(n);
   }
@@ -159,7 +162,7 @@ export function generateMap(seed: number, size: number, cx: number, cy: number):
   }
 
   // Guarantee a grove a short walk from the castle.
-  const gx = cx + 9;
+  const gx = cx + 8;
   const gy = cy - 3;
   for (let y = gy - 3; y <= gy + 3; y++) {
     for (let x = gx - 3; x <= gx + 3; x++) {
@@ -173,7 +176,7 @@ export function generateMap(seed: number, size: number, cx: number, cy: number):
   }
 
   // Guarantee a quarry on the other side.
-  depositAt(cx - 8, cy + 4, 2.3, 0.85);
+  depositAt(cx - 7, cy + 3, 2.3, 0.85);
 
   return map;
 }

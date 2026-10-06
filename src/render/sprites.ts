@@ -400,6 +400,7 @@ export const BUILDING_CANVAS: Record<BuildingType | 'site', BuildingCanvas> = {
   sawmill: { w: 150, h: 140, ax: 75, ay: 100 },
   forester: { w: 150, h: 140, ax: 75, ay: 100 },
   stonecutter: { w: 150, h: 140, ax: 75, ay: 100 },
+  tower: { w: 150, h: 210, ax: 75, ay: 170 },
   site: { w: 150, h: 90, ax: 75, ay: 50 },
 };
 
@@ -582,6 +583,47 @@ function paintStonecutter(ctx: Ctx): void {
   stoneBlock(ctx, bx - 5, by - 6, 9, 6, 1.05);
 }
 
+function paintTower(ctx: Ctx): void {
+  const a = 0.5;
+  const H = 66;
+  const stone = '#a39d90';
+  shadow(ctx, 0.75, 0.75, 0.6);
+  // Low wall ring around the foot of the tower.
+  box(ctx, 0, 0, 0.8, 0.8, 0, 6, '#8f897d');
+  walls(ctx, 0, 0, a, a, 6, H - 6, stone);
+  for (let z = 12, row = 0; z < H; z += 7, row++) {
+    line(ctx, [-a, a, z], [a, a, z], shade(stone, 0.82));
+    line(ctx, [a, -a, z], [a, a, z], shade(stone, 0.6));
+    const t = row % 2 ? -0.15 : 0.15;
+    line(ctx, [t, a, z], [t, a, z + 7], shade(stone, 0.82));
+    line(ctx, [a, t, z], [a, t, z + 7], shade(stone, 0.6));
+  }
+  frontQuad(ctx, a, 0.05, 0.4, 6, 22, '#3d2a1a');
+  frontQuad(ctx, a, -0.12, 0.08, 40, 50, '#2c2724');
+  sideQuad(ctx, a, -0.1, 0.1, 44, 54, '#221e1b');
+  // Wooden lookout with a pointed roof and the player's banner.
+  box(ctx, 0, 0, a + 0.12, a + 0.12, H, 10, '#8a5a32');
+  for (const t of [-0.3, 0, 0.3]) {
+    line(ctx, [t, a + 0.12, H], [t, a + 0.12, H + 10], '#5e3b1f');
+    line(ctx, [a + 0.12, t, H], [a + 0.12, t, H + 10], '#4a2e18');
+  }
+  pyramidRoof(ctx, a + 0.2, H + 10, 34, '#9e3328');
+  const [fx, fy] = P(0, 0, H + 44);
+  ctx.strokeStyle = '#3b2b1a';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(fx, fy);
+  ctx.lineTo(fx, fy - 16);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(fx, fy - 16);
+  ctx.lineTo(fx + 13, fy - 12);
+  ctx.lineTo(fx, fy - 8);
+  ctx.closePath();
+  ctx.fillStyle = '#2b5fb4';
+  ctx.fill();
+}
+
 function paintSite(ctx: Ctx): void {
   const hw = 0.95;
   const hh = 0.95;
@@ -610,6 +652,7 @@ export const BUILDING_PAINTERS: Record<BuildingType | 'site', (ctx: Ctx) => void
   sawmill: paintSawmill,
   forester: paintForester,
   stonecutter: paintStonecutter,
+  tower: paintTower,
   site: paintSite,
 };
 
@@ -624,6 +667,7 @@ const SETTLER_LOOK: Record<SettlerKind, { tunic: string; hat: string; tool?: 'ax
   sawmiller: { tunic: '#8b5a2b', hat: '#d9c9a3' },
   forester: { tunic: '#7a9a3a', hat: '#5a4020', tool: 'shovel' },
   stonecutter: { tunic: '#7d7f86', hat: '#4a3b2c', tool: 'pick' },
+  guard: { tunic: '#a83232', hat: '#8d939a' },
 };
 
 /** Settler, 20×32 with the feet at (10, 29). */

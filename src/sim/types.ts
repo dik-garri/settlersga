@@ -15,8 +15,8 @@ export enum Terrain {
   Rock = 3,
 }
 
-export type BuildingType = 'castle' | 'woodcutter' | 'sawmill' | 'forester' | 'stonecutter';
-export type SettlerKind = 'carrier' | 'builder' | 'woodcutter' | 'sawmiller' | 'forester' | 'stonecutter';
+export type BuildingType = 'castle' | 'woodcutter' | 'sawmill' | 'forester' | 'stonecutter' | 'tower';
+export type SettlerKind = 'carrier' | 'builder' | 'woodcutter' | 'sawmiller' | 'forester' | 'stonecutter' | 'guard';
 
 export interface Building {
   id: number;

@@ -28,6 +28,12 @@ export const START_PLANKS = 14;
 export const START_STONE = 6;
 
 export const TREE_MATURE = 4;
+
+/** Territory radius (tiles from the building center) claimed by the castle and by garrisoned towers. */
+export const TERRITORY_RADIUS: Partial<Record<BuildingType, number>> = {
+  castle: 10,
+  tower: 8,
+};
 /** Stone units in a deposit tile at generation, inclusive range. */
 export const DEPOSIT_STONE: [number, number] = [4, 8];
 
@@ -60,6 +66,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   sawmill: { name: 'Лесопилка', w: 2, h: 2, cost: { plank: 2, stone: 2 }, worker: 'sawmiller', playerBuildable: true },
   forester: { name: 'Дом лесничего', w: 2, h: 2, cost: { plank: 2 }, worker: 'forester', playerBuildable: true },
   stonecutter: { name: 'Каменотёс', w: 2, h: 2, cost: { plank: 2 }, worker: 'stonecutter', playerBuildable: true },
+  tower: { name: 'Сторожевая башня', w: 2, h: 2, cost: { plank: 2, stone: 3 }, worker: 'guard', playerBuildable: true },
 };
 
 export function costOf(type: BuildingType): Stock {
@@ -78,4 +85,5 @@ export const SETTLER_NAMES: Record<SettlerKind, string> = {
   sawmiller: 'Пильщик',
   forester: 'Лесничий',
   stonecutter: 'Каменотёс',
+  guard: 'Стражник',
 };

@@ -117,12 +117,13 @@ button.active {
   display: flex;
   flex-direction: column;
   align-items: center;
-  width: 108px;
-  padding: 4px 6px 6px;
+  min-width: 108px;
+  padding: 4px 8px 6px;
 }
 
 .build-btn .name {
   font-size: 13px;
+  white-space: nowrap;
 }
 
 .build-btn .cost {
@@ -162,7 +163,7 @@ button.active {
 .hint {
   position: absolute;
   left: 50%;
-  bottom: 118px;
+  bottom: 150px;
   transform: translateX(-50%);
   color: var(--muted);
   font-size: 12px;

@@ -20,6 +20,7 @@ import {
   START_CARRIERS,
   START_PLANKS,
   START_STONE,
+  TERRITORY_RADIUS,
   totalCost,
   TREE_MATURE,
   type GatherDef,
@@ -49,6 +50,8 @@ export class World {
   readonly settlers: Settler[] = [];
   readonly stats: { produced: Stock; treesPlanted: number } = { produced: emptyStock(), treesPlanted: 0 };
   tick = 0;
+  /** Bumped whenever the territory changes, so views can redraw the border. */
+  territoryVersion = 0;
 
   private readonly rng: Rng;
   private readonly settlerById = new Map<number, Settler>();
@@ -67,6 +70,7 @@ export class World {
     this.castle = castle;
     castle.output.plank = START_PLANKS;
     castle.output.stone = START_STONE;
+    this.recomputeTerritory();
     for (let i = 0; i < START_CARRIERS; i++) this.spawnSettler('carrier', castle);
     for (let i = 0; i < START_BUILDERS; i++) this.spawnSettler('builder', castle);
   }
@@ -75,13 +79,23 @@ export class World {
 
   canPlace(type: BuildingType, x: number, y: number): boolean {
     const def = BUILDINGS[type];
+    // The castle founds the territory, everything else must stay inside it.
+    const owned = (tx: number, ty: number) => type === 'castle' || this.owns(tx, ty);
     for (let dy = 0; dy < def.h; dy++) {
       for (let dx = 0; dx < def.w; dx++) {
-        if (!this.map.isBuildable(x + dx, y + dy)) return false;
+        if (!this.map.isBuildable(x + dx, y + dy) || !owned(x + dx, y + dy)) return false;
       }
     }
     const door = doorOf(x, y, def.w, def.h);
-    return this.map.isWalkable(door.x, door.y) && this.map.door[this.map.idx(door.x, door.y)] === 0;
+    return (
+      this.map.isWalkable(door.x, door.y) &&
+      this.map.door[this.map.idx(door.x, door.y)] === 0 &&
+      owned(door.x, door.y)
+    );
+  }
+
+  owns(x: number, y: number): boolean {
+    return this.map.inBounds(x, y) && this.map.owner[this.map.idx(x, y)] === 1;
   }
 
   buildingAt(x: number, y: number): Building | undefined {
@@ -161,6 +175,24 @@ export class World {
     this.map.door[this.map.idx(b.door.x, b.door.y)] = b.id;
     this.buildings.set(b.id, b);
     return b;
+  }
+
+  /** Rebuilds the territory from the castle and every garrisoned tower. */
+  private recomputeTerritory(): void {
+    const m = this.map;
+    m.owner.fill(0);
+    for (const b of this.buildings.values()) {
+      const r = TERRITORY_RADIUS[b.type];
+      if (!r || !b.done || (b.type !== 'castle' && b.workerId === null)) continue;
+      const cx = b.x + (b.w - 1) / 2;
+      const cy = b.y + (b.h - 1) / 2;
+      for (let y = Math.floor(cy - r); y <= Math.ceil(cy + r); y++) {
+        for (let x = Math.floor(cx - r); x <= Math.ceil(cx + r); x++) {
+          if (m.inBounds(x, y) && Math.hypot(x - cx, y - cy) <= r) m.owner[m.idx(x, y)] = 1;
+        }
+      }
+    }
+    this.territoryVersion++;
   }
 
   private spawnSettler(kind: SettlerKind, at: Building): Settler {
@@ -352,6 +384,7 @@ export class World {
         b.workerId = s.id;
         b.workerRequested = false;
         s.tasks.shift();
+        if (TERRITORY_RADIUS[b.type]) this.recomputeTerritory();
         return;
       }
     }
@@ -498,6 +531,7 @@ export class World {
       }
 
       case 'sawmiller':
+      case 'guard':
         if (home && s.inside !== home.id) this.goHome(s, home);
         return;
     }
@@ -510,7 +544,7 @@ export class World {
    */
   private canPlant(x: number, y: number, planting = false): boolean {
     const m = this.map;
-    if (!m.isBuildable(x, y) || m.hasDoorNear(x, y) || this.settlerNear(x, y)) return false;
+    if (!this.owns(x, y) || !m.isBuildable(x, y) || m.hasDoorNear(x, y) || this.settlerNear(x, y)) return false;
     if (!planting && this.reservedPlots.has(m.idx(x, y))) return false;
     return staysConnected(m, x, y);
   }
@@ -536,6 +570,7 @@ export class World {
   }
 
   private isGatherTarget(res: Resource, i: number): boolean {
+    if (this.map.owner[i] !== 1) return false;
     return res === 'stone' ? this.map.stone[i] > 0 : this.map.tree[i] === TREE_MATURE;
   }
 

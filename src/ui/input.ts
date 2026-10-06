@@ -133,7 +133,8 @@ export class InputController {
     if (placing) {
       const a = this.anchorFor(placing, t.x, t.y);
       if (!this.world.canPlace(placing, a.x, a.y)) {
-        this.cb.onMessage('Здесь строить нельзя');
+        const outside = !this.world.owns(a.x, a.y);
+        this.cb.onMessage(outside ? 'Строить можно только на своей земле' : 'Здесь строить нельзя');
         return;
       }
       const b = this.world.placeBuilding(placing, a.x, a.y);
@@ -183,6 +184,9 @@ export class InputController {
         break;
       case 'Digit4':
         this.cb.onSelectBuildType('stonecutter');
+        break;
+      case 'Digit5':
+        this.cb.onSelectBuildType('tower');
         break;
     }
   }
