@@ -8,6 +8,7 @@ import {
   paintBoulder,
   paintDeposit,
   paintField,
+  paintVines,
   paintSign,
   paintFlag,
   paintGround,
@@ -106,7 +107,10 @@ export class SpriteAtlas {
     for (let code = 0; code <= ORE_RESOURCES.length; code++) {
       a.add(`sign:${code}`, 18, 30, 6, 28, (ctx) => paintSign(ctx, oreOf(code)));
     }
-    for (let v = 1; v <= 4; v++) a.add(`field:${v}`, 66, 40, 33, 24, (ctx) => paintField(ctx, v));
+    for (let v = 1; v <= 4; v++) {
+      a.add(`field:grain:${v}`, 66, 40, 33, 24, (ctx) => paintField(ctx, v));
+      a.add(`field:vine:${v}`, 66, 40, 33, 24, (ctx) => paintVines(ctx, v));
+    }
     for (let v = 0; v < 3; v++) a.add(`deposit:${v}`, 56, 44, 28, 34, (ctx) => paintDeposit(ctx, v));
     for (const [type, c] of Object.entries(BUILDING_CANVAS)) {
       a.add(`building:${type}`, c.w, c.h, c.ax, c.ay, (ctx) => {

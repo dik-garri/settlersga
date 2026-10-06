@@ -26,13 +26,15 @@ export const RESOURCES = [
   'scythe',
   'rod',
   'hammer',
+  'grapes',
+  'wine',
 ] as const;
 export type Resource = (typeof RESOURCES)[number];
 export type Stock = Record<Resource, number>;
 export const emptyStock = (): Stock => Object.fromEntries(RESOURCES.map((r) => [r, 0])) as Stock;
 
 /** What a planting profession puts into the ground. */
-export type PlantKind = 'tree' | 'grain';
+export type PlantKind = 'tree' | 'grain' | 'vine';
 
 export enum Terrain {
   Water = 0,
@@ -68,6 +70,8 @@ export type BuildingType =
   | 'goldsmelter'
   | 'toolsmith'
   | 'warehouse'
+  | 'vineyard'
+  | 'winery'
   | 'tower';
 
 export type SettlerKind =
@@ -88,6 +92,8 @@ export type SettlerKind =
   | 'geologist'
   | 'smelter'
   | 'toolsmith'
+  | 'vinegrower'
+  | 'winemaker'
   | 'guard';
 
 /** Player ids start at 1; 0 means "nobody" in per-tile ownership. */

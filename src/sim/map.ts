@@ -11,8 +11,9 @@ export class GameMap {
   readonly tree: Uint8Array;
   /** Stone units left in a deposit on this tile, 0 if none. Deposits block movement. */
   readonly stone: Uint8Array;
-  /** Grain field stage, 0 = no field. Fields are walkable but not buildable. */
+  /** Field stage, 0 = no field, and its kind (`CROP_KINDS` index). Fields are walkable but not buildable. */
   readonly crop: Uint8Array;
+  readonly cropKind: Uint8Array;
   /** Fish left in a water tile. */
   readonly fish: Uint8Array;
   /** Ore kind under a mountain tile (`ORE_RESOURCES` index + 1, 0 = none) and units left. */
@@ -44,6 +45,7 @@ export class GameMap {
     this.tree = new Uint8Array(n);
     this.stone = new Uint8Array(n);
     this.crop = new Uint8Array(n);
+    this.cropKind = new Uint8Array(n);
     this.fish = new Uint8Array(n);
     this.ore = new Uint8Array(n);
     this.oreAmount = new Uint8Array(n);

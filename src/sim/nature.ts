@@ -1,4 +1,5 @@
 import {
+  CROP_KINDS,
   CROP_GROW_CHANCE,
   CROP_GROW_EVERY,
   CROP_RIPE,
@@ -57,14 +58,37 @@ const GATHER_RULES: Partial<Record<Resource, GatherRule>> = {
     },
   },
   grain: {
-    isTarget: (m, i) => m.crop[i] === CROP_RIPE,
+    isTarget: (m, i) => m.crop[i] === CROP_RIPE && m.cropKind[i] === CROP_KINDS.indexOf('grain'),
     take: (w, i) => {
       w.map.crop[i] = 0;
       w.map.touch(i);
       w.fields.delete(i);
     },
   },
+  grapes: {
+    isTarget: (m, i) => m.crop[i] === CROP_RIPE && m.cropKind[i] === CROP_KINDS.indexOf('vine'),
+    // Vines are perennial: after the harvest they grow fruit again instead of being replanted.
+    take: (w, i) => {
+      w.map.crop[i] = 2;
+      w.map.touch(i);
+    },
+  },
 };
+
+function field(kind: PlantKind): PlantRule {
+  const code = CROP_KINDS.indexOf(kind);
+  return {
+    // Fields stay walkable.
+    isSafe: () => true,
+    counts: (m, i) => m.crop[i] > 0 && m.cropKind[i] === code,
+    plant: (w, i) => {
+      w.map.crop[i] = 1;
+      w.map.cropKind[i] = code;
+      w.map.touch(i);
+      w.fields.add(i);
+    },
+  };
+}
 
 interface PlantRule {
   /** Costlier checks, run only on the chosen candidate and again at planting time. */
@@ -85,16 +109,8 @@ const PLANT_RULES: Record<PlantKind, PlantRule> = {
       w.stats.treesPlanted++;
     },
   },
-  grain: {
-    // Fields stay walkable.
-    isSafe: () => true,
-    counts: (m, i) => m.crop[i] > 0,
-    plant: (w, i) => {
-      w.map.crop[i] = 1;
-      w.map.touch(i);
-      w.fields.add(i);
-    },
-  },
+  grain: field('grain'),
+  vine: field('vine'),
 };
 
 const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);

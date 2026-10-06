@@ -7,6 +7,7 @@ import { TICKS_PER_SECOND } from './sim/config';
 import { World } from './sim/world';
 import { Hud } from './ui/hud';
 import { InputController } from './ui/input';
+import { Minimap } from './ui/minimap';
 import { createState } from './ui/state';
 import { hasSave, readSave, storeSave } from './ui/storage';
 
@@ -49,6 +50,8 @@ async function main() {
       location.search = '?load=1';
     },
   });
+  const minimap = new Minimap(world, camera);
+  document.getElementById('hud')!.append(minimap.el);
   const input = new InputController(app.canvas, camera, renderer, world, state, {
     onSelectBuildType: (type) => hud.selectBuildType(type),
     onHotkey: (n) => hud.hotkey(n),
@@ -76,6 +79,7 @@ async function main() {
     const view = camera.viewRect(app.screen.width, app.screen.height);
     renderer.sync(acc / TICK_MS, now, view, input.ghost(), state.selected, state.hover, input.area());
     hud.update(now);
+    minimap.update(now, app.screen.width, app.screen.height);
   });
 
   Object.assign(window, { world, seed, state });

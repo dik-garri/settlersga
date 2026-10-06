@@ -129,3 +129,20 @@ describe('logistics fairness', () => {
     expect(got(b)).toBe(1);
   });
 });
+
+describe('wine', () => {
+  it('a vinegrower plants vines once, harvests grapes repeatedly and the winery makes wine', () => {
+    const w = richWorld();
+    const c = w.castle;
+    const vineyard = placeNear(w, 'vineyard', c.x + 6, c.y + 4)!;
+    const winery = placeNear(w, 'winery', c.x - 5, c.y - 1)!;
+    expect(vineyard && winery).toBeTruthy();
+    run(w, 12000);
+    expect(w.stats.produced.grapes).toBeGreaterThan(4);
+    expect(w.stats.produced.wine).toBeGreaterThan(0);
+    // Harvested vines stay planted (perennial): far fewer plantings than harvests.
+    const vines = [...w.map.crop.keys()].filter((i) => w.map.crop[i] > 0 && w.map.cropKind[i] === 1).length;
+    expect(vines).toBeGreaterThan(0);
+    expect(w.stats.produced.grapes).toBeGreaterThan(vines);
+  });
+});

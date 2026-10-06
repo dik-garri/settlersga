@@ -9,12 +9,13 @@ import {
   PROFESSIONS,
   RESOURCE_GROUPS,
   RESOURCE_INFO,
+  TICKS_PER_SECOND,
   type Category,
   type ResourceGroup,
 } from '../sim/config';
 import { available, chooseOutput, oreLeft } from '../sim/buildings';
 import { hasGatherTargetNear } from '../sim/nature';
-import { RESOURCES, type Building, type BuildingType, type Resource, type SettlerKind } from '../sim/types';
+import { RESOURCES, type Building, type BuildingType, type Resource, type SettlerKind, type Stock } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import type { GameState, Placeable } from './state';
 
@@ -80,6 +81,11 @@ function inStorage(world: World, res: Resource): number {
 export class Hud {
   private readonly stockEl = el('div', 'stock');
   private readonly stockPanel = el('div', 'panel stock-panel');
+  private readonly statsPanel = el('div', 'panel stats-panel');
+  /** `stats.produced` sampled once per game minute, newest last (for "last 10 minutes"). */
+  private readonly history: Stock[] = [];
+  private lastSampleTick = -Infinity;
+  private lastStats = -Infinity;
   /** Number elements per resource, in the top bar and the stock panel; built once, updated in place. */
   private readonly stockValues: [Resource, HTMLElement][] = [];
   private readonly popEl = el('div', 'pop');
@@ -110,9 +116,19 @@ export class Hud {
     more.title = 'Весь склад';
     more.onclick = () => {
       this.stockPanel.hidden = !this.stockPanel.hidden;
+      this.statsPanel.hidden = true;
       more.blur();
     };
-    this.stockEl.append(more);
+    const stats = el('button', 'stock-toggle', '📊');
+    stats.title = 'Статистика';
+    stats.onclick = () => {
+      this.statsPanel.hidden = !this.statsPanel.hidden;
+      this.lastStats = -Infinity;
+      this.stockPanel.hidden = true;
+      stats.blur();
+    };
+    this.stockEl.append(more, stats);
+    this.statsPanel.hidden = true;
     top.append(this.stockEl, this.popEl);
     this.stockPanel.hidden = true;
     for (const [group, title] of Object.entries(RESOURCE_GROUPS) as [ResourceGroup, string][]) {
@@ -197,7 +213,7 @@ export class Hud {
     this.showTab(0);
 
     this.infoEl.hidden = true;
-    root.append(top, this.stockPanel, speed, build, this.infoEl, this.hintEl, this.toastEl);
+    root.append(top, this.stockPanel, this.statsPanel, speed, build, this.infoEl, this.hintEl, this.toastEl);
   }
 
   showTab(t: number): void {
@@ -233,6 +249,15 @@ export class Hud {
     this.lastUpdate = nowMs;
     const { world, state } = this;
     for (const [r, value] of this.stockValues) value.textContent = String(inStorage(world, r));
+    if (world.tick - this.lastSampleTick >= TICKS_PER_SECOND * 60) {
+      this.lastSampleTick = world.tick;
+      this.history.push({ ...world.stats.produced });
+      if (this.history.length > 11) this.history.shift();
+    }
+    if (!this.statsPanel.hidden && nowMs - this.lastStats > 1000) {
+      this.lastStats = nowMs;
+      this.renderStats();
+    }
 
     const counts = new Map<SettlerKind, number>();
     let busy = 0;
@@ -269,6 +294,45 @@ export class Hud {
     s.append(wareIcon(r, 20), value);
     this.stockValues.push([r, value]);
     return s;
+  }
+
+  private renderStats(): void {
+    const { world } = this;
+    const total = world.stats.produced;
+    const old = this.history[0] ?? total;
+    const minutes = Math.max(1, this.history.length - 1);
+    this.statsPanel.innerHTML = '';
+    this.statsPanel.append(el('h4', '', `Производство (за ${minutes} мин / всего)`));
+    const grid = el('div', 'stats-grid');
+    for (const r of RESOURCES) {
+      if (total[r] === 0) continue;
+      const row = el('span', 'stock-row');
+      row.append(wareIcon(r), el('span', '', nameOf(r)), el('b', '', `${total[r] - old[r]} / ${total[r]}`));
+      grid.append(row);
+    }
+    this.statsPanel.append(grid);
+
+    const kinds = new Map<SettlerKind, number>();
+    for (const s of world.settlers) if (s.owner === LOCAL_PLAYER) kinds.set(s.kind, (kinds.get(s.kind) ?? 0) + 1);
+    this.statsPanel.append(el('h4', '', 'Население'));
+    const people = el('div', 'stats-grid');
+    for (const [kind, n] of [...kinds].sort((a, b) => b[1] - a[1])) {
+      const row = el('span', 'stock-row');
+      row.append(el('span', '', PROFESSIONS[kind].name), el('b', '', String(n)));
+      people.append(row);
+    }
+    this.statsPanel.append(people);
+
+    const types = new Map<BuildingType, number>();
+    for (const b of world.buildings.values()) if (b.owner === LOCAL_PLAYER) types.set(b.type, (types.get(b.type) ?? 0) + 1);
+    this.statsPanel.append(el('h4', '', 'Здания'));
+    const houses = el('div', 'stats-grid');
+    for (const [type, n] of [...types].sort((a, b) => b[1] - a[1])) {
+      const row = el('span', 'stock-row');
+      row.append(el('span', '', BUILDINGS[type].name), el('b', '', String(n)));
+      houses.append(row);
+    }
+    this.statsPanel.append(houses);
   }
 
   private renderInfo(): void {

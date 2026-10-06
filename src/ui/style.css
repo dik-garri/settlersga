@@ -247,7 +247,8 @@ button.active {
   margin-right: 3px;
 }
 
-.stock-panel {
+.stock-panel,
+.stats-panel {
   top: 92px;
   left: 12px;
   padding: 8px 14px 10px;
@@ -294,4 +295,22 @@ button.active {
 button.danger {
   border-color: #c24a3a;
   background: rgba(194, 74, 58, 0.3);
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2px;
+}
+
+.minimap {
+  right: 12px;
+  bottom: 14px;
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .minimap {
+    display: none;
+  }
 }

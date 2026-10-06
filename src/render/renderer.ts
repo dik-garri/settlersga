@@ -1,5 +1,5 @@
 import { Container, Graphics, Sprite, type Application } from 'pixi.js';
-import { BUILD_TICKS_PER_UNIT, BUILDINGS, TREE_MATURE } from '../sim/config';
+import { BUILD_TICKS_PER_UNIT, BUILDINGS, CROP_KINDS, TREE_MATURE } from '../sim/config';
 import { RESOURCES, Terrain, type Building, type BuildingType, type Resource, type Settler } from '../sim/types';
 import { CHUNK } from '../sim/map';
 import { LOCAL_PLAYER, type World } from '../sim/world';
@@ -372,8 +372,10 @@ export class GameRenderer {
   private syncCrop(i: number): void {
     const { map } = this.sim;
     const stage = map.crop[i];
-    if (stage === this.cropState[i]) return;
-    this.cropState[i] = stage;
+    // Kind and stage together, so a field replaced by another kind is redrawn.
+    const state = stage === 0 ? 0 : map.cropKind[i] * 8 + stage;
+    if (state === this.cropState[i]) return;
+    this.cropState[i] = state;
     let s = this.cropSprites[i];
     if (stage === 0) {
       s?.destroy();
@@ -389,7 +391,7 @@ export class GameRenderer {
       this.groundChunks[map.chunkOf(x, y)].addChild(s);
       this.cropSprites[i] = s;
     }
-    s.texture = this.atlas.get(`field:${stage}`);
+    s.texture = this.atlas.get(`field:${CROP_KINDS[map.cropKind[i]]}:${stage}`);
     s.anchor.copyFrom(s.texture.defaultAnchor!);
   }
 

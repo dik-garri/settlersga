@@ -64,7 +64,12 @@ export const RESOURCE_INFO: Record<Resource, { name: string; group: ResourceGrou
   scythe: { name: 'Косы', group: 'tools' },
   rod: { name: 'Удочки', group: 'tools' },
   hammer: { name: 'Молотки', group: 'tools' },
+  grapes: { name: 'Виноград', group: 'food' },
+  wine: { name: 'Вино', group: 'food' },
 };
+
+/** Field plantings stored in `map.crop` (stage) with their kind in `map.cropKind` (index here). */
+export const CROP_KINDS: readonly PlantKind[] = ['grain', 'vine'];
 
 /** What the toolsmith can forge. */
 export const TOOLS: readonly Resource[] = ['axe', 'saw', 'pickaxe', 'shovel', 'scythe', 'rod', 'hammer'];
@@ -167,6 +172,14 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
   miner: { name: 'Шахтёр', behavior: 'workshop', tool: 'pickaxe' },
   smelter: { name: 'Плавильщик', behavior: 'workshop' },
   toolsmith: { name: 'Инструментальщик', behavior: 'workshop' },
+  vinegrower: {
+    name: 'Виноградарь',
+    behavior: 'farm',
+    tool: 'shovel',
+    gather: { res: 'grapes', radius: 5, workTicks: 30, restTicks: 20 },
+    plant: { what: 'vine', radius: 5, workTicks: 40, restTicks: 20, maxNearby: 8 },
+  },
+  winemaker: { name: 'Винодел', behavior: 'workshop' },
   geologist: { name: 'Геолог', behavior: 'prospect' },
   guard: { name: 'Стражник', behavior: 'garrison' },
 };
@@ -414,6 +427,26 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     playerBuildable: true,
     category: 'metal',
     recipe: { inputs: { iron: 1, coal: 1 }, outputs: {}, outputChoice: TOOLS, keepInStock: 2, ticks: 80 },
+  },
+
+  vineyard: {
+    name: 'Виноградник',
+    w: 2,
+    h: 2,
+    cost: { plank: 2, stone: 1 },
+    worker: 'vinegrower',
+    playerBuildable: true,
+    category: 'food',
+  },
+  winery: {
+    name: 'Винодельня',
+    w: 2,
+    h: 2,
+    cost: { plank: 2, stone: 2 },
+    worker: 'winemaker',
+    playerBuildable: true,
+    category: 'food',
+    recipe: { inputs: { grapes: 2 }, outputs: { wine: 1 }, ticks: 80 },
   },
 
   tower: {
