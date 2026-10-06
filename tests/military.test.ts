@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { centerOf } from '../src/sim/buildings';
+import { START_SOLDIERS } from '../src/sim/config';
 import { killSettler } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
 import { RESOURCES, type Building } from '../src/sim/types';
@@ -69,7 +70,7 @@ describe('players', () => {
     expect(Math.hypot(p1.x - p2.x, p1.y - p2.y)).toBeGreaterThan(30);
     expect(w.castleOf(1).owner).toBe(1);
     expect(w.castleOf(2).owner).toBe(2);
-    expect(soldiersOf(w, 2).length).toBe(3);
+    expect(soldiersOf(w, 2).length).toBe(START_SOLDIERS);
     const c2 = w.castleOf(2);
     expect(w.map.owner[w.map.idx(c2.x, c2.y)]).toBe(2);
     run(w, 600);
@@ -78,7 +79,7 @@ describe('players', () => {
 });
 
 describe('military economy', () => {
-  it('the weaponsmith forges swords from iron and coal', () => {
+  it('the weaponsmith forges the weapons garrisons wait for from iron and coal', () => {
     const w = rich(new World(42));
     const c = w.castle;
     const smith = placeNear(w, 'weaponsmith', c.x + 5, c.y - 1)!;
@@ -87,7 +88,9 @@ describe('military economy', () => {
     c.output.iron = 2;
     c.output.coal = 2;
     run(w, 1500);
-    expect(w.stats.produced.sword).toBe(2);
+    // The castle's empty archer slots ask for bows first.
+    expect(w.stats.produced.bow).toBe(2);
+    expect(w.stats.produced.sword).toBe(0);
   });
 
   it('carriers with swords enlist into the castle garrison', () => {
@@ -96,8 +99,8 @@ describe('military economy', () => {
     const carriers = w.settlers.filter((s) => s.kind === 'carrier').length;
     c.output.sword = 2;
     run(w, 300);
-    expect(soldiersOf(w, 1).length).toBe(5);
-    expect(c.garrison.length).toBe(5);
+    expect(soldiersOf(w, 1).length).toBe(START_SOLDIERS + 2);
+    expect(c.garrison.length).toBe(START_SOLDIERS + 2);
     expect(c.output.sword).toBe(0);
     expect(w.settlers.filter((s) => s.kind === 'carrier').length).toBe(carriers - 2);
   });

@@ -576,6 +576,8 @@ export const BUILDING_CANVAS: Record<BuildingType | 'site2' | 'site3', BuildingC
   toolsmith: SMALL,
   weaponsmith: SMALL,
   tower: { w: 150, h: 210, ax: 75, ay: 170 },
+  bigtower: { w: 170, h: 240, ax: 85, ay: 190 },
+  fortress: { w: 230, h: 260, ax: 115, ay: 195 },
   site2: { w: 150, h: 90, ax: 75, ay: 50 },
   site3: { w: 220, h: 120, ax: 110, ay: 65 },
 };
@@ -774,6 +776,87 @@ function paintTower(ctx: Ctx): void {
   // The banner on the roof tip is a separate per-owner sprite (`BANNERS`).
 }
 
+/** Big tower: a broader, taller stone tower with a crenellated platform and a high roof. */
+function paintBigTower(ctx: Ctx): void {
+  const a = 0.62;
+  const H = 82;
+  const stone = '#9c968a';
+  shadow(ctx, 0.85, 0.85, 0.7);
+  box(ctx, 0, 0, 0.9, 0.9, 0, 8, '#8a8478');
+  walls(ctx, 0, 0, a, a, 8, H - 8, stone);
+  for (let z = 14, row = 0; z < H; z += 7, row++) {
+    line(ctx, [-a, a, z], [a, a, z], shade(stone, 0.82));
+    line(ctx, [a, -a, z], [a, a, z], shade(stone, 0.6));
+    const t = row % 2 ? -0.2 : 0.2;
+    line(ctx, [t, a, z], [t, a, z + 7], shade(stone, 0.82));
+    line(ctx, [a, t, z], [a, t, z + 7], shade(stone, 0.6));
+  }
+  frontQuad(ctx, a, 0.08, 0.48, 8, 26, '#3d2a1a');
+  for (const z of [38, 60]) {
+    frontQuad(ctx, a, -0.3, -0.12, z, z + 9, '#2c2724');
+    sideQuad(ctx, a, -0.25, -0.07, z + 3, z + 12, '#221e1b');
+    sideQuad(ctx, a, 0.2, 0.38, z + 3, z + 12, '#221e1b');
+  }
+  // Crenellated platform.
+  const p = a + 0.14;
+  box(ctx, 0, 0, p, p, H, 6, shade(stone, 1.05));
+  const merlon = (cx: number, cy: number) => box(ctx, cx, cy, 0.07, 0.07, H + 6, 6, stone);
+  for (let t = -p + 0.07; t <= p; t += 0.27) {
+    merlon(t, -p + 0.07);
+    merlon(-p + 0.07, t);
+  }
+  pyramidRoof(ctx, a - 0.05, H + 6, 38, '#8e2e24');
+  for (let t = -p + 0.07; t <= p; t += 0.27) {
+    merlon(t, p - 0.07);
+    merlon(p - 0.07, t);
+  }
+}
+
+/** Fortress: a walled square with two corner towers and a central keep. */
+function paintFortress(ctx: Ctx): void {
+  const hw = 1.3;
+  const hh = 1.3;
+  const H = 30;
+  const stone = '#a29c8f';
+  shadow(ctx, hw, hh, 0.6);
+  const tower = (cx: number, cy: number, h: number) => {
+    walls(ctx, cx, cy, 0.32, 0.32, 0, h, '#aaa498');
+    pyramidRoof2(cx, cy, 0.38, h, 24);
+  };
+  const pyramidRoof2 = (cx: number, cy: number, r: number, z: number, rise: number) => {
+    const apex: V3 = [cx, cy, z + rise];
+    poly(ctx, [[cx - r, cy - r, z], [cx - r, cy + r, z], apex], shade('#8e2e24', 0.7));
+    poly(ctx, [[cx - r, cy - r, z], [cx + r, cy - r, z], apex], shade('#8e2e24', 0.85));
+    poly(ctx, [[cx - r, cy + r, z], [cx + r, cy + r, z], apex], '#8e2e24');
+    poly(ctx, [[cx + r, cy - r, z], [cx + r, cy + r, z], apex], shade('#8e2e24', 0.75));
+  };
+  // Back tower, walls, keep, front tower.
+  tower(-hw + 0.25, -hh + 0.25, H + 26);
+  walls(ctx, 0, 0, hw, hh, 0, H, stone);
+  for (let z = 7; z < H; z += 7) {
+    line(ctx, [-hw, hh, z], [hw, hh, z], shade(stone, 0.82));
+    line(ctx, [hw, -hh, z], [hw, hh, z], shade(stone, 0.6));
+  }
+  poly(ctx, [[-hw, -hh, H], [hw, -hh, H], [hw, hh, H], [-hw, hh, H]], shade(stone, 0.9));
+  const merlon = (cx: number, cy: number) => box(ctx, cx, cy, 0.08, 0.08, H, 6, stone);
+  for (let t = -hw + 0.08; t <= hw; t += 0.33) {
+    merlon(t, -hh + 0.08);
+    merlon(-hw + 0.08, t);
+  }
+  box(ctx, 0, 0, 0.55, 0.55, H, 36, '#b0aa9c');
+  frontQuad(ctx, 0.55, -0.12, 0.12, H + 18, H + 28, '#3a3430');
+  sideQuad(ctx, 0.55, -0.12, 0.12, H + 18, H + 28, '#2c2724');
+  pyramidRoof(ctx, 0.62, H + 36, 34, '#8e2e24');
+  for (let t = -hw + 0.08; t <= hw; t += 0.33) {
+    merlon(t, hh - 0.08);
+    merlon(hw - 0.08, t);
+  }
+  tower(hw - 0.25, hh - 0.25, H + 18);
+  // Gate in front of the door tile (dx = +1).
+  frontQuad(ctx, hh, 0.74, 1.22, 0, 22, '#3d2a1a');
+  frontQuad(ctx, hh, 0.78, 1.18, 0, 19, '#5a3d22');
+}
+
 /**
  * Where a building's owner banner stands, in sprite pixels from the footprint center (the roof tip).
  * The renderer places the `flag:<owner>` sprite there, so it follows conquests.
@@ -781,6 +864,8 @@ function paintTower(ctx: Ctx): void {
 export const BANNERS: Partial<Record<BuildingType, { x: number; y: number }>> = {
   castle: { x: 0, y: -130 },
   tower: { x: 0, y: -110 },
+  bigtower: { x: 0, y: -126 },
+  fortress: { x: 0, y: -100 },
 };
 
 function paintSite(ctx: Ctx, half: number): void {
@@ -1365,6 +1450,8 @@ export const BUILDING_PAINTERS: Record<BuildingType | 'site2' | 'site3', (ctx: C
   vineyard: styled('vineyard'),
   winery: styled('winery'),
   tower: paintTower,
+  bigtower: paintBigTower,
+  fortress: paintFortress,
   site2: (ctx) => paintSite(ctx, 1),
   site3: (ctx) => paintSite(ctx, 1.5),
 };
@@ -1468,7 +1555,7 @@ export function paintField(ctx: Ctx, stage: number): void {
 
 export type SettlerFrame = 'stand' | 'walk' | 'work';
 
-type Tool = 'axe' | 'hammer' | 'shovel' | 'pick' | 'rod' | 'scythe' | 'bucket' | 'sword';
+type Tool = 'axe' | 'hammer' | 'shovel' | 'pick' | 'rod' | 'scythe' | 'bucket' | 'sword' | 'bow';
 
 /** Player colours (index = player id − 1): flags, borders, soldiers' tunics. */
 export const PLAYER_COLORS: readonly string[] = ['#2b5fb4', '#c0392b', '#2e8b57', '#d4a017'];
@@ -1497,6 +1584,7 @@ const SETTLER_LOOK: Record<SettlerKind, { tunic: string; hat: string; tool?: Too
   digger: { tunic: '#8a6a3c', hat: '#5a4636', tool: 'shovel' },
   // Soldiers wear their player's colour (see `paintSettler`'s `tunic`).
   soldier: { tunic: PLAYER_COLORS[0], hat: '#8d939a', tool: 'sword' },
+  archer: { tunic: PLAYER_COLORS[0], hat: '#4f6b3a', tool: 'bow' },
 };
 
 /** Settler, 20×32 with the feet at (10, 29). `tunic` overrides the profession colour (player colour for soldiers). */
@@ -1529,7 +1617,29 @@ export function paintSettler(ctx: Ctx, kind: SettlerKind, frame: SettlerFrame, t
   ctx.fillRect(-4.3, -10, 8.6, 1.5);
   // Arms and tool.
   ctx.fillStyle = '#e9b98f';
-  if (look.tool === 'sword') {
+  if (look.tool === 'bow') {
+    // Always armed: bow drawn and aimed while shooting or fighting, carried at the side otherwise.
+    ctx.fillRect(3.3, frame === 'work' ? -19 : -16, 1.8, 6);
+    ctx.fillRect(-5.1, -16, 1.8, 6);
+    ctx.strokeStyle = '#7a4a22';
+    ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    if (frame === 'work') ctx.arc(6, -17, 6, -Math.PI / 2, Math.PI / 2);
+    else ctx.arc(4, -12, 5, -Math.PI / 2 - 0.3, Math.PI / 2 - 0.3);
+    ctx.stroke();
+    ctx.strokeStyle = '#e8e2d0';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    if (frame === 'work') {
+      ctx.moveTo(6, -23);
+      ctx.lineTo(3, -17);
+      ctx.lineTo(6, -11);
+    } else {
+      ctx.moveTo(2.5, -16.8);
+      ctx.lineTo(5.5, -7.2);
+    }
+    ctx.stroke();
+  } else if (look.tool === 'sword') {
     // Always armed: blade raised to strike while fighting, held at the side otherwise.
     ctx.fillRect(3.3, frame === 'work' ? -22 : -16, 1.8, frame === 'work' ? 7 : 6);
     ctx.fillRect(-5.1, -16, 1.8, 6);
@@ -1820,6 +1930,19 @@ function paintTool(ctx: Ctx, res: Resource): void {
       handle(-6, 4, 3, -2);
       ctx.fillRect(1, -5, 6, 4);
       return;
+    case 'bow':
+      ctx.strokeStyle = '#7a4a22';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(-2, 0, 6.5, -Math.PI / 2.6, Math.PI / 2.6);
+      ctx.stroke();
+      ctx.strokeStyle = '#e8e2d0';
+      ctx.lineWidth = 0.6;
+      ctx.beginPath();
+      ctx.moveTo(0.6, -5.7);
+      ctx.lineTo(0.6, 5.7);
+      ctx.stroke();
+      return;
     case 'sword':
       ctx.strokeStyle = '#d6dadf';
       ctx.lineWidth = 1.6;
@@ -1831,6 +1954,27 @@ function paintTool(ctx: Ctx, res: Resource): void {
       ctx.fillStyle = '#8a6a2c';
       ctx.fillRect(-6, 1, 3, 3);
       return;
+  }
+}
+
+/** Rank badge above a fighter's head: `level` gold chevrons, 12×10 centred at (6, 5). */
+export function paintChevrons(ctx: Ctx, level: number): void {
+  ctx.translate(6, 5);
+  ctx.strokeStyle = '#3b2b1a';
+  ctx.fillStyle = '#f2c94c';
+  for (let k = 0; k < level; k++) {
+    const y = 2 - k * 3.5;
+    ctx.beginPath();
+    ctx.moveTo(-5, y);
+    ctx.lineTo(0, y - 3);
+    ctx.lineTo(5, y);
+    ctx.lineTo(5, y + 1.6);
+    ctx.lineTo(0, y - 1.4);
+    ctx.lineTo(-5, y + 1.6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
   }
 }
 

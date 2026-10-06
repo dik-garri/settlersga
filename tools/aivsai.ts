@@ -5,6 +5,7 @@
  *   npm run sim:ai -- --seeds=42,7 --minutes=60 --players=2 --passive=0
  */
 import { TICKS_PER_SECOND } from '../src/sim/config';
+import { isArcher, isFighter } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
 import { World } from '../src/sim/world';
 import { arg } from './scenario';
@@ -31,7 +32,10 @@ for (const seed of seeds) {
         const own = [...w.buildings.values()].filter((b) => b.owner === p.id);
         const done = own.filter((b) => b.done).length;
         const people = w.settlers.filter((s) => s.owner === p.id);
-        const soldiers = people.filter((s) => s.kind === 'soldier').length;
+        const fighters = people.filter((s) => isFighter(s));
+        const archers = fighters.filter((s) => isArcher(s)).length;
+        const ranked = fighters.filter((s) => s.level > 0).length;
+        const soldiers = `${fighters.length} (archers ${archers}, ranked ${ranked})`;
         let land = 0;
         for (const o of w.map.owner) if (o === p.id) land++;
         const st = w.ai.find((a) => a.player === p.id)?.stats;

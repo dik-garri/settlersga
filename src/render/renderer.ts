@@ -1,5 +1,5 @@
 import { Container, Graphics, MeshSimple, Sprite, Texture, type Application } from 'pixi.js';
-import { BUILD_TICKS_PER_UNIT, BUILDINGS, CROP_KINDS, TREE_MATURE } from '../sim/config';
+import { BUILD_TICKS_PER_UNIT, BUILDINGS, CROP_KINDS, PROFESSIONS, SHOT_TICKS, TREE_MATURE } from '../sim/config';
 import { RESOURCES, Terrain, type Building, type BuildingType, type Resource, type Settler } from '../sim/types';
 import { CHUNK } from '../sim/map';
 import { LOCAL_PLAYER, type World } from '../sim/world';
@@ -57,6 +57,8 @@ interface SettlerView {
   root: Container;
   body: Sprite;
   ware: Sprite;
+  /** Rank badge for fighters above level 0. */
+  rank: Sprite;
   facing: 1 | -1;
 }
 
@@ -119,6 +121,8 @@ export class GameRenderer {
   private territoryVersion = -1;
   private readonly marks = new Graphics();
   private readonly objects = new Container({ sortableChildren: true });
+  /** Arrows in flight (`World.shots`), redrawn every frame above everything standing on the ground. */
+  private readonly shots = new Graphics();
   private readonly ghostLayer = new Container();
   private readonly ghostSprite: Sprite;
   /**
@@ -152,7 +156,7 @@ export class GameRenderer {
     /** Draw the fog of war (`?fog=off` disables it for debugging). */
     private readonly fogOn = true,
   ) {
-    this.world.addChild(this.ground, this.territory, this.marks, this.objects, this.fog, this.ghostLayer);
+    this.world.addChild(this.ground, this.territory, this.marks, this.objects, this.shots, this.fog, this.ghostLayer);
     app.stage.addChild(this.world);
     this.ghostSprite = new Sprite();
     this.ghostSprite.alpha = 0.75;
@@ -451,6 +455,7 @@ export class GameRenderer {
     this.syncBuildings();
     this.syncSettlers(alpha, timeMs);
     this.syncFog(timeMs);
+    this.drawShots(alpha);
     this.drawMarks(ghost, selected, hover, area);
   }
 
@@ -501,6 +506,27 @@ export class GameRenderer {
         const at = this.staticAt.get(obj);
         if (at) obj.visible = this.fogSeen[map.idx(Math.round(at.x), Math.round(at.y))] !== 0;
       }
+    }
+  }
+
+  /** Each arrow flies on a shallow arc from the shooter's shoulder to the target. */
+  private drawShots(alpha: number): void {
+    const g = this.shots;
+    g.clear();
+    const now = this.sim.tick + alpha;
+    for (const shot of this.sim.shots) {
+      const p = Math.min(1, Math.max(0, (now - shot.tick) / SHOT_TICKS));
+      const a = this.surface(shot.x0, shot.y0);
+      const b = this.surface(shot.x1, shot.y1);
+      const at = (k: number) => ({
+        x: a.x + (b.x - a.x) * k,
+        y: a.y - 18 + (b.y - 12 - (a.y - 18)) * k - Math.sin(Math.PI * k) * 14,
+      });
+      const head = at(p);
+      const tail = at(Math.max(0, p - 0.18));
+      const color = Number.parseInt(PLAYER_COLORS[(shot.owner - 1) % PLAYER_COLORS.length].slice(1), 16);
+      g.moveTo(tail.x, tail.y).lineTo(head.x, head.y).stroke({ width: 1.5, color: 0x3b2b1a });
+      g.circle(tail.x, tail.y, 1.2).fill({ color });
     }
   }
 
@@ -885,8 +911,10 @@ export class GameRenderer {
       if (s.working) frame = Math.floor(timeMs / 220) % 2 ? 'work' : 'stand';
       else if (moving) frame = Math.floor(timeMs / 160) % 2 ? 'walk' : 'stand';
       v.body.texture = this.atlas.get(
-        s.kind === 'soldier' ? `settler:soldier:${frame}:${s.owner}` : `settler:${s.kind}:${frame}`,
+        PROFESSIONS[s.kind].combat ? `settler:${s.kind}:${frame}:${s.owner}` : `settler:${s.kind}:${frame}`,
       );
+      v.rank.visible = s.level > 0;
+      if (s.level > 0) v.rank.texture = this.atlas.get(`chevrons:${s.level}`);
       v.body.scale.x = v.facing;
 
       v.root.position.set(p.x, p.y - (moving && frame === 'walk' ? 1 : 0));
@@ -902,8 +930,11 @@ export class GameRenderer {
     const ware = new Sprite(this.atlas.get('ware:log'));
     ware.position.set(0, -27);
     ware.visible = false;
-    root.addChild(body, ware);
-    const v: SettlerView = { root, body, ware, facing: 1 };
+    const rank = new Sprite(this.atlas.get('chevrons:1'));
+    rank.position.set(0, -33);
+    rank.visible = false;
+    root.addChild(body, ware, rank);
+    const v: SettlerView = { root, body, ware, rank, facing: 1 };
     this.settlerViews.set(s.id, v);
     return v;
   }

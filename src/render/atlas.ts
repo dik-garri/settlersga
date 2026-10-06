@@ -1,5 +1,5 @@
 import { CanvasSource, Rectangle, Texture } from 'pixi.js';
-import { ORE_RESOURCES, oreOf, PROFESSIONS } from '../sim/config';
+import { ORE_RESOURCES, oreOf, PROFESSIONS, SOLDIER_LEVELS } from '../sim/config';
 import { RESOURCES, type BuildingType, type Resource, type SettlerKind } from '../sim/types';
 import {
   BUILDING_CANVAS,
@@ -7,6 +7,7 @@ import {
   groundVariants,
   paintBoulder,
   paintDeposit,
+  paintChevrons,
   paintField,
   paintVines,
   paintSign,
@@ -133,13 +134,19 @@ export class SpriteAtlas {
       }
     }
     for (const res of RESOURCES) a.add(`ware:${res}`, 16, 10, 8, 5, (ctx) => paintWare(ctx, res));
-    // Per-player variants: door flags and soldiers in the owner's colour.
+    // Per-player variants: door flags and every fighting profession in the owner's colour.
+    const fighters = (Object.keys(PROFESSIONS) as SettlerKind[]).filter((k) => PROFESSIONS[k].combat);
     PLAYER_COLORS.forEach((color, k) => {
       a.add(`flag:${k + 1}`, 14, 28, 2, 26, (ctx) => paintFlag(ctx, color));
-      for (const frame of ['stand', 'walk', 'work'] as SettlerFrame[]) {
-        a.add(`settler:soldier:${frame}:${k + 1}`, 20, 32, 10, 29, (ctx) => paintSettler(ctx, 'soldier', frame, color));
+      for (const kind of fighters) {
+        for (const frame of ['stand', 'walk', 'work'] as SettlerFrame[]) {
+          a.add(`settler:${kind}:${frame}:${k + 1}`, 20, 32, 10, 29, (ctx) => paintSettler(ctx, kind, frame, color));
+        }
       }
     });
+    for (let level = 1; level < SOLDIER_LEVELS.length; level++) {
+      a.add(`chevrons:${level}`, 12, 10, 6, 5, (ctx) => paintChevrons(ctx, level));
+    }
     this.textures = a.build();
   }
 

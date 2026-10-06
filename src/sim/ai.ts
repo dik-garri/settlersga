@@ -16,6 +16,7 @@ import {
   AI,
   AI_PLAN,
   BUILD_MAX_SLOPE,
+  SOLDIER_LEVELS,
   BUILDINGS,
   costOf,
   gatheredBy,
@@ -23,7 +24,7 @@ import {
   PROFESSIONS,
   type BuildingDef,
 } from './config';
-import { isMilitary } from './military';
+import { FIGHTERS, isFighter, isMilitary, keepOf } from './military';
 import { isGatherTarget } from './nature';
 import { RESOURCES, Terrain, type Building, type BuildingType, type PlayerId, type Point } from './types';
 import type { World } from './world';
@@ -103,27 +104,28 @@ function think(w: World, ai: AiState): void {
 
   // Army ready but no enemy in reach: push military buildings towards the nearest enemy.
   // Only when every military building is manned and the new one can be manned too.
-  const soldiers = w.settlers.filter((s) => s.owner === me && s.kind === 'soldier').length;
+  const soldiers = w.settlers.filter((s) => s.owner === me && isFighter(s)).length;
   const military = own.filter((b) => isMilitary(b));
   if (
     !attacked &&
-    FRONTIER &&
     (ai.blockedUntil.frontier ?? -Infinity) <= w.tick &&
     soldiers >= AI.frontierSoldiers &&
     military.length < AI.maxMilitary &&
-    military.every((b) => b.done && b.garrison.length > 0) &&
-    ctx.canMan(FRONTIER) &&
-    ctx.affordable(FRONTIER)
+    military.every((b) => b.done && b.garrison.length > 0)
   ) {
-    ctx.frontier = true;
-    if (!tryPlace(ctx, ai, FRONTIER)) ai.blockedUntil.frontier = w.tick + RETRY_TICKS;
+    // The largest military building it can pay for and man: more spare fighters at the front.
+    const type = FRONTIER.find((t) => ctx.canMan(t) && ctx.affordable(t));
+    if (type) {
+      ctx.frontier = true;
+      if (!tryPlace(ctx, ai, type)) ai.blockedUntil.frontier = w.tick + RETRY_TICKS;
+    }
   }
 }
 
-/** The military building the AI pushes its border with (the first buildable one with a garrison). */
-const FRONTIER = (Object.keys(BUILDINGS) as BuildingType[]).find(
-  (t) => BUILDINGS[t].garrison && BUILDINGS[t].playerBuildable && BUILDINGS[t].territory,
-);
+/** Military buildings the AI pushes its border with, largest garrison first. */
+const FRONTIER = (Object.keys(BUILDINGS) as BuildingType[])
+  .filter((t) => BUILDINGS[t].garrison && BUILDINGS[t].playerBuildable && BUILDINGS[t].territory)
+  .sort((a, b) => BUILDINGS[b].garrison!.capacity - BUILDINGS[a].garrison!.capacity);
 
 function tryPlace(ctx: Context, ai: AiState, type: BuildingType): boolean {
   const spot = ctx.bestSpot(type);
@@ -166,15 +168,18 @@ function attackIfStrong(w: World, ai: AiState): boolean {
   let bestMargin = -Infinity;
   for (const b of w.buildings.values()) {
     if (b.owner === me || !b.done || !isMilitary(b) || w.isDefeated(b.owner)) continue;
-    const ready = w.availableAttackers(b.id, me);
-    const defenders = b.garrison.length;
-    if (ready < AI.minAttackers || ready < AI.attackRatio * defenders + 1) continue;
+    // Own fighters' strength (ranks and professions known) against what a player sees of the target:
+    // the number of defenders and the kind of building (its defense bonus).
+    const ready = w.attackerComposition(b.id, Infinity, me);
+    const power = ready.reduce((n, s) => n + SOLDIER_LEVELS[s.level].damage * (PROFESSIONS[s.kind].combat?.melee ?? 1), 0);
+    const defense = b.garrison.length * (BUILDINGS[b.type].garrison!.defense ?? 1);
+    if (ready.length < AI.minAttackers || power < AI.attackRatio * defense + 1) continue;
     // Prefer the castle (it ends the game), then the largest margin.
-    const margin = ready - AI.attackRatio * defenders + (w.castleOf(b.owner) === b ? 100 : 0);
+    const margin = power - AI.attackRatio * defense + (w.castleOf(b.owner) === b ? 100 : 0);
     if (margin > bestMargin) {
       bestMargin = margin;
       target = b;
-      send = ready;
+      send = ready.length;
     }
   }
   if (!target) return false;
@@ -252,16 +257,18 @@ class Context {
   }
 
   /**
-   * A new military building needs at least one soldier to claim land, taken from the castle's reserve
-   * or recruited with a sword. Only build one if that leaves the castle `AI.homeGuard` soldiers after
-   * every still-empty military building got its first one too.
+   * A new military building needs at least one fighter to claim land: a spare one from any military
+   * building (beyond what each keeps; empty outposts are manned from the nearest spares) or a recruit
+   * with a weapon. Only build one if every still-empty military building gets its first one too and
+   * `AI.homeGuard` spares remain.
    */
   canMan(type: BuildingType): boolean {
     if (!BUILDINGS[type].garrison) return true;
-    const castle = this.w.castleOf(this.me);
-    const empty = this.own.filter((b) => b !== castle && isMilitary(b) && b.garrison.length === 0).length;
-    const swords = available(this.w, this.me, PROFESSIONS.soldier.tool!);
-    return castle.garrison.length + swords - empty - 1 >= AI.homeGuard;
+    const military = this.own.filter((b) => b.done && isMilitary(b));
+    const empty = military.filter((b) => b.garrison.length === 0).length;
+    const spare = military.reduce((n, b) => n + Math.max(0, b.garrison.length - keepOf(b)), 0);
+    const weapons = FIGHTERS.reduce((n, k) => n + available(this.w, this.me, PROFESSIONS[k].tool!), 0);
+    return spare + weapons - empty - 1 >= AI.homeGuard;
   }
 
   /** Places the building on the best-scored legal spot; null if none. */

@@ -15,7 +15,7 @@ import {
   TERRAIN,
 } from './config';
 import { levelStep } from './digging';
-import { assaultTick, joinTick, soldierIdle } from './military';
+import { assaultTick, joinTick, releaseJoin, soldierIdle } from './military';
 import { canPlant, findGatherTarget, findPlotFor, harvest, isGatherTarget, plant, type Target } from './nature';
 import { findPath } from './pathfinding';
 import { RESOURCES, Terrain, type Building, type Point, type Settler, type Task } from './types';
@@ -299,7 +299,7 @@ export function abort(w: World, s: Settler): void {
         if (b) b.workerRequested = false;
         break;
       case 'join':
-        if (b) b.garrisonInbound--;
+        if (b) releaseJoin(b, task);
         break;
     }
   }
