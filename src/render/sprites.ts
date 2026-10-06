@@ -575,6 +575,7 @@ export const BUILDING_CANVAS: Record<BuildingType | 'site2' | 'site3', BuildingC
   goldsmelter: SMALL,
   toolsmith: SMALL,
   weaponsmith: SMALL,
+  barracks: SMALL,
   tower: { w: 150, h: 210, ax: 75, ay: 170 },
   bigtower: { w: 170, h: 240, ax: 85, ay: 190 },
   fortress: { w: 230, h: 260, ax: 115, ay: 195 },
@@ -1278,6 +1279,18 @@ const STYLES: Partial<Record<BuildingType, Style>> = {
   },
   ironsmelter: { hw: 0.7, hh: 0.7, H: 22, wall: '#8f7f6e', roof: '#4a4f55', rise: 18, doorDx: 0.5, deco: ['furnace'] },
   goldsmelter: { hw: 0.7, hh: 0.7, H: 22, wall: '#a89c80', roof: '#7a5a20', rise: 18, doorDx: 0.5, deco: ['furnace'] },
+  // Long stone drill hall with a red roof; weapons racked by the wall.
+  barracks: {
+    hw: 0.8,
+    hh: 0.62,
+    H: 26,
+    wall: '#a8a294',
+    roof: '#8c2f26',
+    rise: 20,
+    doorDx: 0.5,
+    floors: 2,
+    deco: ['crates'],
+  },
   weaponsmith: {
     hw: 0.7,
     hh: 0.7,
@@ -1446,6 +1459,7 @@ export const BUILDING_PAINTERS: Record<BuildingType | 'site2' | 'site3', (ctx: C
   goldsmelter: styled('goldsmelter'),
   toolsmith: styled('toolsmith'),
   weaponsmith: styled('weaponsmith'),
+  barracks: styled('barracks'),
   warehouse: styled('warehouse'),
   vineyard: styled('vineyard'),
   winery: styled('winery'),
@@ -1581,6 +1595,7 @@ const SETTLER_LOOK: Record<SettlerKind, { tunic: string; hat: string; tool?: Too
   vinegrower: { tunic: '#7a4a6e', hat: '#e3c76a', tool: 'shovel' },
   winemaker: { tunic: '#6a2f3a', hat: '#e8e4da' },
   weaponsmith: { tunic: '#4a4f55', hat: '#8c4a3a', tool: 'hammer' },
+  recruit: { tunic: '#8a7f6a', hat: '#5a4636' },
   digger: { tunic: '#8a6a3c', hat: '#5a4636', tool: 'shovel' },
   // Soldiers wear their player's colour (see `paintSettler`'s `tunic`).
   soldier: { tunic: PLAYER_COLORS[0], hat: '#8d939a', tool: 'sword' },

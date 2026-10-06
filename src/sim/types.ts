@@ -83,7 +83,8 @@ export type BuildingType =
   | 'weaponsmith'
   | 'tower'
   | 'bigtower'
-  | 'fortress';
+  | 'fortress'
+  | 'barracks';
 
 export type SettlerKind =
   | 'carrier'
@@ -108,6 +109,7 @@ export type SettlerKind =
   | 'weaponsmith'
   | 'soldier'
   | 'archer'
+  | 'recruit'
   | 'digger';
 
 /** Player ids start at 1; 0 means "nobody" in per-tile ownership. */
