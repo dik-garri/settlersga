@@ -18,9 +18,13 @@ export enum Terrain {
 export type BuildingType = 'castle' | 'woodcutter' | 'sawmill' | 'forester' | 'stonecutter' | 'tower';
 export type SettlerKind = 'carrier' | 'builder' | 'woodcutter' | 'sawmiller' | 'forester' | 'stonecutter' | 'guard';
 
+/** Player ids start at 1; 0 means "nobody" in per-tile ownership. */
+export type PlayerId = number;
+
 export interface Building {
   id: number;
   type: BuildingType;
+  owner: PlayerId;
   /** Top tile of the footprint; footprint spans [x, x+w) × [y, y+h). */
   x: number;
   y: number;
@@ -42,6 +46,7 @@ export interface Building {
   outReserved: Stock;
   workerId: number | null;
   workerRequested: boolean;
+  /** Workshop: ticks spent on the current recipe cycle. */
   timer: number;
 }
 
@@ -61,6 +66,7 @@ export type Task =
 
 export interface Settler {
   id: number;
+  owner: PlayerId;
   kind: SettlerKind;
   /** Position in tile coordinates (tile centers are integers). */
   x: number;

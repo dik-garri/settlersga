@@ -272,14 +272,15 @@ export class GameRenderer {
 
   /** Goods lying at the door: output pile on the right, input pile on the left. */
   private syncPile(b: Building, v: BuildingView): void {
-    if (b.type === 'castle') return;
+    if (BUILDINGS[b.type].storage) return;
     // Materials on a site not yet built in; the builder uses planks first, then stone.
     const used = b.done ? 0 : Math.floor(b.progress / BUILD_TICKS_PER_UNIT);
     const usedPlanks = Math.min(used, b.delivered.plank);
     const waitingPlank = b.done ? 0 : b.delivered.plank - usedPlanks;
     const waitingStone = b.done ? 0 : b.delivered.stone - Math.min(b.delivered.stone, used - usedPlanks);
     const out = RESOURCES.map((r) => b.output[r]).join(',');
-    const key = `${out},${b.input.log},${waitingPlank},${waitingStone}`;
+    const inp = RESOURCES.map((r) => b.input[r]).join(',');
+    const key = `${out},${inp},${waitingPlank},${waitingStone}`;
     if (key === v.pileKey) return;
     v.pileKey = key;
     // Keep the flag (child 0), drop the old pile.
@@ -292,7 +293,7 @@ export class GameRenderer {
       }
     };
     for (const r of RESOURCES) stack(r, b.output[r], 8);
-    stack('log', b.input.log, -34);
+    for (const r of RESOURCES) stack(r, b.input[r], -34);
     stack('plank', waitingPlank, -34);
     stack('stone', waitingStone, -50);
   }

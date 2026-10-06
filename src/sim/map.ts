@@ -8,7 +8,7 @@ export class GameMap {
   readonly tree: Uint8Array;
   /** Stone units left in a deposit on this tile, 0 if none. Deposits block movement. */
   readonly stone: Uint8Array;
-  /** 1 if the tile belongs to the player's territory, 0 otherwise. */
+  /** Player id owning the tile's territory, 0 if nobody. */
   readonly owner: Uint8Array;
   /** Building id occupying the tile, 0 if none. */
   readonly building: Int32Array;

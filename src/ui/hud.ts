@@ -1,5 +1,5 @@
 import { buildingIcon } from '../render/atlas';
-import { BUILDINGS, costOf, GATHERERS, INPUT_CAP, OUTPUT_CAP, SETTLER_NAMES, TERRITORY_RADIUS } from '../sim/config';
+import { BUILDINGS, costOf, gatheredBy, INPUT_CAP, OUTPUT_CAP, PROFESSIONS } from '../sim/config';
 import { RESOURCES, type Building, type BuildingType, type Resource, type SettlerKind } from '../sim/types';
 import type { World } from '../sim/world';
 import type { GameState } from './state';
@@ -153,7 +153,6 @@ export class Hud {
     this.infoEl.hidden = !b;
     if (!b) return;
     const def = BUILDINGS[b.type];
-    const gather = def.worker ? GATHERERS[def.worker] : undefined;
     const rows: [string, string][] = [];
     if (!b.done) {
       rows.push(['Стройка', `${Math.floor(this.world.buildProgress(b) * 100)}%`]);
@@ -162,22 +161,27 @@ export class Hud {
         if (cost[r] > 0) rows.push([RESOURCE_UI[r].name, `${b.delivered[r]} / ${cost[r]} (в пути ${b.inbound[r]})`]);
       }
       rows.push(['Строитель', b.builderId !== null ? 'на месте или в пути' : 'ожидается']);
-    } else if (b.type === 'castle') {
+    } else if (def.storage) {
       for (const r of RESOURCES) rows.push([RESOURCE_UI[r].name, String(b.output[r])]);
     } else {
       const worker = this.world.getSettler(b.workerId);
-      rows.push(['Работник', worker ? SETTLER_NAMES[worker.kind] : b.workerRequested ? 'идёт' : 'нет свободных']);
+      const workerName = worker ? PROFESSIONS[worker.kind].name : b.workerRequested ? 'идёт' : 'нет свободных';
+      rows.push(['Работник', workerName]);
       rows.push(['Статус', this.status(b)]);
-      if (b.type === 'sawmill') {
-        rows.push(['Брёвна (вход)', `${b.input.log} / ${INPUT_CAP}`]);
-        rows.push(['Доски', `${b.output.plank} / ${OUTPUT_CAP}`]);
-      } else if (b.type === 'forester') {
-        rows.push(['Посажено всего', String(this.world.stats.treesPlanted)]);
-      } else if (b.type === 'tower') {
-        rows.push(['Радиус земли', `${TERRITORY_RADIUS.tower} клеток`]);
+      const gather = gatheredBy(b.type);
+      if (def.recipe) {
+        for (const r of RESOURCES) {
+          if (def.recipe.inputs[r]) rows.push([`${RESOURCE_UI[r].name} (вход)`, `${b.input[r]} / ${INPUT_CAP}`]);
+        }
+        for (const r of RESOURCES) {
+          if (def.recipe.outputs[r]) rows.push([RESOURCE_UI[r].name, `${b.output[r]} / ${OUTPUT_CAP}`]);
+        }
       } else if (gather) {
         rows.push([RESOURCE_UI[gather.res].name, `${b.output[gather.res]} / ${OUTPUT_CAP}`]);
+      } else if (b.type === 'forester') {
+        rows.push(['Посажено всего', String(this.world.stats.treesPlanted)]);
       }
+      if (def.territory) rows.push(['Радиус земли', `${def.territory} клеток`]);
     }
     this.infoEl.innerHTML = '';
     this.infoEl.append(el('h3', '', def.name));
@@ -188,17 +192,29 @@ export class Hud {
 
   private status(b: Building): string {
     if (b.workerId === null) return 'ждёт работника';
-    if (b.type === 'sawmill') {
-      if (b.output.plank >= OUTPUT_CAP) return 'склад полон';
-      if (b.input.log === 0) return 'нет брёвен';
-      return 'пилит';
-    }
+    const def = BUILDINGS[b.type];
+    const behavior = PROFESSIONS[def.worker!].behavior;
     const w = this.world.getSettler(b.workerId);
     const outside = w !== undefined && w.inside === null;
-    if (b.type === 'forester') return outside ? 'сажает деревья' : 'отдыхает';
-    if (b.type === 'tower') return 'охраняет границу';
-    const gather = GATHERERS[BUILDINGS[b.type].worker!];
-    if (gather && b.output[gather.res] >= OUTPUT_CAP) return 'склад полон';
-    return outside ? (GATHER_PLACE[b.type] ?? 'работает') : 'отдыхает';
+    switch (behavior) {
+      case 'workshop': {
+        const recipe = def.recipe!;
+        if (RESOURCES.some((r) => b.output[r] + (recipe.outputs[r] ?? 0) > OUTPUT_CAP)) return 'склад полон';
+        const missing = RESOURCES.filter((r) => b.input[r] < (recipe.inputs[r] ?? 0));
+        if (missing.length > 0) return `нет: ${missing.map((r) => RESOURCE_UI[r].name.toLowerCase()).join(', ')}`;
+        return 'работает';
+      }
+      case 'plant':
+        return outside ? 'сажает деревья' : 'отдыхает';
+      case 'garrison':
+        return 'охраняет границу';
+      case 'gather': {
+        const gather = gatheredBy(b.type)!;
+        if (b.output[gather.res] >= OUTPUT_CAP) return 'склад полон';
+        return outside ? (GATHER_PLACE[b.type] ?? 'работает') : 'отдыхает';
+      }
+      default:
+        return 'работает';
+    }
   }
 }

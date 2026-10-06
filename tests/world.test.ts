@@ -202,6 +202,18 @@ describe('World', () => {
     for (const i of outside) expect(world.map.tree[i], `tree ${i}`).toBeGreaterThan(0);
   });
 
+  it('tags buildings, settlers and land with their owner', () => {
+    const world = new World(42);
+    const c = world.castle;
+    const wc = findSpot(world, 'woodcutter', { x: c.x + 5, y: c.y });
+    const b = world.placeBuilding('woodcutter', wc.x, wc.y)!;
+    expect(b.owner).toBe(1);
+    expect(world.settlers.every((s) => s.owner === 1)).toBe(true);
+    // Player 2 owns no land, so cannot build anywhere.
+    expect(world.canPlace('woodcutter', wc.x + 2, wc.y, 2)).toBe(false);
+    expect(world.placeBuilding('woodcutter', wc.x + 2, wc.y, 2)).toBeNull();
+  });
+
   it('never leaves reservations negative', () => {
     const world = new World(7);
     const wc = findSpot(world, 'woodcutter', { x: world.castle.x + 6, y: world.castle.y });
