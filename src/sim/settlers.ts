@@ -101,10 +101,12 @@ export function updateSettler(w: World, s: Settler): void {
     }
     case 'plant': {
       const i = w.map.idx(task.x, task.y);
-      if (!canPlant(w, task.x, task.y, s.owner, true)) return abort(w, s);
       s.working = true;
       if (--task.n > 0) return;
+      // Checked once, at the moment the sapling would block the tile.
+      if (!canPlant(w, task.x, task.y, s.owner, true)) return abort(w, s);
       w.map.tree[i] = 1;
+      w.map.touch(i);
       w.reservedPlots.delete(i);
       w.stats.treesPlanted++;
       s.tasks.shift();

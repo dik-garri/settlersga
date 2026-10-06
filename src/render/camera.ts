@@ -40,6 +40,13 @@ export class Camera {
     return { x: (sx - viewW / 2) / this.zoom + this.x, y: (sy - viewH / 2) / this.zoom + this.y };
   }
 
+  /** The world-pixel rectangle currently on screen. */
+  viewRect(viewW: number, viewH: number): { x: number; y: number; w: number; h: number } {
+    const w = viewW / this.zoom;
+    const h = viewH / this.zoom;
+    return { x: this.x - w / 2, y: this.y - h / 2, w, h };
+  }
+
   apply(viewW: number, viewH: number): void {
     this.target.scale.set(this.zoom);
     this.target.position.set(Math.round(viewW / 2 - this.x * this.zoom), Math.round(viewH / 2 - this.y * this.zoom));

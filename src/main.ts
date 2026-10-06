@@ -71,7 +71,8 @@ async function main() {
     }
     camera.apply(app.screen.width, app.screen.height);
     const now = performance.now();
-    renderer.sync(acc / TICK_MS, now, input.ghost(), state.selected, state.hover);
+    const view = camera.viewRect(app.screen.width, app.screen.height);
+    renderer.sync(acc / TICK_MS, now, view, input.ghost(), state.selected, state.hover);
     hud.update(now);
   });
 

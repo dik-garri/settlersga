@@ -70,6 +70,8 @@ npm run dev         # dev-сервер
 npm test            # тесты
 npm run typecheck   # проверка типов
 npm run build       # production-сборка в dist/
+npm run sim:probe   # проверка экономики: час игры на нескольких картах
+npm run sim:bench   # замер скорости симуляции: карта 256×256, 1000 поселенцев
 ```
 
 ## Что дальше

@@ -8,12 +8,16 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "sim:probe": "tsx tools/probe.ts",
+    "sim:bench": "tsx tools/bench.ts"
   },
   "dependencies": {
     "pixi.js": "^8.22.0"
   },
   "devDependencies": {
+    "@types/node": "^20.19.43",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.3",
     "vitest": "^4.1.11"

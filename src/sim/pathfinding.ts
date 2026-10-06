@@ -1,4 +1,5 @@
 import type { GameMap } from './map';
+import { sameRegion } from './regions';
 import type { Point } from './types';
 
 const DIRS: readonly [number, number, number][] = [
@@ -18,6 +19,11 @@ class MinHeap {
 
   get size(): number {
     return this.items.length;
+  }
+
+  clear(): void {
+    this.items.length = 0;
+    this.keys.length = 0;
   }
 
   push(item: number, key: number): void {
@@ -63,6 +69,66 @@ class MinHeap {
   }
 }
 
+/** Counters for benchmarks and profiling; never read by game logic. */
+export const pathStats = { calls: 0, failures: 0, expanded: 0, expandedInFailures: 0 };
+
+/**
+ * Search buffers reused across calls on the same map, so a search costs what it explores
+ * rather than the map area. A node's g/from are valid only if `seen[i] === stamp`.
+ */
+interface Scratch {
+  g: Float32Array;
+  from: Int32Array;
+  seen: Uint32Array;
+  closed: Uint32Array;
+  stamp: number;
+  open: MinHeap;
+}
+
+const scratchByMap = new WeakMap<GameMap, Scratch>();
+
+function scratchFor(map: GameMap): Scratch {
+  let s = scratchByMap.get(map);
+  if (!s) {
+    const n = map.w * map.h;
+    s = {
+      g: new Float32Array(n),
+      from: new Int32Array(n),
+      seen: new Uint32Array(n),
+      closed: new Uint32Array(n),
+      stamp: 0,
+      open: new MinHeap(),
+    };
+    scratchByMap.set(map, s);
+  }
+  if (++s.stamp === 0xffffffff) {
+    s.seen.fill(0);
+    s.closed.fill(0);
+    s.stamp = 1;
+  }
+  s.open.clear();
+  return s;
+}
+
+function goalInStartRegion(map: GameMap, sx: number, sy: number, tx: number, ty: number, adjacent: boolean): boolean {
+  const start = map.idx(sx, sy);
+  if (!adjacent) return sameRegion(map, start, map.idx(tx, ty));
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const x = tx + dx;
+      const y = ty + dy;
+      if ((dx || dy) && map.isWalkable(x, y) && sameRegion(map, start, map.idx(x, y))) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Slightly inflating the heuristic breaks ties between equal-cost nodes in favour of the ones
+ * closer to the goal, which cuts expansions on open ground; paths stay within 0.1% of optimal.
+ */
+const TIE_BREAK = 1.001;
+
 function octile(ax: number, ay: number, bx: number, by: number): number {
   const dx = Math.abs(ax - bx);
   const dy = Math.abs(ay - by);
@@ -74,6 +140,7 @@ function octile(ax: number, ay: number, bx: number, by: number): number {
  * Returns the tiles to walk through, excluding the start, or null if unreachable.
  * With `adjacent`, any walkable tile touching the target counts as the goal
  * (used for blocked targets such as trees). The start tile is always allowed.
+ * `useRegions` lets hopeless searches fail in O(1) (see regions.ts); tests disable it to cross-check.
  */
 export function findPath(
   map: GameMap,
@@ -82,28 +149,37 @@ export function findPath(
   tx: number,
   ty: number,
   adjacent = false,
+  useRegions = true,
 ): Point[] | null {
   const isGoal = adjacent
     ? (x: number, y: number) => Math.max(Math.abs(x - tx), Math.abs(y - ty)) === 1
     : (x: number, y: number) => x === tx && y === ty;
 
+  pathStats.calls++;
   if (isGoal(sx, sy)) return [];
-  if (!adjacent && !map.isWalkable(tx, ty)) return null;
+  if (!adjacent && !map.isWalkable(tx, ty)) {
+    pathStats.failures++;
+    return null;
+  }
 
-  const n = map.w * map.h;
-  const g = new Float32Array(n).fill(Infinity);
-  const from = new Int32Array(n).fill(-1);
-  const closed = new Uint8Array(n);
-  const open = new MinHeap();
+  if (useRegions && !goalInStartRegion(map, sx, sy, tx, ty, adjacent)) {
+    pathStats.failures++;
+    return null;
+  }
+
+  const { g, from, seen, closed, stamp, open } = scratchFor(map);
+  const expandedBefore = pathStats.expanded;
 
   const start = map.idx(sx, sy);
   g[start] = 0;
-  open.push(start, octile(sx, sy, tx, ty));
+  seen[start] = stamp;
+  open.push(start, octile(sx, sy, tx, ty) * TIE_BREAK);
 
   while (open.size > 0) {
     const cur = open.pop();
-    if (closed[cur]) continue;
-    closed[cur] = 1;
+    if (closed[cur] === stamp) continue;
+    closed[cur] = stamp;
+    pathStats.expanded++;
     const cx = cur % map.w;
     const cy = (cur - cx) / map.w;
 
@@ -125,15 +201,18 @@ export function findPath(
         continue;
       }
       const ni = map.idx(nx, ny);
-      if (closed[ni]) continue;
+      if (closed[ni] === stamp) continue;
       const ng = g[cur] + cost;
-      if (ng < g[ni]) {
+      if (seen[ni] !== stamp || ng < g[ni]) {
+        seen[ni] = stamp;
         g[ni] = ng;
         from[ni] = cur;
-        open.push(ni, ng + octile(nx, ny, tx, ty));
+        open.push(ni, ng + octile(nx, ny, tx, ty) * TIE_BREAK);
       }
     }
   }
+  pathStats.failures++;
+  pathStats.expandedInFailures += pathStats.expanded - expandedBefore;
   return null;
 }
 

@@ -1,6 +1,7 @@
 import { TREE_MATURE, type GatherDef, type PlantDef } from './config';
 import type { GameMap } from './map';
 import { findPath, staysConnected } from './pathfinding';
+import { markWalkable } from './regions';
 import { randInt } from './rng';
 import type { Building, PlayerId, Point, Resource, Settler } from './types';
 import type { World } from './world';
@@ -11,12 +12,14 @@ const GATHER_RULES: Partial<Record<Resource, { isTarget(m: GameMap, i: number): 
     isTarget: (m, i) => m.tree[i] === TREE_MATURE,
     take: (m, i) => {
       m.tree[i] = 0;
+      m.touch(i);
     },
   },
   stone: {
     isTarget: (m, i) => m.stone[i] > 0,
     take: (m, i) => {
       m.stone[i]--;
+      m.touch(i);
     },
   },
 };
@@ -33,6 +36,7 @@ export function isGatherTarget(w: World, res: Resource, i: number, owner: Player
 /** Removes one unit of `res` from the tile. */
 export function harvest(w: World, res: Resource, i: number): void {
   GATHER_RULES[res]!.take(w.map, i);
+  markWalkable(w.map, i % w.map.w, Math.floor(i / w.map.w));
 }
 
 /** Nearest reachable, unreserved target within the gatherer's radius of its hut. */
@@ -81,11 +85,20 @@ export function settlerNear(w: World, x: number, y: number): boolean {
  * `planting` skips the reservation check for the forester who holds it.
  */
 export function canPlant(w: World, x: number, y: number, owner: PlayerId, planting = false): boolean {
+  return plotLooksFree(w, x, y, owner, planting) && plotIsSafe(w, x, y);
+}
+
+/** Cheap per-tile checks, fine to run over a whole search radius. */
+function plotLooksFree(w: World, x: number, y: number, owner: PlayerId, planting = false): boolean {
   const m = w.map;
   if (!m.inBounds(x, y) || m.owner[m.idx(x, y)] !== owner) return false;
-  if (!m.isBuildable(x, y) || m.hasDoorNear(x, y) || settlerNear(w, x, y)) return false;
-  if (!planting && w.reservedPlots.has(m.idx(x, y))) return false;
-  return staysConnected(m, x, y);
+  if (!m.isBuildable(x, y) || m.hasDoorNear(x, y)) return false;
+  return planting || !w.reservedPlots.has(m.idx(x, y));
+}
+
+/** Costlier checks (other settlers, route connectivity), run only on the chosen candidate. */
+function plotIsSafe(w: World, x: number, y: number): boolean {
+  return !settlerNear(w, x, y) && staysConnected(w.map, x, y);
 }
 
 /** A random reachable free plot around the forester's hut, spreading the new forest out. */
@@ -95,13 +108,14 @@ export function findPlotFor(w: World, s: Settler, home: Building, def: PlantDef)
   for (let y = home.door.y - r; y <= home.door.y + r; y++) {
     for (let x = home.door.x - r; x <= home.door.x + r; x++) {
       const d = dist({ x, y }, home.door);
-      if (d < 2 || d > r || !canPlant(w, x, y, s.owner)) continue;
+      if (d < 2 || d > r || !plotLooksFree(w, x, y, s.owner)) continue;
       if (treesAround(w.map, x, y) >= 4) continue;
       candidates.push({ x, y });
     }
   }
-  for (let attempt = 0; attempt < 6 && candidates.length > 0; attempt++) {
+  for (let attempt = 0; attempt < 12 && candidates.length > 0; attempt++) {
     const [c] = candidates.splice(randInt(w.rng, candidates.length), 1);
+    if (!plotIsSafe(w, c.x, c.y)) continue;
     const path = findPath(w.map, Math.round(s.x), Math.round(s.y), c.x, c.y, true);
     if (path) return { ...c, path };
   }
@@ -114,7 +128,10 @@ export function updateTrees(w: World): void {
   const n = m.w * m.h;
   for (let k = 0; k < 20; k++) {
     const i = randInt(w.rng, n);
-    if (m.tree[i] > 0 && m.tree[i] < TREE_MATURE && w.rng() < 0.3) m.tree[i]++;
+    if (m.tree[i] > 0 && m.tree[i] < TREE_MATURE && w.rng() < 0.3) {
+      m.tree[i]++;
+      m.touch(i);
+    }
   }
   if (w.rng() < 0.1) {
     const i = randInt(w.rng, n);
@@ -124,5 +141,6 @@ export function updateTrees(w: World): void {
     if (!m.isBuildable(x, y) || m.hasDoorNear(x, y) || settlerNear(w, x, y)) return;
     if (treesAround(m, x, y) >= 5 || !staysConnected(m, x, y)) return;
     m.tree[m.idx(x, y)] = 1;
+    m.touch(m.idx(x, y));
   }
 }

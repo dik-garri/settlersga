@@ -2,6 +2,9 @@ import { DEPOSIT_STONE, TREE_MATURE } from './config';
 import { createRng, randInt, type Rng } from './rng';
 import { Terrain } from './types';
 
+/** Edge length, in tiles, of the square chunks used to track changes. */
+export const CHUNK = 16;
+
 export class GameMap {
   readonly terrain: Uint8Array;
   /** 0 = no tree, 1..TREE_MATURE = growth stage. Trees block movement. */
@@ -15,17 +18,37 @@ export class GameMap {
   /** Building id whose door is on this tile, 0 if none. */
   readonly door: Int32Array;
 
+  /** Chunk grid size and a change counter per chunk (see `touch`). Derived, not saved. */
+  readonly chunksX: number;
+  readonly chunksY: number;
+  readonly chunkVersion: Uint32Array;
+
   constructor(
     readonly w: number,
     readonly h: number,
   ) {
     const n = w * h;
+    this.chunksX = Math.ceil(w / CHUNK);
+    this.chunksY = Math.ceil(h / CHUNK);
+    this.chunkVersion = new Uint32Array(this.chunksX * this.chunksY);
     this.terrain = new Uint8Array(n).fill(Terrain.Grass);
     this.tree = new Uint8Array(n);
     this.stone = new Uint8Array(n);
     this.owner = new Uint8Array(n);
     this.building = new Int32Array(n);
     this.door = new Int32Array(n);
+  }
+
+  chunkOf(x: number, y: number): number {
+    return Math.floor(y / CHUNK) * this.chunksX + Math.floor(x / CHUNK);
+  }
+
+  /**
+   * Records that a tile's visible contents (tree, stone) changed, so views only re-scan dirty chunks.
+   * Every runtime write to `tree` or `stone` must call this.
+   */
+  touch(i: number): void {
+    this.chunkVersion[this.chunkOf(i % this.w, Math.floor(i / this.w))]++;
   }
 
   idx(x: number, y: number): number {
