@@ -15,8 +15,8 @@ export enum Terrain {
   Rock = 3,
 }
 
-export type BuildingType = 'castle' | 'woodcutter' | 'sawmill';
-export type SettlerKind = 'carrier' | 'builder' | 'woodcutter' | 'sawmiller';
+export type BuildingType = 'castle' | 'woodcutter' | 'sawmill' | 'forester';
+export type SettlerKind = 'carrier' | 'builder' | 'woodcutter' | 'sawmiller' | 'forester';
 
 export interface Building {
   id: number;
@@ -54,6 +54,7 @@ export type Task =
   /** Worker puts its own product on the building's output pile. */
   | { t: 'store'; b: number; res: Resource }
   | { t: 'chop'; x: number; y: number; n: number }
+  | { t: 'plant'; x: number; y: number; n: number }
   | { t: 'build'; b: number }
   | { t: 'become'; b: number; kind: SettlerKind };
 

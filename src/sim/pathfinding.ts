@@ -136,3 +136,41 @@ export function findPath(
   }
   return null;
 }
+
+const CONNECT_RADIUS = 5;
+
+/**
+ * Whether the tile at (x, y) can become blocked without cutting any route through it:
+ * all walkable neighbours must stay mutually reachable inside a small window around the
+ * tile. Conservative — a detour longer than the window counts as disconnected.
+ */
+export function staysConnected(map: GameMap, x: number, y: number): boolean {
+  const minX = x - CONNECT_RADIUS;
+  const minY = y - CONNECT_RADIUS;
+  const size = CONNECT_RADIUS * 2 + 1;
+  const inWindow = (nx: number, ny: number) => nx >= minX && ny >= minY && nx < minX + size && ny < minY + size;
+  const open = (nx: number, ny: number) => !(nx === x && ny === y) && inWindow(nx, ny) && map.isWalkable(nx, ny);
+
+  const neighbours: [number, number][] = [];
+  for (const [dx, dy] of DIRS) {
+    if (open(x + dx, y + dy)) neighbours.push([x + dx, y + dy]);
+  }
+  if (neighbours.length <= 1) return true;
+
+  const seen = new Uint8Array(size * size);
+  const key = (nx: number, ny: number) => (ny - minY) * size + (nx - minX);
+  const queue: [number, number][] = [neighbours[0]];
+  seen[key(...neighbours[0])] = 1;
+  while (queue.length > 0) {
+    const [cx, cy] = queue.pop()!;
+    for (const [dx, dy] of DIRS) {
+      const nx = cx + dx;
+      const ny = cy + dy;
+      if (!open(nx, ny) || seen[key(nx, ny)]) continue;
+      if (dx !== 0 && dy !== 0 && (!open(cx + dx, cy) || !open(cx, cy + dy))) continue;
+      seen[key(nx, ny)] = 1;
+      queue.push([nx, ny]);
+    }
+  }
+  return neighbours.every(([nx, ny]) => seen[key(nx, ny)] === 1);
+}

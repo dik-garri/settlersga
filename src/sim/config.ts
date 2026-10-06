@@ -12,6 +12,9 @@ export const CHOP_TICKS = 40;
 export const WOODCUTTER_REST_TICKS = 30;
 export const WOODCUTTER_RADIUS = 8;
 export const SAW_TICKS = 50;
+export const PLANT_TICKS = 30;
+export const FORESTER_REST_TICKS = 60;
+export const FORESTER_RADIUS = 6;
 export const HANDLE_TICKS = 3;
 
 export const OUTPUT_CAP = 4;
@@ -42,6 +45,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   castle: { name: 'Замок', w: 3, h: 3, cost: 0, worker: null, playerBuildable: false },
   woodcutter: { name: 'Дом лесоруба', w: 2, h: 2, cost: 2, worker: 'woodcutter', playerBuildable: true },
   sawmill: { name: 'Лесопилка', w: 2, h: 2, cost: 3, worker: 'sawmiller', playerBuildable: true },
+  forester: { name: 'Дом лесничего', w: 2, h: 2, cost: 2, worker: 'forester', playerBuildable: true },
 };
 
 export const SETTLER_NAMES: Record<SettlerKind, string> = {
@@ -49,4 +53,5 @@ export const SETTLER_NAMES: Record<SettlerKind, string> = {
   builder: 'Строитель',
   woodcutter: 'Лесоруб',
   sawmiller: 'Пильщик',
+  forester: 'Лесничий',
 };

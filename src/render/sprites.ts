@@ -346,6 +346,7 @@ export const BUILDING_CANVAS: Record<BuildingType | 'site', BuildingCanvas> = {
   castle: { w: 220, h: 250, ax: 110, ay: 190 },
   woodcutter: { w: 150, h: 140, ax: 75, ay: 100 },
   sawmill: { w: 150, h: 140, ax: 75, ay: 100 },
+  forester: { w: 150, h: 140, ax: 75, ay: 100 },
   site: { w: 150, h: 90, ax: 75, ay: 50 },
 };
 
@@ -466,6 +467,41 @@ function paintSawmill(ctx: Ctx): void {
   ctx.fillRect(lx - 14, ly - 9, 20, 3);
 }
 
+/** Small sapling drawn directly in canvas pixels at (x, y). */
+function sapling(ctx: Ctx, x: number, y: number, s: number): void {
+  ctx.fillStyle = '#5e3b1f';
+  ctx.fillRect(x - 0.6 * s, y - 5 * s, 1.2 * s, 5 * s);
+  ctx.beginPath();
+  ctx.moveTo(x - 4 * s, y - 3 * s);
+  ctx.lineTo(x, y - 11 * s);
+  ctx.lineTo(x + 4 * s, y - 3 * s);
+  ctx.closePath();
+  ctx.fillStyle = '#4f8a3a';
+  ctx.fill();
+}
+
+function paintForester(ctx: Ctx): void {
+  const hw = 0.75;
+  const hh = 0.75;
+  const H = 22;
+  const logs = '#8a5a32';
+  shadow(ctx, hw, hh);
+  // Fenced nursery bed in front of the hut.
+  poly(ctx, [[-0.95, hh + 0.1, 0], [0.2, hh + 0.1, 0], [0.2, hh + 0.5, 0], [-0.95, hh + 0.5, 0]], '#6e5233');
+  walls(ctx, 0, 0, hw, hh, 0, H, logs);
+  for (let z = 3; z < H; z += 4) {
+    line(ctx, [-hw, hh, z], [hw, hh, z], shade(logs, 0.7), 1.5);
+    line(ctx, [hw, -hh, z], [hw, hh, z], shade(logs, 0.55), 1.5);
+  }
+  frontQuad(ctx, hh, 0.32, 0.68, 0, 16, '#3e2716');
+  sideQuad(ctx, hw, -0.35, -0.05, 10, 16, '#2a2724');
+  gableRoof(ctx, hw, hh, H, 24, '#4f7a3a', logs);
+  for (const dx of [-0.8, -0.45, -0.1]) {
+    const [x, y] = P(dx, hh + 0.3, 0);
+    sapling(ctx, x, y, 0.9);
+  }
+}
+
 function paintSite(ctx: Ctx): void {
   const hw = 0.95;
   const hh = 0.95;
@@ -492,6 +528,7 @@ export const BUILDING_PAINTERS: Record<BuildingType | 'site', (ctx: Ctx) => void
   castle: paintCastle,
   woodcutter: paintWoodcutter,
   sawmill: paintSawmill,
+  forester: paintForester,
   site: paintSite,
 };
 
@@ -499,11 +536,12 @@ export const BUILDING_PAINTERS: Record<BuildingType | 'site', (ctx: Ctx) => void
 
 export type SettlerFrame = 'stand' | 'walk' | 'work';
 
-const SETTLER_LOOK: Record<SettlerKind, { tunic: string; hat: string; tool?: 'axe' | 'hammer' }> = {
+const SETTLER_LOOK: Record<SettlerKind, { tunic: string; hat: string; tool?: 'axe' | 'hammer' | 'shovel' }> = {
   carrier: { tunic: '#3f6fb5', hat: '#6b4423' },
   builder: { tunic: '#d08a2c', hat: '#c23b2b', tool: 'hammer' },
   woodcutter: { tunic: '#3d7d3a', hat: '#2e4d22', tool: 'axe' },
   sawmiller: { tunic: '#8b5a2b', hat: '#d9c9a3' },
+  forester: { tunic: '#7a9a3a', hat: '#5a4020', tool: 'shovel' },
 };
 
 /** Settler, 20×32 with the feet at (10, 29). */
@@ -543,6 +581,7 @@ export function paintSettler(ctx: Ctx, kind: SettlerKind, frame: SettlerFrame): 
       ctx.fillRect(3.5, -27, 1.5, 7);
       ctx.fillStyle = '#9aa0a6';
       if (look.tool === 'axe') ctx.fillRect(4.5, -27, 4, 3);
+      else if (look.tool === 'shovel') ctx.fillRect(2.5, -31, 3.5, 4.5);
       else ctx.fillRect(2, -28, 5, 2.5);
     }
   } else {

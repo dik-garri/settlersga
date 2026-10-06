@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BUILDINGS, START_PLANKS } from '../src/sim/config';
 import type { BuildingType } from '../src/sim/types';
+import { findPath } from '../src/sim/pathfinding';
 import { World } from '../src/sim/world';
 
 /** Finds the free spot closest to `near` where the building can be placed. */
@@ -68,10 +69,48 @@ describe('World', () => {
     expect(planksNow).toBe(START_PLANKS - spent + world.stats.produced.plank);
   });
 
+  it('forester plants saplings around the hut', () => {
+    const world = new World(42);
+    const spot = findSpot(world, 'forester', { x: world.castle.x - 5, y: world.castle.y });
+    const hut = world.placeBuilding('forester', spot.x, spot.y)!;
+    expect(hut).not.toBeNull();
+
+    run(world, 3000);
+
+    expect(hut.done).toBe(true);
+    expect(world.getSettler(hut.workerId)?.kind).toBe('forester');
+    expect(world.stats.treesPlanted).toBeGreaterThanOrEqual(5);
+    // Saplings stay off building and door tiles.
+    for (let i = 0; i < world.map.tree.length; i++) {
+      if (world.map.tree[i]) expect(world.map.building[i] + world.map.door[i]).toBe(0);
+    }
+  });
+
+  it('keeps a woodcutter supplied for an hour when paired with a forester', () => {
+    const world = new World(42);
+    // On the castle meadow, so only the forester's saplings are within the woodcutter's reach.
+    const c = world.castle;
+    const wc = findSpot(world, 'woodcutter', { x: c.x - 4, y: c.y + 3 });
+    world.placeBuilding('woodcutter', wc.x, wc.y);
+    const fr = findSpot(world, 'forester', { x: c.x - 4, y: c.y - 1 });
+    world.placeBuilding('forester', fr.x, fr.y);
+
+    run(world, 30000);
+    const before = world.stats.produced.log;
+    run(world, 6000);
+
+    expect(world.stats.produced.log - before).toBeGreaterThan(20);
+    for (const b of world.buildings.values()) {
+      expect(findPath(world.map, c.door.x, c.door.y, b.door.x, b.door.y), b.type).not.toBeNull();
+    }
+  });
+
   it('never leaves reservations negative', () => {
     const world = new World(7);
     const wc = findSpot(world, 'woodcutter', { x: world.castle.x + 6, y: world.castle.y });
     world.placeBuilding('woodcutter', wc.x, wc.y);
+    const fr = findSpot(world, 'forester', { x: world.castle.x + 4, y: world.castle.y + 5 });
+    world.placeBuilding('forester', fr.x, fr.y);
     for (let i = 0; i < 3000; i++) {
       world.step();
       for (const b of world.buildings.values()) {

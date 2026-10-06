@@ -3,12 +3,15 @@ import {
   BUILDINGS,
   CHOP_TICKS,
   DISPATCH_EVERY,
+  FORESTER_RADIUS,
+  FORESTER_REST_TICKS,
   HANDLE_TICKS,
   IDLE_GO_HOME_TICKS,
   INPUT_CAP,
   MAP_SIZE,
   MAX_POPULATION,
   OUTPUT_CAP,
+  PLANT_TICKS,
   SAW_TICKS,
   SETTLER_SPEED,
   SPAWN_CARRIER_EVERY,
@@ -20,7 +23,7 @@ import {
   WOODCUTTER_REST_TICKS,
 } from './config';
 import { generateMap, type GameMap } from './map';
-import { findPath } from './pathfinding';
+import { findPath, staysConnected } from './pathfinding';
 import { createRng, randInt, type Rng } from './rng';
 import {
   emptyStock,
@@ -42,12 +45,14 @@ export class World {
   readonly castle: Building;
   readonly buildings = new Map<number, Building>();
   readonly settlers: Settler[] = [];
-  readonly stats: { produced: Stock } = { produced: emptyStock() };
+  readonly stats: { produced: Stock; treesPlanted: number } = { produced: emptyStock(), treesPlanted: 0 };
   tick = 0;
 
   private readonly rng: Rng;
   private readonly settlerById = new Map<number, Settler>();
   private readonly reservedTrees = new Set<number>();
+  /** Tiles a forester is on the way to plant. */
+  private readonly reservedPlots = new Set<number>();
   private nextId = 1;
 
   constructor(seed = 1) {
@@ -195,7 +200,7 @@ export class World {
       const x = (i % m.w) + randInt(this.rng, 5) - 2;
       const y = Math.floor(i / m.w) + randInt(this.rng, 5) - 2;
       if (!m.isBuildable(x, y) || m.hasDoorNear(x, y) || this.settlerNear(x, y)) return;
-      if (this.treesAround(x, y) >= 5) return;
+      if (this.treesAround(x, y) >= 5 || !staysConnected(m, x, y)) return;
       m.tree[m.idx(x, y)] = 1;
     }
   }
@@ -311,6 +316,17 @@ export class World {
         s.tasks.shift();
         return;
       }
+      case 'plant': {
+        const i = this.map.idx(task.x, task.y);
+        if (!this.canPlant(task.x, task.y, true)) return this.abort(s);
+        s.working = true;
+        if (--task.n > 0) return;
+        this.map.tree[i] = 1;
+        this.reservedPlots.delete(i);
+        this.stats.treesPlanted++;
+        s.tasks.shift();
+        return;
+      }
       case 'build': {
         const b = this.buildings.get(task.b);
         if (!b || b.done) {
@@ -388,6 +404,9 @@ export class World {
         case 'chop':
           this.reservedTrees.delete(this.map.idx(task.x, task.y));
           break;
+        case 'plant':
+          this.reservedPlots.delete(this.map.idx(task.x, task.y));
+          break;
         case 'build':
           if (b && b.builderId === s.id) b.builderId = null;
           break;
@@ -457,10 +476,62 @@ export class World {
         return;
       }
 
+      case 'forester': {
+        if (!home) return;
+        if (s.inside !== home.id) return this.goHome(s, home);
+        const plot = this.findPlotFor(s, home);
+        if (!plot) {
+          s.tasks = [{ t: 'wait', n: 40 }];
+          return;
+        }
+        this.reservedPlots.add(this.map.idx(plot.x, plot.y));
+        s.path = plot.path;
+        s.tasks = [
+          { t: 'goto', x: plot.x, y: plot.y, adj: true },
+          { t: 'plant', x: plot.x, y: plot.y, n: PLANT_TICKS },
+          { t: 'goto', x: home.door.x, y: home.door.y },
+          { t: 'enter', b: home.id },
+          { t: 'wait', n: FORESTER_REST_TICKS },
+        ];
+        return;
+      }
+
       case 'sawmiller':
         if (home && s.inside !== home.id) this.goHome(s, home);
         return;
     }
+  }
+
+  /**
+   * Whether a sapling may go on this tile: free grass, not next to a door, nobody standing there,
+   * and blocking it does not cut any walking route.
+   * `planting` skips the reservation check for the forester who holds it.
+   */
+  private canPlant(x: number, y: number, planting = false): boolean {
+    const m = this.map;
+    if (!m.isBuildable(x, y) || m.hasDoorNear(x, y) || this.settlerNear(x, y)) return false;
+    if (!planting && this.reservedPlots.has(m.idx(x, y))) return false;
+    return staysConnected(m, x, y);
+  }
+
+  /** A random reachable free plot around the forester's hut, spreading the new forest out. */
+  private findPlotFor(s: Settler, home: Building): (Point & { path: Point[] }) | null {
+    const candidates: Point[] = [];
+    const r = FORESTER_RADIUS;
+    for (let y = home.door.y - r; y <= home.door.y + r; y++) {
+      for (let x = home.door.x - r; x <= home.door.x + r; x++) {
+        const d = dist({ x, y }, home.door);
+        if (d < 2 || d > r || !this.canPlant(x, y)) continue;
+        if (this.treesAround(x, y) >= 4) continue;
+        candidates.push({ x, y });
+      }
+    }
+    for (let attempt = 0; attempt < 6 && candidates.length > 0; attempt++) {
+      const [c] = candidates.splice(randInt(this.rng, candidates.length), 1);
+      const path = findPath(this.map, Math.round(s.x), Math.round(s.y), c.x, c.y, true);
+      if (path) return { ...c, path };
+    }
+    return null;
   }
 
   /** Nearest reachable mature, unreserved tree within the woodcutter's radius. */

@@ -5,7 +5,7 @@ import type { World } from '../sim/world';
 import type { GameState } from './state';
 
 const SPEEDS = [1, 2, 4];
-const PLAYER_BUILDINGS: BuildingType[] = ['woodcutter', 'sawmill'];
+const PLAYER_BUILDINGS: BuildingType[] = ['woodcutter', 'sawmill', 'forester'];
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -92,7 +92,7 @@ export class Hud {
     this.stockEl.innerHTML = '';
     this.stockEl.append(this.stat('🪵', 'Брёвна', store.log), this.stat('🪚', 'Доски', store.plank));
 
-    const counts: Record<SettlerKind, number> = { carrier: 0, builder: 0, woodcutter: 0, sawmiller: 0 };
+    const counts: Record<SettlerKind, number> = { carrier: 0, builder: 0, woodcutter: 0, sawmiller: 0, forester: 0 };
     let busy = 0;
     for (const s of world.settlers) {
       counts[s.kind]++;
@@ -100,7 +100,8 @@ export class Hud {
     }
     this.popEl.textContent =
       `Поселенцы: ${world.settlers.length} · носильщики ${busy}/${counts.carrier} заняты · ` +
-      `строители ${counts.builder} · лесорубы ${counts.woodcutter} · пильщики ${counts.sawmiller}`;
+      `строители ${counts.builder} · лесорубы ${counts.woodcutter} · пильщики ${counts.sawmiller} · ` +
+      `лесничие ${counts.forester}`;
 
     for (const [key, b] of this.speedButtons) {
       b.classList.toggle('active', key === 'pause' ? state.paused : !state.paused && state.speed === key);
@@ -137,9 +138,14 @@ export class Hud {
       const worker = this.world.getSettler(b.workerId);
       rows.push(['Работник', worker ? SETTLER_NAMES[worker.kind] : b.workerRequested ? 'идёт' : 'нет свободных']);
       rows.push(['Статус', this.status(b)]);
-      if (b.type === 'sawmill') rows.push(['Брёвна (вход)', `${b.input.log} / ${INPUT_CAP}`]);
-      const res = b.type === 'woodcutter' ? 'log' : 'plank';
-      rows.push([b.type === 'woodcutter' ? 'Брёвна' : 'Доски', `${b.output[res]} / ${OUTPUT_CAP}`]);
+      if (b.type === 'sawmill') {
+        rows.push(['Брёвна (вход)', `${b.input.log} / ${INPUT_CAP}`]);
+        rows.push(['Доски', `${b.output.plank} / ${OUTPUT_CAP}`]);
+      } else if (b.type === 'woodcutter') {
+        rows.push(['Брёвна', `${b.output.log} / ${OUTPUT_CAP}`]);
+      } else if (b.type === 'forester') {
+        rows.push(['Посажено всего', String(this.world.stats.treesPlanted)]);
+      }
     }
     this.infoEl.innerHTML = '';
     this.infoEl.append(el('h3', '', def.name));
@@ -155,8 +161,10 @@ export class Hud {
       if (b.input.log === 0) return 'нет брёвен';
       return 'пилит';
     }
-    if (b.output.log >= OUTPUT_CAP) return 'склад полон';
     const w = this.world.getSettler(b.workerId);
-    return w && w.inside === null ? 'в лесу' : 'отдыхает';
+    const outside = w !== undefined && w.inside === null;
+    if (b.type === 'forester') return outside ? 'сажает деревья' : 'отдыхает';
+    if (b.output.log >= OUTPUT_CAP) return 'склад полон';
+    return outside ? 'в лесу' : 'отдыхает';
   }
 }

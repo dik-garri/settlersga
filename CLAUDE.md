@@ -4,6 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Browser prototype of a Settlers 3/4-style economy game: isometric 2D, sprites, TypeScript + Vite + PixiJS 8. UI text is in Russian. Design spec: `docs/superpowers/specs/2026-10-06-settlers-prototype-design.md`.
 
+## Workflow
+
+Once a change is verified (tests and typecheck pass, and the game has been checked in the browser when rendering or UI changed), commit and push to `origin main` without asking. Update `README.md` (player-facing, in Russian) and this file in the same commit whenever the change affects them.
+
 ## Commands
 
 ```bash
@@ -28,6 +32,7 @@ Three layers with one-way dependencies: `ui → render → sim`. `src/sim` must 
 - Every building has a **door tile** (`doorOf`: `(x+w-1, y+h)`, in front of the lower-left wall). It is walkable but not buildable. All pickups and drops happen there. For the castle, `output` is the warehouse stock.
 - **Settlers run a task queue** (`Settler.tasks`, union type `Task` in `types.ts`). `updateSettler` executes the head task each tick. An empty queue calls `idle()`, which holds per-profession behavior (woodcutter goes for trees, builder looks for sites, carrier goes home). Workers are carriers converted by the `become` task.
 - **Reservation invariant:** jobs reserve resources up front (`outReserved` on the source, `inbound` on the destination, `reservedTrees`, `builderId`, `workerRequested`). Any job that can fail must go through `abort()`, which walks the *remaining* tasks and releases what they hold. When you add a task type that reserves something, add its release to `abort()`. `tests/world.test.ts` checks that counters never go negative and that planks are conserved.
+- **Connectivity invariant:** anything that turns a walkable tile into a blocked one at runtime (forester planting, natural tree spread) must first pass `staysConnected` (`pathfinding.ts`): a conservative local check that blocking the tile does not cut any route. Without it, trees eventually wall off doors and settlers get stuck in an endless retry loop that calls A* every tick. Player-placed buildings are not guarded yet.
 - **Logistics:** `dispatch()` runs every `DISPATCH_EVERY` ticks and hands work only to idle carriers, in this priority: worker requests, then demands (sites need planks, sawmills need logs; each matched to the nearest supply), then surplus from producers carried to the castle. Distances use straight lines; A* (`pathfinding.ts`, 8-way, no corner cutting, `adjacent` mode for blocked targets such as trees) runs lazily inside the `goto` task, and the route is recomputed when the next tile becomes blocked.
 - Tunables (timings, caps, costs, start resources) live in `config.ts`, and building definitions are in `BUILDINGS`.
 
