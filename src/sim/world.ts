@@ -43,6 +43,7 @@ import { findPath, staysConnected } from './pathfinding';
 import { createRng, type Rng } from './rng';
 import { mapFromSave, restoreWorld, type SaveData } from './save';
 import { markWalkable } from './regions';
+import { seasonAt, type SeasonInfo } from './seasons';
 import { abort, updateSettler } from './settlers';
 import {
   emptyStock,
@@ -276,6 +277,11 @@ export class World {
   /** Fog of war: does the player see the tile right now (own buildings or settlers nearby)? */
   isVisible(x: number, y: number, player: PlayerId = LOCAL_PLAYER): boolean {
     return this.map.inBounds(x, y) && isVisible(this, this.map.idx(x, y), player);
+  }
+
+  /** Current season (derived from the tick). */
+  season(): SeasonInfo {
+    return seasonAt(this.tick);
   }
 
   isProspected(x: number, y: number, player: PlayerId = LOCAL_PLAYER): boolean {

@@ -305,7 +305,18 @@ function fractalNoise(rng: Rng, w: number, h: number): Float32Array {
 }
 
 /** The guaranteed coal/iron mountain, relative to each start; `elevate` gives it a summit. */
-const START_MOUNTAIN = { dx: -2, dy: -8, r: 2.8 };
+/**
+ * The guaranteed start mountain, relative to each start: two touching lobes, coal and iron, each
+ * big enough for its own mine whatever the other mine's position. `elevate` gives each lobe a summit.
+ */
+const START_MOUNTAIN = {
+  dx: -2,
+  dy: -8,
+  lobes: [
+    { dx: -1.8, r: 2.1, ore: 'coal' as const },
+    { dx: 1.8, r: 2.1, ore: 'ironore' as const },
+  ],
+};
 
 /**
  * Generates terrain, forests and ore. Around every start position (castle center) a meadow is
@@ -412,18 +423,20 @@ export function generateMap(seed: number, size: number, starts: readonly Point[]
     depositAt(cx - 7, cy + 3, 2.3, 0.85);
 
     // Guarantee a small mountain with coal and iron inside the starting territory.
-    const mx = cx + START_MOUNTAIN.dx;
     const my = cy + START_MOUNTAIN.dy;
-    for (let y = my - 3; y <= my + 3; y++) {
-      for (let x = mx - 3; x <= mx + 3; x++) {
-        if (!map.inBounds(x, y) || Math.hypot(x - mx, y - my) > START_MOUNTAIN.r) continue;
-        const i = map.idx(x, y);
-        map.terrain[i] = Terrain.Mountain;
-        map.tree[i] = 0;
-        map.stone[i] = 0;
-        map.fish[i] = 0;
-        map.ore[i] = ORE_RESOURCES.indexOf(x < mx ? 'coal' : 'ironore') + 1;
-        map.oreAmount[i] = ORE_AMOUNT[1];
+    for (const lobe of START_MOUNTAIN.lobes) {
+      const lx = cx + START_MOUNTAIN.dx + lobe.dx;
+      for (let y = Math.floor(my - lobe.r); y <= my + lobe.r; y++) {
+        for (let x = Math.floor(lx - lobe.r); x <= lx + lobe.r; x++) {
+          if (!map.inBounds(x, y) || Math.hypot(x - lx, y - my) > lobe.r) continue;
+          const i = map.idx(x, y);
+          map.terrain[i] = Terrain.Mountain;
+          map.tree[i] = 0;
+          map.stone[i] = 0;
+          map.fish[i] = 0;
+          map.ore[i] = ORE_RESOURCES.indexOf(lobe.ore) + 1;
+          map.oreAmount[i] = ORE_AMOUNT[1];
+        }
       }
     }
 
@@ -454,7 +467,9 @@ export function generateMap(seed: number, size: number, starts: readonly Point[]
     map,
     height,
     starts.map((st) => ({ cx: st.x, cy: st.y, r: 6 })),
-    starts.map((st) => ({ x: st.x + START_MOUNTAIN.dx, y: st.y + START_MOUNTAIN.dy, r: START_MOUNTAIN.r })),
+    starts.flatMap((st) =>
+      START_MOUNTAIN.lobes.map((l) => ({ x: st.x + START_MOUNTAIN.dx + l.dx, y: st.y + START_MOUNTAIN.dy, r: l.r })),
+    ),
   );
   return map;
 }

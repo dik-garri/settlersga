@@ -110,6 +110,9 @@ export class Hud {
   /** Number elements per resource, in the top bar and the stock panel; built once, updated in place. */
   private readonly stockValues: [Resource, HTMLElement][] = [];
   private readonly popEl = el('div', 'pop');
+  /** Season, year and how far into the season (a thin bar). */
+  private readonly seasonEl = el('div', 'season');
+  private readonly seasonBar = el('span', 'season-bar');
   private readonly speedButtons = new Map<number | 'pause', HTMLButtonElement>();
   private readonly buildButtons = new Map<Placeable, HTMLButtonElement>();
   private readonly tabButtons: HTMLButtonElement[] = [];
@@ -155,7 +158,8 @@ export class Hud {
     };
     this.stockEl.append(more, stats);
     this.statsPanel.hidden = true;
-    top.append(this.stockEl, this.popEl);
+    this.seasonEl.title = 'Время года';
+    top.append(this.stockEl, this.seasonEl, this.popEl);
     this.stockPanel.hidden = true;
     for (const [group, title] of Object.entries(RESOURCE_GROUPS) as [ResourceGroup, string][]) {
       this.stockPanel.append(el('h4', '', title));
@@ -301,6 +305,11 @@ export class Hud {
       .filter(([kind]) => kind !== 'carrier')
       .map(([kind, n]) => `${PROFESSIONS[kind].name.toLowerCase()} ${n}`)
       .join(' · ');
+    const season = world.season();
+    const icon = ['🌱', '☀️', '🍂', '❄️'][season.index] ?? '';
+    this.seasonEl.textContent = `${icon} ${season.def.name} · год ${season.year + 1} `;
+    this.seasonBar.style.setProperty('--p', `${Math.round(season.progress * 100)}%`);
+    this.seasonEl.append(this.seasonBar);
     this.popEl.textContent =
       `Поселенцы: ${people} · носильщики ${busy}/${counts.get('carrier') ?? 0} заняты` +
       (workers ? ` · ${workers}` : '');

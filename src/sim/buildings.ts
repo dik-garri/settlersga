@@ -64,6 +64,17 @@ export function addBuilding(w: World, type: BuildingType, x: number, y: number, 
   w.map.door[w.map.idx(b.door.x, b.door.y)] = b.id;
   w.buildings.set(b.id, b);
   w.buildingsVersion++;
+  // Anyone standing on the new footprint would be walled in: step them out onto the door tile,
+  // which is always walkable. Their current route is recomputed from there.
+  for (const s of w.settlers) {
+    if (s.inside !== null) continue;
+    const sx = Math.round(s.x);
+    const sy = Math.round(s.y);
+    if (sx < x || sy < y || sx >= x + def.w || sy >= y + def.h) continue;
+    s.x = s.px = b.door.x;
+    s.y = s.py = b.door.y;
+    s.path = [];
+  }
   return b;
 }
 

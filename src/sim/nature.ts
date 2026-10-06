@@ -14,6 +14,7 @@ import type { GameMap } from './map';
 import { findPath, staysConnected } from './pathfinding';
 import { markWalkable } from './regions';
 import { randInt } from './rng';
+import { seasonAt } from './seasons';
 import { Terrain, type Building, type PlantKind, type PlayerId, type Point, type Resource, type Settler } from './types';
 import type { World } from './world';
 
@@ -245,16 +246,17 @@ function scaled(w: World, perReferenceArea: number, attempt: () => void): void {
 export function updateNature(w: World): void {
   const m = w.map;
   const n = m.w * m.h;
+  const season = seasonAt(w.tick).def;
 
   scaled(w, 20, () => {
     const i = randInt(w.rng, n);
-    if (m.tree[i] > 0 && m.tree[i] < TREE_MATURE && w.rng() < 0.3) {
+    if (m.tree[i] > 0 && m.tree[i] < TREE_MATURE && w.rng() < 0.3 * season.tree) {
       m.tree[i]++;
       m.touch(i);
     }
   });
 
-  scaled(w, 0.1, () => {
+  scaled(w, 0.1 * season.spread, () => {
     const i = randInt(w.rng, n);
     if (m.tree[i] !== TREE_MATURE) return;
     const x = (i % m.w) + randInt(w.rng, 5) - 2;
@@ -267,13 +269,16 @@ export function updateNature(w: World): void {
 
   scaled(w, FISH_RESTOCK, () => {
     const i = randInt(w.rng, n);
-    if (TERRAIN[m.terrain[i] as Terrain].water && m.fish[i] < FISH_MAX && w.rng() < 0.5) m.fish[i]++;
+    if (TERRAIN[m.terrain[i] as Terrain].water && m.fish[i] < FISH_MAX && w.rng() < 0.5 * season.fish) m.fish[i]++;
   });
 
   if (w.tick % CROP_GROW_EVERY === 0 && w.fields.size > 0) {
     // Sorted so the RNG is consumed in the same order after a save/load.
+    const vine = CROP_KINDS.indexOf('vine');
     for (const i of [...w.fields].sort((a, b) => a - b)) {
-      if (m.crop[i] < CROP_RIPE && w.rng() < CROP_GROW_CHANCE) {
+      // Vines leaf out all year but set fruit (the last stage) only in fruiting seasons.
+      const cap = m.cropKind[i] === vine && !season.fruit ? CROP_RIPE - 1 : CROP_RIPE;
+      if (m.crop[i] < CROP_RIPE && w.rng() < CROP_GROW_CHANCE * season.crop && m.crop[i] < cap) {
         m.crop[i]++;
         m.touch(i);
       }

@@ -124,7 +124,12 @@ function think(w: World, ai: AiState): void {
   for (const step of AI_PLAN) {
     if (count(step.type) >= step.count) continue;
     if (step.after && !own.some((b) => b.type === step.after && b.done)) continue;
-    if ((ai.blockedUntil[step.type] ?? -Infinity) > w.tick) continue;
+    if ((ai.blockedUntil[step.type] ?? -Infinity) > w.tick) {
+      // Waiting to retry a mine whose ore it is already looking for keeps that search first.
+      const waiting = BUILDINGS[step.type].mine;
+      if (waiting && ai.wantOre === waiting.res) sought = true;
+      continue;
+    }
     if (!ctx.affordable(step.type) || !ctx.staffable(step.type, count(step.type) === 0)) continue;
     if (BUILDINGS[step.type].garrison && !ctx.canMan(step.type)) continue;
     const mine = BUILDINGS[step.type].mine;
