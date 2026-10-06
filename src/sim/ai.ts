@@ -118,6 +118,9 @@ function think(w: World, ai: AiState): void {
   }
 
   const count = (t: BuildingType) => own.filter((b) => b.type === t).length;
+  // Only the first mine of the plan that cannot be placed decides what geologists look for: later
+  // failures (gold, stone…) must not overwrite a more urgent need such as coal for weapons.
+  let sought = false;
   for (const step of AI_PLAN) {
     if (count(step.type) >= step.count) continue;
     if (step.after && !own.some((b) => b.type === step.after && b.done)) continue;
@@ -129,8 +132,9 @@ function think(w: World, ai: AiState): void {
       if (mine && ai.wantOre === mine.res) ai.wantOre = null;
       return;
     }
-    if (mine) {
+    if (mine && !sought) {
       // No known deposit: look for one (geologist) and lean the next towers towards mountains.
+      sought = true;
       ai.wantOre = mine.res;
       prospect(ctx, ai);
     }
@@ -139,11 +143,13 @@ function think(w: World, ai: AiState): void {
 
   // Army ready but no enemy in reach: push military buildings towards the nearest enemy.
   // Only when every military building is manned and the new one can be manned too.
+  // Short of ore (`wantOre`), it expands towards mountains even with an enemy in reach: saving
+  // soldiers for an attack is pointless when no new ones can be made (e.g. coal worked out).
   const soldiers = w.settlers.filter((s) => s.owner === me && isFighter(s)).length;
   const military = own.filter((b) => isMilitary(b));
   if (
     !attacked &&
-    !enemyInReach(w, me, military) &&
+    (ai.wantOre !== null || !enemyInReach(w, me, military)) &&
     (ai.blockedUntil.frontier ?? -Infinity) <= w.tick &&
     soldiers >= AI.frontierSoldiers &&
     military.length < AI.maxMilitary &&

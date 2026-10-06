@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { knownEnemies } from '../src/sim/ai';
-import { AI } from '../src/sim/config';
+import { AI, AI_PLAN, BUILDINGS, oreOf } from '../src/sim/config';
 import { centerOf, spawnSettler } from '../src/sim/buildings';
 import { enterGarrison, killSettler } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
@@ -189,4 +189,23 @@ describe('determinism', () => {
     run(b, 6 * MINUTE);
     expect(saveWorld(b)).toEqual(saveWorld(a));
   });
+});
+
+describe('AI ore prospecting', () => {
+  it('looks for the ore of the first mine in its plan it cannot place, not the last one', () => {
+    const w = new World(42, { players: 2, ai: [2] });
+    // Let it build up to the toolsmith, so the later mines of the plan (gold, stone…) are in play.
+    for (let t = 0; t < 30 * MINUTE; t++) w.step();
+    const own = () => [...w.buildings.values()].filter((b) => b.owner === 2);
+    expect(own().some((b) => b.type === 'toolsmith' && b.done)).toBe(true);
+    // Then coal, gold and stone run out everywhere and its coal mines are gone.
+    for (let i = 0; i < w.map.ore.length; i++) {
+      const res = oreOf(w.map.ore[i]);
+      if (res === 'coal' || res === 'goldore' || res === 'stone') w.map.oreAmount[i] = 0;
+    }
+    for (const b of own()) if (b.type === 'coalmine') w.demolish(b.id, 2);
+    for (let t = 0; t < 5 * MINUTE; t++) w.step();
+    const firstMine = AI_PLAN.find((s) => BUILDINGS[s.type].mine)!;
+    expect(w.ai[0].wantOre).toBe(BUILDINGS[firstMine.type].mine!.res);
+  }, LONG);
 });
