@@ -20,7 +20,8 @@ import { updateNature } from './nature';
 import { findPath, staysConnected } from './pathfinding';
 import { createRng, type Rng } from './rng';
 import { mapFromSave, restoreWorld, type SaveData } from './save';
-import { updateSettler } from './settlers';
+import { markWalkable } from './regions';
+import { abort, updateSettler } from './settlers';
 import { emptyStock, Terrain, type Building, type BuildingType, type PlayerId, type Settler, type Stock, type Task } from './types';
 
 export { doorOf } from './buildings';
@@ -179,6 +180,46 @@ export class World {
   }
 
   // --------------------------------------------------------------- commands
+
+  /** Player command: serve this building first (materials, inputs, builders). */
+  setPriority(id: number, on: boolean, player: PlayerId = LOCAL_PLAYER): boolean {
+    const b = this.buildings.get(id);
+    if (!b || b.owner !== player) return false;
+    b.priority = on;
+    return true;
+  }
+
+  /**
+   * Player command: tear down a building. Goods lying there are lost; every job involving it is
+   * cancelled (goods in hands go back to a warehouse), its worker becomes a carrier again and the
+   * tiles become free. The castle cannot be demolished.
+   */
+  demolish(id: number, player: PlayerId = LOCAL_PLAYER): boolean {
+    const b = this.buildings.get(id);
+    if (!b || b.owner !== player || !BUILDINGS[b.type].playerBuildable) return false;
+    for (const s of this.settlers) {
+      if (s.tasks.some((t) => 'b' in t && t.b === id)) abort(this, s);
+      if (s.home === id) {
+        abort(this, s);
+        s.kind = 'carrier';
+        s.home = null;
+      }
+      if (s.inside === id) s.inside = null;
+    }
+    // Jobs aborted above may have re-targeted this building on their way back; drop those too.
+    for (const s of this.settlers) if (s.tasks.some((t) => 'b' in t && t.b === id)) abort(this, s);
+    this.buildings.delete(id);
+    const m = this.map;
+    m.door[m.idx(b.door.x, b.door.y)] = 0;
+    for (let dy = 0; dy < b.h; dy++) {
+      for (let dx = 0; dx < b.w; dx++) {
+        m.building[m.idx(b.x + dx, b.y + dy)] = 0;
+        markWalkable(m, b.x + dx, b.y + dy);
+      }
+    }
+    if (BUILDINGS[b.type].territory) recomputeTerritory(this);
+    return true;
+  }
 
   /**
    * Player command: the nearest idle carrier becomes a geologist, examines up to `PROSPECT_TILES`

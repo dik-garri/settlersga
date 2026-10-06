@@ -67,6 +67,7 @@ export type BuildingType =
   | 'ironsmelter'
   | 'goldsmelter'
   | 'toolsmith'
+  | 'warehouse'
   | 'tower';
 
 export type SettlerKind =
@@ -123,6 +124,8 @@ export interface Building {
   unreachableUntil: number;
   /** Residence: settlers released so far. */
   spawned: number;
+  /** Player flag: served first by logistics and builders. */
+  priority: boolean;
 }
 
 export type Task =

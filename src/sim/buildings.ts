@@ -47,6 +47,7 @@ export function addBuilding(w: World, type: BuildingType, x: number, y: number, 
     timer: 0,
     unreachableUntil: 0,
     spawned: 0,
+    priority: false,
   };
   for (let dy = 0; dy < def.h; dy++) {
     for (let dx = 0; dx < def.w; dx++) {

@@ -286,15 +286,18 @@ describe('World', () => {
     world.placeBuilding('stonecutter', st.x, st.y);
     const sm = findSpot(world, 'sawmill', { x: world.castle.x + 1, y: world.castle.y - 5 });
     world.placeBuilding('sawmill', sm.x, sm.y);
+    const violations: string[] = [];
     for (let i = 0; i < 3000; i++) {
       world.step();
       for (const b of world.buildings.values()) {
-        for (const v of [...Object.values(b.inbound), ...Object.values(b.outReserved), ...Object.values(b.output)]) {
-          expect(v).toBeGreaterThanOrEqual(0);
+        for (const res of RESOURCES) {
+          if (b.inbound[res] < 0 || b.outReserved[res] < 0 || b.output[res] < 0 || b.outReserved[res] > b.output[res]) {
+            violations.push(`tick ${world.tick} ${b.type} ${res}`);
+          }
         }
-        for (const res of RESOURCES) expect(b.outReserved[res]).toBeLessThanOrEqual(b.output[res]);
       }
     }
+    expect(violations.slice(0, 5)).toEqual([]);
     expect(Object.values(world.stats.lost).every((n) => n === 0)).toBe(true);
   });
 });

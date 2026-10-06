@@ -25,6 +25,9 @@ function hash(i: number): number {
 }
 
 interface BuildingView {
+  /** Tiles the body and the door pile are registered under (see `addStatic`). */
+  at: { x: number; y: number };
+  doorAt: { x: number; y: number };
   body: Container;
   site: Sprite;
   main: Sprite;
@@ -439,6 +442,13 @@ export class GameRenderer {
   }
 
   private syncBuildings(): void {
+    for (const [id, v] of this.buildingViews) {
+      if (this.sim.buildings.has(id)) continue;
+      // Demolished.
+      this.removeStatic(v.body, v.at.x, v.at.y);
+      this.removeStatic(v.front, v.doorAt.x, v.doorAt.y);
+      this.buildingViews.delete(id);
+    }
     for (const b of this.sim.buildings.values()) {
       let v = this.buildingViews.get(b.id);
       if (!v) v = this.createBuildingView(b);
@@ -480,7 +490,7 @@ export class GameRenderer {
 
     this.addStatic(body, cx, cy);
     this.addStatic(front, b.door.x, b.door.y);
-    const v: BuildingView = { body, site, main, front, pileKey: '' };
+    const v: BuildingView = { at: { x: cx, y: cy }, doorAt: { ...b.door }, body, site, main, front, pileKey: '' };
     this.buildingViews.set(b.id, v);
     return v;
   }

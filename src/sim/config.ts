@@ -192,7 +192,7 @@ export interface Recipe {
 export type Category = 'housing' | 'resources' | 'food' | 'mining' | 'metal' | 'military';
 
 export const CATEGORIES: Record<Category, string> = {
-  housing: 'Жильё',
+  housing: 'Поселение',
   resources: 'Сырьё',
   food: 'Еда',
   mining: 'Горное дело',
@@ -269,6 +269,17 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     playerBuildable: true,
     category: 'housing',
     residence: { capacity: 14, everyTicks: 100 },
+  },
+
+  warehouse: {
+    name: 'Склад',
+    w: 2,
+    h: 2,
+    cost: { plank: 3, stone: 2 },
+    worker: null,
+    playerBuildable: true,
+    category: 'housing',
+    storage: true,
   },
 
   woodcutter: {

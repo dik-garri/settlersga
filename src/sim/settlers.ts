@@ -342,7 +342,7 @@ function idle(w: World, s: Settler): void {
       let bestScore = Infinity;
       for (const b of w.buildings.values()) {
         if (b.owner !== s.owner || b.done || b.builderId !== null || !isReachable(w, b)) continue;
-        const score = dist(s, b.door) + (hasBuildWork(b) ? 0 : 1000);
+        const score = dist(s, b.door) + (hasBuildWork(b) ? 0 : 1000) - (b.priority ? 2000 : 0);
         if (score < bestScore) {
           best = b;
           bestScore = score;

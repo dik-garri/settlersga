@@ -92,6 +92,10 @@ export class Hud {
   private readonly hintEl = el('div', 'hint');
   private readonly toastEl = el('div', 'toast');
   private lastUpdate = 0;
+  /** Building whose demolition awaits a second click. */
+  private confirmDemolish: number | null = null;
+  /** Re-render the info panel only when its content changes, so buttons in it stay clickable. */
+  private infoKey = '';
   private toastTimer = 0;
 
   constructor(
@@ -270,7 +274,12 @@ export class Hud {
   private renderInfo(): void {
     const b = this.state.selected !== null ? this.world.buildings.get(this.state.selected) : undefined;
     this.infoEl.hidden = !b;
-    if (!b) return;
+    if (!b) {
+      this.confirmDemolish = null;
+      this.infoKey = '';
+      return;
+    }
+    if (this.confirmDemolish !== null && this.confirmDemolish !== b.id) this.confirmDemolish = null;
     const def = BUILDINGS[b.type];
     const rows: [string, string][] = [];
     if (!b.done) {
@@ -321,11 +330,35 @@ export class Hud {
       }
       if (def.territory) rows.push(['Радиус земли', `${def.territory} клеток`]);
     }
+    if (b.priority) rows.push(['Приоритет', 'да']);
+    const key = JSON.stringify([b.id, rows, this.confirmDemolish === b.id]);
+    if (key === this.infoKey) return;
+    this.infoKey = key;
     this.infoEl.innerHTML = '';
     this.infoEl.append(el('h3', '', def.name));
     const table = el('dl');
     for (const [k, v] of rows) table.append(el('dt', '', k), el('dd', '', v));
     this.infoEl.append(table);
+    if (!def.playerBuildable) return;
+    const actions = el('div', 'info-actions');
+    if (!b.done || def.recipe || def.residence) {
+      const prio = el('button', b.priority ? 'active' : '', b.priority ? '⬆ Приоритет: да' : '⬆ Приоритет');
+      prio.title = 'Обслуживать в первую очередь: материалы, сырьё, строители';
+      prio.onclick = () => this.world.setPriority(b.id, !b.priority);
+      actions.append(prio);
+    }
+    const confirming = this.confirmDemolish === b.id;
+    const demolish = el('button', confirming ? 'danger' : '', confirming ? 'Точно снести?' : '🔨 Снести');
+    demolish.onclick = () => {
+      if (!confirming) {
+        this.confirmDemolish = b.id;
+        return;
+      }
+      this.confirmDemolish = null;
+      if (this.world.demolish(b.id)) this.state.selected = null;
+    };
+    actions.append(demolish);
+    this.infoEl.append(actions);
   }
 
   private status(b: Building): string {

@@ -78,7 +78,7 @@ async function main() {
     hud.update(now);
   });
 
-  Object.assign(window, { world, seed });
+  Object.assign(window, { world, seed, state });
   if (save) console.info(`Loaded save at tick ${world.tick}`);
   else console.info(`Settlers prototype, seed ${seed} (add ?seed=${seed} to replay this map)`);
 }

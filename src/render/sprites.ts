@@ -439,6 +439,7 @@ export const BUILDING_CANVAS: Record<BuildingType | 'site2' | 'site3', BuildingC
   ironmine: SMALL,
   goldmine: SMALL,
   stonemine: SMALL,
+  warehouse: SMALL,
   ironsmelter: SMALL,
   goldsmelter: SMALL,
   toolsmith: SMALL,
@@ -690,7 +691,7 @@ function paintSite(ctx: Ctx, half: number): void {
 
 // ------------------------------------------------- data-described buildings
 
-type Deco = 'chimney' | 'well' | 'nets' | 'pen' | 'sacks' | 'oven' | 'meat' | 'hay' | 'furnace' | 'anvil';
+type Deco = 'chimney' | 'well' | 'nets' | 'pen' | 'sacks' | 'oven' | 'meat' | 'hay' | 'furnace' | 'anvil' | 'crates';
 
 /** A gabled building described by data, so new building types rarely need a hand-written painter. */
 interface Style {
@@ -885,6 +886,27 @@ function paintDeco(ctx: Ctx, st: Style, deco: Deco): void {
       ctx.fill();
       return;
     }
+    case 'crates': {
+      const crate = (dx: number, dy: number, z: number) => box(ctx, dx, dy, 0.13, 0.13, z, 9, '#a07a4a');
+      crate(hw + 0.25, -hh * 0.4, 0);
+      crate(hw + 0.25, -hh * 0.1, 0);
+      crate(hw + 0.25, -hh * 0.25, 9);
+      crate(-hw * 0.5, hh + 0.3, 0);
+      const [bx, by] = P(-hw * 0.05, hh + 0.35, 0);
+      ctx.fillStyle = '#7a5530';
+      ctx.beginPath();
+      ctx.ellipse(bx, by - 5, 4, 5.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#4a3420';
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(bx - 4, by - 7);
+      ctx.lineTo(bx + 4, by - 7);
+      ctx.moveTo(bx - 4, by - 3);
+      ctx.lineTo(bx + 4, by - 3);
+      ctx.stroke();
+      return;
+    }
     case 'hay': {
       const [x, y] = P(hw + 0.35, hh * 0.4, 0);
       ctx.fillStyle = '#d9b44a';
@@ -989,6 +1011,17 @@ const STYLES: Partial<Record<BuildingType, Style>> = {
   },
   pigfarm: { hw: 0.6, hh: 0.6, H: 20, wall: '#a07a50', roof: '#c4a35a', rise: 20, doorDx: 0.5, deco: ['pen'] },
   slaughterhouse: { hw: 0.7, hh: 0.7, H: 24, wall: '#c9c0ae', roof: '#7a2e24', rise: 22, doorDx: 0.5, deco: ['meat'] },
+  warehouse: {
+    hw: 0.65,
+    hh: 0.8,
+    H: 20,
+    wall: '#9c7a50',
+    roof: '#6e4a33',
+    rise: 20,
+    doorDx: 0.5,
+    timber: true,
+    deco: ['crates'],
+  },
   ironsmelter: { hw: 0.7, hh: 0.7, H: 22, wall: '#8f7f6e', roof: '#4a4f55', rise: 18, doorDx: 0.5, deco: ['furnace'] },
   goldsmelter: { hw: 0.7, hh: 0.7, H: 22, wall: '#a89c80', roof: '#7a5a20', rise: 18, doorDx: 0.5, deco: ['furnace'] },
   toolsmith: {
@@ -1149,6 +1182,7 @@ export const BUILDING_PAINTERS: Record<BuildingType | 'site2' | 'site3', (ctx: C
   ironsmelter: styled('ironsmelter'),
   goldsmelter: styled('goldsmelter'),
   toolsmith: styled('toolsmith'),
+  warehouse: styled('warehouse'),
   tower: paintTower,
   site2: (ctx) => paintSite(ctx, 1),
   site3: (ctx) => paintSite(ctx, 1.5),

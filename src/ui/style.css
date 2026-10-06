@@ -278,3 +278,20 @@ button.active {
 .stock-row b {
   margin-left: auto;
 }
+
+.info-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.info-actions button {
+  flex: 1;
+  font-size: 13px;
+  padding: 4px 6px;
+}
+
+button.danger {
+  border-color: #c24a3a;
+  background: rgba(194, 74, 58, 0.3);
+}

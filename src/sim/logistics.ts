@@ -84,7 +84,9 @@ function dispatchFor(w: World, owner: PlayerId): void {
   for (const res of RESOURCES) {
     const wanting = own.filter((b) => demand(w, b, res) > 0);
     while (wanting.length > 0) {
-      wanting.sort((a, b) => stocked(a, res) - stocked(b, res) || a.id - b.id);
+      wanting.sort(
+        (a, b) => Number(b.priority) - Number(a.priority) || stocked(a, res) - stocked(b, res) || a.id - b.id,
+      );
       const b = wanting[0];
       const from = nearestSupply(w, own, res, b);
       if (!from) break;
