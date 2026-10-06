@@ -1133,7 +1133,6 @@ function paintMine(ctx: Ctx, ore: string): void {
   shadow(ctx, 0.85, 0.85, 0.3);
   // Rock mound.
   const rock = '#8d8576';
-  poly(ctx, [[-0.95, -0.9, 0], [0.95, -0.9, 0], [0.95, 0.9, 0], [-0.95, 0.9, 0]], shade(rock, 0.9));
   ctx.fillStyle = rock;
   const [lx, ly] = P(-0.95, 0.9, 0);
   const [rx, ry] = P(0.95, -0.9, 0);

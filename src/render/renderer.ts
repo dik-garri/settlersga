@@ -1,4 +1,4 @@
-import { Container, Graphics, Sprite, type Application } from 'pixi.js';
+import { Container, Graphics, MeshSimple, Sprite, Texture, type Application } from 'pixi.js';
 import { BUILD_TICKS_PER_UNIT, BUILDINGS, CROP_KINDS, TREE_MATURE } from '../sim/config';
 import { RESOURCES, Terrain, type Building, type BuildingType, type Resource, type Settler } from '../sim/types';
 import { CHUNK } from '../sim/map';
@@ -146,10 +146,13 @@ export class GameRenderer {
       const y0 = Math.floor(c / map.chunksX) * CHUNK;
       const x1 = Math.min(map.w, x0 + CHUNK) - 1;
       const y1 = Math.min(map.h, y0 + CHUNK) - 1;
+      // Raised ground shows higher on screen than its flat footprint.
+      let lift = 0;
+      for (let vy = y0; vy <= y1 + 1; vy++) for (let vx = x0; vx <= x1 + 1; vx++) lift = Math.max(lift, map.vertexHeight(vx, vy));
       this.chunkBounds.set(
         [
           (x0 - y1) * HALF_W - HALF_W,
-          (x0 + y0) * HALF_H - HALF_H - OVERDRAW_UP,
+          (x0 + y0) * HALF_H - HALF_H - OVERDRAW_UP - lift,
           (x1 - y0) * HALF_W + HALF_W,
           (x1 + y1) * HALF_H + HALF_H + OVERDRAW_DOWN,
         ],
@@ -165,11 +168,34 @@ export class GameRenderer {
     return [-(h - 1) * HALF_W, 0, (w - 1) * HALF_W, (w + h - 2) * HALF_H];
   }
 
-  /** World pixel → fractional tile coordinates. */
-  pickTile(wx: number, wy: number): { x: number; y: number } {
-    return toTile(wx, wy);
+  /** Screen position of a point on the terrain surface (tile coordinates, fractional allowed). */
+  private surface(x: number, y: number): { x: number; y: number } {
+    const p = toScreen(x, y);
+    p.y -= this.sim.map.heightAt(x, y);
+    return p;
   }
 
+  /** Screen position of tile corner (vx, vy) of the vertex grid, i.e. tile coordinates (vx − ½, vy − ½). */
+  private corner(vx: number, vy: number): { x: number; y: number } {
+    const p = toScreen(vx - 0.5, vy - 0.5);
+    p.y -= this.sim.map.vertexHeight(vx, vy);
+    return p;
+  }
+
+  /**
+   * World pixel → fractional tile coordinates on the terrain surface. A point on screen lies above
+   * ground that is `height` lower on the flat projection, so the guess is refined a few times.
+   */
+  pickTile(wx: number, wy: number): { x: number; y: number } {
+    let t = toTile(wx, wy);
+    for (let k = 0; k < 4; k++) t = toTile(wx, wy + this.sim.map.heightAt(t.x, t.y));
+    return t;
+  }
+
+  /**
+   * Ground is one textured mesh per chunk whose vertices are the tile corners raised by their
+   * height (shared corners, so no seams), plus a static slope-shading layer lit from the top-left.
+   */
   private buildGround(): void {
     const { map } = this.sim;
     for (let c = 0; c < map.chunksX * map.chunksY; c++) {
@@ -177,31 +203,93 @@ export class GameRenderer {
       chunk.visible = false;
       this.groundChunks.push(chunk);
     }
-    // Chunk containers in depth order so their 1px overlaps stack like the tiles inside them.
+    // Chunk containers in depth order so overlapping slopes stack like the tiles inside them.
     [...this.groundChunks.keys()]
       .sort((a, b) => (a % map.chunksX) + Math.floor(a / map.chunksX) - ((b % map.chunksX) + Math.floor(b / map.chunksX)))
       .forEach((c) => this.ground.addChild(this.groundChunks[c]));
 
-    for (let d = 0; d <= map.w + map.h - 2; d++) {
-      for (let x = Math.max(0, d - map.h + 1); x <= Math.min(d, map.w - 1); x++) {
-        const y = d - x;
-        const i = map.idx(x, y);
-        const kind = TERRAIN_KIND[map.terrain[i] as Terrain];
-        const v = hash(i) % groundVariants(kind);
-        const tile = new Sprite(this.atlas.get(`ground:${kind}:${v}`));
-        const p = toScreen(x, y);
-        tile.position.set(p.x, p.y);
-        this.groundChunks[map.chunkOf(x, y)].addChild(tile);
-        // Cliffs are covered in boulders; walkable slopes only get the odd small stone.
-        if (kind === 'rock' || (kind === 'mountain' && hash(i + 3) % 4 === 0)) {
-          const rock = new Sprite(this.atlas.get(`boulder:${hash(i + 7) % 2}`));
-          rock.position.set(p.x + ((hash(i) >> 8) % 7) - 3, p.y + 2);
-          rock.scale.set((kind === 'rock' ? 0.8 : 0.4) + ((hash(i) >> 4) % 4) * 0.08);
-          rock.zIndex = depthOf(x, y);
-          this.addStatic(rock, x, y);
+    const source = this.atlas.get('ground:grass:0').source;
+    const sheet = new Texture({ source });
+    for (let c = 0; c < this.groundChunks.length; c++) {
+      const x0 = (c % map.chunksX) * CHUNK;
+      const y0 = Math.floor(c / map.chunksX) * CHUNK;
+      const x1 = Math.min(map.w, x0 + CHUNK);
+      const y1 = Math.min(map.h, y0 + CHUNK);
+      const tiles = (x1 - x0) * (y1 - y0);
+      const vertices = new Float32Array(tiles * 8);
+      const uvs = new Float32Array(tiles * 8);
+      const indices = new Uint32Array(tiles * 6);
+      const shade = new Graphics();
+      const levels = new Map<number, number[][]>();
+      let k = 0;
+      // Back-to-front so overlapping slopes inside the chunk stack correctly.
+      for (let d = x0 + y0; d <= x1 - 1 + y1 - 1; d++) {
+        for (let x = Math.max(x0, d - (y1 - 1)); x <= Math.min(x1 - 1, d - y0); x++) {
+          const y = d - x;
+          const i = map.idx(x, y);
+          const kind = TERRAIN_KIND[map.terrain[i] as Terrain];
+          const tex = this.atlas.get(`ground:${kind}:${hash(i) % groundVariants(kind)}`);
+          if (tex.source !== source) throw new Error('ground sprites must share one atlas page');
+          const quad = [this.corner(x, y), this.corner(x + 1, y), this.corner(x + 1, y + 1), this.corner(x, y + 1)];
+          // Sample slightly inside the painted diamond so antialiased edges never show as seams.
+          const f = tex.frame;
+          const uv = [
+            [f.x + 33, f.y + 2],
+            [f.x + 63.5, f.y + 17],
+            [f.x + 33, f.y + 32],
+            [f.x + 2.5, f.y + 17],
+          ];
+          for (let q = 0; q < 4; q++) {
+            vertices[(k * 4 + q) * 2] = quad[q].x;
+            vertices[(k * 4 + q) * 2 + 1] = quad[q].y;
+            uvs[(k * 4 + q) * 2] = uv[q][0] / source.width;
+            uvs[(k * 4 + q) * 2 + 1] = uv[q][1] / source.height;
+          }
+          indices.set([k * 4, k * 4 + 1, k * 4 + 2, k * 4, k * 4 + 2, k * 4 + 3], k * 6);
+          k++;
+
+          const level = this.slopeLight(x, y);
+          if (level !== 0) {
+            const list = levels.get(level) ?? [];
+            list.push(quad.flatMap((p) => [p.x, p.y]));
+            levels.set(level, list);
+          }
+
+          // Cliffs are covered in boulders; walkable slopes only get the odd small stone.
+          if (kind === 'rock' || (kind === 'mountain' && hash(i + 3) % 4 === 0)) {
+            const rock = new Sprite(this.atlas.get(`boulder:${hash(i + 7) % 2}`));
+            const p = this.surface(x, y);
+            rock.position.set(p.x + ((hash(i) >> 8) % 7) - 3, p.y + 2);
+            rock.scale.set((kind === 'rock' ? 0.8 : 0.4) + ((hash(i) >> 4) % 4) * 0.08);
+            rock.zIndex = depthOf(x, y);
+            this.addStatic(rock, x, y);
+          }
         }
       }
+      for (const [level, polys] of levels) {
+        for (const pts of polys) shade.poly(pts);
+        shade.fill(level > 0 ? { color: 0xfff4d8, alpha: level * 0.05 } : { color: 0x0c0a14, alpha: -level * 0.07 });
+      }
+      this.groundChunks[c].addChild(new MeshSimple({ texture: sheet, vertices, uvs, indices }), shade);
     }
+  }
+
+  /**
+   * Slope shading for a tile as a signed level (−7 dark … +5 light): the surface normal from its
+   * corner heights against a light from the top-left of the screen (tile −x) and above.
+   */
+  private slopeLight(x: number, y: number): number {
+    const m = this.sim.map;
+    const top = m.vertexHeight(x, y);
+    const right = m.vertexHeight(x + 1, y);
+    const bottom = m.vertexHeight(x + 1, y + 1);
+    const left = m.vertexHeight(x, y + 1);
+    // Height change per tile along tile x and y, against a tile's ground length in pixels.
+    const run = HALF_W * Math.SQRT2;
+    const gx = (right - top + bottom - left) / 2 / run;
+    const gy = (left - top + bottom - right) / 2 / run;
+    const lit = (1 + 1.4 * (gx + 0.35 * gy)) / Math.sqrt(1 + gx * gx + gy * gy) - 1;
+    return Math.max(-7, Math.min(5, Math.round(lit * 14)));
   }
 
   /** Registers a non-moving object with its chunk; it is in the scene only while the chunk is visible. */
@@ -292,7 +380,7 @@ export class GameRenderer {
     if (!s) {
       const h = hash(i);
       s = new Sprite(this.atlas.get(`tree:${h % 4}`));
-      const p = toScreen(x, y);
+      const p = this.surface(x, y);
       s.position.set(p.x + ((h >> 6) % 9) - 4, p.y + ((h >> 10) % 5) - 2);
       s.zIndex = depthOf(x, y);
       this.addStatic(s, x, y);
@@ -346,11 +434,11 @@ export class GameRenderer {
     for (let y = y0; y < y1; y++) {
       for (let x = x0; x < x1; x++) {
         if (!owned(x, y)) continue;
-        const p = toScreen(x, y);
-        const top = [p.x, p.y - HALF_H] as const;
-        const right = [p.x + HALF_W, p.y] as const;
-        const bottom = [p.x, p.y + HALF_H] as const;
-        const left = [p.x - HALF_W, p.y] as const;
+        const xy = (p: { x: number; y: number }) => [p.x, p.y] as const;
+        const top = xy(this.corner(x, y));
+        const right = xy(this.corner(x + 1, y));
+        const bottom = xy(this.corner(x + 1, y + 1));
+        const left = xy(this.corner(x, y + 1));
         const edges: [readonly [number, number], readonly [number, number], boolean][] = [
           [right, bottom, !owned(x + 1, y)],
           [left, top, !owned(x - 1, y)],
@@ -386,7 +474,7 @@ export class GameRenderer {
     const y = Math.floor(i / map.w);
     if (!s) {
       s = new Sprite();
-      const p = toScreen(x, y);
+      const p = this.surface(x, y);
       s.position.set(p.x, p.y);
       this.groundChunks[map.chunkOf(x, y)].addChild(s);
       this.cropSprites[i] = s;
@@ -406,7 +494,7 @@ export class GameRenderer {
     let s = this.signSprites[i];
     if (!s) {
       s = new Sprite();
-      const p = toScreen(x, y);
+      const p = this.surface(x, y);
       s.position.set(p.x + 8, p.y + 4);
       s.zIndex = depthOf(x, y) + 0.02;
       this.addStatic(s, x, y);
@@ -431,7 +519,7 @@ export class GameRenderer {
       return;
     }
     if (!s) {
-      const p = toScreen(x, y);
+      const p = this.surface(x, y);
       s = new Sprite();
       s.position.set(p.x, p.y);
       s.scale.x = hash(i + 3) % 2 ? -1 : 1;
@@ -474,7 +562,7 @@ export class GameRenderer {
   private createBuildingView(b: Building): BuildingView {
     const cx = b.x + (b.w - 1) / 2;
     const cy = b.y + (b.h - 1) / 2;
-    const p = toScreen(cx, cy);
+    const p = this.surface(cx, cy);
     const body = new Container();
     body.position.set(p.x, p.y);
     body.zIndex = depthOf(cx, cy) + 0.25;
@@ -483,7 +571,7 @@ export class GameRenderer {
     body.addChild(site, main);
 
     const front = new Container();
-    const d = toScreen(b.door.x, b.door.y);
+    const d = this.surface(b.door.x, b.door.y);
     front.position.set(d.x, d.y);
     front.zIndex = depthOf(b.door.x, b.door.y) - 0.05;
     const flag = new Sprite(this.atlas.get('flag'));
@@ -531,7 +619,7 @@ export class GameRenderer {
       if (!v) v = this.createSettlerView(s);
       const x = s.px + (s.x - s.px) * alpha;
       const y = s.py + (s.y - s.py) * alpha;
-      const p = toScreen(x, y);
+      const p = this.surface(x, y);
       const view = this.view;
       const onScreen =
         s.inside === null &&
@@ -575,11 +663,14 @@ export class GameRenderer {
     return v;
   }
 
+  /** Tile outline following the terrain, shrunk towards its center by `inset` pixels (vertically). */
   private diamond(x: number, y: number, inset = 0): number[] {
-    const p = toScreen(x, y);
-    const w = HALF_W - inset * 2;
-    const h = HALF_H - inset;
-    return [p.x, p.y - h, p.x + w, p.y, p.x, p.y + h, p.x - w, p.y];
+    const c = this.surface(x, y);
+    const k = 1 - inset / HALF_H;
+    return [this.corner(x, y), this.corner(x + 1, y), this.corner(x + 1, y + 1), this.corner(x, y + 1)].flatMap((p) => [
+      c.x + (p.x - c.x) * k,
+      c.y + (p.y - c.y) * k,
+    ]);
   }
 
   private drawMarks(
@@ -626,7 +717,7 @@ export class GameRenderer {
         }
       }
       g.poly(this.diamond(ghost.x + def.w - 1, ghost.y + def.h, 2)).stroke({ width: 2, color, alpha: 0.9 });
-      const p = toScreen(ghost.x + (def.w - 1) / 2, ghost.y + (def.h - 1) / 2);
+      const p = this.surface(ghost.x + (def.w - 1) / 2, ghost.y + (def.h - 1) / 2);
       this.ghostSprite.texture = this.atlas.get(`building:${ghost.type}`);
       this.ghostSprite.anchor.copyFrom(this.ghostSprite.texture.defaultAnchor!);
       this.ghostSprite.position.set(p.x, p.y);

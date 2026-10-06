@@ -75,11 +75,12 @@ export class Minimap {
       if (map.tree[i]) [r, g, b] = [52, 96, 42];
       else if (map.stone[i]) [r, g, b] = [200, 192, 176];
       else if (map.crop[i]) [r, g, b] = [184, 160, 80];
-      if (map.owner[i] !== LOCAL_PLAYER) {
-        r *= 0.6;
-        g *= 0.6;
-        b *= 0.6;
-      }
+      // Higher ground is brighter, so mountains read on the overview too.
+      let light = 0.85 + Math.min(1, map.heightAt(i % map.w, Math.floor(i / map.w)) / 100) * 0.45;
+      if (map.owner[i] !== LOCAL_PLAYER) light *= 0.6;
+      r = Math.min(255, r * light);
+      g = Math.min(255, g * light);
+      b = Math.min(255, b * light);
       d[i * 4] = r;
       d[i * 4 + 1] = g;
       d[i * 4 + 2] = b;

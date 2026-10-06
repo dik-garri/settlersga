@@ -82,7 +82,7 @@ async function main() {
     minimap.update(now, app.screen.width, app.screen.height);
   });
 
-  Object.assign(window, { world, seed, state });
+  Object.assign(window, { world, seed, state, renderer, camera });
   if (save) console.info(`Loaded save at tick ${world.tick}`);
   else console.info(`Settlers prototype, seed ${seed} (add ?seed=${seed} to replay this map)`);
 }
