@@ -24,7 +24,7 @@ export const BUILDER_STALL_TICKS = 40;
 
 export const START_CARRIERS = 12;
 /** Soldiers each player's castle starts with. */
-export const START_SOLDIERS = 3;
+export const START_SOLDIERS = 6;
 /** Military buildings keep at least this many soldiers when sending others out (to attack or to man towers). */
 export const GARRISON_KEEP = 1;
 /** Combat: soldiers within this distance (tiles, building centers) of the target can join an attack. */
@@ -32,6 +32,22 @@ export const ATTACK_RANGE = 30;
 /** Combat: one blow every FIGHT_EVERY ticks; damage per blow is uniform in [min, max]. */
 export const FIGHT_EVERY = 6;
 export const DAMAGE: [number, number] = [12, 24];
+/**
+ * Ranks soldiers and archers reach with gold: hit points and damage relative to level 0. Each step
+ * costs `PROMOTE_COST` of `PROMOTE_RES`, delivered to a military building that `trains`.
+ */
+export const SOLDIER_LEVELS: readonly { hp: number; damage: number }[] = [
+  { hp: 1, damage: 1 },
+  { hp: 1.3, damage: 1.3 },
+  { hp: 1.6, damage: 1.6 },
+];
+export const PROMOTE_RES: Resource = 'gold';
+export const PROMOTE_COST = 1;
+export const PROMOTE_TICKS = 100;
+/** Garrisoned (inside) soldiers regain one hit point every HEAL_EVERY ticks. */
+export const HEAL_EVERY = 10;
+/** Visual only: ticks an arrow is drawn in flight. */
+export const SHOT_TICKS = 5;
 export const START_BUILDERS = 3;
 export const START_PLANKS = 20;
 export const START_STONE = 10;
@@ -77,6 +93,7 @@ export const RESOURCE_INFO: Record<Resource, { name: string; group: ResourceGrou
   grapes: { name: 'Виноград', group: 'food' },
   wine: { name: 'Вино', group: 'food' },
   sword: { name: 'Мечи', group: 'military' },
+  bow: { name: 'Луки', group: 'military' },
 };
 
 /** Field plantings stored in `map.crop` (stage) with their kind in `map.cropKind` (index here). */
@@ -163,11 +180,20 @@ export interface PlantDef {
   maxNearby?: number;
 }
 
+/** Fighting abilities of a military profession. */
+export interface CombatDef {
+  /** Multiplier on melee strength and damage (archers are poor swordsmen). */
+  melee: number;
+  /** Ranged attack: shoots enemies within `range` tiles every `every` ticks for `damage` (× level). */
+  ranged?: { range: number; every: number; damage: [number, number] };
+}
+
 export interface ProfessionDef {
   name: string;
   behavior: Behavior;
-  /** Hit points when taking up the profession (soldiers). */
+  /** Hit points at level 0 when taking up the profession (soldiers, archers). */
   hp?: number;
+  combat?: CombatDef;
   /** Tool a carrier must fetch from storage to take up the profession (it is used up). */
   tool?: Resource;
   gather?: GatherDef;
@@ -218,7 +244,14 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
   winemaker: { name: 'Винодел', behavior: 'workshop' },
   geologist: { name: 'Геолог', behavior: 'prospect' },
   weaponsmith: { name: 'Оружейник', behavior: 'workshop' },
-  soldier: { name: 'Солдат', behavior: 'soldier', tool: 'sword', hp: 100 },
+  soldier: { name: 'Мечник', behavior: 'soldier', tool: 'sword', hp: 100, combat: { melee: 1 } },
+  archer: {
+    name: 'Лучник',
+    behavior: 'soldier',
+    tool: 'bow',
+    hp: 80,
+    combat: { melee: 0.6, ranged: { range: 5, every: 14, damage: [8, 14] } },
+  },
 };
 
 // --------------------------------------------------------------- buildings
@@ -266,15 +299,29 @@ export interface BuildingDef {
   territory?: number;
   /** Residence: releases `capacity` new carriers, one every `everyTicks`, once built. */
   residence?: { capacity: number; everyTicks: number };
-  /**
-   * Military building: holds up to `capacity` soldiers. It claims `territory` while at least one
-   * soldier is inside, or always if `claimsWhenEmpty` (the castle).
-   */
-  garrison?: { capacity: number; claimsWhenEmpty?: boolean };
+  /** Military building (see `GarrisonDef`). */
+  garrison?: GarrisonDef;
   /** Footprint terrain: ordinary buildings need grass, mines need mountain. */
   terrain?: 'mountain';
   /** Mine: each recipe cycle also takes one unit of ore of this resource from a tile within `radius`. */
   mine?: { res: Resource; radius: number };
+}
+
+/**
+ * Military building: holds up to `capacity` soldiers and claims `territory` while at least one is
+ * inside, or always if `claimsWhenEmpty` (the castle).
+ */
+export interface GarrisonDef {
+  capacity: number;
+  claimsWhenEmpty?: boolean;
+  /** Soldiers it never gives away to man other buildings or to attack (default `GARRISON_KEEP`). */
+  keep?: number;
+  /** Slots meant for archers; recruiting and transfers fill them with archers first. */
+  archers?: number;
+  /** Defenders fighting at its door are this much stronger. */
+  defense?: number;
+  /** Gold delivered here promotes the soldiers inside. */
+  trains?: boolean;
 }
 
 function mine(name: string, res: Resource): BuildingDef {
@@ -302,7 +349,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     playerBuildable: false,
     storage: true,
     territory: 10,
-    garrison: { capacity: 12, claimsWhenEmpty: true },
+    garrison: { capacity: 12, claimsWhenEmpty: true, keep: 4, archers: 4, defense: 1.5, trains: true },
   },
 
   house_small: {
@@ -509,7 +556,8 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: 'weaponsmith',
     playerBuildable: true,
     category: 'military',
-    recipe: { inputs: { iron: 1, coal: 1 }, outputs: { sword: 1 }, ticks: 80 },
+    // Swords and bows, whichever garrisons are waiting for (`waitingFor`), keeping a small stock.
+    recipe: { inputs: { iron: 1, coal: 1 }, outputs: {}, outputChoice: ['sword', 'bow'], keepInStock: 3, ticks: 80 },
   },
   tower: {
     name: 'Сторожевая башня',
@@ -520,7 +568,29 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     playerBuildable: true,
     category: 'military',
     territory: 8,
-    garrison: { capacity: 3 },
+    garrison: { capacity: 3, keep: 1, archers: 1, defense: 1.2 },
+  },
+  bigtower: {
+    name: 'Большая башня',
+    w: 2,
+    h: 2,
+    cost: { plank: 4, stone: 6 },
+    worker: null,
+    playerBuildable: true,
+    category: 'military',
+    territory: 11,
+    garrison: { capacity: 6, keep: 2, archers: 2, defense: 1.35, trains: true },
+  },
+  fortress: {
+    name: 'Крепость',
+    w: 3,
+    h: 3,
+    cost: { plank: 6, stone: 10, iron: 2 },
+    worker: null,
+    playerBuildable: true,
+    category: 'military',
+    territory: 14,
+    garrison: { capacity: 12, keep: 3, archers: 4, defense: 1.5, trains: true },
   },
 };
 
@@ -586,9 +656,14 @@ export const AI_PLAN: readonly { type: BuildingType; count: number; after?: Buil
   { type: 'stonecutter', count: 2, after: 'toolsmith' },
   { type: 'house_large', count: 1 },
   { type: 'ironmine', count: 2, after: 'toolsmith' },
+  { type: 'goldmine', count: 1, after: 'toolsmith' },
+  { type: 'goldsmelter', count: 1, after: 'goldmine' },
   { type: 'weaponsmith', count: 2, after: 'ironsmelter' },
+  { type: 'bigtower', count: 1, after: 'weaponsmith' },
   { type: 'tower', count: 7 },
   { type: 'house_large', count: 2 },
+  { type: 'bigtower', count: 3, after: 'weaponsmith' },
+  { type: 'fortress', count: 1, after: 'goldsmelter' },
   { type: 'tower', count: 12 },
 ];
 
@@ -601,10 +676,10 @@ export const AI = {
   /** Build a house when fewer carriers than this are idle. */
   minIdleCarriers: 3,
   /** Attack when spare attackers ≥ attackRatio × defenders + 1, and at least `minAttackers`. */
-  attackRatio: 1.5,
+  attackRatio: 1.2,
   minAttackers: 3,
-  /** Soldiers the castle keeps: new military buildings are only placed if they can be manned without going below. */
-  homeGuard: 2,
+  /** Fighters kept home beyond the castle's own `keep`: new military buildings are only placed if they can be manned without going below. */
+  homeGuard: 0,
   /** No attacks before this tick (25 game minutes): the opening is for building up. */
   peaceTicks: 25 * 60 * TICKS_PER_SECOND,
   /** Ticks between attacks. */

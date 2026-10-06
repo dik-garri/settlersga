@@ -1,5 +1,5 @@
 import { isReachable, nearestStorage } from './buildings';
-import { staffGarrisons } from './military';
+import { goldWanted, staffGarrisons } from './military';
 import { BUILDINGS, costOf, INPUT_CAP, PROFESSIONS, RESOURCE_INFO } from './config';
 import { RESOURCES, type Building, type PlayerId, type Point, type Resource, type Settler } from './types';
 import type { World } from './world';
@@ -17,7 +17,7 @@ export function demand(w: World, b: Building, res: Resource): number {
     const held = recipe.inputsAnyOf.reduce((n, r) => n + b.input[r] + b.inbound[r], 0);
     return INPUT_CAP - held;
   }
-  return 0;
+  return goldWanted(w, b, res, INPUT_CAP);
 }
 
 /** Hands jobs to idle carriers of every player. */

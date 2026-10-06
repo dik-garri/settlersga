@@ -14,8 +14,9 @@ import {
   type ResourceGroup,
 } from '../sim/config';
 import { available, chooseOutput, oreLeft } from '../sim/buildings';
+import { isFighter, keepOf } from '../sim/military';
 import { hasGatherTargetNear } from '../sim/nature';
-import { RESOURCES, type Building, type BuildingType, type Resource, type SettlerKind, type Stock } from '../sim/types';
+import { RESOURCES, type Building, type BuildingType, type Resource, type Settler, type SettlerKind, type Stock } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import type { GameState, Placeable } from './state';
 
@@ -56,6 +57,20 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
   if (cls) e.className = cls;
   if (text !== undefined) e.textContent = text;
   return e;
+}
+
+/** "мечник ×2 (★1 ×1), лучник ×1": fighters by profession, with how many hold each rank above 0. */
+function composition(fighters: Settler[]): string {
+  const byKind = new Map<SettlerKind, Settler[]>();
+  for (const s of fighters) byKind.set(s.kind, [...(byKind.get(s.kind) ?? []), s]);
+  return [...byKind]
+    .map(([kind, list]) => {
+      const ranks = new Map<number, number>();
+      for (const s of list) if (s.level > 0) ranks.set(s.level, (ranks.get(s.level) ?? 0) + 1);
+      const r = [...ranks].sort((a, b) => b[0] - a[0]).map(([l, n]) => `★${l} ×${n}`);
+      return `${PROFESSIONS[kind].name.toLowerCase()} ×${list.length}${r.length ? ` (${r.join(', ')})` : ''}`;
+    })
+    .join(', ');
 }
 
 /** "2 [plank] 1 [stone]" with drawn ware icons. */
@@ -317,7 +332,7 @@ export class Hud {
     const mine = (p: number) => p === LOCAL_PLAYER;
     const land = world.map.owner.reduce((n, o) => n + (o !== 0 ? 1 : 0), 0);
     const ownLand = world.map.owner.reduce((n, o) => n + (mine(o) ? 1 : 0), 0);
-    const soldiersOf = (own: boolean) => world.settlers.filter((s) => s.kind === 'soldier' && mine(s.owner) === own).length;
+    const soldiersOf = (own: boolean) => world.settlers.filter((s) => isFighter(s) && mine(s.owner) === own).length;
     const rows: [string, string][] = [
       ['Время игры', time],
       ['Ваших зданий', String([...world.buildings.values()].filter((b) => mine(b.owner)).length)],
@@ -404,9 +419,13 @@ export class Hud {
       rows.push(['Владелец', `игрок ${b.owner}`]);
       if (def.garrison && b.done) {
         rows.push(['Защитников', String(b.garrison.length)]);
+        if (def.garrison.defense && def.garrison.defense > 1) {
+          rows.push(['Бонус обороны', `+${Math.round((def.garrison.defense - 1) * 100)}%`]);
+        }
         rows.push(['Можно послать', String(canSend)]);
         this.attackCount = Math.max(1, Math.min(this.attackCount, canSend));
         rows.push(['Отправить', String(this.attackCount)]);
+        if (canSend > 0) rows.push(['Пойдут', composition(this.world.attackerComposition(b.id, this.attackCount))]);
       }
     } else if (!b.done) {
       rows.push(['Стройка', `${Math.floor(this.world.buildProgress(b) * 100)}%`]);
@@ -422,6 +441,10 @@ export class Hud {
     } else if (def.garrison || def.storage) {
       if (def.garrison) {
         rows.push(['Гарнизон', `${b.garrison.length} / ${def.garrison.capacity}`]);
+        const members = b.garrison.map((id) => this.world.getSettler(id)).filter((s): s is Settler => !!s);
+        if (members.length > 0) rows.push(['Состав', composition(members)]);
+        rows.push(['Не покидают', String(keepOf(b))]);
+        if (def.garrison.trains) rows.push(['Обучение', `золото: ${def.storage ? b.output.gold : b.input.gold}`]);
         if (b.garrisonInbound > 0) rows.push(['Идут в гарнизон', String(b.garrisonInbound)]);
       }
       if (def.territory) rows.push(['Радиус земли', `${def.territory} клеток`]);

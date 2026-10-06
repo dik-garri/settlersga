@@ -19,7 +19,20 @@ import {
 import { levelTarget, needsLevelling } from './digging';
 import { dispatch } from './logistics';
 import { createAi, updateAi, type AiState } from './ai';
-import { attack, availableAttackers, enterGarrison, killSettler, leaveGarrison, removeDead } from './military';
+import {
+  assaultsByTarget,
+  attack,
+  attackerComposition,
+  availableAttackers,
+  enterGarrison,
+  isFighter,
+  isMilitary,
+  killSettler,
+  leaveGarrison,
+  pruneShots,
+  removeDead,
+  updateGarrison,
+} from './military';
 import { generateMap, type GameMap } from './map';
 import { updateNature } from './nature';
 import { findPath, staysConnected } from './pathfinding';
@@ -94,6 +107,8 @@ export class World {
   readonly fields = new Set<number>();
   /** Settlers killed this tick; dropped from `settlers` at its end (see `killSettler`). */
   readonly dying = new Set<number>();
+  /** Arrows in flight, for drawing only: damage is applied when shot. Derived, not saved. */
+  shots: { x0: number; y0: number; x1: number; y1: number; tick: number; owner: PlayerId }[] = [];
   /** Computer players' state (saved). */
   readonly ai: AiState[] = [];
   /** Players whose castle has been taken, in order of defeat (saved). */
@@ -263,6 +278,11 @@ export class World {
     return attack(this, targetId, count, player);
   }
 
+  /** The fighters `attack` would send (up to `count`), for showing the composition before attacking. */
+  attackerComposition(targetId: number, count: number, player: PlayerId = LOCAL_PLAYER): Settler[] {
+    return attackerComposition(this, targetId, count, player);
+  }
+
   /** How many soldiers `attack` could send against the target right now. */
   availableAttackers(targetId: number, player: PlayerId = LOCAL_PLAYER): number {
     return availableAttackers(this, targetId, player);
@@ -279,7 +299,7 @@ export class World {
       if (s.tasks.some((t) => 'b' in t && t.b === id)) abort(this, s);
       if (s.home === id) {
         abort(this, s);
-        if (s.kind === 'soldier') leaveGarrison(this, b, s);
+        if (isFighter(s)) leaveGarrison(this, b, s);
         else s.kind = 'carrier';
         s.home = null;
       }
@@ -358,9 +378,14 @@ export class World {
       s.py = s.y;
     }
     updateNature(this);
-    for (const b of this.buildings.values()) updateBuilding(this, b);
+    const assaults = assaultsByTarget(this);
+    for (const b of this.buildings.values()) {
+      updateBuilding(this, b);
+      if (b.done && isMilitary(b)) updateGarrison(this, b, assaults);
+    }
     for (const s of this.settlers) if (!this.dying.has(s.id)) updateSettler(this, s);
     removeDead(this);
+    pruneShots(this);
     if (this.tick % DISPATCH_EVERY === 0) dispatch(this);
     if (this.ai.length > 0) updateAi(this);
   }

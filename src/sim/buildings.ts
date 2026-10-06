@@ -53,6 +53,7 @@ export function addBuilding(w: World, type: BuildingType, x: number, y: number, 
     priority: false,
     garrison: [],
     garrisonInbound: 0,
+    garrisonArchersInbound: 0,
   };
   for (let dy = 0; dy < def.h; dy++) {
     for (let dx = 0; dx < def.w; dx++) {
@@ -82,6 +83,8 @@ export function spawnSettler(w: World, kind: SettlerKind, at: Building): Settler
     working: false,
     hp: PROFESSIONS[kind].hp ?? 0,
     opponent: null,
+    level: 0,
+    reload: 0,
   };
   w.settlers.push(s);
   w.settlerById.set(s.id, s);
@@ -131,8 +134,25 @@ export function waitingFor(w: World, owner: PlayerId, tool: Resource): number {
     const worker = BUILDINGS[b.type].worker;
     if (worker && b.done && b.workerId === null && !b.workerRequested && PROFESSIONS[worker].tool === tool) n++;
     if (tool === PROFESSIONS.builder.tool && !b.done && b.builderId === null) n++;
+    n += garrisonSlotsFor(w, b, tool);
   }
   return n;
+}
+
+/** Empty garrison slots that would take a fighter whose weapon is `tool` (archer slots want bows). */
+function garrisonSlotsFor(w: World, b: Building, tool: Resource): number {
+  const g = BUILDINGS[b.type].garrison;
+  if (!g || !b.done) return 0;
+  const space = g.capacity - b.garrison.length - b.garrisonInbound;
+  if (space <= 0) return 0;
+  const fighter = (Object.keys(PROFESSIONS) as SettlerKind[]).find((k) => PROFESSIONS[k].combat && PROFESSIONS[k].tool === tool);
+  if (!fighter) return 0;
+  const archersIn = b.garrison.filter((id) => {
+    const kind = w.getSettler(id)?.kind;
+    return kind !== undefined && !!PROFESSIONS[kind].combat?.ranged;
+  }).length;
+  const archerSlots = Math.min(space, Math.max(0, (g.archers ?? 0) - archersIn - b.garrisonArchersInbound));
+  return PROFESSIONS[fighter].combat!.ranged ? archerSlots : space - archerSlots;
 }
 
 /**

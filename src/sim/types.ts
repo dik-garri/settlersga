@@ -29,6 +29,7 @@ export const RESOURCES = [
   'grapes',
   'wine',
   'sword',
+  'bow',
 ] as const;
 export type Resource = (typeof RESOURCES)[number];
 export type Stock = Record<Resource, number>;
@@ -76,7 +77,9 @@ export type BuildingType =
   | 'vineyard'
   | 'winery'
   | 'weaponsmith'
-  | 'tower';
+  | 'tower'
+  | 'bigtower'
+  | 'fortress';
 
 export type SettlerKind =
   | 'carrier'
@@ -100,6 +103,7 @@ export type SettlerKind =
   | 'winemaker'
   | 'weaponsmith'
   | 'soldier'
+  | 'archer'
   | 'digger';
 
 /** Player ids start at 1; 0 means "nobody" in per-tile ownership. */
@@ -141,6 +145,8 @@ export interface Building {
   /** Military building: soldiers stationed here (settler ids) and soldiers on their way in. */
   garrison: number[];
   garrisonInbound: number;
+  /** Of `garrisonInbound`, how many are archers (so recruiting fills archer slots only once). */
+  garrisonArchersInbound: number;
   /** Construction site on sloped ground: false until a digger has flattened it; builders wait. */
   levelled: boolean;
   diggerId: number | null;
@@ -170,7 +176,8 @@ export type Task =
   /** Take up a profession that has no workplace (e.g. builder), using the tool in hand. */
   | { t: 'retool'; kind: SettlerKind }
   /** Soldier moves into a military building's garrison (reserved via `garrisonInbound`). */
-  | { t: 'join'; b: number }
+  /** `archer`: which garrison role the slot was reserved for (see `garrisonArchersInbound`). */
+  | { t: 'join'; b: number; archer?: boolean }
   /** Soldier attacks an enemy military building: duel its defenders at the door, take it when empty. */
   | { t: 'assault'; b: number; n: number };
 
@@ -198,4 +205,8 @@ export interface Settler {
   hp: number;
   /** Settler this soldier is fighting right now, or null. */
   opponent: number | null;
+  /** Military rank, 0-based index into `SOLDIER_LEVELS`; raised with gold. */
+  level: number;
+  /** Archers: ticks until the next shot. */
+  reload: number;
 }
