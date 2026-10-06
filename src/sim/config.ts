@@ -16,6 +16,11 @@ export const INPUT_CAP = 4;
 
 export const DISPATCH_EVERY = 5;
 export const IDLE_GO_HOME_TICKS = 30;
+/** After a failed route search: how long the settler waits and how long the target building is skipped. */
+export const PATH_FAIL_BACKOFF = 10;
+export const UNREACHABLE_TICKS = 100;
+/** A builder idle this long at a site without material moves to a site with work. */
+export const BUILDER_STALL_TICKS = 40;
 export const SPAWN_CARRIER_EVERY = 200;
 export const MAX_POPULATION = 40;
 

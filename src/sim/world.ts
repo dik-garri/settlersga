@@ -15,7 +15,7 @@ import {
 import { dispatch } from './logistics';
 import { generateMap, type GameMap } from './map';
 import { updateTrees } from './nature';
-import { findPath } from './pathfinding';
+import { findPath, staysConnected } from './pathfinding';
 import { createRng, type Rng } from './rng';
 import { updateSettler } from './settlers';
 import { emptyStock, type Building, type BuildingType, type PlayerId, type Settler, type Stock } from './types';
@@ -39,7 +39,11 @@ export class World {
   readonly buildings = new Map<number, Building>();
   readonly settlers: Settler[] = [];
   readonly players: Player[] = [];
-  readonly stats: { produced: Stock; treesPlanted: number } = { produced: emptyStock(), treesPlanted: 0 };
+  readonly stats: { produced: Stock; lost: Stock; treesPlanted: number } = {
+    produced: emptyStock(),
+    lost: emptyStock(),
+    treesPlanted: 0,
+  };
   tick = 0;
   /** Bumped whenever the territory changes, so views can redraw the border. */
   territoryVersion = 0;
@@ -99,8 +103,28 @@ export class World {
     return (
       this.map.isWalkable(door.x, door.y) &&
       this.map.door[this.map.idx(door.x, door.y)] === 0 &&
-      owned(door.x, door.y)
+      owned(door.x, door.y) &&
+      this.footprintKeepsConnected(x, y, def.w, def.h)
     );
+  }
+
+  /** Blocking the footprint tile by tile must never cut a walking route (see `staysConnected`). */
+  private footprintKeepsConnected(x: number, y: number, w: number, h: number): boolean {
+    const m = this.map;
+    const blocked: number[] = [];
+    let ok = true;
+    for (let dy = 0; dy < h && ok; dy++) {
+      for (let dx = 0; dx < w && ok; dx++) {
+        if (!staysConnected(m, x + dx, y + dy)) ok = false;
+        else {
+          const i = m.idx(x + dx, y + dy);
+          m.building[i] = -1; // temporary marker, restored below
+          blocked.push(i);
+        }
+      }
+    }
+    for (const i of blocked) m.building[i] = 0;
+    return ok;
   }
 
   owns(x: number, y: number, player: PlayerId = LOCAL_PLAYER): boolean {

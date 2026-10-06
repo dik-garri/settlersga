@@ -1,4 +1,4 @@
-import { nearestStorage } from './buildings';
+import { isReachable, nearestStorage } from './buildings';
 import { BUILDINGS, costOf, INPUT_CAP } from './config';
 import { RESOURCES, type Building, type PlayerId, type Point, type Resource, type Settler } from './types';
 import type { World } from './world';
@@ -6,7 +6,8 @@ import type { World } from './world';
 const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
 
 /** Units of `res` the building still wants delivered: site materials or workshop inputs. */
-export function demand(b: Building, res: Resource): number {
+export function demand(w: World, b: Building, res: Resource): number {
+  if (!isReachable(w, b)) return 0;
   if (!b.done) return costOf(b.type)[res] - b.delivered[res] - b.inbound[res];
   const recipe = BUILDINGS[b.type].recipe;
   if (recipe?.inputs[res]) return INPUT_CAP - b.input[res] - b.inbound[res];
@@ -36,7 +37,7 @@ function dispatchFor(w: World, owner: PlayerId): void {
 
   for (const b of own) {
     const kind = BUILDINGS[b.type].worker;
-    if (!kind || !b.done || b.workerId !== null || b.workerRequested) continue;
+    if (!kind || !b.done || b.workerId !== null || b.workerRequested || !isReachable(w, b)) continue;
     const s = take(b.door);
     if (!s) return;
     b.workerRequested = true;
@@ -48,9 +49,9 @@ function dispatchFor(w: World, owner: PlayerId): void {
 
   for (const b of own) {
     for (const res of RESOURCES) {
-      let need = demand(b, res);
+      let need = demand(w, b, res);
       while (need-- > 0) {
-        const from = nearestSupply(own, res, b);
+        const from = nearestSupply(w, own, res, b);
         if (!from) break;
         const s = take(from.door);
         if (!s) return;
@@ -60,7 +61,7 @@ function dispatchFor(w: World, owner: PlayerId): void {
   }
 
   for (const b of own) {
-    if (!b.done || BUILDINGS[b.type].storage) continue;
+    if (!b.done || BUILDINGS[b.type].storage || !isReachable(w, b)) continue;
     for (const res of RESOURCES) {
       while (b.output[res] - b.outReserved[res] > 0) {
         const store = nearestStorage(w, owner, b.door);
@@ -73,10 +74,10 @@ function dispatchFor(w: World, owner: PlayerId): void {
   }
 }
 
-function nearestSupply(own: Building[], res: Resource, target: Building): Building | undefined {
+function nearestSupply(w: World, own: Building[], res: Resource, target: Building): Building | undefined {
   let best: Building | undefined;
   for (const b of own) {
-    if (b === target || !b.done || b.output[res] - b.outReserved[res] <= 0) continue;
+    if (b === target || !b.done || !isReachable(w, b) || b.output[res] - b.outReserved[res] <= 0) continue;
     if (!best || dist(b.door, target.door) < dist(best.door, target.door)) best = b;
   }
   return best;

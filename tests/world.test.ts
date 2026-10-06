@@ -214,6 +214,68 @@ describe('World', () => {
     expect(world.placeBuilding('woodcutter', wc.x + 2, wc.y, 2)).toBeNull();
   });
 
+  it('builders leave a starved site for one they can work on', () => {
+    const world = new World(42);
+    const c = world.castle;
+    c.output.stone = 0; // towers will get their planks but never their stone
+    const towers = [];
+    for (const [dx, dy] of [[5, -4], [-5, -4], [-5, 4]]) {
+      const spot = findSpot(world, 'tower', { x: c.x + dx, y: c.y + dy });
+      towers.push(world.placeBuilding('tower', spot.x, spot.y)!);
+    }
+    run(world, 400); // all three builders settle on the towers
+    const wc = findSpot(world, 'woodcutter', { x: c.x + 5, y: c.y + 4 });
+    const hut = world.placeBuilding('woodcutter', wc.x, wc.y)!;
+    run(world, 3000);
+    expect(towers.every((t) => !t.done)).toBe(true);
+    expect(hut.done).toBe(true);
+  });
+
+  it('a carrier cut off from its destination brings the goods back instead of losing them', () => {
+    const world = new World(42);
+    const c = world.castle;
+    const spot = findSpot(world, 'sawmill', { x: c.x + 6, y: c.y + 4 });
+    const site = world.placeBuilding('sawmill', spot.x, spot.y)!;
+    let carrier;
+    for (let i = 0; i < 400 && !carrier; i++) {
+      world.step();
+      carrier = world.settlers.find((s) => s.carrying === 'plank');
+    }
+    expect(carrier).toBeDefined();
+    // Wall the site in with rock (its own footprint already blocks the rest).
+    for (let y = site.y - 1; y <= site.y + site.h + 1; y++) {
+      for (let x = site.x - 1; x <= site.x + site.w + 1; x++) {
+        const i = world.map.idx(x, y);
+        if (!world.map.building[i]) world.map.terrain[i] = 3;
+      }
+    }
+    run(world, 1500);
+    const planks = () =>
+      goodsInWorld(world, 'plank') + site.delivered.plank;
+    expect(site.done).toBe(false);
+    expect(planks()).toBe(START_PLANKS);
+    expect(world.settlers.some((s) => s.carrying === 'plank')).toBe(false);
+  });
+
+  it('refuses buildings that would close the only passage', () => {
+    const world = new World(42);
+    const c = world.castle;
+    const wx = c.x + 5;
+    const gap = c.y + 1;
+    for (let y = 0; y < world.map.h; y++) {
+      if (y === gap || y === gap + 1) continue;
+      world.map.terrain[world.map.idx(wx, y)] = 3;
+      world.map.tree[world.map.idx(wx, y)] = 0;
+    }
+    for (const [x, y] of [[wx, gap], [wx, gap + 1], [wx + 1, gap], [wx + 1, gap + 1], [wx + 1, gap + 2], [wx, gap + 2]]) {
+      world.map.terrain[world.map.idx(x, y)] = 2;
+      world.map.tree[world.map.idx(x, y)] = 0;
+      world.map.stone[world.map.idx(x, y)] = 0;
+    }
+    world.map.terrain[world.map.idx(wx, gap + 2)] = 3;
+    expect(world.canPlace('woodcutter', wx, gap)).toBe(false);
+  });
+
   it('never leaves reservations negative', () => {
     const world = new World(7);
     const wc = findSpot(world, 'woodcutter', { x: world.castle.x + 6, y: world.castle.y });
@@ -233,5 +295,6 @@ describe('World', () => {
         for (const res of RESOURCES) expect(b.outReserved[res]).toBeLessThanOrEqual(b.output[res]);
       }
     }
+    expect(world.stats.lost).toEqual({ log: 0, plank: 0, stone: 0 });
   });
 });

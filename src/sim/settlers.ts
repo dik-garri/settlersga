@@ -1,5 +1,17 @@
-import { recomputeTerritory, nearestStorage } from './buildings';
-import { BUILD_TICKS_PER_UNIT, BUILDINGS, HANDLE_TICKS, IDLE_GO_HOME_TICKS, OUTPUT_CAP, PROFESSIONS, SETTLER_SPEED, totalCost } from './config';
+import { isReachable, nearestStorage, recomputeTerritory } from './buildings';
+import {
+  BUILD_TICKS_PER_UNIT,
+  BUILDER_STALL_TICKS,
+  BUILDINGS,
+  HANDLE_TICKS,
+  IDLE_GO_HOME_TICKS,
+  OUTPUT_CAP,
+  PATH_FAIL_BACKOFF,
+  PROFESSIONS,
+  SETTLER_SPEED,
+  totalCost,
+  UNREACHABLE_TICKS,
+} from './config';
 import { canPlant, findGatherTarget, findPlotFor, harvest, isGatherTarget } from './nature';
 import { findPath } from './pathfinding';
 import { RESOURCES, type Building, type Point, type Settler } from './types';
@@ -28,7 +40,7 @@ export function updateSettler(w: World, s: Settler): void {
           return;
         }
         const p = findPath(w.map, Math.round(s.x), Math.round(s.y), task.x, task.y, task.adj);
-        if (!p) return abort(w, s);
+        if (!p) return routeFailed(w, s);
         if (p.length === 0) {
           s.tasks.shift();
           return;
@@ -104,10 +116,15 @@ export function updateSettler(w: World, s: Settler): void {
         s.tasks.shift();
         return;
       }
-      const delivered = RESOURCES.reduce((sum, r) => sum + b.delivered[r], 0);
-      if (b.progress < delivered * BUILD_TICKS_PER_UNIT) {
+      if (hasBuildWork(b)) {
         b.progress++;
         s.working = true;
+        task.stall = 0;
+      } else if (++task.stall > BUILDER_STALL_TICKS && otherSiteWithWork(w, s, b)) {
+        // Nothing to build with here, but another site is ready: go there instead.
+        b.builderId = null;
+        s.tasks.shift();
+        return;
       }
       if (b.progress >= totalCost(b.type) * BUILD_TICKS_PER_UNIT) {
         b.done = true;
@@ -159,14 +176,43 @@ function move(w: World, s: Settler, task: GotoTarget): void {
     if (next && !w.map.isWalkable(next.x, next.y)) {
       // Something grew or was built in the way — find a new route.
       const p = findPath(w.map, s.x, s.y, task.x, task.y, task.adj);
-      if (!p) return abort(w, s);
+      if (!p) return routeFailed(w, s);
       s.path = p;
     }
   }
 }
 
-/** Cancels the settler's job and releases every reservation it still holds. */
+/** Material delivered to the site but not yet built in. */
+function hasBuildWork(b: Building): boolean {
+  const delivered = RESOURCES.reduce((sum, r) => sum + b.delivered[r], 0);
+  return b.progress < delivered * BUILD_TICKS_PER_UNIT;
+}
+
+function otherSiteWithWork(w: World, s: Settler, current: Building): boolean {
+  for (const b of w.buildings.values()) {
+    if (b !== current && b.owner === s.owner && !b.done && b.builderId === null && hasBuildWork(b)) return true;
+  }
+  return false;
+}
+
+/**
+ * No route to the current goal: the building the job was heading for is skipped for a while,
+ * the settler backs off instead of searching again every tick.
+ */
+function routeFailed(w: World, s: Settler): void {
+  const target = s.tasks.find((t) => 'b' in t);
+  const b = target && 'b' in target ? w.buildings.get(target.b) : undefined;
+  if (b) b.unreachableUntil = w.tick + UNREACHABLE_TICKS;
+  abort(w, s);
+  if (s.tasks.length === 0) s.tasks = [{ t: 'wait', n: PATH_FAIL_BACKOFF }];
+}
+
+/**
+ * Cancels the settler's job and releases every reservation it still holds.
+ * Goods in hand go back to the nearest warehouse; they are lost only if that trip fails too.
+ */
 export function abort(w: World, s: Settler): void {
+  const returning = s.tasks.some((t) => t.t === 'drop' && t.back);
   for (const task of s.tasks) {
     const b = 'b' in task ? w.buildings.get(task.b) : undefined;
     switch (task.t) {
@@ -192,7 +238,19 @@ export function abort(w: World, s: Settler): void {
   }
   s.tasks = [];
   s.path = [];
-  s.carrying = null;
+  const res = s.carrying;
+  if (!res) return;
+  const store = returning ? undefined : nearestStorage(w, s.owner, s);
+  if (store) {
+    store.inbound[res]++;
+    s.tasks = [
+      { t: 'goto', x: store.door.x, y: store.door.y },
+      { t: 'drop', b: store.id, res, back: true },
+    ];
+  } else {
+    w.stats.lost[res]++;
+    s.carrying = null;
+  }
 }
 
 function goHome(s: Settler, b: Building): void {
@@ -221,16 +279,22 @@ function idle(w: World, s: Settler): void {
       return;
 
     case 'builder': {
+      // Prefer sites that have material waiting, then the nearest.
       let best: Building | undefined;
+      let bestScore = Infinity;
       for (const b of w.buildings.values()) {
-        if (b.owner !== s.owner || b.done || b.builderId !== null) continue;
-        if (!best || dist(s, b.door) < dist(s, best.door)) best = b;
+        if (b.owner !== s.owner || b.done || b.builderId !== null || !isReachable(w, b)) continue;
+        const score = dist(s, b.door) + (hasBuildWork(b) ? 0 : 1000);
+        if (score < bestScore) {
+          best = b;
+          bestScore = score;
+        }
       }
       if (best) {
         best.builderId = s.id;
         s.tasks = [
           { t: 'goto', x: best.door.x, y: best.door.y },
-          { t: 'build', b: best.id },
+          { t: 'build', b: best.id, stall: 0 },
         ];
       } else {
         goToStorage(w, s);

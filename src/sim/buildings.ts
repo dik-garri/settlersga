@@ -35,6 +35,7 @@ export function addBuilding(w: World, type: BuildingType, x: number, y: number, 
     workerId: null,
     workerRequested: false,
     timer: 0,
+    unreachableUntil: 0,
   };
   for (let dy = 0; dy < def.h; dy++) {
     for (let dx = 0; dx < def.w; dx++) {
@@ -68,12 +69,16 @@ export function spawnSettler(w: World, kind: SettlerKind, at: Building): Settler
   return s;
 }
 
-/** Nearest finished warehouse of the player. */
+export function isReachable(w: World, b: Building): boolean {
+  return b.unreachableUntil <= w.tick;
+}
+
+/** Nearest finished, reachable warehouse of the player. */
 export function nearestStorage(w: World, owner: PlayerId, near: Point): Building | undefined {
   let best: Building | undefined;
   let bestD = Infinity;
   for (const b of w.buildings.values()) {
-    if (b.owner !== owner || !b.done || !BUILDINGS[b.type].storage) continue;
+    if (b.owner !== owner || !b.done || !BUILDINGS[b.type].storage || !isReachable(w, b)) continue;
     const d = Math.hypot(b.door.x - near.x, b.door.y - near.y);
     if (d < bestD) {
       best = b;

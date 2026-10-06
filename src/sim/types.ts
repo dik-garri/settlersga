@@ -48,6 +48,8 @@ export interface Building {
   workerRequested: boolean;
   /** Workshop: ticks spent on the current recipe cycle. */
   timer: number;
+  /** Tick until which no route to the door is known; logistics and builders skip it until then. */
+  unreachableUntil: number;
 }
 
 export type Task =
@@ -55,13 +57,15 @@ export type Task =
   | { t: 'enter'; b: number }
   | { t: 'wait'; n: number }
   | { t: 'pickup'; b: number; res: Resource }
-  | { t: 'drop'; b: number; res: Resource }
+  /** `back`: returning goods to a warehouse after a failed job. */
+  | { t: 'drop'; b: number; res: Resource; back?: boolean }
   /** Worker puts its own product on the building's output pile. */
   | { t: 'store'; b: number; res: Resource }
   /** Fell a tree or break stone off a deposit; the settler then carries `res`. */
   | { t: 'gather'; x: number; y: number; n: number; res: Resource }
   | { t: 'plant'; x: number; y: number; n: number }
-  | { t: 'build'; b: number }
+  /** `stall`: consecutive ticks without material to work with. */
+  | { t: 'build'; b: number; stall: number }
   | { t: 'become'; b: number; kind: SettlerKind };
 
 export interface Settler {
