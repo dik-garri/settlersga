@@ -543,3 +543,78 @@ export function gatheredBy(type: BuildingType): GatherDef | undefined {
   const worker = BUILDINGS[type].worker;
   return worker ? PROFESSIONS[worker].gather : undefined;
 }
+
+// ------------------------------------------------------------ computer players
+
+/**
+ * Computer player build order. Each think the AI walks this list top to bottom and places the first
+ * entry whose `count` (sites included) is not reached yet and that it can afford, staff and site.
+ * Entries it cannot satisfy right now are skipped, so the plan adapts to the map. `after`: only once
+ * a building of that type stands (keeps scarce tools and food for what unlocks the chain).
+ */
+export const AI_PLAN: readonly { type: BuildingType; count: number; after?: BuildingType }[] = [
+  { type: 'woodcutter', count: 1 },
+  { type: 'stonecutter', count: 1 },
+  { type: 'sawmill', count: 1 },
+  { type: 'forester', count: 1 },
+  { type: 'house_small', count: 1 },
+  { type: 'woodcutter', count: 2 },
+  { type: 'tower', count: 1 },
+  { type: 'sawmill', count: 2 },
+  { type: 'farm', count: 1 },
+  { type: 'waterworks', count: 1 },
+  { type: 'tower', count: 2 },
+  { type: 'mill', count: 1 },
+  { type: 'bakery', count: 1 },
+  { type: 'fisher', count: 1 },
+  { type: 'house_medium', count: 1 },
+  { type: 'tower', count: 3 },
+  { type: 'coalmine', count: 1 },
+  { type: 'ironmine', count: 1, after: 'coalmine' },
+  { type: 'ironsmelter', count: 1, after: 'ironmine' },
+  { type: 'toolsmith', count: 1, after: 'ironsmelter' },
+  { type: 'weaponsmith', count: 1, after: 'ironsmelter' },
+  { type: 'pigfarm', count: 1 },
+  { type: 'slaughterhouse', count: 1, after: 'pigfarm' },
+  { type: 'farm', count: 2 },
+  { type: 'house_medium', count: 2 },
+  { type: 'coalmine', count: 2, after: 'toolsmith' },
+  { type: 'stonemine', count: 1, after: 'toolsmith' },
+  { type: 'tower', count: 4 },
+  { type: 'forester', count: 2 },
+  { type: 'woodcutter', count: 3 },
+  { type: 'stonecutter', count: 2, after: 'toolsmith' },
+  { type: 'house_large', count: 1 },
+  { type: 'ironmine', count: 2, after: 'toolsmith' },
+  { type: 'weaponsmith', count: 2, after: 'ironsmelter' },
+  { type: 'tower', count: 7 },
+  { type: 'house_large', count: 2 },
+  { type: 'tower', count: 12 },
+];
+
+/** Computer player tuning; `thinkEvery` and `attackRatio` are the difficulty knobs. */
+export const AI = {
+  /** Ticks between decisions (lower = faster, harder). */
+  thinkEvery: 40,
+  /** At most this many own construction sites at once. */
+  maxOpenSites: 3,
+  /** Build a house when fewer carriers than this are idle. */
+  minIdleCarriers: 3,
+  /** Attack when spare attackers ≥ attackRatio × defenders + 1, and at least `minAttackers`. */
+  attackRatio: 1.5,
+  minAttackers: 3,
+  /** Soldiers the castle keeps: new military buildings are only placed if they can be manned without going below. */
+  homeGuard: 2,
+  /** No attacks before this tick (25 game minutes): the opening is for building up. */
+  peaceTicks: 25 * 60 * TICKS_PER_SECOND,
+  /** Ticks between attacks. */
+  attackCooldown: 600,
+  /** With at least this many soldiers and no enemy in reach, build military buildings towards the enemy… */
+  frontierSoldiers: 8,
+  /** …up to this many military buildings in total. */
+  maxMilitary: 30,
+  /** Best-scored spots tried with `canPlace` per placement. */
+  placeTries: 40,
+  /** The last this-many units of a tool are kept for the first building of a type that needs it. */
+  keepTools: 1,
+};

@@ -214,6 +214,50 @@ button.active {
   opacity: 1;
 }
 
+.end-screen {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(340px, calc(100% - 32px));
+  padding: 18px 22px;
+  text-align: center;
+}
+
+.end-screen h2 {
+  margin: 0 0 4px;
+  font-size: 28px;
+}
+
+.end-screen h2.won {
+  color: var(--accent);
+}
+
+.end-screen h2.lost {
+  color: #e06a5a;
+}
+
+.end-screen p {
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+
+.end-screen dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 10px;
+  margin: 0;
+  text-align: left;
+}
+
+.end-screen dt {
+  color: var(--muted);
+}
+
+.end-screen dd {
+  margin: 0;
+  text-align: right;
+}
+
 @media (max-width: 640px) {
   .top {
     max-width: calc(100% - 24px);

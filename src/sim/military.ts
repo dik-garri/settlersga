@@ -238,6 +238,8 @@ function conquer(w: World, b: Building, s: Settler): void {
     if (isMilitary(o) || !onForeignLand(w, o)) continue;
     w.removeBuilding(o);
   }
+  // Losing the castle loses the game.
+  if (w.players.some((p) => p.id === previous && p.castleId === b.id)) w.defeatPlayer(previous);
 }
 
 function onForeignLand(w: World, b: Building): boolean {

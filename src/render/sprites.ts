@@ -556,20 +556,7 @@ function paintCastle(ctx: Ctx): void {
   frontQuad(ctx, k, -0.15, 0.15, H + 26, H + 38, '#3a3430');
   sideQuad(ctx, k, -0.15, 0.15, H + 26, H + 38, '#2c2724');
   pyramidRoof(ctx, k + 0.1, H + 46, 42, '#b23a2c');
-  const [fx, fy] = P(0, 0, H + 88);
-  ctx.strokeStyle = '#3b2b1a';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(fx, fy);
-  ctx.lineTo(fx, fy - 18);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(fx, fy - 18);
-  ctx.lineTo(fx + 14, fy - 14);
-  ctx.lineTo(fx, fy - 10);
-  ctx.closePath();
-  ctx.fillStyle = '#2b5fb4';
-  ctx.fill();
+  // The banner on the roof tip is a separate per-owner sprite (`BANNERS`).
   for (let t = -hw + 0.09; t <= hw; t += 0.36) {
     merlon(t, hh - 0.09);
     merlon(hw - 0.09, t);
@@ -731,21 +718,17 @@ function paintTower(ctx: Ctx): void {
     line(ctx, [a + 0.12, t, H], [a + 0.12, t, H + 10], '#4a2e18');
   }
   pyramidRoof(ctx, a + 0.2, H + 10, 34, '#9e3328');
-  const [fx, fy] = P(0, 0, H + 44);
-  ctx.strokeStyle = '#3b2b1a';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(fx, fy);
-  ctx.lineTo(fx, fy - 16);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(fx, fy - 16);
-  ctx.lineTo(fx + 13, fy - 12);
-  ctx.lineTo(fx, fy - 8);
-  ctx.closePath();
-  ctx.fillStyle = '#2b5fb4';
-  ctx.fill();
+  // The banner on the roof tip is a separate per-owner sprite (`BANNERS`).
 }
+
+/**
+ * Where a building's owner banner stands, in sprite pixels from the footprint center (the roof tip).
+ * The renderer places the `flag:<owner>` sprite there, so it follows conquests.
+ */
+export const BANNERS: Partial<Record<BuildingType, { x: number; y: number }>> = {
+  castle: { x: 0, y: -130 },
+  tower: { x: 0, y: -110 },
+};
 
 function paintSite(ctx: Ctx, half: number): void {
   const hw = half - 0.05;

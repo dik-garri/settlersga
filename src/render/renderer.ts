@@ -5,7 +5,7 @@ import { CHUNK } from '../sim/map';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import type { SpriteAtlas } from './atlas';
 import { depthOf, HALF_H, HALF_W, toScreen, toTile } from './iso';
-import { EDGE_DIRS, GROUND_PRIORITY, groundVariants, PLAYER_COLORS, type GroundKind } from './sprites';
+import { BANNERS, EDGE_DIRS, GROUND_PRIORITY, groundVariants, PLAYER_COLORS, type GroundKind } from './sprites';
 
 const TERRAIN_KIND: Record<Terrain, GroundKind> = {
   [Terrain.Water]: 'water',
@@ -25,10 +25,22 @@ function hash(i: number): number {
   return h >>> 0;
 }
 
+/** Offsets (tile units) for duelling pairs, so simultaneous fights at one door stay apart. */
+const FIGHT_SPOTS: readonly [number, number][] = [
+  [0, 0],
+  [0.32, -0.32],
+  [-0.32, 0.32],
+  [0.38, 0.12],
+  [-0.12, -0.38],
+  [0.12, 0.42],
+];
+
 interface BuildingView {
   /** Owner the flag was last drawn for (buildings change hands when conquered). */
   owner: number;
   flag: Sprite;
+  /** Owner banner on the roof (castle, towers), shown once the building stands. */
+  banner: Sprite | null;
   /** Tiles the body and the door pile are registered under (see `addStatic`). */
   at: { x: number; y: number };
   doorAt: { x: number; y: number };
@@ -656,7 +668,9 @@ export class GameRenderer {
       if (v.owner !== b.owner) {
         v.owner = b.owner;
         v.flag.texture = this.atlas.get(`flag:${b.owner}`);
+        if (v.banner) v.banner.texture = this.atlas.get(`flag:${b.owner}`);
       }
+      if (v.banner) v.banner.visible = b.done;
       const progress = this.sim.buildProgress(b);
       v.site.visible = !b.done;
       if (b.done) {
@@ -684,6 +698,13 @@ export class GameRenderer {
     const site = new Sprite(this.atlas.get(b.w >= 3 ? 'building:site3' : 'building:site2'));
     const main = new Sprite();
     body.addChild(site, main);
+    const at = BANNERS[b.type];
+    const banner = at ? new Sprite(this.atlas.get(`flag:${b.owner}`)) : null;
+    if (banner && at) {
+      banner.position.set(at.x, at.y);
+      banner.visible = b.done;
+      body.addChild(banner);
+    }
 
     const front = new Container();
     const d = this.surface(b.door.x, b.door.y);
@@ -698,6 +719,7 @@ export class GameRenderer {
     const v: BuildingView = {
       owner: b.owner,
       flag,
+      banner,
       at: { x: cx, y: cy },
       doorAt: { ...b.door },
       body,
@@ -750,8 +772,15 @@ export class GameRenderer {
     for (const s of this.sim.settlers) {
       let v = this.settlerViews.get(s.id);
       if (!v) v = this.createSettlerView(s);
-      const x = s.px + (s.x - s.px) * alpha;
-      const y = s.py + (s.y - s.py) * alpha;
+      let x = s.px + (s.x - s.px) * alpha;
+      let y = s.py + (s.y - s.py) * alpha;
+      const foe = s.opponent !== null ? this.sim.getSettler(s.opponent) : undefined;
+      if (foe) {
+        // Several duels at one door: each pair gets its own spot instead of drawing on top of the others.
+        const [ox, oy] = FIGHT_SPOTS[Math.min(s.id, foe.id) % FIGHT_SPOTS.length];
+        x += ox;
+        y += oy;
+      }
       const p = this.surface(x, y);
       const view = this.view;
       const onScreen =
@@ -770,6 +799,11 @@ export class GameRenderer {
       const sdx = s.x - s.px - (s.y - s.py);
       if (sdx > 0.01) v.facing = 1;
       else if (sdx < -0.01) v.facing = -1;
+      if (foe) {
+        // Face the opponent.
+        const toFoe = foe.x - foe.y - (s.x - s.y);
+        if (toFoe !== 0) v.facing = toFoe > 0 ? 1 : -1;
+      }
 
       let frame = 'stand';
       if (s.working) frame = Math.floor(timeMs / 220) % 2 ? 'work' : 'stand';

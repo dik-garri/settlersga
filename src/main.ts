@@ -34,9 +34,11 @@ async function main() {
     params.delete('load');
     history.replaceState(null, '', `${location.pathname}${params.size ? `?${params}` : ''}`);
   }
-  // The local player and one (for now passive) opponent unless ?players= says otherwise.
+  // The local player and one computer opponent unless ?players= says otherwise; ?ai=off keeps the
+  // opponents passive.
   const players = params.has('players') ? Number(params.get('players')) : 2;
-  const world = save ? World.load(save) : new World(seed, { size, players });
+  const ai = params.get('ai') === 'off' ? [] : Array.from({ length: players - 1 }, (_, k) => k + 2);
+  const world = save ? World.load(save) : new World(seed, { size, players, ai });
   const state = createState();
   const atlas = new SpriteAtlas();
   const renderer = new GameRenderer(app, world, atlas);
