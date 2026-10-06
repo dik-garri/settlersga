@@ -26,7 +26,7 @@ npm run typecheck      # tsc --noEmit (strict, noUnusedLocals/Parameters)
 npm run build          # typecheck + vite build
 ```
 
-Append `?seed=N` to the dev URL for a reproducible map (the seed is logged to the console). `window.world` exposes the live `World` for poking from DevTools, e.g. `world.placeBuilding('sawmill', x, y)` or calling `world.step()` in a loop to fast-forward.
+Append `?seed=N` to the dev URL for a reproducible map (the seed is logged to the console) and `?size=N` for another map size; `?load=1` restores the browser save slot. `window.world` exposes the live `World` for poking from DevTools, e.g. `world.placeBuilding('sawmill', x, y)` or calling `world.step()` in a loop to fast-forward.
 
 ## Architecture
 
@@ -46,6 +46,7 @@ Three layers with one-way dependencies: `ui → render → sim`. `src/sim` must 
 - **Buildings are data** (`BUILDINGS` in `config.ts`): `cost`, `worker`, `storage` (warehouse), `recipe` (workshop inputs → outputs per `ticks`, run by `updateBuilding` while the worker is inside), `territory` (radius). **Gatherers** share one code path: a profession's `gather` def (resource, radius, timings) plus `GATHER_RULES` in `nature.ts` (which tile qualifies and what working it does). A new gathering profession is a `PROFESSIONS` entry plus, for a new resource, a rule.
 - **Territory:** `map.owner` holds the owning player per tile. `recomputeTerritory()` rebuilds it from scratch out of buildings with a `territory` radius (worker-less ones like the castle once done, others once their worker has moved in via `become`; earlier buildings win overlaps) and bumps `territoryVersion`, which the renderer polls to redraw the dimming and border. `canPlace` requires the footprint and door to be owned; `isGatherTarget` and `canPlant` only accept owned tiles, so gatherers and foresters never work outside the border.
 - Building costs are multi-resource (`cost: Partial<Stock>`); always read them through `costOf()` / `totalCost()`. Construction takes one work shift per delivered unit of any material.
+- **Save/load** (`save.ts`): `saveWorld` snapshots everything to plain JSON (map layers as base64, `Rng.state`, buildings in id order); `World.load` restores it, and `tests/save.test.ts` asserts a loaded world continues bit-for-bit like the original. When you add simulation state, add it to `SaveData` and bump `SAVE_VERSION` if old saves can no longer load. Keep sim state plain data (no closures, class instances or functions) so it stays serializable.
 - Tunables (timings, caps, costs, start resources) live in `config.ts`.
 
 ### Rendering (`src/render`)

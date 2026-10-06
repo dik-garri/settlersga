@@ -48,6 +48,7 @@ export class Hud {
     root: HTMLElement,
     private readonly world: World,
     private readonly state: GameState,
+    actions: { onSave(): void; onLoad(): void },
   ) {
     const top = el('div', 'panel top');
     top.append(this.stockEl, this.popEl);
@@ -71,6 +72,19 @@ export class Hud {
       speed.append(b);
       this.speedButtons.set(s, b);
     }
+    const save = el('button', 'sep', '💾');
+    save.title = 'Сохранить игру';
+    save.onclick = () => {
+      actions.onSave();
+      save.blur();
+    };
+    const load = el('button', '', '📂');
+    load.title = 'Загрузить сохранение';
+    load.onclick = () => {
+      actions.onLoad();
+      load.blur();
+    };
+    speed.append(save, load);
 
     const build = el('div', 'panel build');
     PLAYER_BUILDINGS.forEach((type, i) => {

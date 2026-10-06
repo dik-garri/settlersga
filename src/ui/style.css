@@ -99,6 +99,10 @@ button:hover {
   background: rgba(255, 255, 255, 0.12);
 }
 
+button.sep {
+  margin-left: 8px;
+}
+
 button.active {
   border-color: var(--accent);
   background: rgba(232, 179, 74, 0.18);

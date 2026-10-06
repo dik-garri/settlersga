@@ -17,6 +17,7 @@ import { generateMap, type GameMap } from './map';
 import { updateTrees } from './nature';
 import { findPath, staysConnected } from './pathfinding';
 import { createRng, type Rng } from './rng';
+import { mapFromSave, restoreWorld, type SaveData } from './save';
 import { updateSettler } from './settlers';
 import { emptyStock, type Building, type BuildingType, type PlayerId, type Settler, type Stock } from './types';
 
@@ -28,6 +29,13 @@ export const LOCAL_PLAYER: PlayerId = 1;
 export interface Player {
   id: PlayerId;
   castleId: number;
+}
+
+export interface WorldOptions {
+  /** Map edge length in tiles. */
+  size?: number;
+  /** Restore this snapshot instead of generating a new world (see `World.load`). */
+  from?: SaveData;
 }
 
 /**
@@ -57,11 +65,21 @@ export class World {
   readonly reservedPlots = new Set<number>();
   nextId = 1;
 
-  constructor(seed = 1) {
-    const c = Math.floor(MAP_SIZE / 2);
-    this.map = generateMap(seed, MAP_SIZE, c, c);
+  constructor(seed = 1, opts: WorldOptions = {}) {
     this.rng = createRng(seed ^ 0x9e3779b9);
+    if (opts.from) {
+      this.map = mapFromSave(opts.from);
+      restoreWorld(this, opts.from);
+      return;
+    }
+    const size = opts.size ?? MAP_SIZE;
+    const c = Math.floor(size / 2);
+    this.map = generateMap(seed, size, c, c);
     this.addPlayer(c - 1, c - 1);
+  }
+
+  static load(save: SaveData): World {
+    return new World(0, { from: save });
   }
 
   private addPlayer(x: number, y: number): Player {

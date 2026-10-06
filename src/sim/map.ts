@@ -148,7 +148,9 @@ export function generateMap(seed: number, size: number, cx: number, cy: number):
   };
 
   // Scattered stone deposits.
-  for (let k = 0; k < 7; k++) depositAt(4 + randInt(rng, size - 8), 4 + randInt(rng, size - 8), 1.6, 0.65);
+  // About 7 deposits per 64×64, scaled with map area.
+  const deposits = Math.max(1, Math.round((7 * size * size) / (64 * 64)));
+  for (let k = 0; k < deposits; k++) depositAt(4 + randInt(rng, size - 8), 4 + randInt(rng, size - 8), 1.6, 0.65);
 
   // Clear a meadow for the castle.
   for (let y = cy - 6; y <= cy + 6; y++) {

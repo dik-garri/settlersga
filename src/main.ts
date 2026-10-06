@@ -8,6 +8,7 @@ import { World } from './sim/world';
 import { Hud } from './ui/hud';
 import { InputController } from './ui/input';
 import { createState } from './ui/state';
+import { hasSave, readSave, storeSave } from './ui/storage';
 
 const TICK_MS = 1000 / TICKS_PER_SECOND;
 const MAX_TICKS_PER_FRAME = 20;
@@ -23,9 +24,16 @@ async function main() {
   });
   document.getElementById('game')!.appendChild(app.canvas);
 
-  const seedParam = new URLSearchParams(location.search).get('seed');
-  const seed = seedParam ? Number(seedParam) : Math.floor(Math.random() * 1e9);
-  const world = new World(seed);
+  const params = new URLSearchParams(location.search);
+  const seed = params.has('seed') ? Number(params.get('seed')) : Math.floor(Math.random() * 1e9);
+  const size = params.has('size') ? Number(params.get('size')) : undefined;
+  const save = params.has('load') ? readSave() : null;
+  if (params.has('load')) {
+    // Loading is one-shot: a later refresh should not silently reload the slot.
+    params.delete('load');
+    history.replaceState(null, '', `${location.pathname}${params.size ? `?${params}` : ''}`);
+  }
+  const world = save ? World.load(save) : new World(seed, { size });
   const state = createState();
   const atlas = new SpriteAtlas();
   const renderer = new GameRenderer(app, world, atlas);
@@ -34,7 +42,13 @@ async function main() {
   const home = toScreen(c.x + 1, c.y + 1);
   camera.centerOn(home.x, home.y);
 
-  const hud = new Hud(document.getElementById('hud')!, world, state);
+  const hud = new Hud(document.getElementById('hud')!, world, state, {
+    onSave: () => hud.toast(storeSave(world) ? 'Игра сохранена' : 'Не удалось сохранить'),
+    onLoad: () => {
+      if (!hasSave()) return hud.toast('Сохранений нет');
+      location.search = '?load=1';
+    },
+  });
   const input = new InputController(app.canvas, camera, renderer, world, state, {
     onSelectBuildType: (type) => hud.selectBuildType(type),
     onMessage: (text) => hud.toast(text),
@@ -62,7 +76,8 @@ async function main() {
   });
 
   Object.assign(window, { world, seed });
-  console.info(`Settlers prototype, seed ${seed} (add ?seed=${seed} to replay this map)`);
+  if (save) console.info(`Loaded save at tick ${world.tick}`);
+  else console.info(`Settlers prototype, seed ${seed} (add ?seed=${seed} to replay this map)`);
 }
 
 main();
