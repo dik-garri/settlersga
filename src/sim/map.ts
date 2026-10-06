@@ -1,4 +1,4 @@
-import { DEPOSIT_STONE, FISH_MAX, TREE_MATURE } from './config';
+import { DEPOSIT_STONE, FISH_MAX, ORE_AMOUNT, ORE_RESOURCES, TREE_MATURE } from './config';
 import { createRng, randInt, type Rng } from './rng';
 import { Terrain } from './types';
 
@@ -15,6 +15,11 @@ export class GameMap {
   readonly crop: Uint8Array;
   /** Fish left in a water tile. */
   readonly fish: Uint8Array;
+  /** Ore kind under a mountain tile (`ORE_RESOURCES` index + 1, 0 = none) and units left. */
+  readonly ore: Uint8Array;
+  readonly oreAmount: Uint8Array;
+  /** Bit (player − 1) set once that player's geologist examined the tile. */
+  readonly prospected: Uint8Array;
   /** Player id owning the tile's territory, 0 if nobody. */
   readonly owner: Uint8Array;
   /** Building id occupying the tile, 0 if none. */
@@ -40,6 +45,9 @@ export class GameMap {
     this.stone = new Uint8Array(n);
     this.crop = new Uint8Array(n);
     this.fish = new Uint8Array(n);
+    this.ore = new Uint8Array(n);
+    this.oreAmount = new Uint8Array(n);
+    this.prospected = new Uint8Array(n);
     this.owner = new Uint8Array(n);
     this.building = new Int32Array(n);
     this.door = new Int32Array(n);
@@ -50,8 +58,8 @@ export class GameMap {
   }
 
   /**
-   * Records that a tile's visible contents (tree, stone, crop) changed, so views only re-scan dirty chunks.
-   * Every runtime write to `tree`, `stone` or `crop` must call this.
+   * Records that a tile's visible contents changed, so views only re-scan dirty chunks.
+   * Every runtime write to `tree`, `stone`, `crop`, `prospected`, or `oreAmount` reaching 0 must call this.
    */
   touch(i: number): void {
     this.chunkVersion[this.chunkOf(i % this.w, Math.floor(i / this.w))]++;
@@ -67,7 +75,7 @@ export class GameMap {
 
   isPassableTerrain(x: number, y: number): boolean {
     const t = this.terrain[this.idx(x, y)];
-    return t === Terrain.Grass || t === Terrain.Sand;
+    return t === Terrain.Grass || t === Terrain.Sand || t === Terrain.Mountain;
   }
 
   isWalkable(x: number, y: number): boolean {
@@ -76,12 +84,12 @@ export class GameMap {
     return this.isPassableTerrain(x, y) && this.tree[i] === 0 && this.stone[i] === 0 && this.building[i] === 0;
   }
 
-  /** Free grass tile a building footprint may cover. */
-  isBuildable(x: number, y: number): boolean {
+  /** Free tile of the given terrain (grass by default, mountain for mines) a footprint may cover. */
+  isBuildable(x: number, y: number, terrain: Terrain = Terrain.Grass): boolean {
     if (!this.inBounds(x, y)) return false;
     const i = this.idx(x, y);
     return (
-      this.terrain[i] === Terrain.Grass &&
+      this.terrain[i] === terrain &&
       this.tree[i] === 0 &&
       this.stone[i] === 0 &&
       this.crop[i] === 0 &&
@@ -152,6 +160,19 @@ export function generateMap(seed: number, size: number, cx: number, cy: number):
   const map = new GameMap(size, size);
   const height = fractalNoise(rng, size, size);
   const forest = fractalNoise(rng, size, size);
+  const oreNoise = ORE_RESOURCES.map(() => fractalNoise(rng, size, size));
+  /** Ore under a mountain tile: the strongest ore noise above its threshold, otherwise some stone. */
+  const seedOre = (i: number) => {
+    const thresholds = [0.56, 0.6, 0.68, 2];
+    let best = -1;
+    for (let k = 0; k < thresholds.length; k++) {
+      if (oreNoise[k][i] > thresholds[k] && (best < 0 || oreNoise[k][i] > oreNoise[best][i])) best = k;
+    }
+    if (best < 0 && rng() < 0.35) best = ORE_RESOURCES.indexOf('stone');
+    if (best < 0) return;
+    map.ore[i] = best + 1;
+    map.oreAmount[i] = ORE_AMOUNT[0] + randInt(rng, ORE_AMOUNT[1] - ORE_AMOUNT[0] + 1);
+  };
 
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
@@ -162,8 +183,10 @@ export function generateMap(seed: number, size: number, cx: number, cy: number):
       let t = Terrain.Grass;
       if (h < 0.3) t = Terrain.Water;
       else if (h < 0.35) t = Terrain.Sand;
-      else if (h > 0.72) t = Terrain.Rock;
+      else if (h > 0.84) t = Terrain.Rock;
+      else if (h > 0.7) t = Terrain.Mountain;
       map.terrain[i] = t;
+      if (t === Terrain.Mountain) seedOre(i);
       if (t === Terrain.Water) map.fish[i] = FISH_MAX;
       if (t === Terrain.Grass && forest[i] > 0.55 && rng() < 0.75) {
         map.tree[i] = rng() < 0.85 ? TREE_MATURE : 2 + randInt(rng, 2);
@@ -198,6 +221,8 @@ export function generateMap(seed: number, size: number, cx: number, cy: number):
       map.tree[i] = 0;
       map.stone[i] = 0;
       map.fish[i] = 0;
+      map.ore[i] = 0;
+      map.oreAmount[i] = 0;
     }
   }
 
@@ -212,12 +237,30 @@ export function generateMap(seed: number, size: number, cx: number, cy: number):
       map.terrain[i] = Terrain.Grass;
       map.stone[i] = 0;
       map.fish[i] = 0;
+      map.ore[i] = 0;
+      map.oreAmount[i] = 0;
       if (rng() < 0.7) map.tree[i] = TREE_MATURE;
     }
   }
 
   // Guarantee a quarry on the other side.
   depositAt(cx - 7, cy + 3, 2.3, 0.85);
+
+  // Guarantee a small mountain with coal and iron inside the starting territory.
+  const mx = cx - 2;
+  const my = cy - 8;
+  for (let y = my - 3; y <= my + 3; y++) {
+    for (let x = mx - 3; x <= mx + 3; x++) {
+      if (!map.inBounds(x, y) || Math.hypot(x - mx, y - my) > 2.8) continue;
+      const i = map.idx(x, y);
+      map.terrain[i] = Terrain.Mountain;
+      map.tree[i] = 0;
+      map.stone[i] = 0;
+      map.fish[i] = 0;
+      map.ore[i] = ORE_RESOURCES.indexOf(x < mx ? 'coal' : 'ironore') + 1;
+      map.oreAmount[i] = ORE_AMOUNT[1];
+    }
+  }
 
   // Guarantee a pond inside the starting territory: water for wells, fish for fishers.
   const px = cx - 1;
@@ -227,6 +270,8 @@ export function generateMap(seed: number, size: number, cx: number, cy: number):
       if (!map.inBounds(x, y)) continue;
       const d = Math.hypot(x - px, y - py);
       const i = map.idx(x, y);
+      map.ore[i] = 0;
+      map.oreAmount[i] = 0;
       if (d <= 1.7) {
         map.terrain[i] = Terrain.Water;
         map.fish[i] = FISH_MAX;

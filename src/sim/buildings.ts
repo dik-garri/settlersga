@@ -1,4 +1,4 @@
-import { BUILDINGS, OUTPUT_CAP, type Recipe } from './config';
+import { BUILDINGS, OUTPUT_CAP, oreOf, type BuildingDef, type Recipe } from './config';
 import { emptyStock, RESOURCES, type Building, type BuildingType, type PlayerId, type Point, type SettlerKind, type Settler } from './types';
 import type { World } from './world';
 
@@ -90,9 +90,44 @@ export function nearestStorage(w: World, owner: PlayerId, near: Point): Building
 }
 
 function canRunRecipe(b: Building, recipe: Recipe): boolean {
-  return RESOURCES.every(
+  const all = RESOURCES.every(
     (r) => b.input[r] >= (recipe.inputs[r] ?? 0) && b.output[r] + (recipe.outputs[r] ?? 0) <= OUTPUT_CAP,
   );
+  return all && (!recipe.inputsAnyOf || recipe.inputsAnyOf.some((r) => b.input[r] > 0));
+}
+
+/** Ore units of the mine's kind still within its radius. */
+export function oreLeft(w: World, b: Building): number {
+  const { res, radius } = BUILDINGS[b.type].mine!;
+  const c = centerOf(b);
+  let n = 0;
+  for (let y = Math.floor(c.y - radius); y <= Math.ceil(c.y + radius); y++) {
+    for (let x = Math.floor(c.x - radius); x <= Math.ceil(c.x + radius); x++) {
+      if (!w.map.inBounds(x, y) || Math.hypot(x - c.x, y - c.y) > radius) continue;
+      const i = w.map.idx(x, y);
+      if (oreOf(w.map.ore[i]) === res) n += w.map.oreAmount[i];
+    }
+  }
+  return n;
+}
+
+/** Tile with ore of the mine's kind within its radius, nearest first; -1 if worked out. */
+export function findOreTile(w: World, b: Building, def: BuildingDef): number {
+  const { res, radius } = def.mine!;
+  const c = centerOf(b);
+  let best = -1;
+  let bestD = Infinity;
+  for (let y = Math.floor(c.y - radius); y <= Math.ceil(c.y + radius); y++) {
+    for (let x = Math.floor(c.x - radius); x <= Math.ceil(c.x + radius); x++) {
+      if (!w.map.inBounds(x, y)) continue;
+      const d = Math.hypot(x - c.x, y - c.y);
+      const i = w.map.idx(x, y);
+      if (d > radius || d >= bestD || w.map.oreAmount[i] === 0 || oreOf(w.map.ore[i]) !== res) continue;
+      best = i;
+      bestD = d;
+    }
+  }
+  return best;
 }
 
 /**
@@ -107,12 +142,21 @@ export function updateBuilding(w: World, b: Building): void {
     spawnSettler(w, 'carrier', b);
     return;
   }
-  const recipe = BUILDINGS[b.type].recipe;
+  const def = BUILDINGS[b.type];
+  const recipe = def.recipe;
   if (!recipe || !b.done) return;
   const worker = w.getSettler(b.workerId);
   if (!worker || worker.inside !== b.id || !canRunRecipe(b, recipe)) return;
+  const oreTile = def.mine ? findOreTile(w, b, def) : -1;
+  if (def.mine && oreTile < 0) return; // worked out
   if (++b.timer < recipe.ticks) return;
   b.timer = 0;
+  if (recipe.inputsAnyOf) {
+    // Eat whichever of the alternatives is most plentiful.
+    const pick = recipe.inputsAnyOf.reduce((a, r) => (b.input[r] > b.input[a] ? r : a));
+    b.input[pick]--;
+  }
+  if (oreTile >= 0 && --w.map.oreAmount[oreTile] === 0) w.map.touch(oreTile);
   for (const r of RESOURCES) {
     const made = recipe.outputs[r] ?? 0;
     b.input[r] -= recipe.inputs[r] ?? 0;

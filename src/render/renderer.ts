@@ -12,6 +12,7 @@ const TERRAIN_KIND: Record<Terrain, GroundKind> = {
   [Terrain.Sand]: 'sand',
   [Terrain.Grass]: 'grass',
   [Terrain.Rock]: 'rock',
+  [Terrain.Mountain]: 'mountain',
 };
 
 const TREE_SCALE = [0, 0.35, 0.55, 0.78, 1];
@@ -50,6 +51,14 @@ export interface ViewRect {
 const OVERDRAW_UP = 260;
 const OVERDRAW_DOWN = 40;
 
+/** Highlighted circle of tiles, e.g. where a geologist would look. */
+export interface Area {
+  x: number;
+  y: number;
+  r: number;
+  valid: boolean;
+}
+
 export interface Ghost {
   type: BuildingType;
   x: number;
@@ -87,6 +96,9 @@ export class GameRenderer {
   private readonly treeState: Uint8Array;
   private readonly depositSprites: (Sprite | null)[];
   private readonly cropSprites: (Sprite | null)[];
+  /** Geologist signs for the local player; state is ore code + 1, 0 = none. */
+  private readonly signSprites: (Sprite | null)[];
+  private readonly signState: Uint8Array;
   private readonly cropState: Uint8Array;
   /** Rendered deposit size per tile: 0 = none, otherwise size class + 1. */
   private readonly depositState: Uint8Array;
@@ -111,6 +123,8 @@ export class GameRenderer {
     this.depositSprites = new Array(n).fill(null);
     this.depositState = new Uint8Array(n);
     this.cropSprites = new Array(n).fill(null);
+    this.signSprites = new Array(n).fill(null);
+    this.signState = new Uint8Array(n);
     this.cropState = new Uint8Array(n);
     const chunks = map.chunksX * map.chunksY;
     this.ownerSeen = new Uint8Array(n).fill(255);
@@ -175,10 +189,11 @@ export class GameRenderer {
         const p = toScreen(x, y);
         tile.position.set(p.x, p.y);
         this.groundChunks[map.chunkOf(x, y)].addChild(tile);
-        if (kind === 'rock') {
+        // Cliffs are covered in boulders; walkable slopes only get the odd small stone.
+        if (kind === 'rock' || (kind === 'mountain' && hash(i + 3) % 4 === 0)) {
           const rock = new Sprite(this.atlas.get(`boulder:${hash(i + 7) % 2}`));
           rock.position.set(p.x + ((hash(i) >> 8) % 7) - 3, p.y + 2);
-          rock.scale.set(0.8 + ((hash(i) >> 4) % 4) * 0.08);
+          rock.scale.set((kind === 'rock' ? 0.8 : 0.4) + ((hash(i) >> 4) % 4) * 0.08);
           rock.zIndex = depthOf(x, y);
           this.addStatic(rock, x, y);
         }
@@ -209,6 +224,7 @@ export class GameRenderer {
     ghost: Ghost | null,
     selected: number | null,
     hover: { x: number; y: number } | null,
+    area: Area | null = null,
   ) {
     this.view = view;
     this.syncTerritory();
@@ -216,7 +232,7 @@ export class GameRenderer {
     this.syncChangedTiles();
     this.syncBuildings();
     this.syncSettlers(alpha, timeMs);
-    this.drawMarks(ghost, selected, hover);
+    this.drawMarks(ghost, selected, hover, area);
   }
 
   private syncVisibleChunks(): void {
@@ -249,6 +265,7 @@ export class GameRenderer {
           this.syncTree(i);
           this.syncDeposit(i);
           this.syncCrop(i);
+          this.syncSign(i);
         }
       }
     }
@@ -370,6 +387,27 @@ export class GameRenderer {
       this.cropSprites[i] = s;
     }
     s.texture = this.atlas.get(`field:${stage}`);
+    s.anchor.copyFrom(s.texture.defaultAnchor!);
+  }
+
+  private syncSign(i: number): void {
+    const { map } = this.sim;
+    const seen = (map.prospected[i] & (1 << (LOCAL_PLAYER - 1))) !== 0;
+    const state = seen ? map.ore[i] * (map.oreAmount[i] > 0 ? 1 : 0) + 1 : 0;
+    if (state === this.signState[i]) return;
+    this.signState[i] = state;
+    const x = i % map.w;
+    const y = Math.floor(i / map.w);
+    let s = this.signSprites[i];
+    if (!s) {
+      s = new Sprite();
+      const p = toScreen(x, y);
+      s.position.set(p.x + 8, p.y + 4);
+      s.zIndex = depthOf(x, y) + 0.02;
+      this.addStatic(s, x, y);
+      this.signSprites[i] = s;
+    }
+    s.texture = this.atlas.get(`sign:${state - 1}`);
     s.anchor.copyFrom(s.texture.defaultAnchor!);
   }
 
@@ -532,12 +570,28 @@ export class GameRenderer {
     return [p.x, p.y - h, p.x + w, p.y, p.x, p.y + h, p.x - w, p.y];
   }
 
-  private drawMarks(ghost: Ghost | null, selected: number | null, hover: { x: number; y: number } | null): void {
+  private drawMarks(
+    ghost: Ghost | null,
+    selected: number | null,
+    hover: { x: number; y: number } | null,
+    area: Area | null,
+  ): void {
     const g = this.marks;
     g.clear();
     this.ghostSprite.visible = false;
 
-    if (hover && !ghost && this.sim.map.inBounds(hover.x, hover.y)) {
+    if (area) {
+      const color = area.valid ? 0xffe066 : 0xff5a5a;
+      for (let y = Math.ceil(area.y - area.r); y <= area.y + area.r; y++) {
+        for (let x = Math.ceil(area.x - area.r); x <= area.x + area.r; x++) {
+          if (Math.hypot(x - area.x, y - area.y) <= area.r && this.sim.map.inBounds(x, y)) {
+            g.poly(this.diamond(x, y, 1)).fill({ color, alpha: 0.22 });
+          }
+        }
+      }
+    }
+
+    if (hover && !ghost && !area && this.sim.map.inBounds(hover.x, hover.y)) {
       g.poly(this.diamond(hover.x, hover.y, 1)).stroke({ width: 1.5, color: 0xffffff, alpha: 0.45 });
     }
 

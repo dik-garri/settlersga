@@ -1,18 +1,29 @@
-import { buildingIcon } from '../render/atlas';
+import { buildingIcon, settlerIcon } from '../render/atlas';
 import { BUILDINGS, CATEGORIES, costOf, gatheredBy, INPUT_CAP, OUTPUT_CAP, PROFESSIONS, type Category } from '../sim/config';
+import { oreLeft } from '../sim/buildings';
 import { hasGatherTargetNear } from '../sim/nature';
 import { RESOURCES, type Building, type BuildingType, type Resource, type SettlerKind } from '../sim/types';
 import type { World } from '../sim/world';
-import type { GameState } from './state';
+import type { GameState, Placeable } from './state';
 
 const SPEEDS = [1, 2, 4];
-/** Player-buildable types per build-menu tab, in table order. */
+/** Commands that, like buildings, are aimed at a tile from the build menu. */
+const COMMANDS: Record<Exclude<Placeable, BuildingType>, { name: string; category: Category; hint: string }> = {
+  geologist: { name: 'Геолог', category: 'mining', hint: 'разведка' },
+};
+
+/** Player-buildable types, then commands, per build-menu tab. */
 const MENU = (Object.keys(CATEGORIES) as Category[]).map((category) => ({
   category,
-  types: (Object.keys(BUILDINGS) as BuildingType[]).filter(
-    (t) => BUILDINGS[t].playerBuildable && BUILDINGS[t].category === category,
-  ),
+  types: [
+    ...(Object.keys(BUILDINGS) as BuildingType[]).filter(
+      (t) => BUILDINGS[t].playerBuildable && BUILDINGS[t].category === category,
+    ),
+    ...(Object.keys(COMMANDS) as (keyof typeof COMMANDS)[]).filter((c) => COMMANDS[c].category === category),
+  ] as Placeable[],
 }));
+
+const isBuilding = (p: Placeable): p is BuildingType => p in BUILDINGS;
 
 const RESOURCE_UI: Record<Resource, { icon: string; name: string }> = {
   log: { icon: '🪵', name: 'Брёвна' },
@@ -25,6 +36,9 @@ const RESOURCE_UI: Record<Resource, { icon: string; name: string }> = {
   bread: { icon: '🍞', name: 'Хлеб' },
   pig: { icon: '🐖', name: 'Свиньи' },
   meat: { icon: '🥩', name: 'Мясо' },
+  coal: { icon: '⚫', name: 'Уголь' },
+  ironore: { icon: '🟤', name: 'Железная руда' },
+  goldore: { icon: '🟡', name: 'Золотая руда' },
 };
 
 const GATHER_PLACE: Partial<Record<BuildingType, string>> = {
@@ -54,7 +68,7 @@ export class Hud {
   private readonly stockEl = el('div', 'stock');
   private readonly popEl = el('div', 'pop');
   private readonly speedButtons = new Map<number | 'pause', HTMLButtonElement>();
-  private readonly buildButtons = new Map<BuildingType, HTMLButtonElement>();
+  private readonly buildButtons = new Map<Placeable, HTMLButtonElement>();
   private readonly tabButtons: HTMLButtonElement[] = [];
   private readonly tabRows: HTMLElement[] = [];
   private tab = 0;
@@ -119,9 +133,13 @@ export class Hud {
       this.tabButtons.push(tab);
       const row = el('div', 'build-row');
       types.forEach((type, i) => {
-        const def = BUILDINGS[type];
         const b = el('button', 'build-btn');
-        b.append(buildingIcon(type), el('span', 'name', def.name), el('span', 'cost', `${costLabel(type)} · [${i + 1}]`));
+        if (isBuilding(type)) {
+          b.append(buildingIcon(type), el('span', 'name', BUILDINGS[type].name), el('span', 'cost', `${costLabel(type)} · [${i + 1}]`));
+        } else {
+          const cmd = COMMANDS[type];
+          b.append(settlerIcon(type), el('span', 'name', cmd.name), el('span', 'cost', `${cmd.hint} · [${i + 1}]`));
+        }
         b.onclick = () => {
           this.selectBuildType(state.placing === type ? null : type);
           b.blur();
@@ -154,7 +172,7 @@ export class Hud {
     if (type) this.selectBuildType(this.state.placing === type ? null : type);
   }
 
-  selectBuildType(type: BuildingType | null): void {
+  selectBuildType(type: Placeable | null): void {
     this.state.placing = type;
     if (type) this.state.selected = null;
   }
@@ -194,7 +212,9 @@ export class Hud {
     }
     for (const [type, b] of this.buildButtons) b.classList.toggle('active', state.placing === type);
 
-    this.hintEl.textContent = state.placing
+    this.hintEl.textContent = state.placing === 'geologist'
+      ? 'ЛКМ по своей горе — отправить геолога · ПКМ / Esc — отмена'
+      : state.placing
       ? 'ЛКМ — поставить (Shift — несколько) · ПКМ / Esc — отмена'
       : 'Перетаскивание / WASD — камера · колесо — зум · клик по зданию — информация';
 
@@ -236,6 +256,12 @@ export class Hud {
         for (const r of RESOURCES) {
           if (def.recipe.inputs[r]) rows.push([`${RESOURCE_UI[r].name} (вход)`, `${b.input[r]} / ${INPUT_CAP}`]);
         }
+        const anyOf = def.recipe.inputsAnyOf;
+        if (anyOf) {
+          const held = anyOf.map((r) => `${RESOURCE_UI[r].icon}${b.input[r]}`).join(' ');
+          rows.push(['Еда (вход)', `${held} / ${INPUT_CAP}`]);
+        }
+        if (def.mine) rows.push(['Руды в радиусе', String(oreLeft(this.world, b))]);
         for (const r of RESOURCES) {
           if (def.recipe.outputs[r]) rows.push([RESOURCE_UI[r].name, `${b.output[r]} / ${OUTPUT_CAP}`]);
         }
@@ -262,9 +288,13 @@ export class Hud {
     switch (behavior) {
       case 'workshop': {
         const recipe = def.recipe!;
+        if (def.mine && oreLeft(this.world, b) === 0) return 'выработана';
         if (RESOURCES.some((r) => b.output[r] + (recipe.outputs[r] ?? 0) > OUTPUT_CAP)) return 'склад полон';
-        const missing = RESOURCES.filter((r) => b.input[r] < (recipe.inputs[r] ?? 0));
-        if (missing.length > 0) return `нет: ${missing.map((r) => RESOURCE_UI[r].name.toLowerCase()).join(', ')}`;
+        const missing = RESOURCES.filter((r) => b.input[r] < (recipe.inputs[r] ?? 0)).map((r) =>
+          RESOURCE_UI[r].name.toLowerCase(),
+        );
+        if (recipe.inputsAnyOf && !recipe.inputsAnyOf.some((r) => b.input[r] > 0)) missing.push('еды');
+        if (missing.length > 0) return `нет: ${missing.join(', ')}`;
         return 'работает';
       }
       case 'plant':

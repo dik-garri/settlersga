@@ -1,11 +1,23 @@
 import { GameMap } from './map';
-import type { Building, Settler, Stock } from './types';
+import type { Building, Settler } from './types';
 import type { Player, World } from './world';
 
 /** Bump when the save layout changes incompatibly. */
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
-const MAP_LAYERS = ['terrain', 'tree', 'stone', 'crop', 'fish', 'owner', 'building', 'door'] as const;
+const MAP_LAYERS = [
+  'terrain',
+  'tree',
+  'stone',
+  'crop',
+  'fish',
+  'ore',
+  'oreAmount',
+  'prospected',
+  'owner',
+  'building',
+  'door',
+] as const;
 type MapLayer = (typeof MAP_LAYERS)[number];
 
 /** Plain-JSON snapshot of the whole simulation. */
@@ -15,7 +27,7 @@ export interface SaveData {
   nextId: number;
   rngState: number;
   territoryVersion: number;
-  stats: { produced: Stock; lost: Stock; treesPlanted: number };
+  stats: World['stats'];
   players: Player[];
   map: { w: number; h: number } & Record<MapLayer, string>;
   buildings: Building[];

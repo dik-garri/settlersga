@@ -1,5 +1,5 @@
 import { CanvasSource, Rectangle, Texture } from 'pixi.js';
-import { PROFESSIONS } from '../sim/config';
+import { ORE_RESOURCES, oreOf, PROFESSIONS } from '../sim/config';
 import { RESOURCES, type BuildingType, type SettlerKind } from '../sim/types';
 import {
   BUILDING_CANVAS,
@@ -8,6 +8,7 @@ import {
   paintBoulder,
   paintDeposit,
   paintField,
+  paintSign,
   paintFlag,
   paintGround,
   paintSettler,
@@ -95,13 +96,16 @@ export class SpriteAtlas {
 
   constructor() {
     const a = new AtlasBuilder();
-    for (const kind of ['grass', 'sand', 'water', 'rock'] as GroundKind[]) {
+    for (const kind of ['grass', 'sand', 'water', 'rock', 'mountain'] as GroundKind[]) {
       for (let v = 0; v < groundVariants(kind); v++) {
         a.add(`ground:${kind}:${v}`, 66, 34, 33, 17, (ctx) => paintGround(ctx, kind, v));
       }
     }
     for (let v = 0; v < 4; v++) a.add(`tree:${v}`, 48, 80, 24, 72, (ctx) => paintTree(ctx, v));
     for (let v = 0; v < 2; v++) a.add(`boulder:${v}`, 52, 40, 26, 30, (ctx) => paintBoulder(ctx, v));
+    for (let code = 0; code <= ORE_RESOURCES.length; code++) {
+      a.add(`sign:${code}`, 18, 30, 6, 28, (ctx) => paintSign(ctx, oreOf(code)));
+    }
     for (let v = 1; v <= 4; v++) a.add(`field:${v}`, 66, 40, 33, 24, (ctx) => paintField(ctx, v));
     for (let v = 0; v < 3; v++) a.add(`deposit:${v}`, 56, 44, 28, 34, (ctx) => paintDeposit(ctx, v));
     for (const [type, c] of Object.entries(BUILDING_CANVAS)) {
@@ -147,6 +151,22 @@ export class SpriteAtlas {
     }
     return t;
   }
+}
+
+/** Standalone settler portrait for HTML UI. */
+export function settlerIcon(kind: SettlerKind, size = 56): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = size * dpr;
+  canvas.height = size * dpr;
+  canvas.style.width = `${size}px`;
+  canvas.style.height = `${size}px`;
+  const ctx = canvas.getContext('2d')!;
+  const scale = (size / 32) * 0.95;
+  ctx.scale(dpr * scale, dpr * scale);
+  ctx.translate((size / scale - 20) / 2, 1);
+  paintSettler(ctx, kind, 'work');
+  return canvas;
 }
 
 /** Standalone icon canvas for HTML UI. */

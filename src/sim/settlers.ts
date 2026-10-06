@@ -110,6 +110,19 @@ export function updateSettler(w: World, s: Settler): void {
       s.tasks.shift();
       return;
     }
+    case 'prospect': {
+      s.working = true;
+      if (--task.n > 0) return;
+      const i = w.map.idx(task.x, task.y);
+      const bit = 1 << (s.owner - 1);
+      if (!(w.map.prospected[i] & bit)) {
+        w.map.prospected[i] |= bit;
+        w.map.touch(i);
+        w.stats.prospected++;
+      }
+      s.tasks.shift();
+      return;
+    }
     case 'build': {
       const b = w.buildings.get(task.b);
       if (!b || b.done) {
@@ -200,6 +213,12 @@ function otherSiteWithWork(w: World, s: Settler, current: Building): boolean {
  * the settler backs off instead of searching again every tick.
  */
 function routeFailed(w: World, s: Settler): void {
+  // A geologist skips a tile he cannot reach and carries on with the rest of his errand.
+  if (s.tasks[1]?.t === 'prospect') {
+    s.tasks.splice(0, 2);
+    s.path = [];
+    return;
+  }
   const target = s.tasks.find((t) => 'b' in t);
   const b = target && 'b' in target ? w.buildings.get(target.b) : undefined;
   if (b) b.unreachableUntil = w.tick + UNREACHABLE_TICKS;
@@ -349,6 +368,11 @@ function idle(w: World, s: Settler): void {
     case 'workshop':
     case 'garrison':
       if (home && s.inside !== home.id) goHome(s, home);
+      return;
+
+    case 'prospect':
+      // Errand finished (or aborted): back to carrying.
+      s.kind = 'carrier';
       return;
   }
 }

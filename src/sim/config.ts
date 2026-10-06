@@ -34,6 +34,20 @@ export const DEPOSIT_STONE: [number, number] = [4, 8];
 export const CROP_RIPE = 4;
 export const CROP_GROW_EVERY = 10;
 export const CROP_GROW_CHANCE = 0.035;
+/** Ore kinds stored in `map.ore` (index + 1; 0 = none) and the resource a mine extracts. */
+export const ORE_RESOURCES: readonly Resource[] = ['coal', 'ironore', 'goldore', 'stone'];
+export function oreOf(code: number): Resource | null {
+  return code > 0 ? ORE_RESOURCES[code - 1] : null;
+}
+/** Ore units per mountain tile at generation, inclusive range. */
+export const ORE_AMOUNT: [number, number] = [6, 14];
+/** Geologist: how far around the target he looks and how long each tile takes. */
+export const PROSPECT_RADIUS = 3;
+export const PROSPECT_TILES = 8;
+export const PROSPECT_TICKS = 15;
+/** Food a miner eats per unit of ore. */
+export const MINER_FOOD: readonly Resource[] = ['bread', 'fish', 'meat'];
+
 /** Fish per water tile and how fast the water restocks (expected restock attempts per tick per 64×64 of map). */
 export const FISH_MAX = 3;
 export const FISH_RESTOCK = 2;
@@ -48,9 +62,10 @@ export const FISH_RESTOCK = 2;
  * - plant: walks out and plants (a tree, a field…);
  * - farm: harvests ripe plantings like a gatherer, otherwise plants new ones;
  * - workshop: stays inside and runs the building's recipe;
- * - garrison: stays inside so the building claims territory.
+ * - garrison: stays inside so the building claims territory;
+ * - prospect: a carrier on a geologist errand; turns back into a carrier once the errand is done.
  */
-export type Behavior = 'carrier' | 'builder' | 'gather' | 'plant' | 'farm' | 'workshop' | 'garrison';
+export type Behavior = 'carrier' | 'builder' | 'gather' | 'plant' | 'farm' | 'workshop' | 'garrison' | 'prospect';
 
 export interface GatherDef {
   res: Resource;
@@ -102,25 +117,32 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
   baker: { name: 'Пекарь', behavior: 'workshop' },
   pigfarmer: { name: 'Свинопас', behavior: 'workshop' },
   butcher: { name: 'Мясник', behavior: 'workshop' },
+  miner: { name: 'Шахтёр', behavior: 'workshop' },
+  geologist: { name: 'Геолог', behavior: 'prospect' },
   guard: { name: 'Стражник', behavior: 'garrison' },
 };
 
 // --------------------------------------------------------------- buildings
 
-/** A workshop turns `inputs` into `outputs` every `ticks` while its worker is inside. */
+/**
+ * A workshop turns `inputs` (all of them) plus one unit of any of `inputsAnyOf` into `outputs`
+ * every `ticks` while its worker is inside. `inputsAnyOf` share one input pile limit.
+ */
 export interface Recipe {
   inputs: Partial<Stock>;
+  inputsAnyOf?: readonly Resource[];
   outputs: Partial<Stock>;
   ticks: number;
 }
 
 /** Build-menu tab. */
-export type Category = 'housing' | 'resources' | 'food' | 'military';
+export type Category = 'housing' | 'resources' | 'food' | 'mining' | 'military';
 
 export const CATEGORIES: Record<Category, string> = {
   housing: 'Жильё',
   resources: 'Сырьё',
   food: 'Еда',
+  mining: 'Горное дело',
   military: 'Военное',
 };
 
@@ -140,6 +162,25 @@ export interface BuildingDef {
   territory?: number;
   /** Residence: releases `capacity` new carriers, one every `everyTicks`, once built. */
   residence?: { capacity: number; everyTicks: number };
+  /** Footprint terrain: ordinary buildings need grass, mines need mountain. */
+  terrain?: 'mountain';
+  /** Mine: each recipe cycle also takes one unit of ore of this resource from a tile within `radius`. */
+  mine?: { res: Resource; radius: number };
+}
+
+function mine(name: string, res: Resource): BuildingDef {
+  return {
+    name,
+    w: 2,
+    h: 2,
+    cost: { plank: 3, stone: 1 },
+    worker: 'miner',
+    playerBuildable: true,
+    category: 'mining',
+    terrain: 'mountain',
+    mine: { res, radius: 3 },
+    recipe: { inputs: {}, inputsAnyOf: MINER_FOOD, outputs: { [res]: 1 }, ticks: 80 },
+  };
 }
 
 export const BUILDINGS: Record<BuildingType, BuildingDef> = {
@@ -273,6 +314,11 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     category: 'food',
     recipe: { inputs: { pig: 1 }, outputs: { meat: 2 }, ticks: 60 },
   },
+
+  coalmine: mine('Угольная шахта', 'coal'),
+  ironmine: mine('Железный рудник', 'ironore'),
+  goldmine: mine('Золотой рудник', 'goldore'),
+  stonemine: mine('Каменоломня в горе', 'stone'),
 
   tower: {
     name: 'Сторожевая башня',

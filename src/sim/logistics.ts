@@ -11,6 +11,11 @@ export function demand(w: World, b: Building, res: Resource): number {
   if (!b.done) return costOf(b.type)[res] - b.delivered[res] - b.inbound[res];
   const recipe = BUILDINGS[b.type].recipe;
   if (recipe?.inputs[res]) return INPUT_CAP - b.input[res] - b.inbound[res];
+  if (recipe?.inputsAnyOf?.includes(res)) {
+    // Alternatives share one pile limit.
+    const held = recipe.inputsAnyOf.reduce((n, r) => n + b.input[r] + b.inbound[r], 0);
+    return INPUT_CAP - held;
+  }
   return 0;
 }
 

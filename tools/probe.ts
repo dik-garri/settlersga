@@ -35,6 +35,9 @@ for (const seed of seeds) {
     [15, 'fisher', -2, 8],
     [15, 'pigfarm', 7, -4],
     [15, 'slaughterhouse', -6, 6],
+    [20, 'coalmine', -3, -8],
+    [20, 'ironmine', 0, -8],
+    [20, 'house_small', 4, 8],
   ];
 
   const rows: string[] = [];

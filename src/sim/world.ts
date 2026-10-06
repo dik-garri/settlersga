@@ -4,6 +4,9 @@ import {
   BUILDINGS,
   DISPATCH_EVERY,
   MAP_SIZE,
+  PROSPECT_RADIUS,
+  PROSPECT_TICKS,
+  PROSPECT_TILES,
   START_BUILDERS,
   START_CARRIERS,
   START_PLANKS,
@@ -17,7 +20,7 @@ import { findPath, staysConnected } from './pathfinding';
 import { createRng, type Rng } from './rng';
 import { mapFromSave, restoreWorld, type SaveData } from './save';
 import { updateSettler } from './settlers';
-import { emptyStock, type Building, type BuildingType, type PlayerId, type Settler, type Stock } from './types';
+import { emptyStock, Terrain, type Building, type BuildingType, type PlayerId, type Settler, type Stock, type Task } from './types';
 
 export { doorOf } from './buildings';
 
@@ -45,10 +48,11 @@ export class World {
   readonly buildings = new Map<number, Building>();
   readonly settlers: Settler[] = [];
   readonly players: Player[] = [];
-  readonly stats: { produced: Stock; lost: Stock; treesPlanted: number } = {
+  readonly stats: { produced: Stock; lost: Stock; treesPlanted: number; prospected: number } = {
     produced: emptyStock(),
     lost: emptyStock(),
     treesPlanted: 0,
+    prospected: 0,
   };
   tick = 0;
   /** Bumped whenever the territory changes, so views can redraw the border. */
@@ -113,9 +117,10 @@ export class World {
     // A castle founds a territory, everything else must stay inside its owner's.
     const owned = (tx: number, ty: number) =>
       type === 'castle' ? this.map.inBounds(tx, ty) && this.map.owner[this.map.idx(tx, ty)] === 0 : this.owns(tx, ty, player);
+    const ground = def.terrain === 'mountain' ? Terrain.Mountain : Terrain.Grass;
     for (let dy = 0; dy < def.h; dy++) {
       for (let dx = 0; dx < def.w; dx++) {
-        if (!this.map.isBuildable(x + dx, y + dy) || !owned(x + dx, y + dy)) return false;
+        if (!this.map.isBuildable(x + dx, y + dy, ground) || !owned(x + dx, y + dy)) return false;
       }
     }
     const door = doorOf(x, y, def.w, def.h);
@@ -167,7 +172,45 @@ export class World {
     return b.progress / (totalCost(b.type) * BUILD_TICKS_PER_UNIT);
   }
 
+  isProspected(x: number, y: number, player: PlayerId = LOCAL_PLAYER): boolean {
+    return this.map.inBounds(x, y) && (this.map.prospected[this.map.idx(x, y)] & (1 << (player - 1))) !== 0;
+  }
+
   // --------------------------------------------------------------- commands
+
+  /**
+   * Player command: the nearest idle carrier becomes a geologist, examines up to `PROSPECT_TILES`
+   * unexplored mountain tiles around (x, y) and turns back into a carrier. False if impossible.
+   */
+  sendGeologist(x: number, y: number, player: PlayerId = LOCAL_PLAYER): boolean {
+    const m = this.map;
+    if (!this.owns(x, y, player) || m.terrain[m.idx(x, y)] !== Terrain.Mountain) return false;
+    const tiles: { x: number; y: number; d: number }[] = [];
+    for (let ty = y - PROSPECT_RADIUS; ty <= y + PROSPECT_RADIUS; ty++) {
+      for (let tx = x - PROSPECT_RADIUS; tx <= x + PROSPECT_RADIUS; tx++) {
+        const d = Math.hypot(tx - x, ty - y);
+        if (d > PROSPECT_RADIUS || !this.owns(tx, ty, player) || !m.isWalkable(tx, ty)) continue;
+        if (m.terrain[m.idx(tx, ty)] !== Terrain.Mountain || this.isProspected(tx, ty, player)) continue;
+        tiles.push({ x: tx, y: ty, d });
+      }
+    }
+    if (tiles.length === 0) return false;
+    let best: Settler | undefined;
+    for (const s of this.settlers) {
+      if (s.owner !== player || s.kind !== 'carrier' || s.tasks.length > 0) continue;
+      if (!best || Math.hypot(s.x - x, s.y - y) < Math.hypot(best.x - x, best.y - y)) best = s;
+    }
+    if (!best) return false;
+    best.kind = 'geologist';
+    best.tasks = tiles
+      .sort((a, b) => a.d - b.d)
+      .slice(0, PROSPECT_TILES)
+      .flatMap((t): Task[] => [
+        { t: 'goto', x: t.x, y: t.y },
+        { t: 'prospect', x: t.x, y: t.y, n: PROSPECT_TICKS },
+      ]);
+    return true;
+  }
 
   /** Player command: lay out a construction site. */
   placeBuilding(type: BuildingType, x: number, y: number, player: PlayerId = LOCAL_PLAYER): Building | null {

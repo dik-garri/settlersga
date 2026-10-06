@@ -184,13 +184,14 @@ function logEnds(ctx: Ctx, at: [number, number], count: number) {
 
 // ---------------------------------------------------------------- terrain
 
-export type GroundKind = 'grass' | 'sand' | 'water' | 'rock';
+export type GroundKind = 'grass' | 'sand' | 'water' | 'rock' | 'mountain';
 
 const GROUND_COLORS: Record<GroundKind, { base: string[]; dots: string[] }> = {
   grass: { base: ['#6a9a3c', '#6f9f40', '#64933a', '#73a145'], dots: ['#7fb04f', '#5a8733', '#88b85a'] },
   sand: { base: ['#d8c48a', '#d2bd82'], dots: ['#c7b077', '#e4d39d'] },
   water: { base: ['#2f6f9e', '#2c6995'], dots: ['#4f8fbd', '#3b7cab'] },
   rock: { base: ['#8a8378', '#837c71'], dots: ['#9b958b', '#6f695f'] },
+  mountain: { base: ['#9a8f7c', '#948a77', '#a09582'], dots: ['#b0a690', '#7e7462', '#8c8a6a'] },
 };
 
 export function groundVariants(kind: GroundKind): number {
@@ -222,6 +223,26 @@ export function paintGround(ctx: Ctx, kind: GroundKind, variant: number): void {
       ctx.quadraticCurveTo(x + 3, y + 2, x + 6, y);
       ctx.strokeStyle = dots[i % dots.length];
       ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  } else if (kind === 'mountain') {
+    // Rocky slope: light ledges with dark cracks under them.
+    for (let i = 0; i < 5; i++) {
+      const x = rng() * 44 - 22;
+      const y = rng() * 18 - 9;
+      const len = 6 + rng() * 8;
+      ctx.fillStyle = 'rgba(255,255,255,0.12)';
+      ctx.beginPath();
+      ctx.moveTo(x - len / 2, y);
+      ctx.lineTo(x, y - 3);
+      ctx.lineTo(x + len / 2, y);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(40,32,24,0.45)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x - len / 2, y);
+      ctx.lineTo(x + len / 2, y + 1);
       ctx.stroke();
     }
   } else {
@@ -414,6 +435,10 @@ export const BUILDING_CANVAS: Record<BuildingType | 'site2' | 'site3', BuildingC
   bakery: SMALL,
   pigfarm: SMALL,
   slaughterhouse: SMALL,
+  coalmine: SMALL,
+  ironmine: SMALL,
+  goldmine: SMALL,
+  stonemine: SMALL,
   tower: { w: 150, h: 210, ax: 75, ay: 170 },
   site2: { w: 150, h: 90, ax: 75, ay: 50 },
   site3: { w: 220, h: 120, ax: 110, ay: 65 },
@@ -963,6 +988,91 @@ function paintMill(ctx: Ctx): void {
   paintDeco(ctx, { hw: a, hh: a, H, wall: stone, roof: '', rise: 0, doorDx: 0.4 }, 'sacks');
 }
 
+/** Mine entrance dug into the slope, with a cart of its ore. */
+function paintMine(ctx: Ctx, ore: string): void {
+  shadow(ctx, 0.85, 0.85, 0.3);
+  // Rock mound.
+  const rock = '#8d8576';
+  poly(ctx, [[-0.95, -0.9, 0], [0.95, -0.9, 0], [0.95, 0.9, 0], [-0.95, 0.9, 0]], shade(rock, 0.9));
+  ctx.fillStyle = rock;
+  const [lx, ly] = P(-0.95, 0.9, 0);
+  const [rx, ry] = P(0.95, -0.9, 0);
+  const [tx, ty] = P(-0.3, -0.3, 34);
+  ctx.beginPath();
+  ctx.moveTo(lx, ly);
+  ctx.quadraticCurveTo(tx - 30, ty + 6, tx, ty);
+  ctx.quadraticCurveTo(tx + 34, ty + 4, rx, ry);
+  ctx.lineTo(...P(0.95, 0.9, 0));
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = shade(rock, 1.15);
+  ctx.beginPath();
+  ctx.moveTo(lx + 10, ly - 6);
+  ctx.quadraticCurveTo(tx - 22, ty + 8, tx, ty + 2);
+  ctx.quadraticCurveTo(tx - 4, ty + 22, lx + 18, ly - 4);
+  ctx.closePath();
+  ctx.fill();
+  // Timbered entrance on the front slope, at the door side.
+  const h = 18;
+  frontQuad(ctx, 0.9, 0.18, 0.72, 0, h, '#1c1814');
+  line(ctx, [0.18, 0.9, 0], [0.18, 0.9, h], '#6b4a26', 3);
+  line(ctx, [0.72, 0.9, 0], [0.72, 0.9, h], '#6b4a26', 3);
+  line(ctx, [0.12, 0.9, h], [0.78, 0.9, h], '#6b4a26', 3.5);
+  // Rails and a cart.
+  line(ctx, [0.3, 0.9, 0], [0.3, 1.35, 0], '#5a5048', 1);
+  line(ctx, [0.6, 0.9, 0], [0.6, 1.35, 0], '#5a5048', 1);
+  const [cx, cy] = P(0.45, 1.2, 0);
+  ctx.fillStyle = '#5e4a36';
+  ctx.fillRect(cx - 7, cy - 9, 14, 7);
+  ctx.fillStyle = ore;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy - 9, 6.5, 3, 0, Math.PI, 0);
+  ctx.fill();
+  ctx.fillStyle = '#2b2622';
+  ctx.beginPath();
+  ctx.arc(cx - 4, cy - 1.5, 1.8, 0, Math.PI * 2);
+  ctx.arc(cx + 4, cy - 1.5, 1.8, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/** Ore colours, shared by mines, ore wares and geologist signs (index = `map.ore` code − 1). */
+export const ORE_COLORS: Record<string, string> = {
+  coal: '#2a2724',
+  ironore: '#8e5a44',
+  goldore: '#e2b93b',
+  stone: '#b8b0a0',
+};
+
+/** Geologist's sign, 18×30 with the post foot at (6, 28). `ore` null = nothing found. */
+export function paintSign(ctx: Ctx, ore: string | null): void {
+  ctx.translate(6, 28);
+  ctx.strokeStyle = '#5e3b1f';
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(0, -22);
+  ctx.stroke();
+  ctx.fillStyle = '#d9c39a';
+  ctx.fillRect(-1, -24, 12, 9);
+  ctx.strokeStyle = '#8a6a3c';
+  ctx.lineWidth = 0.8;
+  ctx.strokeRect(-1, -24, 12, 9);
+  if (ore) {
+    ctx.beginPath();
+    ctx.arc(5, -19.5, 3, 0, Math.PI * 2);
+    ctx.fillStyle = ORE_COLORS[ore];
+    ctx.fill();
+  } else {
+    ctx.strokeStyle = '#7a2e24';
+    ctx.beginPath();
+    ctx.moveTo(2.5, -22);
+    ctx.lineTo(7.5, -17);
+    ctx.moveTo(7.5, -22);
+    ctx.lineTo(2.5, -17);
+    ctx.stroke();
+  }
+}
+
 const styled = (type: BuildingType) => (ctx: Ctx) => paintStyled(ctx, STYLES[type]!);
 
 export const BUILDING_PAINTERS: Record<BuildingType | 'site2' | 'site3', (ctx: Ctx) => void> = {
@@ -981,6 +1091,10 @@ export const BUILDING_PAINTERS: Record<BuildingType | 'site2' | 'site3', (ctx: C
   bakery: styled('bakery'),
   pigfarm: styled('pigfarm'),
   slaughterhouse: styled('slaughterhouse'),
+  coalmine: (ctx) => paintMine(ctx, ORE_COLORS.coal),
+  ironmine: (ctx) => paintMine(ctx, ORE_COLORS.ironore),
+  goldmine: (ctx) => paintMine(ctx, ORE_COLORS.goldore),
+  stonemine: (ctx) => paintMine(ctx, ORE_COLORS.stone),
   tower: paintTower,
   site2: (ctx) => paintSite(ctx, 1),
   site3: (ctx) => paintSite(ctx, 1.5),
@@ -1052,6 +1166,8 @@ const SETTLER_LOOK: Record<SettlerKind, { tunic: string; hat: string; tool?: Too
   baker: { tunic: '#f0ece2', hat: '#ffffff' },
   pigfarmer: { tunic: '#8a6d4b', hat: '#5a4636' },
   butcher: { tunic: '#b83c3c', hat: '#e8e4da' },
+  miner: { tunic: '#555b66', hat: '#d9b44a', tool: 'pick' },
+  geologist: { tunic: '#7a5c3a', hat: '#3b2b1a', tool: 'hammer' },
   guard: { tunic: '#a83232', hat: '#8d939a' },
 };
 
@@ -1230,6 +1346,17 @@ function paintFood(ctx: Ctx, res: Resource): void {
       blob(ctx, -1, 0, 5, 3.5, '#b5413a', '#7a221c');
       ctx.fillStyle = '#efe6d2';
       ctx.fillRect(3, -1, 4, 2);
+      return;
+    case 'coal':
+    case 'ironore':
+    case 'goldore':
+      for (const [x, y, r] of [
+        [-3, 1, 3],
+        [2, 1.5, 2.8],
+        [-0.5, -1.8, 2.6],
+      ]) {
+        blob(ctx, x, y, r, r * 0.85, ORE_COLORS[res], shade(ORE_COLORS[res], 0.6));
+      }
       return;
   }
 }

@@ -3,7 +3,21 @@ export interface Point {
   y: number;
 }
 
-export const RESOURCES = ['log', 'plank', 'stone', 'water', 'fish', 'grain', 'flour', 'bread', 'pig', 'meat'] as const;
+export const RESOURCES = [
+  'log',
+  'plank',
+  'stone',
+  'water',
+  'fish',
+  'grain',
+  'flour',
+  'bread',
+  'pig',
+  'meat',
+  'coal',
+  'ironore',
+  'goldore',
+] as const;
 export type Resource = (typeof RESOURCES)[number];
 export type Stock = Record<Resource, number>;
 export const emptyStock = (): Stock => Object.fromEntries(RESOURCES.map((r) => [r, 0])) as Stock;
@@ -15,7 +29,10 @@ export enum Terrain {
   Water = 0,
   Sand = 1,
   Grass = 2,
+  /** Impassable cliffs and peaks. */
   Rock = 3,
+  /** Walkable mountain slopes; only mines can be built here, ore lies underneath. */
+  Mountain = 4,
 }
 
 export type BuildingType =
@@ -34,6 +51,10 @@ export type BuildingType =
   | 'bakery'
   | 'pigfarm'
   | 'slaughterhouse'
+  | 'coalmine'
+  | 'ironmine'
+  | 'goldmine'
+  | 'stonemine'
   | 'tower';
 
 export type SettlerKind =
@@ -50,6 +71,8 @@ export type SettlerKind =
   | 'baker'
   | 'pigfarmer'
   | 'butcher'
+  | 'miner'
+  | 'geologist'
   | 'guard';
 
 /** Player ids start at 1; 0 means "nobody" in per-tile ownership. */
@@ -102,6 +125,8 @@ export type Task =
   | { t: 'plant'; x: number; y: number; n: number; what: PlantKind }
   /** `stall`: consecutive ticks without material to work with. */
   | { t: 'build'; b: number; stall: number }
+  /** Geologist examines a mountain tile and leaves a sign. */
+  | { t: 'prospect'; x: number; y: number; n: number }
   | { t: 'become'; b: number; kind: SettlerKind };
 
 export interface Settler {

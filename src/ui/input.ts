@@ -1,9 +1,9 @@
 import type { Camera } from '../render/camera';
-import type { GameRenderer, Ghost } from '../render/renderer';
-import { BUILDINGS } from '../sim/config';
-import type { BuildingType } from '../sim/types';
+import type { Area, GameRenderer, Ghost } from '../render/renderer';
+import { BUILDINGS, PROSPECT_RADIUS } from '../sim/config';
+import { Terrain, type BuildingType } from '../sim/types';
 import type { World } from '../sim/world';
-import type { GameState } from './state';
+import type { GameState, Placeable } from './state';
 
 const KEY_PAN_SPEED = 900; // screen px per second
 const EDGE_PAN_SPEED = 700;
@@ -11,7 +11,7 @@ const EDGE = 10;
 const DRAG_THRESHOLD = 5;
 
 export interface InputCallbacks {
-  onSelectBuildType(type: BuildingType | null): void;
+  onSelectBuildType(type: Placeable | null): void;
   /** Digit 1–9: pick a building on the open build-menu tab. */
   onHotkey(n: number): void;
   onNextTab(): void;
@@ -66,10 +66,21 @@ export class InputController {
 
   ghost(): Ghost | null {
     const { placing } = this.state;
-    if (!placing || !this.pointer) return null;
+    if (!placing || placing === 'geologist' || !this.pointer) return null;
     const t = this.tileAt(this.pointer.x, this.pointer.y);
     const a = this.anchorFor(placing, t.x, t.y);
     return { type: placing, ...a, valid: this.world.canPlace(placing, a.x, a.y) };
+  }
+
+  /** Tiles a geologist sent to the cursor would examine. */
+  area(): Area | null {
+    if (this.state.placing !== 'geologist' || !this.pointer) return null;
+    const t = this.tileAt(this.pointer.x, this.pointer.y);
+    const x = Math.round(t.x);
+    const y = Math.round(t.y);
+    const m = this.world.map;
+    const valid = this.world.owns(x, y) && m.terrain[m.idx(x, y)] === Terrain.Mountain;
+    return { x, y, r: PROSPECT_RADIUS, valid };
   }
 
   update(dtMs: number): void {
@@ -133,6 +144,12 @@ export class InputController {
     const p = this.local(e);
     const t = this.tileAt(p.x, p.y);
     const { placing } = this.state;
+    if (placing === 'geologist') {
+      const ok = this.world.sendGeologist(Math.round(t.x), Math.round(t.y));
+      this.cb.onMessage(ok ? 'Геолог отправлен' : 'Нужна неразведанная гора на своей земле и свободный носильщик');
+      if (ok && !e.shiftKey) this.cb.onSelectBuildType(null);
+      return;
+    }
     if (placing) {
       const a = this.anchorFor(placing, t.x, t.y);
       if (!this.world.canPlace(placing, a.x, a.y)) {
