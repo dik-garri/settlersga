@@ -1,5 +1,15 @@
-import { BUILDINGS, OUTPUT_CAP, oreOf, type BuildingDef, type Recipe } from './config';
-import { emptyStock, RESOURCES, type Building, type BuildingType, type PlayerId, type Point, type SettlerKind, type Settler } from './types';
+import { BUILDINGS, OUTPUT_CAP, oreOf, PROFESSIONS, type BuildingDef, type Recipe } from './config';
+import {
+  emptyStock,
+  RESOURCES,
+  type Building,
+  type BuildingType,
+  type PlayerId,
+  type Point,
+  type Resource,
+  type SettlerKind,
+  type Settler,
+} from './types';
 import type { World } from './world';
 
 /** Door sits in front of the lower-left wall, next to the front corner. */
@@ -93,7 +103,50 @@ function canRunRecipe(b: Building, recipe: Recipe): boolean {
   const all = RESOURCES.every(
     (r) => b.input[r] >= (recipe.inputs[r] ?? 0) && b.output[r] + (recipe.outputs[r] ?? 0) <= OUTPUT_CAP,
   );
-  return all && (!recipe.inputsAnyOf || recipe.inputsAnyOf.some((r) => b.input[r] > 0));
+  if (!all) return false;
+  if (recipe.inputsAnyOf && !recipe.inputsAnyOf.some((r) => b.input[r] > 0)) return false;
+  return !recipe.outputChoice || recipe.outputChoice.some((r) => b.output[r] < OUTPUT_CAP);
+}
+
+/** Units of `res` the player has lying in piles and warehouses, not yet promised to anyone. */
+export function available(w: World, owner: PlayerId, res: Resource): number {
+  let n = 0;
+  for (const b of w.buildings.values()) if (b.owner === owner) n += b.output[res] - b.outReserved[res];
+  return n;
+}
+
+/** Workplaces (and, for hammers, construction sites) currently waiting for someone with this tool. */
+export function waitingFor(w: World, owner: PlayerId, tool: Resource): number {
+  let n = 0;
+  for (const b of w.buildings.values()) {
+    if (b.owner !== owner) continue;
+    const worker = BUILDINGS[b.type].worker;
+    if (worker && b.done && b.workerId === null && !b.workerRequested && PROFESSIONS[worker].tool === tool) n++;
+    if (tool === PROFESSIONS.builder.tool && !b.done && b.builderId === null) n++;
+  }
+  return n;
+}
+
+/**
+ * The choice the owner is shortest of (awaited plus reserve, minus available; ties: least available),
+ * or null when every choice is covered and nothing needs making.
+ */
+export function chooseOutput(w: World, b: Building, recipe: Recipe): Resource | null {
+  let best: Resource | null = null;
+  let bestNeed = 0;
+  let bestHave = Infinity;
+  for (const r of recipe.outputChoice ?? []) {
+    if (b.output[r] >= OUTPUT_CAP) continue;
+    const have = available(w, b.owner, r);
+    const need = waitingFor(w, b.owner, r) + (recipe.keepInStock ?? 0) - have;
+    if (need <= 0) continue;
+    if (need > bestNeed || (need === bestNeed && have < bestHave)) {
+      best = r;
+      bestNeed = need;
+      bestHave = have;
+    }
+  }
+  return best;
 }
 
 /** Ore units of the mine's kind still within its radius. */
@@ -149,6 +202,7 @@ export function updateBuilding(w: World, b: Building): void {
   if (!worker || worker.inside !== b.id || !canRunRecipe(b, recipe)) return;
   const oreTile = def.mine ? findOreTile(w, b, def) : -1;
   if (def.mine && oreTile < 0) return; // worked out
+  if (recipe.outputChoice && !chooseOutput(w, b, recipe)) return; // nothing worth making
   if (++b.timer < recipe.ticks) return;
   b.timer = 0;
   if (recipe.inputsAnyOf) {
@@ -162,6 +216,11 @@ export function updateBuilding(w: World, b: Building): void {
     b.input[r] -= recipe.inputs[r] ?? 0;
     b.output[r] += made;
     w.stats.produced[r] += made;
+  }
+  const chosen = recipe.outputChoice ? chooseOutput(w, b, recipe) : null;
+  if (chosen) {
+    b.output[chosen]++;
+    w.stats.produced[chosen]++;
   }
 }
 

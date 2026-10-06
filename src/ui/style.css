@@ -226,3 +226,55 @@ button.active {
     display: none;
   }
 }
+
+.ware-icon {
+  vertical-align: middle;
+}
+
+.stat {
+  align-items: center;
+}
+
+.stock-toggle {
+  padding: 0 8px;
+  font-size: 15px;
+}
+
+.cost-items {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  margin-right: 3px;
+}
+
+.stock-panel {
+  top: 92px;
+  left: 12px;
+  padding: 8px 14px 10px;
+  width: 320px;
+  max-height: calc(100% - 300px);
+  overflow-y: auto;
+}
+
+.stock-panel h4 {
+  margin: 8px 0 4px;
+  font-size: 13px;
+  color: var(--accent);
+}
+
+.stock-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 14px;
+}
+
+.stock-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.stock-row b {
+  margin-left: auto;
+}

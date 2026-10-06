@@ -1,5 +1,5 @@
 import { isReachable, nearestStorage } from './buildings';
-import { BUILDINGS, costOf, INPUT_CAP } from './config';
+import { BUILDINGS, costOf, INPUT_CAP, PROFESSIONS, RESOURCE_INFO } from './config';
 import { RESOURCES, type Building, type PlayerId, type Point, type Resource, type Settler } from './types';
 import type { World } from './world';
 
@@ -40,15 +40,42 @@ function dispatchFor(w: World, owner: PlayerId): void {
   };
   const own = [...w.buildings.values()].filter((b) => b.owner === owner);
 
+  // Staff finished workplaces; professions with a tool fetch it from the nearest pile first.
   for (const b of own) {
     const kind = BUILDINGS[b.type].worker;
     if (!kind || !b.done || b.workerId !== null || b.workerRequested || !isReachable(w, b)) continue;
-    const s = take(b.door);
+    const tool = PROFESSIONS[kind].tool;
+    const from = tool ? nearestSupply(w, own, tool, b) : undefined;
+    if (tool && !from) continue; // waits for the toolsmith
+    const s = take(from ? from.door : b.door);
     if (!s) return;
     b.workerRequested = true;
+    s.tasks = [];
+    if (from && tool) {
+      from.outReserved[tool]++;
+      s.tasks.push({ t: 'goto', x: from.door.x, y: from.door.y }, { t: 'pickup', b: from.id, res: tool });
+    }
+    s.tasks.push({ t: 'goto', x: b.door.x, y: b.door.y }, { t: 'become', b: b.id, kind });
+  }
+
+  // More construction sites than builders: carriers pick up hammers and become builders.
+  const builderTool = PROFESSIONS.builder.tool!;
+  const sitesWaiting = own.filter((b) => !b.done && b.builderId === null && isReachable(w, b)).length;
+  const comingBuilders = w.settlers.filter(
+    (s) =>
+      s.owner === owner &&
+      ((s.kind === 'builder' && s.tasks.length === 0) || s.tasks.some((t) => t.t === 'retool')),
+  ).length;
+  for (let k = sitesWaiting - comingBuilders; k > 0; k--) {
+    const from = nearestSupply(w, own, builderTool, null);
+    if (!from) break;
+    const s = take(from.door);
+    if (!s) return;
+    from.outReserved[builderTool]++;
     s.tasks = [
-      { t: 'goto', x: b.door.x, y: b.door.y },
-      { t: 'become', b: b.id, kind },
+      { t: 'goto', x: from.door.x, y: from.door.y },
+      { t: 'pickup', b: from.id, res: builderTool },
+      { t: 'retool', kind: 'builder' },
     ];
   }
 
@@ -68,15 +95,27 @@ function dispatchFor(w: World, owner: PlayerId): void {
     }
   }
 
+  const stored = new Map<Resource, number>();
+  const storedOf = (res: Resource) => {
+    let n = stored.get(res);
+    if (n === undefined) {
+      n = 0;
+      for (const b of own) if (BUILDINGS[b.type].storage) n += b.output[res] + b.inbound[res];
+      stored.set(res, n);
+    }
+    return n;
+  };
   for (const b of own) {
     if (!b.done || BUILDINGS[b.type].storage || !isReachable(w, b)) continue;
     for (const res of RESOURCES) {
-      while (b.output[res] - b.outReserved[res] > 0) {
+      const limit = RESOURCE_INFO[res].storeLimit ?? Infinity;
+      while (b.output[res] - b.outReserved[res] > 0 && storedOf(res) < limit) {
         const store = nearestStorage(w, owner, b.door);
         if (!store) return;
         const s = take(b.door);
         if (!s) return;
         assignDelivery(s, b, store, res);
+        stored.set(res, storedOf(res) + 1);
       }
     }
   }
@@ -87,11 +126,12 @@ function stocked(b: Building, res: Resource): number {
   return (b.done ? b.input[res] : b.delivered[res]) + b.inbound[res];
 }
 
-function nearestSupply(w: World, own: Building[], res: Resource, target: Building): Building | undefined {
+/** Nearest pile holding unpromised `res`; distance from `target`'s door, or any when target is null. */
+function nearestSupply(w: World, own: Building[], res: Resource, target: Building | null): Building | undefined {
   let best: Building | undefined;
   for (const b of own) {
     if (b === target || !b.done || !isReachable(w, b) || b.output[res] - b.outReserved[res] <= 0) continue;
-    if (!best || dist(b.door, target.door) < dist(best.door, target.door)) best = b;
+    if (!best || (target && dist(b.door, target.door) < dist(best.door, target.door))) best = b;
   }
   return best;
 }

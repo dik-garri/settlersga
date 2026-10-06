@@ -17,6 +17,15 @@ export const RESOURCES = [
   'coal',
   'ironore',
   'goldore',
+  'iron',
+  'gold',
+  'axe',
+  'saw',
+  'pickaxe',
+  'shovel',
+  'scythe',
+  'rod',
+  'hammer',
 ] as const;
 export type Resource = (typeof RESOURCES)[number];
 export type Stock = Record<Resource, number>;
@@ -55,6 +64,9 @@ export type BuildingType =
   | 'ironmine'
   | 'goldmine'
   | 'stonemine'
+  | 'ironsmelter'
+  | 'goldsmelter'
+  | 'toolsmith'
   | 'tower';
 
 export type SettlerKind =
@@ -73,6 +85,8 @@ export type SettlerKind =
   | 'butcher'
   | 'miner'
   | 'geologist'
+  | 'smelter'
+  | 'toolsmith'
   | 'guard';
 
 /** Player ids start at 1; 0 means "nobody" in per-tile ownership. */
@@ -127,7 +141,9 @@ export type Task =
   | { t: 'build'; b: number; stall: number }
   /** Geologist examines a mountain tile and leaves a sign. */
   | { t: 'prospect'; x: number; y: number; n: number }
-  | { t: 'become'; b: number; kind: SettlerKind };
+  | { t: 'become'; b: number; kind: SettlerKind }
+  /** Take up a profession that has no workplace (e.g. builder), using the tool in hand. */
+  | { t: 'retool'; kind: SettlerKind };
 
 export interface Settler {
   id: number;

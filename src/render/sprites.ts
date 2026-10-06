@@ -439,6 +439,9 @@ export const BUILDING_CANVAS: Record<BuildingType | 'site2' | 'site3', BuildingC
   ironmine: SMALL,
   goldmine: SMALL,
   stonemine: SMALL,
+  ironsmelter: SMALL,
+  goldsmelter: SMALL,
+  toolsmith: SMALL,
   tower: { w: 150, h: 210, ax: 75, ay: 170 },
   site2: { w: 150, h: 90, ax: 75, ay: 50 },
   site3: { w: 220, h: 120, ax: 110, ay: 65 },
@@ -687,7 +690,7 @@ function paintSite(ctx: Ctx, half: number): void {
 
 // ------------------------------------------------- data-described buildings
 
-type Deco = 'chimney' | 'well' | 'nets' | 'pen' | 'sacks' | 'oven' | 'meat' | 'hay';
+type Deco = 'chimney' | 'well' | 'nets' | 'pen' | 'sacks' | 'oven' | 'meat' | 'hay' | 'furnace' | 'anvil';
 
 /** A gabled building described by data, so new building types rarely need a hand-written painter. */
 interface Style {
@@ -847,6 +850,41 @@ function paintDeco(ctx: Ctx, st: Style, deco: Deco): void {
       }
       return;
     }
+    case 'furnace': {
+      // Brick stack with a fire glow and dark smoke.
+      box(ctx, hw * 0.35, -hh * 0.35, 0.16, 0.16, H, st.rise + 14, '#8c4a3a');
+      const [gx, gy] = P(hw, hh * 0.2, 6);
+      ctx.fillStyle = '#ff8a2a';
+      ctx.fillRect(gx - 1, gy - 6, 6, 6);
+      ctx.fillStyle = '#ffd36a';
+      ctx.fillRect(gx + 0.5, gy - 4, 3, 3);
+      const [sx, sy] = P(hw * 0.35, -hh * 0.35, H + st.rise + 18);
+      for (const [dx, dy, r] of [
+        [0, 0, 4],
+        [4, -7, 5],
+        [9, -15, 6],
+      ]) {
+        ctx.beginPath();
+        ctx.arc(sx + dx, sy + dy, r, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(90,90,90,0.5)';
+        ctx.fill();
+      }
+      return;
+    }
+    case 'anvil': {
+      const [x, y] = P(hw + 0.3, hh * 0.3, 0);
+      ctx.fillStyle = '#5e3b1f';
+      ctx.fillRect(x - 3, y - 6, 6, 6);
+      ctx.fillStyle = '#4a4f55';
+      ctx.fillRect(x - 6, y - 9, 12, 3);
+      ctx.beginPath();
+      ctx.moveTo(x + 6, y - 9);
+      ctx.lineTo(x + 10, y - 8);
+      ctx.lineTo(x + 6, y - 6);
+      ctx.closePath();
+      ctx.fill();
+      return;
+    }
     case 'hay': {
       const [x, y] = P(hw + 0.35, hh * 0.4, 0);
       ctx.fillStyle = '#d9b44a';
@@ -951,6 +989,19 @@ const STYLES: Partial<Record<BuildingType, Style>> = {
   },
   pigfarm: { hw: 0.6, hh: 0.6, H: 20, wall: '#a07a50', roof: '#c4a35a', rise: 20, doorDx: 0.5, deco: ['pen'] },
   slaughterhouse: { hw: 0.7, hh: 0.7, H: 24, wall: '#c9c0ae', roof: '#7a2e24', rise: 22, doorDx: 0.5, deco: ['meat'] },
+  ironsmelter: { hw: 0.7, hh: 0.7, H: 22, wall: '#8f7f6e', roof: '#4a4f55', rise: 18, doorDx: 0.5, deco: ['furnace'] },
+  goldsmelter: { hw: 0.7, hh: 0.7, H: 22, wall: '#a89c80', roof: '#7a5a20', rise: 18, doorDx: 0.5, deco: ['furnace'] },
+  toolsmith: {
+    hw: 0.7,
+    hh: 0.7,
+    H: 24,
+    wall: '#d8c8a8',
+    roof: '#5a5048',
+    rise: 22,
+    doorDx: 0.5,
+    timber: true,
+    deco: ['chimney', 'anvil'],
+  },
 };
 
 function paintMill(ctx: Ctx): void {
@@ -1095,6 +1146,9 @@ export const BUILDING_PAINTERS: Record<BuildingType | 'site2' | 'site3', (ctx: C
   ironmine: (ctx) => paintMine(ctx, ORE_COLORS.ironore),
   goldmine: (ctx) => paintMine(ctx, ORE_COLORS.goldore),
   stonemine: (ctx) => paintMine(ctx, ORE_COLORS.stone),
+  ironsmelter: styled('ironsmelter'),
+  goldsmelter: styled('goldsmelter'),
+  toolsmith: styled('toolsmith'),
   tower: paintTower,
   site2: (ctx) => paintSite(ctx, 1),
   site3: (ctx) => paintSite(ctx, 1.5),
@@ -1168,6 +1222,8 @@ const SETTLER_LOOK: Record<SettlerKind, { tunic: string; hat: string; tool?: Too
   butcher: { tunic: '#b83c3c', hat: '#e8e4da' },
   miner: { tunic: '#555b66', hat: '#d9b44a', tool: 'pick' },
   geologist: { tunic: '#7a5c3a', hat: '#3b2b1a', tool: 'hammer' },
+  smelter: { tunic: '#6e4a33', hat: '#3b2b1a' },
+  toolsmith: { tunic: '#5a5048', hat: '#8c4a3a', tool: 'hammer' },
   guard: { tunic: '#a83232', hat: '#8d939a' },
 };
 
@@ -1356,7 +1412,102 @@ function paintFood(ctx: Ctx, res: Resource): void {
         [-0.5, -1.8, 2.6],
       ]) {
         blob(ctx, x, y, r, r * 0.85, ORE_COLORS[res], shade(ORE_COLORS[res], 0.6));
+        blob(ctx, x - r * 0.35, y - r * 0.35, r * 0.3, r * 0.25, 'rgba(255,255,255,0.35)');
       }
+      return;
+    case 'iron':
+    case 'gold': {
+      const c = res === 'iron' ? '#9aa0a6' : '#e2b93b';
+      ctx.fillStyle = shade(c, 0.75);
+      ctx.beginPath();
+      ctx.moveTo(-7, 3);
+      ctx.lineTo(7, 3);
+      ctx.lineTo(5, -2);
+      ctx.lineTo(-5, -2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = shade(c, 1.15);
+      ctx.fillRect(-5, -3, 10, 1.5);
+      return;
+    }
+    default:
+      paintTool(ctx, res);
+  }
+}
+
+/** Tool wares: drawn in the 16×10 ware box around the origin. */
+function paintTool(ctx: Ctx, res: Resource): void {
+  const wood = '#8a5a2c';
+  const steel = '#9aa0a6';
+  ctx.lineCap = 'round';
+  const handle = (x0: number, y0: number, x1: number, y1: number) => {
+    ctx.strokeStyle = wood;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+  };
+  ctx.fillStyle = steel;
+  ctx.strokeStyle = steel;
+  switch (res) {
+    case 'axe':
+      handle(-6, 4, 5, -3);
+      ctx.fillStyle = steel;
+      ctx.beginPath();
+      ctx.moveTo(3, -4);
+      ctx.lineTo(7, -5);
+      ctx.lineTo(7, 1);
+      ctx.lineTo(4, -1);
+      ctx.closePath();
+      ctx.fill();
+      return;
+    case 'saw':
+      ctx.fillRect(-7, -2, 11, 3);
+      for (let x = -7; x < 4; x += 2) {
+        ctx.beginPath();
+        ctx.moveTo(x, 1);
+        ctx.lineTo(x + 1, 3);
+        ctx.lineTo(x + 2, 1);
+        ctx.fill();
+      }
+      ctx.fillStyle = wood;
+      ctx.fillRect(4, -3, 3, 5);
+      return;
+    case 'pickaxe':
+      handle(-1, 5, 1, -2);
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(-7, 0);
+      ctx.quadraticCurveTo(1, -6, 8, 0);
+      ctx.stroke();
+      return;
+    case 'shovel':
+      handle(-7, 2, 3, 0);
+      ctx.beginPath();
+      ctx.ellipse(5.5, -0.5, 3, 2.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    case 'scythe':
+      handle(-6, 5, 2, -4);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(2, -4);
+      ctx.quadraticCurveTo(8, -3, 7, 3);
+      ctx.stroke();
+      return;
+    case 'rod':
+      handle(-7, 4, 6, -4);
+      ctx.strokeStyle = '#d9d2c0';
+      ctx.lineWidth = 0.6;
+      ctx.beginPath();
+      ctx.moveTo(6, -4);
+      ctx.lineTo(6, 3);
+      ctx.stroke();
+      return;
+    case 'hammer':
+      handle(-6, 4, 3, -2);
+      ctx.fillRect(1, -5, 6, 4);
       return;
   }
 }

@@ -1,6 +1,6 @@
 import { CanvasSource, Rectangle, Texture } from 'pixi.js';
 import { ORE_RESOURCES, oreOf, PROFESSIONS } from '../sim/config';
-import { RESOURCES, type BuildingType, type SettlerKind } from '../sim/types';
+import { RESOURCES, type BuildingType, type Resource, type SettlerKind } from '../sim/types';
 import {
   BUILDING_CANVAS,
   BUILDING_PAINTERS,
@@ -151,6 +151,23 @@ export class SpriteAtlas {
     }
     return t;
   }
+}
+
+/** Standalone ware icon for HTML UI, drawn by the same painter as goods on the map. */
+export function wareIcon(res: Resource, size = 18): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = size * dpr;
+  canvas.height = size * dpr;
+  canvas.style.width = `${size}px`;
+  canvas.style.height = `${size}px`;
+  canvas.className = 'ware-icon';
+  const ctx = canvas.getContext('2d')!;
+  const scale = size / 16;
+  ctx.scale(dpr * scale, dpr * scale);
+  ctx.translate(0, 3);
+  paintWare(ctx, res);
+  return canvas;
 }
 
 /** Standalone settler portrait for HTML UI. */

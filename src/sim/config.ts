@@ -26,6 +26,48 @@ export const START_CARRIERS = 12;
 export const START_BUILDERS = 3;
 export const START_PLANKS = 20;
 export const START_STONE = 10;
+/** Tools in the castle at the start, enough for the first workplaces. */
+export const START_TOOLS: Partial<Stock> = { axe: 3, saw: 2, pickaxe: 4, shovel: 2, scythe: 2, rod: 2, hammer: 2 };
+/** Display names and stock-panel groups, kept with the data so new resources are one entry. */
+export type ResourceGroup = 'building' | 'food' | 'metal' | 'tools';
+export const RESOURCE_GROUPS: Record<ResourceGroup, string> = {
+  building: 'Стройматериалы',
+  food: 'Еда',
+  metal: 'Руда и металл',
+  tools: 'Инструменты',
+};
+/**
+ * `storeLimit`: surplus is hauled to warehouses only while fewer than this many units are stored;
+ * beyond that goods wait at the producer, whose full pile pauses it, so carriers are not spent on
+ * goods nobody needs (water is unlimited and only used next door). Unset = no limit.
+ */
+export const RESOURCE_INFO: Record<Resource, { name: string; group: ResourceGroup; storeLimit?: number }> = {
+  log: { name: 'Брёвна', group: 'building' },
+  plank: { name: 'Доски', group: 'building' },
+  stone: { name: 'Камень', group: 'building' },
+  water: { name: 'Вода', group: 'food', storeLimit: 16 },
+  fish: { name: 'Рыба', group: 'food' },
+  grain: { name: 'Зерно', group: 'food' },
+  flour: { name: 'Мука', group: 'food' },
+  bread: { name: 'Хлеб', group: 'food' },
+  pig: { name: 'Свиньи', group: 'food' },
+  meat: { name: 'Мясо', group: 'food' },
+  coal: { name: 'Уголь', group: 'metal' },
+  ironore: { name: 'Железная руда', group: 'metal' },
+  goldore: { name: 'Золотая руда', group: 'metal' },
+  iron: { name: 'Железо', group: 'metal' },
+  gold: { name: 'Золото', group: 'metal' },
+  axe: { name: 'Топоры', group: 'tools' },
+  saw: { name: 'Пилы', group: 'tools' },
+  pickaxe: { name: 'Кирки', group: 'tools' },
+  shovel: { name: 'Лопаты', group: 'tools' },
+  scythe: { name: 'Косы', group: 'tools' },
+  rod: { name: 'Удочки', group: 'tools' },
+  hammer: { name: 'Молотки', group: 'tools' },
+};
+
+/** What the toolsmith can forge. */
+export const TOOLS: readonly Resource[] = ['axe', 'saw', 'pickaxe', 'shovel', 'scythe', 'rod', 'hammer'];
 
 export const TREE_MATURE = 4;
 /** Stone units in a deposit tile at generation, inclusive range. */
@@ -86,38 +128,45 @@ export interface PlantDef {
 export interface ProfessionDef {
   name: string;
   behavior: Behavior;
+  /** Tool a carrier must fetch from storage to take up the profession (it is used up). */
+  tool?: Resource;
   gather?: GatherDef;
   plant?: PlantDef;
 }
 
 export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
   carrier: { name: 'Носильщик', behavior: 'carrier' },
-  builder: { name: 'Строитель', behavior: 'builder' },
-  woodcutter: { name: 'Лесоруб', behavior: 'gather', gather: { res: 'log', radius: 8, workTicks: 40, restTicks: 30 } },
+  builder: { name: 'Строитель', behavior: 'builder', tool: 'hammer' },
+  woodcutter: { name: 'Лесоруб', behavior: 'gather', tool: 'axe', gather: { res: 'log', radius: 8, workTicks: 40, restTicks: 30 } },
   stonecutter: {
     name: 'Каменотёс',
     behavior: 'gather',
+    tool: 'pickaxe',
     gather: { res: 'stone', radius: 8, workTicks: 50, restTicks: 30 },
   },
   forester: {
     name: 'Лесничий',
     behavior: 'plant',
+    tool: 'shovel',
     plant: { what: 'tree', radius: 6, workTicks: 30, restTicks: 60 },
   },
   waterman: { name: 'Водонос', behavior: 'gather', gather: { res: 'water', radius: 7, workTicks: 20, restTicks: 20 } },
-  fisher: { name: 'Рыбак', behavior: 'gather', gather: { res: 'fish', radius: 8, workTicks: 60, restTicks: 30 } },
+  fisher: { name: 'Рыбак', behavior: 'gather', tool: 'rod', gather: { res: 'fish', radius: 8, workTicks: 60, restTicks: 30 } },
   farmer: {
     name: 'Фермер',
     behavior: 'farm',
+    tool: 'scythe',
     gather: { res: 'grain', radius: 5, workTicks: 30, restTicks: 15 },
     plant: { what: 'grain', radius: 5, workTicks: 25, restTicks: 15, maxNearby: 10 },
   },
-  sawmiller: { name: 'Пильщик', behavior: 'workshop' },
+  sawmiller: { name: 'Пильщик', behavior: 'workshop', tool: 'saw' },
   miller: { name: 'Мельник', behavior: 'workshop' },
   baker: { name: 'Пекарь', behavior: 'workshop' },
   pigfarmer: { name: 'Свинопас', behavior: 'workshop' },
   butcher: { name: 'Мясник', behavior: 'workshop' },
-  miner: { name: 'Шахтёр', behavior: 'workshop' },
+  miner: { name: 'Шахтёр', behavior: 'workshop', tool: 'pickaxe' },
+  smelter: { name: 'Плавильщик', behavior: 'workshop' },
+  toolsmith: { name: 'Инструментальщик', behavior: 'workshop' },
   geologist: { name: 'Геолог', behavior: 'prospect' },
   guard: { name: 'Стражник', behavior: 'garrison' },
 };
@@ -132,17 +181,22 @@ export interface Recipe {
   inputs: Partial<Stock>;
   inputsAnyOf?: readonly Resource[];
   outputs: Partial<Stock>;
+  /** Instead of fixed outputs: one unit of whichever of these the owner needs most (see `chooseOutput`). */
+  outputChoice?: readonly Resource[];
+  /** With `outputChoice`: keep at least this many of each in stock; beyond that, only make what is awaited. */
+  keepInStock?: number;
   ticks: number;
 }
 
 /** Build-menu tab. */
-export type Category = 'housing' | 'resources' | 'food' | 'mining' | 'military';
+export type Category = 'housing' | 'resources' | 'food' | 'mining' | 'metal' | 'military';
 
 export const CATEGORIES: Record<Category, string> = {
   housing: 'Жильё',
   resources: 'Сырьё',
   food: 'Еда',
   mining: 'Горное дело',
+  metal: 'Металл',
   military: 'Военное',
 };
 
@@ -319,6 +373,37 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   ironmine: mine('Железный рудник', 'ironore'),
   goldmine: mine('Золотой рудник', 'goldore'),
   stonemine: mine('Каменоломня в горе', 'stone'),
+
+  ironsmelter: {
+    name: 'Плавильня железа',
+    w: 2,
+    h: 2,
+    cost: { plank: 2, stone: 3 },
+    worker: 'smelter',
+    playerBuildable: true,
+    category: 'metal',
+    recipe: { inputs: { ironore: 1, coal: 1 }, outputs: { iron: 1 }, ticks: 70 },
+  },
+  goldsmelter: {
+    name: 'Плавильня золота',
+    w: 2,
+    h: 2,
+    cost: { plank: 2, stone: 3 },
+    worker: 'smelter',
+    playerBuildable: true,
+    category: 'metal',
+    recipe: { inputs: { goldore: 1, coal: 1 }, outputs: { gold: 1 }, ticks: 70 },
+  },
+  toolsmith: {
+    name: 'Инструментальщик',
+    w: 2,
+    h: 2,
+    cost: { plank: 3, stone: 2 },
+    worker: 'toolsmith',
+    playerBuildable: true,
+    category: 'metal',
+    recipe: { inputs: { iron: 1, coal: 1 }, outputs: {}, outputChoice: TOOLS, keepInStock: 2, ticks: 80 },
+  },
 
   tower: {
     name: 'Сторожевая башня',

@@ -1,9 +1,21 @@
-import { buildingIcon, settlerIcon } from '../render/atlas';
-import { BUILDINGS, CATEGORIES, costOf, gatheredBy, INPUT_CAP, OUTPUT_CAP, PROFESSIONS, type Category } from '../sim/config';
-import { oreLeft } from '../sim/buildings';
+import { buildingIcon, settlerIcon, wareIcon } from '../render/atlas';
+import {
+  BUILDINGS,
+  CATEGORIES,
+  costOf,
+  gatheredBy,
+  INPUT_CAP,
+  OUTPUT_CAP,
+  PROFESSIONS,
+  RESOURCE_GROUPS,
+  RESOURCE_INFO,
+  type Category,
+  type ResourceGroup,
+} from '../sim/config';
+import { available, chooseOutput, oreLeft } from '../sim/buildings';
 import { hasGatherTargetNear } from '../sim/nature';
 import { RESOURCES, type Building, type BuildingType, type Resource, type SettlerKind } from '../sim/types';
-import type { World } from '../sim/world';
+import { LOCAL_PLAYER, type World } from '../sim/world';
 import type { GameState, Placeable } from './state';
 
 const SPEEDS = [1, 2, 4];
@@ -25,21 +37,10 @@ const MENU = (Object.keys(CATEGORIES) as Category[]).map((category) => ({
 
 const isBuilding = (p: Placeable): p is BuildingType => p in BUILDINGS;
 
-const RESOURCE_UI: Record<Resource, { icon: string; name: string }> = {
-  log: { icon: '🪵', name: 'Брёвна' },
-  plank: { icon: '🪚', name: 'Доски' },
-  stone: { icon: '🪨', name: 'Камень' },
-  water: { icon: '💧', name: 'Вода' },
-  fish: { icon: '🐟', name: 'Рыба' },
-  grain: { icon: '🌾', name: 'Зерно' },
-  flour: { icon: '🥣', name: 'Мука' },
-  bread: { icon: '🍞', name: 'Хлеб' },
-  pig: { icon: '🐖', name: 'Свиньи' },
-  meat: { icon: '🥩', name: 'Мясо' },
-  coal: { icon: '⚫', name: 'Уголь' },
-  ironore: { icon: '🟤', name: 'Железная руда' },
-  goldore: { icon: '🟡', name: 'Золотая руда' },
-};
+/** Shown permanently in the top bar; everything else is in the stock panel (📦). */
+const PINNED: readonly Resource[] = ['plank', 'stone', 'bread', 'fish', 'meat', 'coal', 'iron', 'gold'];
+
+const nameOf = (r: Resource) => RESOURCE_INFO[r].name;
 
 const GATHER_PLACE: Partial<Record<BuildingType, string>> = {
   woodcutter: 'в лесу',
@@ -49,13 +50,6 @@ const GATHER_PLACE: Partial<Record<BuildingType, string>> = {
   farm: 'в поле',
 };
 
-function costLabel(type: BuildingType): string {
-  const cost = costOf(type);
-  return RESOURCES.filter((r) => cost[r] > 0)
-    .map((r) => `${cost[r]} ${RESOURCE_UI[r].icon}`)
-    .join(' ');
-}
-
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -63,9 +57,31 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
   return e;
 }
 
+/** "2 [plank] 1 [stone]" with drawn ware icons. */
+function costLabel(type: BuildingType): HTMLElement {
+  const cost = costOf(type);
+  const out = el('span', 'cost-items');
+  for (const r of RESOURCES) {
+    if (cost[r] > 0) out.append(String(cost[r]), wareIcon(r, 14), ' ');
+  }
+  return out;
+}
+
+/** Total of `res` in the local player's warehouses. */
+function inStorage(world: World, res: Resource): number {
+  let n = 0;
+  for (const b of world.buildings.values()) {
+    if (b.owner === LOCAL_PLAYER && BUILDINGS[b.type].storage) n += b.output[res];
+  }
+  return n;
+}
+
 /** HTML overlay: stock, population, speed, build menu and info about the selected building. */
 export class Hud {
   private readonly stockEl = el('div', 'stock');
+  private readonly stockPanel = el('div', 'panel stock-panel');
+  /** Number elements per resource, in the top bar and the stock panel; built once, updated in place. */
+  private readonly stockValues: [Resource, HTMLElement][] = [];
   private readonly popEl = el('div', 'pop');
   private readonly speedButtons = new Map<number | 'pause', HTMLButtonElement>();
   private readonly buildButtons = new Map<Placeable, HTMLButtonElement>();
@@ -85,7 +101,29 @@ export class Hud {
     actions: { onSave(): void; onLoad(): void },
   ) {
     const top = el('div', 'panel top');
+    for (const r of PINNED) this.stockEl.append(this.stat(r));
+    const more = el('button', 'stock-toggle', '📦');
+    more.title = 'Весь склад';
+    more.onclick = () => {
+      this.stockPanel.hidden = !this.stockPanel.hidden;
+      more.blur();
+    };
+    this.stockEl.append(more);
     top.append(this.stockEl, this.popEl);
+    this.stockPanel.hidden = true;
+    for (const [group, title] of Object.entries(RESOURCE_GROUPS) as [ResourceGroup, string][]) {
+      this.stockPanel.append(el('h4', '', title));
+      const grid = el('div', 'stock-grid');
+      for (const r of RESOURCES) {
+        if (RESOURCE_INFO[r].group !== group) continue;
+        const value = el('b', '', '0');
+        const row = el('span', 'stock-row');
+        row.append(wareIcon(r), el('span', '', nameOf(r)), value);
+        grid.append(row);
+        this.stockValues.push([r, value]);
+      }
+      this.stockPanel.append(grid);
+    }
 
     const speed = el('div', 'panel speed');
     const pause = el('button', '', '⏸');
@@ -135,7 +173,9 @@ export class Hud {
       types.forEach((type, i) => {
         const b = el('button', 'build-btn');
         if (isBuilding(type)) {
-          b.append(buildingIcon(type), el('span', 'name', BUILDINGS[type].name), el('span', 'cost', `${costLabel(type)} · [${i + 1}]`));
+          const cost = el('span', 'cost');
+          cost.append(costLabel(type), `· [${i + 1}]`);
+          b.append(buildingIcon(type), el('span', 'name', BUILDINGS[type].name), cost);
         } else {
           const cmd = COMMANDS[type];
           b.append(settlerIcon(type), el('span', 'name', cmd.name), el('span', 'cost', `${cmd.hint} · [${i + 1}]`));
@@ -153,7 +193,7 @@ export class Hud {
     this.showTab(0);
 
     this.infoEl.hidden = true;
-    root.append(top, speed, build, this.infoEl, this.hintEl, this.toastEl);
+    root.append(top, this.stockPanel, speed, build, this.infoEl, this.hintEl, this.toastEl);
   }
 
   showTab(t: number): void {
@@ -188,10 +228,7 @@ export class Hud {
     if (nowMs - this.lastUpdate < 150) return;
     this.lastUpdate = nowMs;
     const { world, state } = this;
-    const store = world.castle.output;
-
-    this.stockEl.innerHTML = '';
-    this.stockEl.append(...RESOURCES.map((r) => this.stat(RESOURCE_UI[r].icon, RESOURCE_UI[r].name, store[r])));
+    for (const [r, value] of this.stockValues) value.textContent = String(inStorage(world, r));
 
     const counts = new Map<SettlerKind, number>();
     let busy = 0;
@@ -221,10 +258,12 @@ export class Hud {
     this.renderInfo();
   }
 
-  private stat(icon: string, label: string, value: number): HTMLElement {
+  private stat(r: Resource): HTMLElement {
     const s = el('span', 'stat');
-    s.title = label;
-    s.append(el('span', 'icon', icon), el('b', '', String(value)));
+    s.title = nameOf(r);
+    const value = el('b', '', '0');
+    s.append(wareIcon(r, 20), value);
+    this.stockValues.push([r, value]);
     return s;
   }
 
@@ -238,35 +277,45 @@ export class Hud {
       rows.push(['Стройка', `${Math.floor(this.world.buildProgress(b) * 100)}%`]);
       const cost = costOf(b.type);
       for (const r of RESOURCES) {
-        if (cost[r] > 0) rows.push([RESOURCE_UI[r].name, `${b.delivered[r]} / ${cost[r]} (в пути ${b.inbound[r]})`]);
+        if (cost[r] > 0) rows.push([nameOf(r), `${b.delivered[r]} / ${cost[r]} (в пути ${b.inbound[r]})`]);
       }
       rows.push(['Строитель', b.builderId !== null ? 'на месте или в пути' : 'ожидается']);
     } else if (def.residence) {
       rows.push(['Жители', `${b.spawned} / ${def.residence.capacity}`]);
       rows.push(['Статус', b.spawned < def.residence.capacity ? 'заселяется' : 'заселён']);
     } else if (def.storage) {
-      for (const r of RESOURCES) rows.push([RESOURCE_UI[r].name, String(b.output[r])]);
+      for (const r of RESOURCES) if (b.output[r] > 0) rows.push([nameOf(r), String(b.output[r])]);
     } else {
       const worker = this.world.getSettler(b.workerId);
-      const workerName = worker ? PROFESSIONS[worker.kind].name : b.workerRequested ? 'идёт' : 'нет свободных';
+      const tool = PROFESSIONS[def.worker!].tool;
+      const workerName = worker
+        ? PROFESSIONS[worker.kind].name
+        : b.workerRequested
+          ? 'идёт'
+          : tool && available(this.world, b.owner, tool) === 0
+            ? `нет инструмента: ${nameOf(tool).toLowerCase()}`
+            : 'нет свободных носильщиков';
       rows.push(['Работник', workerName]);
       rows.push(['Статус', this.status(b)]);
       const gather = gatheredBy(b.type);
       if (def.recipe) {
         for (const r of RESOURCES) {
-          if (def.recipe.inputs[r]) rows.push([`${RESOURCE_UI[r].name} (вход)`, `${b.input[r]} / ${INPUT_CAP}`]);
+          if (def.recipe.inputs[r]) rows.push([`${nameOf(r)} (вход)`, `${b.input[r]} / ${INPUT_CAP}`]);
         }
         const anyOf = def.recipe.inputsAnyOf;
         if (anyOf) {
-          const held = anyOf.map((r) => `${RESOURCE_UI[r].icon}${b.input[r]}`).join(' ');
+          const held = anyOf.map((r) => `${nameOf(r).toLowerCase()} ${b.input[r]}`).join(', ');
           rows.push(['Еда (вход)', `${held} / ${INPUT_CAP}`]);
         }
         if (def.mine) rows.push(['Руды в радиусе', String(oreLeft(this.world, b))]);
         for (const r of RESOURCES) {
-          if (def.recipe.outputs[r]) rows.push([RESOURCE_UI[r].name, `${b.output[r]} / ${OUTPUT_CAP}`]);
+          if (def.recipe.outputs[r]) rows.push([nameOf(r), `${b.output[r]} / ${OUTPUT_CAP}`]);
+        }
+        for (const r of def.recipe.outputChoice ?? []) {
+          if (b.output[r] > 0) rows.push([nameOf(r), `${b.output[r]} / ${OUTPUT_CAP}`]);
         }
       } else if (gather) {
-        rows.push([RESOURCE_UI[gather.res].name, `${b.output[gather.res]} / ${OUTPUT_CAP}`]);
+        rows.push([nameOf(gather.res), `${b.output[gather.res]} / ${OUTPUT_CAP}`]);
       } else if (b.type === 'forester') {
         rows.push(['Посажено всего', String(this.world.stats.treesPlanted)]);
       }
@@ -289,9 +338,10 @@ export class Hud {
       case 'workshop': {
         const recipe = def.recipe!;
         if (def.mine && oreLeft(this.world, b) === 0) return 'выработана';
+        if (recipe.outputChoice && !chooseOutput(this.world, b, recipe)) return 'запас полон, заказов нет';
         if (RESOURCES.some((r) => b.output[r] + (recipe.outputs[r] ?? 0) > OUTPUT_CAP)) return 'склад полон';
         const missing = RESOURCES.filter((r) => b.input[r] < (recipe.inputs[r] ?? 0)).map((r) =>
-          RESOURCE_UI[r].name.toLowerCase(),
+          nameOf(r).toLowerCase(),
         );
         if (recipe.inputsAnyOf && !recipe.inputsAnyOf.some((r) => b.input[r] > 0)) missing.push('еды');
         if (missing.length > 0) return `нет: ${missing.join(', ')}`;
@@ -307,7 +357,7 @@ export class Hud {
         if (b.output[gather.res] >= OUTPUT_CAP) return 'склад полон';
         if (outside) return GATHER_PLACE[b.type] ?? 'работает';
         if (behavior === 'gather' && !hasGatherTargetNear(this.world, b, gather)) {
-          return `нет поблизости: ${RESOURCE_UI[gather.res].name.toLowerCase()}`;
+          return `нет поблизости: ${nameOf(gather.res).toLowerCase()}`;
         }
         return 'отдыхает';
       }

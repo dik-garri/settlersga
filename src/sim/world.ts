@@ -11,6 +11,7 @@ import {
   START_CARRIERS,
   START_PLANKS,
   START_STONE,
+  START_TOOLS,
   totalCost,
 } from './config';
 import { dispatch } from './logistics';
@@ -93,6 +94,7 @@ export class World {
     const castle = addBuilding(this, 'castle', x, y, id, true);
     castle.output.plank = START_PLANKS;
     castle.output.stone = START_STONE;
+    for (const [res, n] of Object.entries(START_TOOLS)) castle.output[res as keyof Stock] += n ?? 0;
     const player = { id, castleId: castle.id };
     this.players.push(player);
     recomputeTerritory(this);

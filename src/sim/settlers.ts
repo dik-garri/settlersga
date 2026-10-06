@@ -110,6 +110,12 @@ export function updateSettler(w: World, s: Settler): void {
       s.tasks.shift();
       return;
     }
+    case 'retool':
+      s.kind = task.kind;
+      s.home = null;
+      s.carrying = null;
+      s.tasks.shift();
+      return;
     case 'prospect': {
       s.working = true;
       if (--task.n > 0) return;
@@ -154,6 +160,7 @@ export function updateSettler(w: World, s: Settler): void {
       s.kind = task.kind;
       s.home = b.id;
       s.inside = b.id;
+      s.carrying = null; // the tool, if the profession needs one
       b.workerId = s.id;
       b.workerRequested = false;
       s.tasks.shift();
