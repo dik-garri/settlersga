@@ -1,4 +1,5 @@
 import { isReachable, nearestStorage } from './buildings';
+import { staffGarrisons } from './military';
 import { BUILDINGS, costOf, INPUT_CAP, PROFESSIONS, RESOURCE_INFO } from './config';
 import { RESOURCES, type Building, type PlayerId, type Point, type Resource, type Settler } from './types';
 import type { World } from './world';
@@ -30,7 +31,6 @@ export function dispatch(w: World): void {
  */
 function dispatchFor(w: World, owner: PlayerId): void {
   const idle = w.settlers.filter((s) => s.owner === owner && s.kind === 'carrier' && s.tasks.length === 0);
-  if (idle.length === 0) return;
   const take = (near: Point): Settler | undefined => {
     let bestIdx = -1;
     for (let i = 0; i < idle.length; i++) {
@@ -48,7 +48,7 @@ function dispatchFor(w: World, owner: PlayerId): void {
     const from = tool ? nearestSupply(w, own, tool, b) : undefined;
     if (tool && !from) continue; // waits for the toolsmith
     const s = take(from ? from.door : b.door);
-    if (!s) return;
+    if (!s) break;
     b.workerRequested = true;
     s.tasks = [];
     if (from && tool) {
@@ -58,13 +58,16 @@ function dispatchFor(w: World, owner: PlayerId): void {
     s.tasks.push({ t: 'goto', x: b.door.x, y: b.door.y }, { t: 'become', b: b.id, kind });
   }
 
+  staffGarrisons(w, own, take, (res, target) => nearestPile(w, own, res, target.door));
+  if (idle.length === 0) return;
+
   // More construction sites than builders: carriers pick up hammers and become builders.
   const builderTool = PROFESSIONS.builder.tool!;
   const sitesWaiting = own.filter((b) => !b.done && b.builderId === null && isReachable(w, b)).length;
   const comingBuilders = w.settlers.filter(
     (s) =>
       s.owner === owner &&
-      ((s.kind === 'builder' && s.tasks.length === 0) || s.tasks.some((t) => t.t === 'retool')),
+      ((s.kind === 'builder' && s.tasks.length === 0) || s.tasks.some((t) => t.t === 'retool' && t.kind === 'builder')),
   ).length;
   for (let k = sitesWaiting - comingBuilders; k > 0; k--) {
     const from = nearestSupply(w, own, builderTool, null);
@@ -134,6 +137,16 @@ function nearestSupply(w: World, own: Building[], res: Resource, target: Buildin
   for (const b of own) {
     if (b === target || !b.done || !isReachable(w, b) || b.output[res] - b.outReserved[res] <= 0) continue;
     if (!best || (target && dist(b.door, target.door) < dist(best.door, target.door))) best = b;
+  }
+  return best;
+}
+
+/** Nearest pile (any building, including a warehouse at the destination) holding unpromised `res`. */
+function nearestPile(w: World, own: Building[], res: Resource, near: Point): Building | undefined {
+  let best: Building | undefined;
+  for (const b of own) {
+    if (!b.done || !isReachable(w, b) || b.output[res] - b.outReserved[res] <= 0) continue;
+    if (!best || dist(b.door, near) < dist(best.door, near)) best = b;
   }
   return best;
 }

@@ -5,7 +5,7 @@ import { CHUNK } from '../sim/map';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import type { SpriteAtlas } from './atlas';
 import { depthOf, HALF_H, HALF_W, toScreen, toTile } from './iso';
-import { groundVariants, type GroundKind } from './sprites';
+import { groundVariants, PLAYER_COLORS, type GroundKind } from './sprites';
 
 const TERRAIN_KIND: Record<Terrain, GroundKind> = {
   [Terrain.Water]: 'water',
@@ -25,6 +25,9 @@ function hash(i: number): number {
 }
 
 interface BuildingView {
+  /** Owner the flag was last drawn for (buildings change hands when conquered). */
+  owner: number;
+  flag: Sprite;
   /** Tiles the body and the door pile are registered under (see `addStatic`). */
   at: { x: number; y: number };
   doorAt: { x: number; y: number };
@@ -332,16 +335,32 @@ export class GameRenderer {
     const y0 = Math.floor(c / map.chunksX) * CHUNK;
     const x1 = Math.min(map.w, x0 + CHUNK);
     const y1 = Math.min(map.h, y0 + CHUNK);
-    const owned = (x: number, y: number) => map.inBounds(x, y) && map.owner[map.idx(x, y)] === LOCAL_PLAYER;
+    const ownerAt = (x: number, y: number) => (map.inBounds(x, y) ? map.owner[map.idx(x, y)] : 0);
     let dim = false;
     for (let y = y0; y < y1; y++) {
       for (let x = x0; x < x1; x++) {
-        if (owned(x, y)) continue;
+        if (ownerAt(x, y) === LOCAL_PLAYER) continue;
         g.poly(this.diamond(x, y));
         dim = true;
       }
     }
     if (dim) g.fill({ color: 0x0b1420, alpha: 0.3 });
+    // Every player's border in its colour: edges between a tile it owns and one it does not.
+    const owners = new Set<number>();
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) if (ownerAt(x, y)) owners.add(ownerAt(x, y));
+    for (const player of owners) this.drawBorder(g, player, x0, y0, x1, y1, ownerAt);
+  }
+
+  private drawBorder(
+    g: Graphics,
+    player: number,
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    ownerAt: (x: number, y: number) => number,
+  ): void {
+    const owned = (x: number, y: number) => ownerAt(x, y) === player;
     let border = false;
     for (let y = y0; y < y1; y++) {
       for (let x = x0; x < x1; x++) {
@@ -365,7 +384,7 @@ export class GameRenderer {
         }
       }
     }
-    if (border) g.stroke({ width: 3, color: 0x2b5fb4, alpha: 0.85 });
+    if (border) g.stroke({ width: 3, color: PLAYER_COLORS[(player - 1) % PLAYER_COLORS.length], alpha: 0.85 });
   }
 
   /** Fields are flat, so they live in the ground layer of their chunk rather than among sorted objects. */
@@ -454,6 +473,10 @@ export class GameRenderer {
     for (const b of this.sim.buildings.values()) {
       let v = this.buildingViews.get(b.id);
       if (!v) v = this.createBuildingView(b);
+      if (v.owner !== b.owner) {
+        v.owner = b.owner;
+        v.flag.texture = this.atlas.get(`flag:${b.owner}`);
+      }
       const progress = this.sim.buildProgress(b);
       v.site.visible = !b.done;
       if (b.done) {
@@ -486,13 +509,23 @@ export class GameRenderer {
     const d = toScreen(b.door.x, b.door.y);
     front.position.set(d.x, d.y);
     front.zIndex = depthOf(b.door.x, b.door.y) - 0.05;
-    const flag = new Sprite(this.atlas.get('flag'));
+    const flag = new Sprite(this.atlas.get(`flag:${b.owner}`));
     flag.position.set(-16, 3);
     front.addChild(flag);
 
     this.addStatic(body, cx, cy);
     this.addStatic(front, b.door.x, b.door.y);
-    const v: BuildingView = { at: { x: cx, y: cy }, doorAt: { ...b.door }, body, site, main, front, pileKey: '' };
+    const v: BuildingView = {
+      owner: b.owner,
+      flag,
+      at: { x: cx, y: cy },
+      doorAt: { ...b.door },
+      body,
+      site,
+      main,
+      front,
+      pileKey: '',
+    };
     this.buildingViews.set(b.id, v);
     return v;
   }
@@ -526,6 +559,14 @@ export class GameRenderer {
   }
 
   private syncSettlers(alpha: number, timeMs: number): void {
+    if (this.settlerViews.size > this.sim.settlers.length) {
+      // Some settlers died.
+      for (const [id, v] of this.settlerViews) {
+        if (this.sim.settlerById.has(id)) continue;
+        v.root.destroy({ children: true });
+        this.settlerViews.delete(id);
+      }
+    }
     for (const s of this.sim.settlers) {
       let v = this.settlerViews.get(s.id);
       if (!v) v = this.createSettlerView(s);
@@ -553,7 +594,9 @@ export class GameRenderer {
       let frame = 'stand';
       if (s.working) frame = Math.floor(timeMs / 220) % 2 ? 'work' : 'stand';
       else if (moving) frame = Math.floor(timeMs / 160) % 2 ? 'walk' : 'stand';
-      v.body.texture = this.atlas.get(`settler:${s.kind}:${frame}`);
+      v.body.texture = this.atlas.get(
+        s.kind === 'soldier' ? `settler:soldier:${frame}:${s.owner}` : `settler:${s.kind}:${frame}`,
+      );
       v.body.scale.x = v.facing;
 
       v.root.position.set(p.x, p.y - (moving && frame === 'walk' ? 1 : 0));

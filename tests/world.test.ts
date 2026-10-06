@@ -159,7 +159,7 @@ describe('World', () => {
     }
   });
 
-  it('a garrisoned guard tower pushes the border out', () => {
+  it('a garrisoned tower pushes the border out', () => {
     const world = new World(42);
     const c = world.castle;
     const owned = () => world.map.owner.reduce((sum, v) => sum + v, 0);
@@ -182,7 +182,9 @@ describe('World', () => {
     run(world, 3000);
 
     expect(tower.done).toBe(true);
-    expect(world.getSettler(tower.workerId)?.kind).toBe('guard');
+    // Soldiers from the castle's reserve man it.
+    expect(tower.garrison.length).toBeGreaterThan(0);
+    expect(tower.garrison.every((id) => world.getSettler(id)?.kind === 'soldier')).toBe(true);
     expect(owned()).toBeGreaterThan(before + 40);
     expect(world.map.owner[world.map.idx(tower.x, tower.y)]).toBe(1);
   });

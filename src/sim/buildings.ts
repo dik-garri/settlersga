@@ -48,6 +48,8 @@ export function addBuilding(w: World, type: BuildingType, x: number, y: number, 
     unreachableUntil: 0,
     spawned: 0,
     priority: false,
+    garrison: [],
+    garrisonInbound: 0,
   };
   for (let dy = 0; dy < def.h; dy++) {
     for (let dx = 0; dx < def.w; dx++) {
@@ -75,6 +77,8 @@ export function spawnSettler(w: World, kind: SettlerKind, at: Building): Settler
     home: null,
     idleTicks: 0,
     working: false,
+    hp: PROFESSIONS[kind].hp ?? 0,
+    opponent: null,
   };
   w.settlers.push(s);
   w.settlerById.set(s.id, s);
@@ -226,24 +230,34 @@ export function updateBuilding(w: World, b: Building): void {
 }
 
 /** Whether the building currently projects territory. */
-function claimsTerritory(b: Building): boolean {
+export function claimsTerritory(b: Building): boolean {
   const def = BUILDINGS[b.type];
-  return !!def.territory && b.done && (def.worker === null || b.workerId !== null);
+  if (!def.territory || !b.done) return false;
+  if (def.garrison) return def.garrison.claimsWhenEmpty === true || b.garrison.length > 0;
+  return def.worker === null || b.workerId !== null;
 }
 
-/** Rebuilds per-tile ownership. Earlier buildings win where claims overlap. */
+/**
+ * Rebuilds per-tile ownership. Where claims overlap the nearest claiming building wins (ties: the
+ * earlier one), so borders run between rival strongholds and a building always holds its own ground.
+ */
 export function recomputeTerritory(w: World): void {
   const m = w.map;
   m.owner.fill(0);
+  const best = new Float32Array(m.w * m.h).fill(Infinity);
   for (const b of w.buildings.values()) {
     if (!claimsTerritory(b)) continue;
     const r = BUILDINGS[b.type].territory!;
     const c = centerOf(b);
     for (let y = Math.floor(c.y - r); y <= Math.ceil(c.y + r); y++) {
       for (let x = Math.floor(c.x - r); x <= Math.ceil(c.x + r); x++) {
-        if (!m.inBounds(x, y) || Math.hypot(x - c.x, y - c.y) > r) continue;
+        const d = Math.hypot(x - c.x, y - c.y);
+        if (!m.inBounds(x, y) || d > r) continue;
         const i = m.idx(x, y);
-        if (m.owner[i] === 0) m.owner[i] = b.owner;
+        if (d < best[i]) {
+          best[i] = d;
+          m.owner[i] = b.owner;
+        }
       }
     }
   }

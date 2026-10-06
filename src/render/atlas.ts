@@ -15,6 +15,7 @@ import {
   paintSettler,
   paintTree,
   paintWare,
+  PLAYER_COLORS,
   type GroundKind,
   type SettlerFrame,
 } from './sprites';
@@ -124,7 +125,13 @@ export class SpriteAtlas {
       }
     }
     for (const res of RESOURCES) a.add(`ware:${res}`, 16, 10, 8, 5, (ctx) => paintWare(ctx, res));
-    a.add('flag', 14, 28, 2, 26, paintFlag);
+    // Per-player variants: door flags and soldiers in the owner's colour.
+    PLAYER_COLORS.forEach((color, k) => {
+      a.add(`flag:${k + 1}`, 14, 28, 2, 26, (ctx) => paintFlag(ctx, color));
+      for (const frame of ['stand', 'walk', 'work'] as SettlerFrame[]) {
+        a.add(`settler:soldier:${frame}:${k + 1}`, 20, 32, 10, 29, (ctx) => paintSettler(ctx, 'soldier', frame, color));
+      }
+    });
     this.textures = a.build();
   }
 

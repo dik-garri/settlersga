@@ -12,6 +12,7 @@ import {
   totalCost,
   UNREACHABLE_TICKS,
 } from './config';
+import { assaultTick, joinTick, soldierIdle } from './military';
 import { canPlant, findGatherTarget, findPlotFor, harvest, isGatherTarget, plant, type Target } from './nature';
 import { findPath } from './pathfinding';
 import { RESOURCES, type Building, type Point, type Settler, type Task } from './types';
@@ -25,6 +26,11 @@ type GotoTarget = { x: number; y: number; adj?: boolean };
 export function updateSettler(w: World, s: Settler): void {
   s.working = false;
   const task = s.tasks[0];
+  // A defender called out to a duel stands and fights; the attacker's `assault` task resolves it.
+  if (s.opponent !== null && task?.t !== 'assault') {
+    s.working = true;
+    return;
+  }
   if (!task) {
     idle(w, s);
     return;
@@ -112,10 +118,15 @@ export function updateSettler(w: World, s: Settler): void {
     }
     case 'retool':
       s.kind = task.kind;
+      s.hp = PROFESSIONS[task.kind].hp ?? 0;
       s.home = null;
       s.carrying = null;
       s.tasks.shift();
       return;
+    case 'join':
+      return joinTick(w, s, task);
+    case 'assault':
+      return assaultTick(w, s, task);
     case 'prospect': {
       s.working = true;
       if (--task.n > 0) return;
@@ -260,6 +271,9 @@ export function abort(w: World, s: Settler): void {
       case 'become':
         if (b) b.workerRequested = false;
         break;
+      case 'join':
+        if (b) b.garrisonInbound--;
+        break;
     }
   }
   s.tasks = [];
@@ -380,6 +394,10 @@ function idle(w: World, s: Settler): void {
     case 'prospect':
       // Errand finished (or aborted): back to carrying.
       s.kind = 'carrier';
+      return;
+
+    case 'soldier':
+      soldierIdle(w, s);
       return;
   }
 }

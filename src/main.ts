@@ -34,7 +34,9 @@ async function main() {
     params.delete('load');
     history.replaceState(null, '', `${location.pathname}${params.size ? `?${params}` : ''}`);
   }
-  const world = save ? World.load(save) : new World(seed, { size });
+  // The local player and one (for now passive) opponent unless ?players= says otherwise.
+  const players = params.has('players') ? Number(params.get('players')) : 2;
+  const world = save ? World.load(save) : new World(seed, { size, players });
   const state = createState();
   const atlas = new SpriteAtlas();
   const renderer = new GameRenderer(app, world, atlas);
@@ -82,7 +84,7 @@ async function main() {
     minimap.update(now, app.screen.width, app.screen.height);
   });
 
-  Object.assign(window, { world, seed, state });
+  Object.assign(window, { world, seed, state, camera });
   if (save) console.info(`Loaded save at tick ${world.tick}`);
   else console.info(`Settlers prototype, seed ${seed} (add ?seed=${seed} to replay this map)`);
 }

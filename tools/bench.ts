@@ -5,6 +5,7 @@
  *   npm run sim:bench -- --size=256 --settlers=1000 --ticks=3000
  */
 import { spawnSettler } from '../src/sim/buildings';
+import { PROFESSIONS } from '../src/sim/config';
 import { pathStats } from '../src/sim/pathfinding';
 import { World } from '../src/sim/world';
 import { arg, placeNear } from './scenario';
@@ -33,6 +34,8 @@ for (let cy = 12; cy < size - 8; cy += 16) {
   }
 }
 while (w.settlers.length < target) spawnSettler(w, 'carrier', w.castle);
+// Enough tools for every workplace, so the bench measures a working economy rather than idle huts.
+for (const tool of Object.values(PROFESSIONS).map((p) => p.tool)) if (tool) w.castle.output[tool] = target;
 
 const warmup = 600;
 for (let i = 0; i < warmup; i++) w.step();
