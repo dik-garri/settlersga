@@ -367,6 +367,7 @@ export class Hud {
       for (const r of RESOURCES) {
         if (cost[r] > 0) rows.push([nameOf(r), `${b.delivered[r]} / ${cost[r]} (в пути ${b.inbound[r]})`]);
       }
+      if (!b.levelled) rows.push(['Выравнивание', b.diggerId !== null ? 'землекоп работает' : 'ждёт землекопа']);
       rows.push(['Строитель', b.builderId !== null ? 'на месте или в пути' : 'ожидается']);
     } else if (def.residence) {
       rows.push(['Жители', `${b.spawned} / ${def.residence.capacity}`]);

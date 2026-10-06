@@ -184,7 +184,7 @@ function logEnds(ctx: Ctx, at: [number, number], count: number) {
 
 // ---------------------------------------------------------------- terrain
 
-export type GroundKind = 'grass' | 'sand' | 'water' | 'rock' | 'mountain';
+export type GroundKind = 'grass' | 'sand' | 'water' | 'rock' | 'mountain' | 'ford';
 
 const GROUND_COLORS: Record<GroundKind, { base: string[]; dots: string[] }> = {
   grass: { base: ['#6a9a3c', '#6f9f40', '#64933a', '#73a145'], dots: ['#7fb04f', '#5a8733', '#88b85a'] },
@@ -192,7 +192,76 @@ const GROUND_COLORS: Record<GroundKind, { base: string[]; dots: string[] }> = {
   water: { base: ['#2f6f9e', '#2c6995'], dots: ['#4f8fbd', '#3b7cab'] },
   rock: { base: ['#8a8378', '#837c71'], dots: ['#9b958b', '#6f695f'] },
   mountain: { base: ['#9a8f7c', '#948a77', '#a09582'], dots: ['#b0a690', '#7e7462', '#8c8a6a'] },
+  ford: { base: ['#5f97b4', '#6a9fb8'], dots: ['#cdbb86', '#8fbfd6'] },
 };
+
+/** Ground kinds in blending order: a tile's higher-priority neighbours fade over its edges. */
+export const GROUND_PRIORITY: readonly GroundKind[] = ['water', 'ford', 'sand', 'grass', 'mountain', 'rock'];
+
+/**
+ * Transition overlays: which edge or corner of a tile the neighbour sits at, as tile-local (u, v)
+ * offsets (u along tile x, v along tile y; the neighbour is at u/v = 1 for +1, 0 for −1).
+ */
+export const EDGE_DIRS: readonly [number, number][] = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+  [1, 1],
+  [-1, -1],
+  [1, -1],
+  [-1, 1],
+];
+
+/**
+ * A ground tile of `kind` faded out towards the tile's centre from the edge or corner `dir`
+ * (index into `EDGE_DIRS`), with a ragged noisy border. Same 66×34 canvas as `paintGround`.
+ */
+export function paintGroundEdge(ctx: Ctx, kind: GroundKind, dir: number): void {
+  const scale = 2;
+  const tmp = document.createElement('canvas');
+  tmp.width = 66 * scale;
+  tmp.height = 34 * scale;
+  const t = tmp.getContext('2d')!;
+  t.scale(scale, scale);
+  paintGround(t, kind, 0);
+  const img = t.getImageData(0, 0, tmp.width, tmp.height);
+  const [du, dv] = EDGE_DIRS[dir];
+  const rng = createRng(4000 + dir * 31 + kind.length);
+  // Coarse value noise for a ragged border.
+  const grid = Array.from({ length: 9 * 9 }, () => rng());
+  const noise = (u: number, v: number) => {
+    const gx = Math.max(0, Math.min(7.999, u * 8));
+    const gy = Math.max(0, Math.min(7.999, v * 8));
+    const x0 = Math.floor(gx);
+    const y0 = Math.floor(gy);
+    const tx = gx - x0;
+    const ty = gy - y0;
+    const a = grid[y0 * 9 + x0];
+    const b = grid[y0 * 9 + x0 + 1];
+    const c = grid[(y0 + 1) * 9 + x0];
+    const d = grid[(y0 + 1) * 9 + x0 + 1];
+    return (a + (b - a) * tx) * (1 - ty) + (c + (d - c) * tx) * ty;
+  };
+  for (let py = 0; py < tmp.height; py++) {
+    for (let px = 0; px < tmp.width; px++) {
+      // Canvas pixel → tile-local (u, v): the diamond's top corner is (33, 0), u runs down-right.
+      const sx = (px + 0.5) / scale - 33;
+      const sy = (py + 0.5) / scale;
+      const u = (sx / 32 + sy / 16) / 2;
+      const v = (sy / 16 - sx / 32) / 2;
+      // Distance from the neighbour's edge (0 at the edge, 1 at the far side), or from its corner.
+      const eu = du > 0 ? 1 - u : u;
+      const ev = dv > 0 ? 1 - v : v;
+      const d = du !== 0 && dv !== 0 ? Math.hypot(eu, ev) * 1.25 : du !== 0 ? eu : ev;
+      const reach = 0.42 + (noise(u, v) - 0.5) * 0.3;
+      const m = Math.max(0, Math.min(1, (reach - d) / 0.18));
+      img.data[(py * tmp.width + px) * 4 + 3] *= m;
+    }
+  }
+  t.putImageData(img, 0, 0);
+  ctx.drawImage(tmp, 0, 0, 66, 34);
+}
 
 export function groundVariants(kind: GroundKind): number {
   return GROUND_COLORS[kind].base.length;
@@ -213,7 +282,7 @@ export function paintGround(ctx: Ctx, kind: GroundKind, variant: number): void {
   ctx.save();
   ctx.clip();
   const rng = createRng(kind.length * 1000 + variant * 77 + 3);
-  if (kind === 'water') {
+  if (kind === 'water' || kind === 'ford') {
     for (let i = 0; i < 4; i++) {
       const x = rng() * 44 - 22;
       const y = rng() * 18 - 9;
@@ -224,6 +293,13 @@ export function paintGround(ctx: Ctx, kind: GroundKind, variant: number): void {
       ctx.strokeStyle = dots[i % dots.length];
       ctx.lineWidth = 1;
       ctx.stroke();
+    }
+    if (kind === 'ford') {
+      // Shallow: pebbles show through.
+      for (let i = 0; i < 14; i++) {
+        ctx.fillStyle = 'rgba(214,196,138,0.75)';
+        ctx.fillRect(rng() * 52 - 26, rng() * 24 - 12, 2, 1.5);
+      }
     }
   } else if (kind === 'mountain') {
     // Rocky slope: light ledges with dark cracks under them.
@@ -1382,6 +1458,7 @@ const SETTLER_LOOK: Record<SettlerKind, { tunic: string; hat: string; tool?: Too
   vinegrower: { tunic: '#7a4a6e', hat: '#e3c76a', tool: 'shovel' },
   winemaker: { tunic: '#6a2f3a', hat: '#e8e4da' },
   weaponsmith: { tunic: '#4a4f55', hat: '#8c4a3a', tool: 'hammer' },
+  digger: { tunic: '#8a6a3c', hat: '#5a4636', tool: 'shovel' },
   // Soldiers wear their player's colour (see `paintSettler`'s `tunic`).
   soldier: { tunic: PLAYER_COLORS[0], hat: '#8d939a', tool: 'sword' },
 };

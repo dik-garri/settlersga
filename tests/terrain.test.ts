@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { BUILD_MAX_SLOPE, oreOf } from '../src/sim/config';
+import { BUILD_DIG_SLOPE, BUILD_MAX_SLOPE, oreOf } from '../src/sim/config';
+import { needsLevelling } from '../src/sim/digging';
 import { GameMap, generateMap } from '../src/sim/map';
 import { Terrain } from '../src/sim/types';
 import { World } from '../src/sim/world';
@@ -77,16 +78,21 @@ describe('terrain heights', () => {
 });
 
 describe('building on slopes', () => {
-  it('ordinary buildings need level ground, mines do not', () => {
+  it('ordinary buildings need level or levellable ground, mines do not', () => {
     const w = new World(42);
     const m = w.map;
     // A spot that is fine now…
     let spot: { x: number; y: number } | null = null;
     for (let y = 0; y < m.h && !spot; y++) for (let x = 0; x < m.w && !spot; x++) if (w.canPlace('woodcutter', x, y)) spot = { x, y };
     expect(spot).not.toBeNull();
-    // …is refused once one of its corners rises beyond the allowed slope.
+    // …still allowed when moderately sloped (a digger will level it first)…
     const v = (spot!.y + 1) * (m.w + 1) + spot!.x + 1;
-    m.height[v] = m.vertexHeight(spot!.x + 1, spot!.y + 1) + BUILD_MAX_SLOPE + 4;
+    const base = m.vertexHeight(spot!.x + 1, spot!.y + 1);
+    m.height[v] = base + BUILD_MAX_SLOPE + 4;
+    expect(w.canPlace('woodcutter', spot!.x, spot!.y)).toBe(true);
+    expect(needsLevelling(m, 'woodcutter', spot!.x, spot!.y)).toBe(true);
+    // …and refused once one of its corners rises beyond what a digger can level.
+    m.height[v] = base + BUILD_DIG_SLOPE + 4;
     expect(w.canPlace('woodcutter', spot!.x, spot!.y)).toBe(false);
 
     let mine: { x: number; y: number } | null = null;

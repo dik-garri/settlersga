@@ -88,6 +88,14 @@ export const TOOLS: readonly Resource[] = ['axe', 'saw', 'pickaxe', 'shovel', 's
 export const TREE_MATURE = 4;
 /** Ordinary buildings need ground whose corners (footprint and door) differ by at most this many pixels. */
 export const BUILD_MAX_SLOPE = 12;
+/** Up to this slope a site is still allowed, but a digger must level it before builders start. */
+export const BUILD_DIG_SLOPE = 30;
+/** A digger moves one corner by one pixel towards the site's level every this many ticks. */
+export const DIG_EVERY = 3;
+/** Rivers per 64×64 of map, carved from high ground down to the sea or into a lake. */
+export const RIVERS_PER_64 = 1.5;
+/** A river gets a walkable ford about this often (tiles), so rivers never cut the land apart. */
+export const FORD_EVERY = 10;
 /** Stone units in a deposit tile at generation, inclusive range. */
 export const DEPOSIT_STONE: [number, number] = [4, 8];
 /** Grain field stages: 1 sown … CROP_RIPE harvestable. Fields grow every CROP_GROW_EVERY ticks with CROP_GROW_CHANCE. */
@@ -124,7 +132,8 @@ export const FISH_RESTOCK = 2;
  * - workshop: stays inside and runs the building's recipe;
  * - garrison: stays inside so the building claims territory;
  * - prospect: a carrier on a geologist errand; turns back into a carrier once the errand is done;
- * - soldier: lives in a military building's garrison; looks for a free one when homeless.
+ * - soldier: lives in a military building's garrison; looks for a free one when homeless;
+ * - digger: levels sloped construction sites before the builders start.
  */
 export type Behavior =
   | 'carrier'
@@ -135,7 +144,8 @@ export type Behavior =
   | 'workshop'
   | 'garrison'
   | 'prospect'
-  | 'soldier';
+  | 'soldier'
+  | 'digger';
 
 export interface GatherDef {
   res: Resource;
@@ -167,6 +177,7 @@ export interface ProfessionDef {
 export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
   carrier: { name: 'Носильщик', behavior: 'carrier' },
   builder: { name: 'Строитель', behavior: 'builder', tool: 'hammer' },
+  digger: { name: 'Землекоп', behavior: 'digger', tool: 'shovel' },
   woodcutter: { name: 'Лесоруб', behavior: 'gather', tool: 'axe', gather: { res: 'log', radius: 8, workTicks: 40, restTicks: 30 } },
   stonecutter: {
     name: 'Каменотёс',

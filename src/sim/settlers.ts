@@ -2,6 +2,7 @@ import { isReachable, nearestStorage, recomputeTerritory } from './buildings';
 import {
   BUILD_TICKS_PER_UNIT,
   BUILDER_STALL_TICKS,
+  DIG_EVERY,
   BUILDINGS,
   HANDLE_TICKS,
   IDLE_GO_HOME_TICKS,
@@ -12,6 +13,7 @@ import {
   totalCost,
   UNREACHABLE_TICKS,
 } from './config';
+import { levelStep } from './digging';
 import { assaultTick, joinTick, soldierIdle } from './military';
 import { canPlant, findGatherTarget, findPlotFor, harvest, isGatherTarget, plant, type Target } from './nature';
 import { findPath } from './pathfinding';
@@ -138,6 +140,23 @@ export function updateSettler(w: World, s: Settler): void {
         w.stats.prospected++;
       }
       s.tasks.shift();
+      return;
+    }
+    case 'dig': {
+      const b = w.buildings.get(task.b);
+      if (!b || b.done || b.levelled) {
+        if (b && b.diggerId === s.id) b.diggerId = null;
+        s.tasks.shift();
+        return;
+      }
+      s.working = true;
+      if (++task.n < DIG_EVERY) return;
+      task.n = 0;
+      if (levelStep(w.map, b)) {
+        b.levelled = true;
+        b.diggerId = null;
+        s.tasks.shift();
+      }
       return;
     }
     case 'build': {
@@ -268,6 +287,9 @@ export function abort(w: World, s: Settler): void {
       case 'build':
         if (b && b.builderId === s.id) b.builderId = null;
         break;
+      case 'dig':
+        if (b && b.diggerId === s.id) b.diggerId = null;
+        break;
       case 'become':
         if (b) b.workerRequested = false;
         break;
@@ -355,7 +377,7 @@ function idle(w: World, s: Settler): void {
       let best: Building | undefined;
       let bestScore = Infinity;
       for (const b of w.buildings.values()) {
-        if (b.owner !== s.owner || b.done || b.builderId !== null || !isReachable(w, b)) continue;
+        if (b.owner !== s.owner || b.done || !b.levelled || b.builderId !== null || !isReachable(w, b)) continue;
         const score = dist(s, b.door) + (hasBuildWork(b) ? 0 : 1000) - (b.priority ? 2000 : 0);
         if (score < bestScore) {
           best = b;
@@ -367,6 +389,30 @@ function idle(w: World, s: Settler): void {
         s.tasks = [
           { t: 'goto', x: best.door.x, y: best.door.y },
           { t: 'build', b: best.id, stall: 0 },
+        ];
+      } else {
+        goToStorage(w, s);
+      }
+      return;
+    }
+
+    case 'digger': {
+      // Nearest sloped site nobody is levelling yet (priority first), otherwise rest like a builder.
+      let best: Building | undefined;
+      let bestScore = Infinity;
+      for (const b of w.buildings.values()) {
+        if (b.owner !== s.owner || b.done || b.levelled || b.diggerId !== null || !isReachable(w, b)) continue;
+        const score = dist(s, b.door) - (b.priority ? 2000 : 0);
+        if (score < bestScore) {
+          best = b;
+          bestScore = score;
+        }
+      }
+      if (best) {
+        best.diggerId = s.id;
+        s.tasks = [
+          { t: 'goto', x: best.door.x, y: best.door.y },
+          { t: 'dig', b: best.id, n: 0 },
         ];
       } else {
         goToStorage(w, s);

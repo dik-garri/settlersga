@@ -1,4 +1,4 @@
-import { DEPOSIT_STONE, FISH_MAX, ORE_AMOUNT, ORE_RESOURCES, TREE_MATURE } from './config';
+import { DEPOSIT_STONE, FISH_MAX, FORD_EVERY, ORE_AMOUNT, ORE_RESOURCES, RIVERS_PER_64, TREE_MATURE } from './config';
 import { createRng, randInt, type Rng } from './rng';
 import { Terrain, type Point } from './types';
 
@@ -29,9 +29,12 @@ export class GameMap {
   readonly door: Int32Array;
   /**
    * Terrain elevation in screen pixels per tile corner: (w+1)×(h+1) vertices, vertex (vx, vy) being
-   * the corner at tile coordinates (vx − ½, vy − ½). Set at generation, static afterwards.
+   * the corner at tile coordinates (vx − ½, vy − ½). Set at generation; at runtime only diggers change
+   * it, through `setVertexHeight`.
    */
   readonly height: Uint8Array;
+  /** Per chunk: bumped whenever a corner of one of its tiles changes height. Derived, not saved. */
+  readonly heightVersion: Uint32Array;
 
   /** Chunk grid size and a change counter per chunk (see `touch`). Derived, not saved. */
   readonly chunksX: number;
@@ -46,6 +49,7 @@ export class GameMap {
     this.chunksX = Math.ceil(w / CHUNK);
     this.chunksY = Math.ceil(h / CHUNK);
     this.chunkVersion = new Uint32Array(this.chunksX * this.chunksY);
+    this.heightVersion = new Uint32Array(this.chunksX * this.chunksY);
     this.terrain = new Uint8Array(n).fill(Terrain.Grass);
     this.tree = new Uint8Array(n);
     this.stone = new Uint8Array(n);
@@ -65,6 +69,17 @@ export class GameMap {
     const x = Math.min(this.w, Math.max(0, vx));
     const y = Math.min(this.h, Math.max(0, vy));
     return this.height[y * (this.w + 1) + x];
+  }
+
+  /** Runtime height change of one corner; marks every chunk whose tiles touch it. */
+  setVertexHeight(vx: number, vy: number, h: number): void {
+    if (vx < 0 || vy < 0 || vx > this.w || vy > this.h) return;
+    this.height[vy * (this.w + 1) + vx] = Math.max(0, Math.min(255, h));
+    for (let ty = vy - 1; ty <= vy; ty++) {
+      for (let tx = vx - 1; tx <= vx; tx++) {
+        if (this.inBounds(tx, ty)) this.heightVersion[this.chunkOf(tx, ty)]++;
+      }
+    }
   }
 
   /** Elevation at a fractional tile position (tile centers are integers), bilinear between corners. */
@@ -118,7 +133,7 @@ export class GameMap {
 
   isPassableTerrain(x: number, y: number): boolean {
     const t = this.terrain[this.idx(x, y)];
-    return t === Terrain.Grass || t === Terrain.Sand || t === Terrain.Mountain;
+    return t === Terrain.Grass || t === Terrain.Sand || t === Terrain.Mountain || t === Terrain.Ford;
   }
 
   isWalkable(x: number, y: number): boolean {
@@ -225,6 +240,10 @@ export function generateMap(seed: number, size: number, starts: readonly Point[]
     map.oreAmount[i] = ORE_AMOUNT[0] + randInt(rng, ORE_AMOUNT[1] - ORE_AMOUNT[0] + 1);
   };
 
+  // Large maps get mountain ranges: ridges of a low-frequency noise lift land into chains.
+  // Separate RNG streams keep the rest of the generation (and every 64×64 map) unchanged.
+  addRidges(height, size, createRng(seed ^ 0x2c1b3c6d));
+
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const i = map.idx(x, y);
@@ -245,6 +264,8 @@ export function generateMap(seed: number, size: number, starts: readonly Point[]
       }
     }
   }
+
+  carveRivers(map, height, starts, createRng(seed ^ 0x51ed2704));
 
   const depositAt = (cx0: number, cy0: number, radius: number, chance: number) => {
     for (let y = Math.floor(cy0 - radius); y <= cy0 + radius; y++) {
@@ -347,6 +368,133 @@ export function generateMap(seed: number, size: number, starts: readonly Point[]
   return map;
 }
 
+/** Ridge weight grows from nothing on 64×64 to full strength on 192×192 and larger. */
+function addRidges(height: Float32Array, size: number, rng: Rng): void {
+  const weight = Math.min(1, Math.max(0, (size - 64) / 128));
+  if (weight === 0) return;
+  const broad = valueNoise(rng, size, size, Math.max(16, size / 4));
+  const fine = valueNoise(rng, size, size, Math.max(8, size / 10));
+  for (let i = 0; i < height.length; i++) {
+    const n = broad[i] * 0.7 + fine[i] * 0.3;
+    const ridge = Math.pow(1 - Math.abs(2 * n - 1), 6); // 1 on the ridge line, falling off fast
+    // Ranges rise from land, not from the open sea.
+    const land = Math.min(1, Math.max(0, (height[i] - 0.33) / 0.15));
+    height[i] += weight * land * Math.max(0, ridge - 0.5) * 0.8;
+  }
+}
+
+/** Rivers keep this far from every start so the guaranteed start area stays intact. */
+const RIVER_START_CLEARANCE = 13;
+
+/**
+ * Rivers flow from high ground downhill (4-connected, slight meander) into existing water; one that
+ * gets stuck in a basin ends in a small lake. Banks turn to sand, and every `FORD_EVERY` tiles a
+ * straight stretch becomes a walkable ford, so rivers never split the land.
+ */
+function carveRivers(map: GameMap, height: Float32Array, starts: readonly Point[], rng: Rng): void {
+  const size = map.w;
+  const count = Math.max(1, Math.round((RIVERS_PER_64 * size * size) / (64 * 64)));
+  const nearStart = (x: number, y: number) => starts.some((s) => Math.hypot(x - s.x, y - s.y) < RIVER_START_CLEARANCE);
+  const DIRS = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ];
+  for (let k = 0; k < count; k++) {
+    let src = -1;
+    for (let attempt = 0; attempt < 80 && src < 0; attempt++) {
+      const x = randInt(rng, size);
+      const y = randInt(rng, size);
+      const i = map.idx(x, y);
+      const t = map.terrain[i];
+      if (nearStart(x, y)) continue;
+      if (t === Terrain.Mountain || (t === Terrain.Grass && height[i] > 0.58)) src = i;
+    }
+    if (src < 0) continue;
+    const path: number[] = [];
+    const visited = new Set<number>();
+    let cur = src;
+    let reachedWater = false;
+    for (let step = 0; step < size * 3; step++) {
+      visited.add(cur);
+      if (map.terrain[cur] === Terrain.Water) {
+        reachedWater = true;
+        break;
+      }
+      path.push(cur);
+      const cx = cur % size;
+      const cy = Math.floor(cur / size);
+      let next = -1;
+      let nextH = Infinity;
+      for (const [dx, dy] of DIRS) {
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (!map.inBounds(nx, ny)) continue;
+        const ni = map.idx(nx, ny);
+        if (visited.has(ni) || map.terrain[ni] === Terrain.Rock || nearStart(nx, ny)) continue;
+        const h = height[ni] + rng() * 0.03; // meander
+        if (h < nextH) {
+          next = ni;
+          nextH = h;
+        }
+      }
+      // Stuck, or would have to climb noticeably: the river ends here in a lake.
+      if (next < 0 || height[next] > height[cur] + 0.03) break;
+      cur = next;
+    }
+    if (path.length < 4) continue;
+
+    const wet = (i: number) => {
+      map.terrain[i] = Terrain.Water;
+      map.fish[i] = FISH_MAX;
+      map.tree[i] = 0;
+      map.stone[i] = 0;
+      map.ore[i] = 0;
+      map.oreAmount[i] = 0;
+    };
+    for (const i of path) wet(i);
+    if (!reachedWater) {
+      const end = path[path.length - 1];
+      const ex = end % size;
+      const ey = Math.floor(end / size);
+      for (let y = ey - 2; y <= ey + 2; y++) {
+        for (let x = ex - 2; x <= ex + 2; x++) {
+          if (!map.inBounds(x, y) || Math.hypot(x - ex, y - ey) > 1.8 || nearStart(x, y)) continue;
+          if (map.terrain[map.idx(x, y)] !== Terrain.Rock) wet(map.idx(x, y));
+        }
+      }
+    }
+    // Sandy banks.
+    for (const i of path) {
+      const x = i % size;
+      const y = Math.floor(i / size);
+      for (const [dx, dy] of DIRS) {
+        if (!map.inBounds(x + dx, y + dy)) continue;
+        const ni = map.idx(x + dx, y + dy);
+        if (map.terrain[ni] === Terrain.Grass && rng() < 0.6) {
+          map.terrain[ni] = Terrain.Sand;
+          map.tree[ni] = 0;
+        }
+      }
+    }
+    // Fords on straight stretches (land on both banks), roughly every FORD_EVERY tiles.
+    const straight = (p: number) => {
+      const a = path[p - 1];
+      const b = path[p + 1];
+      return a !== undefined && b !== undefined && (a % size === b % size || Math.floor(a / size) === Math.floor(b / size));
+    };
+    for (let p = Math.floor(FORD_EVERY / 2); p < path.length - 1; p += FORD_EVERY) {
+      let q = p;
+      while (q < path.length - 1 && !straight(q)) q++;
+      if (q >= path.length - 1) break;
+      map.terrain[path[q]] = Terrain.Ford;
+      map.fish[path[q]] = 0;
+      p = q;
+    }
+  }
+}
+
 /**
  * Corner heights from the final terrain and the height noise: water at 0, gentle sand and grass,
  * mountains clearly raised, rock peaks highest. The castle meadow is levelled and the guaranteed
@@ -364,6 +512,7 @@ function elevate(
     const n = noise[i];
     switch (map.terrain[i] as Terrain) {
       case Terrain.Water:
+      case Terrain.Ford:
         tile[i] = 0;
         break;
       case Terrain.Sand:
@@ -431,7 +580,7 @@ function elevate(
       ]) {
         if (!map.inBounds(tx, ty)) continue;
         const i = map.idx(tx, ty);
-        if (map.terrain[i] === Terrain.Water) wet = true;
+        if (map.terrain[i] === Terrain.Water || map.terrain[i] === Terrain.Ford) wet = true;
         total += tile[i];
         k++;
       }

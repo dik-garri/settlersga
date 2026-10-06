@@ -12,11 +12,13 @@ import {
   paintSign,
   paintFlag,
   paintGround,
+  paintGroundEdge,
+  EDGE_DIRS,
+  GROUND_PRIORITY,
   paintSettler,
   paintTree,
   paintWare,
   PLAYER_COLORS,
-  type GroundKind,
   type SettlerFrame,
 } from './sprites';
 
@@ -98,9 +100,15 @@ export class SpriteAtlas {
 
   constructor() {
     const a = new AtlasBuilder();
-    for (const kind of ['grass', 'sand', 'water', 'rock', 'mountain'] as GroundKind[]) {
+    for (const kind of GROUND_PRIORITY) {
       for (let v = 0; v < groundVariants(kind); v++) {
         a.add(`ground:${kind}:${v}`, 66, 34, 33, 17, (ctx) => paintGround(ctx, kind, v));
+      }
+    }
+    // Transition overlays sit on the same page as the ground (the ground mesh uses one texture).
+    for (const kind of GROUND_PRIORITY) {
+      for (let dir = 0; dir < EDGE_DIRS.length; dir++) {
+        a.add(`edge:${kind}:${dir}`, 66, 34, 33, 17, (ctx) => paintGroundEdge(ctx, kind, dir));
       }
     }
     for (let v = 0; v < 4; v++) a.add(`tree:${v}`, 48, 80, 24, 72, (ctx) => paintTree(ctx, v));

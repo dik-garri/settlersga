@@ -45,6 +45,8 @@ export enum Terrain {
   Rock = 3,
   /** Walkable mountain slopes; only mines can be built here, ore lies underneath. */
   Mountain = 4,
+  /** Shallow river crossing: walkable water, nothing can be built or fished there. */
+  Ford = 5,
 }
 
 export type BuildingType =
@@ -97,7 +99,8 @@ export type SettlerKind =
   | 'vinegrower'
   | 'winemaker'
   | 'weaponsmith'
-  | 'soldier';
+  | 'soldier'
+  | 'digger';
 
 /** Player ids start at 1; 0 means "nobody" in per-tile ownership. */
 export type PlayerId = number;
@@ -138,6 +141,11 @@ export interface Building {
   /** Military building: soldiers stationed here (settler ids) and soldiers on their way in. */
   garrison: number[];
   garrisonInbound: number;
+  /** Construction site on sloped ground: false until a digger has flattened it; builders wait. */
+  levelled: boolean;
+  diggerId: number | null;
+  /** Height the digger flattens the site's corners to (set when the site is laid out). */
+  levelTo: number;
 }
 
 export type Task =
@@ -154,6 +162,8 @@ export type Task =
   | { t: 'plant'; x: number; y: number; n: number; what: PlantKind }
   /** `stall`: consecutive ticks without material to work with. */
   | { t: 'build'; b: number; stall: number }
+  /** Digger flattens the site's corners towards their mean height; `n` counts ticks to the next step. */
+  | { t: 'dig'; b: number; n: number }
   /** Geologist examines a mountain tile and leaves a sign. */
   | { t: 'prospect'; x: number; y: number; n: number }
   | { t: 'become'; b: number; kind: SettlerKind }

@@ -13,6 +13,7 @@ const TERRAIN_RGB: Record<Terrain, [number, number, number]> = {
   [Terrain.Grass]: [106, 154, 60],
   [Terrain.Rock]: [110, 104, 96],
   [Terrain.Mountain]: [150, 141, 124],
+  [Terrain.Ford]: [95, 151, 180],
 };
 
 /**

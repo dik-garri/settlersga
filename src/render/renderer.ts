@@ -5,7 +5,7 @@ import { CHUNK } from '../sim/map';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import type { SpriteAtlas } from './atlas';
 import { depthOf, HALF_H, HALF_W, toScreen, toTile } from './iso';
-import { groundVariants, PLAYER_COLORS, type GroundKind } from './sprites';
+import { EDGE_DIRS, GROUND_PRIORITY, groundVariants, PLAYER_COLORS, type GroundKind } from './sprites';
 
 const TERRAIN_KIND: Record<Terrain, GroundKind> = {
   [Terrain.Water]: 'water',
@@ -13,6 +13,7 @@ const TERRAIN_KIND: Record<Terrain, GroundKind> = {
   [Terrain.Grass]: 'grass',
   [Terrain.Rock]: 'rock',
   [Terrain.Mountain]: 'mountain',
+  [Terrain.Ford]: 'ford',
 };
 
 const TREE_SCALE = [0, 0.35, 0.55, 0.78, 1];
@@ -82,6 +83,15 @@ export class GameRenderer {
    * cost follows the screen, not the map. Settlers join `objects` only while on screen.
    */
   private readonly groundChunks: Container[] = [];
+  /** Per chunk: the mesh + shading container, replaced when heights change. */
+  private readonly groundLayers: (Container | null)[] = [];
+  /** One texture over the ground atlas page, shared by all ground meshes. */
+  private readonly groundSheet: Texture;
+  /** Last `map.heightVersion` the ground of each chunk was built for. */
+  private readonly heightSeen: Uint32Array;
+  private lastHeightSync = 0;
+  /** Where each static object stands (tile coordinates) and its offset from that surface point. */
+  private readonly staticAt = new WeakMap<Container, { x: number; y: number; ox: number; oy: number }>();
   private readonly chunkObjects: Set<Container>[] = [];
   private readonly chunkVisible: Uint8Array;
   private readonly chunkBounds: Float32Array;
@@ -142,27 +152,34 @@ export class GameRenderer {
     }
     this.chunkVisible = new Uint8Array(chunks);
     this.chunkSeen = new Int32Array(chunks).fill(-1);
+    this.heightSeen = new Uint32Array(chunks);
     this.chunkBounds = new Float32Array(chunks * 4);
+    this.groundSheet = new Texture({ source: this.atlas.get('ground:grass:0').source });
     for (let c = 0; c < chunks; c++) {
       this.chunkObjects.push(new Set());
-      const x0 = (c % map.chunksX) * CHUNK;
-      const y0 = Math.floor(c / map.chunksX) * CHUNK;
-      const x1 = Math.min(map.w, x0 + CHUNK) - 1;
-      const y1 = Math.min(map.h, y0 + CHUNK) - 1;
-      // Raised ground shows higher on screen than its flat footprint.
-      let lift = 0;
-      for (let vy = y0; vy <= y1 + 1; vy++) for (let vx = x0; vx <= x1 + 1; vx++) lift = Math.max(lift, map.vertexHeight(vx, vy));
-      this.chunkBounds.set(
-        [
-          (x0 - y1) * HALF_W - HALF_W,
-          (x0 + y0) * HALF_H - HALF_H - OVERDRAW_UP - lift,
-          (x1 - y0) * HALF_W + HALF_W,
-          (x1 + y1) * HALF_H + HALF_H + OVERDRAW_DOWN,
-        ],
-        c * 4,
-      );
+      this.computeChunkBounds(c);
     }
     this.buildGround();
+  }
+
+  /** Screen bounds of a chunk for culling, lifted by its highest corner (raised ground shows higher). */
+  private computeChunkBounds(c: number): void {
+    const { map } = this.sim;
+    const x0 = (c % map.chunksX) * CHUNK;
+    const y0 = Math.floor(c / map.chunksX) * CHUNK;
+    const x1 = Math.min(map.w, x0 + CHUNK) - 1;
+    const y1 = Math.min(map.h, y0 + CHUNK) - 1;
+    let lift = 0;
+    for (let vy = y0; vy <= y1 + 1; vy++) for (let vx = x0; vx <= x1 + 1; vx++) lift = Math.max(lift, map.vertexHeight(vx, vy));
+    this.chunkBounds.set(
+      [
+        (x0 - y1) * HALF_W - HALF_W,
+        (x0 + y0) * HALF_H - HALF_H - OVERDRAW_UP - lift,
+        (x1 - y0) * HALF_W + HALF_W,
+        (x1 + y1) * HALF_H + HALF_H + OVERDRAW_DOWN,
+      ],
+      c * 4,
+    );
   }
 
   /** Bounds of the map in world pixels: [minX, minY, maxX, maxY]. */
@@ -197,7 +214,8 @@ export class GameRenderer {
 
   /**
    * Ground is one textured mesh per chunk whose vertices are the tile corners raised by their
-   * height (shared corners, so no seams), plus a static slope-shading layer lit from the top-left.
+   * height (shared corners, so no seams), plus a slope-shading layer lit from the top-left. Each
+   * chunk's ground can be rebuilt on its own when diggers change heights (`syncHeights`).
    */
   private buildGround(): void {
     const { map } = this.sim;
@@ -205,75 +223,146 @@ export class GameRenderer {
       const chunk = new Container();
       chunk.visible = false;
       this.groundChunks.push(chunk);
+      this.groundLayers.push(null);
     }
     // Chunk containers in depth order so overlapping slopes stack like the tiles inside them.
     [...this.groundChunks.keys()]
       .sort((a, b) => (a % map.chunksX) + Math.floor(a / map.chunksX) - ((b % map.chunksX) + Math.floor(b / map.chunksX)))
       .forEach((c) => this.ground.addChild(this.groundChunks[c]));
-
-    const source = this.atlas.get('ground:grass:0').source;
-    const sheet = new Texture({ source });
     for (let c = 0; c < this.groundChunks.length; c++) {
+      this.buildChunkGround(c);
+      this.heightSeen[c] = map.heightVersion[c];
+    }
+
+    // Cliffs are covered in boulders; walkable slopes only get the odd small stone.
+    for (let y = 0; y < map.h; y++) {
+      for (let x = 0; x < map.w; x++) {
+        const i = map.idx(x, y);
+        const kind = TERRAIN_KIND[map.terrain[i] as Terrain];
+        if (kind !== 'rock' && !(kind === 'mountain' && hash(i + 3) % 4 === 0)) continue;
+        const rock = new Sprite(this.atlas.get(`boulder:${hash(i + 7) % 2}`));
+        const p = this.surface(x, y);
+        rock.position.set(p.x + ((hash(i) >> 8) % 7) - 3, p.y + 2);
+        rock.scale.set((kind === 'rock' ? 0.8 : 0.4) + ((hash(i) >> 4) % 4) * 0.08);
+        rock.zIndex = depthOf(x, y);
+        this.addStatic(rock, x, y);
+      }
+    }
+  }
+
+  /**
+   * (Re)builds one chunk's ground mesh and shading. Tiles go back to front; after each tile's own
+   * texture come the transition overlays of its higher-priority neighbours (fading in from the
+   * shared edge or corner), so terrain borders blend instead of stepping.
+   */
+  private buildChunkGround(c: number): void {
+    const { map } = this.sim;
+    const source = this.groundSheet.source;
+    const x0 = (c % map.chunksX) * CHUNK;
+    const y0 = Math.floor(c / map.chunksX) * CHUNK;
+    const x1 = Math.min(map.w, x0 + CHUNK);
+    const y1 = Math.min(map.h, y0 + CHUNK);
+    const vertices: number[] = [];
+    const uvs: number[] = [];
+    const indices: number[] = [];
+    const shade = new Graphics();
+    const levels = new Map<number, number[][]>();
+    const kindAt = (x: number, y: number) =>
+      map.inBounds(x, y) ? TERRAIN_KIND[map.terrain[map.idx(x, y)] as Terrain] : undefined;
+    const priority = (k: GroundKind | undefined) => (k ? GROUND_PRIORITY.indexOf(k) : -1);
+    const quadOf = (tex: Texture, quad: { x: number; y: number }[]) => {
+      if (tex.source !== source) throw new Error('ground sprites must share one atlas page');
+      // Sample slightly inside the painted diamond so antialiased edges never show as seams.
+      const f = tex.frame;
+      const uv = [
+        [f.x + 33, f.y + 2],
+        [f.x + 63.5, f.y + 17],
+        [f.x + 33, f.y + 32],
+        [f.x + 2.5, f.y + 17],
+      ];
+      const k = vertices.length / 2;
+      for (let q = 0; q < 4; q++) {
+        vertices.push(quad[q].x, quad[q].y);
+        uvs.push(uv[q][0] / source.width, uv[q][1] / source.height);
+      }
+      indices.push(k, k + 1, k + 2, k, k + 2, k + 3);
+    };
+    for (let d = x0 + y0; d <= x1 - 1 + y1 - 1; d++) {
+      for (let x = Math.max(x0, d - (y1 - 1)); x <= Math.min(x1 - 1, d - y0); x++) {
+        const y = d - x;
+        const i = map.idx(x, y);
+        const kind = kindAt(x, y)!;
+        const quad = [this.corner(x, y), this.corner(x + 1, y), this.corner(x + 1, y + 1), this.corner(x, y + 1)];
+        quadOf(this.atlas.get(`ground:${kind}:${hash(i) % groundVariants(kind)}`), quad);
+        const own = priority(kind);
+        EDGE_DIRS.forEach(([du, dv], dir) => {
+          const n = kindAt(x + du, y + dv);
+          if (!n || priority(n) <= own) return;
+          // A corner overlay is redundant where an edge neighbour of the same kind already covers it.
+          if (du !== 0 && dv !== 0 && (kindAt(x + du, y) === n || kindAt(x, y + dv) === n)) return;
+          quadOf(this.atlas.get(`edge:${n}:${dir}`), quad);
+        });
+
+        const level = this.slopeLight(x, y);
+        if (level !== 0) {
+          const list = levels.get(level) ?? [];
+          list.push(quad.flatMap((p) => [p.x, p.y]));
+          levels.set(level, list);
+        }
+      }
+    }
+    for (const [level, polys] of levels) {
+      for (const pts of polys) shade.poly(pts);
+      shade.fill(level > 0 ? { color: 0xfff4d8, alpha: level * 0.05 } : { color: 0x0c0a14, alpha: -level * 0.07 });
+    }
+    const layer = new Container();
+    layer.addChild(
+      new MeshSimple({
+        texture: this.groundSheet,
+        vertices: new Float32Array(vertices),
+        uvs: new Float32Array(uvs),
+        indices: new Uint32Array(indices),
+      }),
+      shade,
+    );
+    // The ground layer stays below the chunk's field decals.
+    this.groundLayers[c]?.destroy({ children: true });
+    this.groundLayers[c] = layer;
+    this.groundChunks[c].addChildAt(layer, 0);
+  }
+
+  /**
+   * Diggers change corner heights at runtime: rebuild the ground of the chunks they touched, redraw
+   * their territory overlay, re-seat everything standing there and lift the culling bounds.
+   * Throttled, since a digger moves a corner a few times per second.
+   */
+  private syncHeights(timeMs: number): void {
+    if (timeMs - this.lastHeightSync < 120) return;
+    this.lastHeightSync = timeMs;
+    const { map } = this.sim;
+    for (let c = 0; c < this.heightSeen.length; c++) {
+      if (map.heightVersion[c] === this.heightSeen[c]) continue;
+      this.heightSeen[c] = map.heightVersion[c];
+      this.buildChunkGround(c);
+      this.drawTerritoryChunk(c);
+      this.computeChunkBounds(c);
+      for (const obj of this.chunkObjects[c]) {
+        const at = this.staticAt.get(obj);
+        if (!at) continue;
+        const p = this.surface(at.x, at.y);
+        obj.position.set(p.x + at.ox, p.y + at.oy);
+      }
       const x0 = (c % map.chunksX) * CHUNK;
       const y0 = Math.floor(c / map.chunksX) * CHUNK;
-      const x1 = Math.min(map.w, x0 + CHUNK);
-      const y1 = Math.min(map.h, y0 + CHUNK);
-      const tiles = (x1 - x0) * (y1 - y0);
-      const vertices = new Float32Array(tiles * 8);
-      const uvs = new Float32Array(tiles * 8);
-      const indices = new Uint32Array(tiles * 6);
-      const shade = new Graphics();
-      const levels = new Map<number, number[][]>();
-      let k = 0;
-      // Back-to-front so overlapping slopes inside the chunk stack correctly.
-      for (let d = x0 + y0; d <= x1 - 1 + y1 - 1; d++) {
-        for (let x = Math.max(x0, d - (y1 - 1)); x <= Math.min(x1 - 1, d - y0); x++) {
-          const y = d - x;
-          const i = map.idx(x, y);
-          const kind = TERRAIN_KIND[map.terrain[i] as Terrain];
-          const tex = this.atlas.get(`ground:${kind}:${hash(i) % groundVariants(kind)}`);
-          if (tex.source !== source) throw new Error('ground sprites must share one atlas page');
-          const quad = [this.corner(x, y), this.corner(x + 1, y), this.corner(x + 1, y + 1), this.corner(x, y + 1)];
-          // Sample slightly inside the painted diamond so antialiased edges never show as seams.
-          const f = tex.frame;
-          const uv = [
-            [f.x + 33, f.y + 2],
-            [f.x + 63.5, f.y + 17],
-            [f.x + 33, f.y + 32],
-            [f.x + 2.5, f.y + 17],
-          ];
-          for (let q = 0; q < 4; q++) {
-            vertices[(k * 4 + q) * 2] = quad[q].x;
-            vertices[(k * 4 + q) * 2 + 1] = quad[q].y;
-            uvs[(k * 4 + q) * 2] = uv[q][0] / source.width;
-            uvs[(k * 4 + q) * 2 + 1] = uv[q][1] / source.height;
-          }
-          indices.set([k * 4, k * 4 + 1, k * 4 + 2, k * 4, k * 4 + 2, k * 4 + 3], k * 6);
-          k++;
-
-          const level = this.slopeLight(x, y);
-          if (level !== 0) {
-            const list = levels.get(level) ?? [];
-            list.push(quad.flatMap((p) => [p.x, p.y]));
-            levels.set(level, list);
-          }
-
-          // Cliffs are covered in boulders; walkable slopes only get the odd small stone.
-          if (kind === 'rock' || (kind === 'mountain' && hash(i + 3) % 4 === 0)) {
-            const rock = new Sprite(this.atlas.get(`boulder:${hash(i + 7) % 2}`));
+      for (let y = y0; y < Math.min(map.h, y0 + CHUNK); y++) {
+        for (let x = x0; x < Math.min(map.w, x0 + CHUNK); x++) {
+          const crop = this.cropSprites[map.idx(x, y)];
+          if (crop) {
             const p = this.surface(x, y);
-            rock.position.set(p.x + ((hash(i) >> 8) % 7) - 3, p.y + 2);
-            rock.scale.set((kind === 'rock' ? 0.8 : 0.4) + ((hash(i) >> 4) % 4) * 0.08);
-            rock.zIndex = depthOf(x, y);
-            this.addStatic(rock, x, y);
+            crop.position.set(p.x, p.y);
           }
         }
       }
-      for (const [level, polys] of levels) {
-        for (const pts of polys) shade.poly(pts);
-        shade.fill(level > 0 ? { color: 0xfff4d8, alpha: level * 0.05 } : { color: 0x0c0a14, alpha: -level * 0.07 });
-      }
-      this.groundChunks[c].addChild(new MeshSimple({ texture: sheet, vertices, uvs, indices }), shade);
     }
   }
 
@@ -298,6 +387,8 @@ export class GameRenderer {
   /** Registers a non-moving object with its chunk; it is in the scene only while the chunk is visible. */
   private addStatic(obj: Container, x: number, y: number): void {
     const c = this.sim.map.chunkOf(Math.round(x), Math.round(y));
+    const p = this.surface(x, y);
+    this.staticAt.set(obj, { x, y, ox: obj.position.x - p.x, oy: obj.position.y - p.y });
     this.chunkObjects[c].add(obj);
     if (this.chunkVisible[c]) this.objects.addChild(obj);
   }
@@ -321,6 +412,7 @@ export class GameRenderer {
     area: Area | null = null,
   ) {
     this.view = view;
+    this.syncHeights(timeMs);
     this.syncTerritory();
     this.syncVisibleChunks();
     this.syncChangedTiles();

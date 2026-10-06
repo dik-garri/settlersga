@@ -1,6 +1,6 @@
 import { addBuilding, doorOf, recomputeTerritory, spawnSettler, updateBuilding } from './buildings';
 import {
-  BUILD_MAX_SLOPE,
+  BUILD_DIG_SLOPE,
   BUILD_TICKS_PER_UNIT,
   BUILDINGS,
   DISPATCH_EVERY,
@@ -16,6 +16,7 @@ import {
   START_TOOLS,
   totalCost,
 } from './config';
+import { levelTarget, needsLevelling } from './digging';
 import { dispatch } from './logistics';
 import { attack, availableAttackers, enterGarrison, leaveGarrison, removeDead } from './military';
 import { generateMap, type GameMap } from './map';
@@ -149,8 +150,9 @@ export class World {
       }
     }
     const door = doorOf(x, y, def.w, def.h);
-    // Mines sit on slopes; everything else needs level ground under the footprint and door.
-    if (def.terrain !== 'mountain' && this.map.heightRange(x, y, x + def.w - 1, y + def.h) > BUILD_MAX_SLOPE) return false;
+    // Mines sit on slopes; everything else needs fairly level ground under the footprint and door
+    // (steeper than BUILD_MAX_SLOPE is allowed, but a digger levels it first).
+    if (def.terrain !== 'mountain' && this.map.heightRange(x, y, x + def.w - 1, y + def.h) > BUILD_DIG_SLOPE) return false;
     return (
       this.map.isWalkable(door.x, door.y) &&
       this.map.door[this.map.idx(door.x, door.y)] === 0 &&
@@ -308,7 +310,12 @@ export class World {
     const door = doorOf(x, y, def.w, def.h);
     const { door: from } = this.castleOf(player);
     if (!findPath(this.map, from.x, from.y, door.x, door.y)) return null;
-    return addBuilding(this, type, x, y, player, false);
+    const b = addBuilding(this, type, x, y, player, false);
+    if (needsLevelling(this.map, type, x, y)) {
+      b.levelled = false;
+      b.levelTo = levelTarget(this.map, b);
+    }
+    return b;
   }
 
   // ------------------------------------------------------------- simulation

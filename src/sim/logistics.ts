@@ -63,7 +63,7 @@ function dispatchFor(w: World, owner: PlayerId): void {
 
   // More construction sites than builders: carriers pick up hammers and become builders.
   const builderTool = PROFESSIONS.builder.tool!;
-  const sitesWaiting = own.filter((b) => !b.done && b.builderId === null && isReachable(w, b)).length;
+  const sitesWaiting = own.filter((b) => !b.done && b.levelled && b.builderId === null && isReachable(w, b)).length;
   const comingBuilders = w.settlers.filter(
     (s) =>
       s.owner === owner &&
@@ -79,6 +79,27 @@ function dispatchFor(w: World, owner: PlayerId): void {
       { t: 'goto', x: from.door.x, y: from.door.y },
       { t: 'pickup', b: from.id, res: builderTool },
       { t: 'retool', kind: 'builder' },
+    ];
+  }
+
+  // Sloped sites waiting for levelling: carriers pick up shovels and become diggers.
+  const diggerTool = PROFESSIONS.digger.tool!;
+  const sitesToDig = own.filter((b) => !b.done && !b.levelled && b.diggerId === null && isReachable(w, b)).length;
+  const comingDiggers = w.settlers.filter(
+    (s) =>
+      s.owner === owner &&
+      ((s.kind === 'digger' && s.tasks.length === 0) || s.tasks.some((t) => t.t === 'retool' && t.kind === 'digger')),
+  ).length;
+  for (let k = sitesToDig - comingDiggers; k > 0; k--) {
+    const from = nearestSupply(w, own, diggerTool, null);
+    if (!from) break;
+    const s = take(from.door);
+    if (!s) return;
+    from.outReserved[diggerTool]++;
+    s.tasks = [
+      { t: 'goto', x: from.door.x, y: from.door.y },
+      { t: 'pickup', b: from.id, res: diggerTool },
+      { t: 'retool', kind: 'digger' },
     ];
   }
 
