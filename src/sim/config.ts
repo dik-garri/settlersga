@@ -75,6 +75,8 @@ export const CROP_KINDS: readonly PlantKind[] = ['grain', 'vine'];
 export const TOOLS: readonly Resource[] = ['axe', 'saw', 'pickaxe', 'shovel', 'scythe', 'rod', 'hammer'];
 
 export const TREE_MATURE = 4;
+/** Ordinary buildings need ground whose corners (footprint and door) differ by at most this many pixels. */
+export const BUILD_MAX_SLOPE = 12;
 /** Stone units in a deposit tile at generation, inclusive range. */
 export const DEPOSIT_STONE: [number, number] = [4, 8];
 /** Grain field stages: 1 sown … CROP_RIPE harvestable. Fields grow every CROP_GROW_EVERY ticks with CROP_GROW_CHANCE. */

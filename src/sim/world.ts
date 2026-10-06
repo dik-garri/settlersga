@@ -1,5 +1,6 @@
 import { addBuilding, doorOf, recomputeTerritory, spawnSettler, updateBuilding } from './buildings';
 import {
+  BUILD_MAX_SLOPE,
   BUILD_TICKS_PER_UNIT,
   BUILDINGS,
   DISPATCH_EVERY,
@@ -127,6 +128,8 @@ export class World {
       }
     }
     const door = doorOf(x, y, def.w, def.h);
+    // Mines sit on slopes; everything else needs level ground under the footprint and door.
+    if (def.terrain !== 'mountain' && this.map.heightRange(x, y, x + def.w - 1, y + def.h) > BUILD_MAX_SLOPE) return false;
     return (
       this.map.isWalkable(door.x, door.y) &&
       this.map.door[this.map.idx(door.x, door.y)] === 0 &&

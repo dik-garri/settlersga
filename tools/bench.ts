@@ -5,6 +5,7 @@
  *   npm run sim:bench -- --size=256 --settlers=1000 --ticks=3000
  */
 import { spawnSettler } from '../src/sim/buildings';
+import { TOOLS } from '../src/sim/config';
 import { pathStats } from '../src/sim/pathfinding';
 import { World } from '../src/sim/world';
 import { arg, placeNear } from './scenario';
@@ -32,6 +33,8 @@ for (let cy = 12; cy < size - 8; cy += 16) {
     if (built.length > 0) clusters++;
   }
 }
+// Every workplace needs its tool (phase 1.3); give the castle enough for all of them.
+for (const tool of TOOLS) w.castle.output[tool] = 1000;
 while (w.settlers.length < target) spawnSettler(w, 'carrier', w.castle);
 
 const warmup = 600;

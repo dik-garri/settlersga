@@ -27,6 +27,11 @@ export class GameMap {
   readonly building: Int32Array;
   /** Building id whose door is on this tile, 0 if none. */
   readonly door: Int32Array;
+  /**
+   * Terrain elevation in screen pixels per tile corner: (w+1)×(h+1) vertices, vertex (vx, vy) being
+   * the corner at tile coordinates (vx − ½, vy − ½). Set at generation, static afterwards.
+   */
+  readonly height: Uint8Array;
 
   /** Chunk grid size and a change counter per chunk (see `touch`). Derived, not saved. */
   readonly chunksX: number;
@@ -53,6 +58,42 @@ export class GameMap {
     this.owner = new Uint8Array(n);
     this.building = new Int32Array(n);
     this.door = new Int32Array(n);
+    this.height = new Uint8Array((w + 1) * (h + 1));
+  }
+
+  vertexHeight(vx: number, vy: number): number {
+    const x = Math.min(this.w, Math.max(0, vx));
+    const y = Math.min(this.h, Math.max(0, vy));
+    return this.height[y * (this.w + 1) + x];
+  }
+
+  /** Elevation at a fractional tile position (tile centers are integers), bilinear between corners. */
+  heightAt(fx: number, fy: number): number {
+    const u = Math.min(this.w, Math.max(0, fx + 0.5));
+    const v = Math.min(this.h, Math.max(0, fy + 0.5));
+    const x0 = Math.min(this.w - 1, Math.floor(u));
+    const y0 = Math.min(this.h - 1, Math.floor(v));
+    const tx = u - x0;
+    const ty = v - y0;
+    const a = this.vertexHeight(x0, y0);
+    const b = this.vertexHeight(x0 + 1, y0);
+    const c = this.vertexHeight(x0, y0 + 1);
+    const d = this.vertexHeight(x0 + 1, y0 + 1);
+    return (a + (b - a) * tx) * (1 - ty) + (c + (d - c) * tx) * ty;
+  }
+
+  /** Max − min elevation over all corners of the tiles x0..x1 × y0..y1 (inclusive). */
+  heightRange(x0: number, y0: number, x1: number, y1: number): number {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let vy = y0; vy <= y1 + 1; vy++) {
+      for (let vx = x0; vx <= x1 + 1; vx++) {
+        const h = this.vertexHeight(vx, vy);
+        if (h < lo) lo = h;
+        if (h > hi) hi = h;
+      }
+    }
+    return hi - lo;
   }
 
   chunkOf(x: number, y: number): number {
@@ -182,6 +223,7 @@ export function generateMap(seed: number, size: number, cx: number, cy: number):
       // Push edges down so the map is framed by water.
       const edge = Math.min(x, y, size - 1 - x, size - 1 - y);
       const h = height[i] - (edge < 4 ? (4 - edge) * 0.08 : 0);
+      height[i] = h;
       let t = Terrain.Grass;
       if (h < 0.3) t = Terrain.Water;
       else if (h < 0.35) t = Terrain.Sand;
@@ -285,5 +327,96 @@ export function generateMap(seed: number, size: number, cx: number, cy: number):
     }
   }
 
+  elevate(map, height, { cx, cy, r: 6 }, { x: mx, y: my, r: 2.8 });
   return map;
+}
+
+/**
+ * Corner heights from the final terrain and the height noise: water at 0, gentle sand and grass,
+ * mountains clearly raised, rock peaks highest. The castle meadow is levelled and the guaranteed
+ * mountain gets a summit. Uses no randomness, so it does not change the rest of the generation.
+ */
+function elevate(
+  map: GameMap,
+  noise: Float32Array,
+  meadow: { cx: number; cy: number; r: number },
+  summit: { x: number; y: number; r: number },
+): void {
+  const { w, h } = map;
+  const tile = new Float32Array(w * h);
+  for (let i = 0; i < tile.length; i++) {
+    const n = noise[i];
+    switch (map.terrain[i] as Terrain) {
+      case Terrain.Water:
+        tile[i] = 0;
+        break;
+      case Terrain.Sand:
+        tile[i] = 3;
+        break;
+      case Terrain.Grass:
+        tile[i] = 4 + Math.min(12, Math.max(0, (n - 0.35) * 30));
+        break;
+      case Terrain.Mountain:
+        tile[i] = 12 + (Math.max(n, 0.7) - 0.7) * 400;
+        break;
+      case Terrain.Rock:
+        tile[i] = 70 + (Math.max(n, 0.84) - 0.84) * 420;
+        break;
+    }
+  }
+  // Level the castle meadow to its mean height, easing back to the natural ground over a few tiles.
+  const BLEND = 4;
+  let sum = 0;
+  let count = 0;
+  for (let y = meadow.cy - meadow.r; y <= meadow.cy + meadow.r; y++) {
+    for (let x = meadow.cx - meadow.r; x <= meadow.cx + meadow.r; x++) {
+      if (map.inBounds(x, y) && map.terrain[map.idx(x, y)] === Terrain.Grass) {
+        sum += tile[map.idx(x, y)];
+        count++;
+      }
+    }
+  }
+  const level = count ? sum / count : 6;
+  const reach = meadow.r + BLEND;
+  for (let y = meadow.cy - reach; y <= meadow.cy + reach; y++) {
+    for (let x = meadow.cx - reach; x <= meadow.cx + reach; x++) {
+      if (!map.inBounds(x, y)) continue;
+      const i = map.idx(x, y);
+      const t = map.terrain[i];
+      if (t !== Terrain.Grass && t !== Terrain.Sand) continue;
+      const d = Math.max(Math.abs(x - meadow.cx), Math.abs(y - meadow.cy));
+      const k = Math.min(1, Math.max(0, (d - meadow.r) / BLEND));
+      tile[i] = level + (tile[i] - level) * k;
+    }
+  }
+  // Give the guaranteed mountain a summit.
+  for (let y = Math.floor(summit.y - summit.r); y <= summit.y + summit.r; y++) {
+    for (let x = Math.floor(summit.x - summit.r); x <= summit.x + summit.r; x++) {
+      if (!map.inBounds(x, y)) continue;
+      const d = Math.hypot(x - summit.x, y - summit.y);
+      const i = map.idx(x, y);
+      if (d <= summit.r && map.terrain[i] === Terrain.Mountain) tile[i] = Math.max(tile[i], 14 + (summit.r - d) * 16);
+    }
+  }
+  // Each corner averages its tiles; any water around it pins it to the water surface.
+  for (let vy = 0; vy <= h; vy++) {
+    for (let vx = 0; vx <= w; vx++) {
+      let total = 0;
+      let k = 0;
+      let wet = false;
+      for (const [tx, ty] of [
+        [vx - 1, vy - 1],
+        [vx, vy - 1],
+        [vx - 1, vy],
+        [vx, vy],
+      ]) {
+        if (!map.inBounds(tx, ty)) continue;
+        const i = map.idx(tx, ty);
+        if (map.terrain[i] === Terrain.Water) wet = true;
+        total += tile[i];
+        k++;
+      }
+      map.height[vy * (w + 1) + vx] = wet || k === 0 ? 0 : Math.min(255, Math.round(total / k));
+    }
+  }
 }
