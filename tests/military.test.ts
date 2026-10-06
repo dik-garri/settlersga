@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { centerOf } from '../src/sim/buildings';
+import { centerOf, spawnSettler } from '../src/sim/buildings';
 import { START_SOLDIERS } from '../src/sim/config';
-import { killSettler } from '../src/sim/military';
+import { enterGarrison, killSettler } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
 import { RESOURCES, type Building } from '../src/sim/types';
 import { startPositions, World } from '../src/sim/world';
@@ -46,7 +46,8 @@ function frontier(opts: { enemySoldiers?: number; swords?: number } = {}) {
     for (const s of soldiersOf(w, 2).slice(opts.enemySoldiers)) killSettler(w, s);
     w.step();
   }
-  if (opts.swords) a.output.sword = opts.swords;
+  // Extra swordsmen in the castle (test setup; in play they come from a barracks).
+  for (let k = 0; k < (opts.swords ?? 0); k++) enterGarrison(w, a, spawnSettler(w, 'soldier', a));
   const ca = centerOf(a);
   const cb = centerOf(b);
   const toward = (from: { x: number; y: number }, to: { x: number; y: number }, k: number) => ({
@@ -93,16 +94,110 @@ describe('military economy', () => {
     expect(w.stats.produced.sword).toBe(0);
   });
 
-  it('carriers with swords enlist into the castle garrison', () => {
+  it('weapons alone recruit nobody: new fighters come only from a barracks', () => {
     const w = rich(new World(42));
     const c = w.castle;
+    c.output.sword = 2;
+    run(w, 600);
+    expect(soldiersOf(w, 1).length).toBe(START_SOLDIERS);
+    expect(c.output.sword).toBe(2);
+  });
+
+  it('a barracks trains carriers with its weapons into fighters who join a garrison', () => {
+    const w = rich(new World(42));
+    const c = w.castle;
+    const barracks = placeNear(w, 'barracks', c.x + 5, c.y - 1)!;
+    run(w, 1500);
+    expect(barracks.done).toBe(true);
     const carriers = w.settlers.filter((s) => s.kind === 'carrier').length;
     c.output.sword = 2;
-    run(w, 300);
+    run(w, 900);
     expect(soldiersOf(w, 1).length).toBe(START_SOLDIERS + 2);
     expect(c.garrison.length).toBe(START_SOLDIERS + 2);
-    expect(c.output.sword).toBe(0);
+    expect(c.output.sword + barracks.input.sword).toBe(0);
+    expect(w.stats.trained).toBe(2);
     expect(w.settlers.filter((s) => s.kind === 'carrier').length).toBe(carriers - 2);
+    expectConsistent(w);
+  });
+
+  it('the weaponsmith follows the player sword/bow shares', () => {
+    for (const [bow, sword] of [
+      [100, 0],
+      [0, 100],
+    ]) {
+      const w = rich(new World(42));
+      const c = w.castle;
+      w.setShare('bow', bow);
+      w.setShare('sword', sword);
+      expect(w.shareOf('bow')).toBe(bow);
+      const smith = placeNear(w, 'weaponsmith', c.x + 5, c.y - 1)!;
+      run(w, 1500);
+      expect(smith.done).toBe(true);
+      c.output.iron = 3;
+      c.output.coal = 3;
+      run(w, 2000);
+      expect(w.stats.produced.bow).toBe(bow ? 3 : 0);
+      expect(w.stats.produced.sword).toBe(sword ? 3 : 0);
+    }
+    // Only weapons have shares, and they stay within 0..100.
+    const w = new World(42);
+    w.setShare('plank', 50);
+    expect(w.shareOf('plank')).toBe(0);
+    w.setShare('bow', 250);
+    expect(w.shareOf('bow')).toBe(100);
+  });
+});
+
+describe('barracks', () => {
+  /** A finished barracks next to the castle and how many fighters the castle still has room for. */
+  function withBarracks() {
+    const w = rich(new World(42));
+    const c = w.castle;
+    const barracks = placeNear(w, 'barracks', c.x + 5, c.y - 1)!;
+    run(w, 1500);
+    expect(barracks.done).toBe(true);
+    return { w, c, barracks };
+  }
+
+  it('trains nobody while every garrison is full, and resumes when room frees up', () => {
+    const { w, c, barracks } = withBarracks();
+    while (c.garrison.length < 12) enterGarrison(w, c, spawnSettler(w, 'soldier', c));
+    c.output.sword = 2;
+    run(w, 900);
+    expect(w.stats.trained).toBe(0);
+    expect(barracks.workerId).toBeNull();
+    expect(c.output.sword + barracks.input.sword).toBe(2);
+    killSettler(w, w.getSettler(c.garrison[0])!);
+    run(w, 900);
+    expect(w.stats.trained).toBe(1);
+    expect(c.garrison.length).toBe(12);
+    expectConsistent(w);
+  });
+
+  it('a barracks picks the weapon its player is shortest of', () => {
+    const { w, c, barracks } = withBarracks();
+    w.setShare('sword', 0);
+    w.setShare('bow', 100);
+    c.output.sword = 1;
+    c.output.bow = 1;
+    run(w, 900);
+    // The first recruit takes the bow (the army has no archers yet, the share wants only archers).
+    const archers = w.settlers.filter((s) => s.kind === 'archer').length;
+    expect(archers).toBeGreaterThanOrEqual(1);
+    expect(w.stats.trained).toBe(2);
+    expect(barracks.input.sword + barracks.input.bow).toBe(0);
+  });
+
+  it('training continues identically after save and load', () => {
+    const { w, c, barracks } = withBarracks();
+    c.output.sword = 2;
+    for (let i = 0; i < 1500 && !(barracks.timer > 0); i++) w.step();
+    expect(barracks.timer).toBeGreaterThan(0);
+    const l = World.load(JSON.parse(JSON.stringify(saveWorld(w))));
+    run(w, 600);
+    run(l, 600);
+    expect(saveWorld(l)).toEqual(saveWorld(w));
+    expect(w.stats.trained).toBe(2);
   });
 });
 

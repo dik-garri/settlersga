@@ -56,6 +56,13 @@ export const PROMOTE_TICKS = 100;
 export const HEAL_EVERY = 10;
 /** Visual only: ticks an arrow is drawn in flight. */
 export const SHOT_TICKS = 5;
+/**
+ * Default army make-up per player (weights, see `World.setShare`): the weaponsmith forges and the
+ * barracks trains towards these proportions of fighters by weapon.
+ */
+export const OUTPUT_SHARES: Partial<Record<Resource, number>> = { sword: 60, bow: 40 };
+/** A barracks only takes a recruit while the player keeps at least this many idle carriers. */
+export const BARRACKS_MIN_IDLE = 2;
 export const START_BUILDERS = 3;
 export const START_PLANKS = 20;
 export const START_STONE = 10;
@@ -377,6 +384,7 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
   winemaker: { name: 'Винодел', behavior: 'workshop' },
   geologist: { name: 'Геолог', behavior: 'prospect' },
   weaponsmith: { name: 'Оружейник', behavior: 'workshop' },
+  recruit: { name: 'Новобранец', behavior: 'workshop' },
   soldier: { name: 'Мечник', behavior: 'soldier', tool: 'sword', hp: 100, combat: { melee: 1 } },
   archer: {
     name: 'Лучник',
@@ -438,6 +446,11 @@ export interface BuildingDef {
   terrain?: 'mountain';
   /** Mine: each recipe cycle also takes one unit of ore of this resource from a tile within `radius`. */
   mine?: { res: Resource; radius: number };
+  /**
+   * Barracks: its worker is a recruit who, given a weapon from the building's pile, trains for
+   * `ticks` and leaves as the fighter whose tool that weapon is. The only way to raise new fighters.
+   */
+  barracks?: { ticks: number };
 }
 
 /**
@@ -714,6 +727,16 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     territory: 11,
     garrison: { capacity: 6, keep: 2, archers: 2, defense: 1.35, trains: true },
   },
+  barracks: {
+    name: 'Казарма',
+    w: 2,
+    h: 2,
+    cost: { plank: 4, stone: 3 },
+    worker: 'recruit',
+    playerBuildable: true,
+    category: 'military',
+    barracks: { ticks: 60 },
+  },
   fortress: {
     name: 'Крепость',
     w: 3,
@@ -777,6 +800,9 @@ export const AI_PLAN: readonly { type: BuildingType; count: number; after?: Buil
   { type: 'ironsmelter', count: 1, after: 'ironmine' },
   { type: 'toolsmith', count: 1, after: 'ironsmelter' },
   { type: 'weaponsmith', count: 1, after: 'ironsmelter' },
+  { type: 'barracks', count: 1, after: 'weaponsmith' },
+  { type: 'goldmine', count: 1, after: 'toolsmith' },
+  { type: 'goldsmelter', count: 1, after: 'goldmine' },
   { type: 'pigfarm', count: 1 },
   { type: 'slaughterhouse', count: 1, after: 'pigfarm' },
   { type: 'farm', count: 2 },
@@ -789,8 +815,6 @@ export const AI_PLAN: readonly { type: BuildingType; count: number; after?: Buil
   { type: 'stonecutter', count: 2, after: 'toolsmith' },
   { type: 'house_large', count: 1 },
   { type: 'ironmine', count: 2, after: 'toolsmith' },
-  { type: 'goldmine', count: 1, after: 'toolsmith' },
-  { type: 'goldsmelter', count: 1, after: 'goldmine' },
   { type: 'weaponsmith', count: 2, after: 'ironsmelter' },
   { type: 'bigtower', count: 1, after: 'weaponsmith' },
   { type: 'tower', count: 7 },
@@ -821,8 +845,16 @@ export const AI = {
   frontierSoldiers: 8,
   /** …up to this many military buildings in total. */
   maxMilitary: 30,
+  /** While it knows no enemy, how strongly towers lean towards the map center (per tile). */
+  scoutCenter: 1,
+  /** Defenders it assumes in an enemy building out of its buildings' sight, as a share of the capacity. */
+  unseenGarrison: 0.5,
+  /** Gathered resources that do not grow back: their gatherers are moved once nothing is left in range. */
+  exhaustible: ['stone'] as readonly Resource[],
   /** Best-scored spots tried with `canPlace` per placement. */
   placeTries: 40,
   /** The last this-many units of a tool are kept for the first building of a type that needs it. */
   keepTools: 1,
+  /** Its army make-up (weights for `World.setShare`): mostly swordsmen, archers for the towers. */
+  weaponShares: { sword: 65, bow: 35 } as Partial<Record<Resource, number>>,
 };

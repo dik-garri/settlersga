@@ -11,7 +11,7 @@ import type { World } from './world';
  * - `seenUntil`: per player, the tick until which a tile stays in sight after a settler passed by;
  *   settlers stamp their surroundings every `FOG.settlerEvery` ticks.
  * Cost: O(settlers × disc) every few ticks plus O(map + buildings × disc) per building change.
- * The AI does not consult the fog yet: it still sees the whole map.
+ * The AI reads only `explored` and building sight (`inBuildingSight`), both reproducible after a load.
  */
 export interface FogState {
   vision: Uint8Array;
@@ -72,6 +72,19 @@ function rebuildVision(w: World): void {
     });
   }
   f.builtFor = [w.buildingsVersion, w.territoryVersion];
+}
+
+/** Rebuilds the building vision if it is stale (e.g. right after a load); cheap otherwise. */
+export function ensureVision(w: World): void {
+  if (w.fog.vision.length !== w.map.w * w.map.h || w.fog.builtFor[0] !== w.buildingsVersion || w.fog.builtFor[1] !== w.territoryVersion) {
+    rebuildVision(w);
+  }
+}
+
+/** Whether a tile is within sight of the player's buildings — derived from saved state only, so
+ * deterministic across save/load (unlike settlers' passing sight). The AI uses this. */
+export function inBuildingSight(w: World, i: number, player: PlayerId): boolean {
+  return ((w.fog.vision[i] ?? 0) & (1 << (player - 1))) !== 0;
 }
 
 /** Called once per tick at the end of `World.step`. */

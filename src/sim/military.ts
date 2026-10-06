@@ -1,10 +1,11 @@
 /**
  * Soldiers, archers, garrisons and combat.
  *
- * Military buildings (`def.garrison`) hold fighters: swordsmen (`soldier`) and archers. Empty slots
- * are filled by moving a spare fighter out of a reserve building (the castle), otherwise by
- * recruiting: a carrier fetches a sword or a bow and enlists. Every building keeps `keep` fighters it
- * never gives away. An attack sends spare fighters to an enemy military building; at its door each
+ * Military buildings (`def.garrison`) hold fighters: swordsmen (`soldier`) and archers. New fighters
+ * come only from a barracks (`def.barracks`): a carrier enters as its recruit, takes a weapon from its
+ * pile, trains and walks to the nearest garrison with room. Empty slots are also filled by moving a
+ * spare fighter out of a reserve building (the castle) or a rear outpost. Every building keeps `keep`
+ * fighters it never gives away. An attack sends spare fighters to an enemy military building; at its door each
  * attacker duels one defender at a time (defenders are stronger by the building's `defense`).
  * Archers inside a garrison shoot attackers approaching it; attacking archers shoot defenders who are
  * busy duelling their comrades. When no defender is left, the attacker takes the building over:
@@ -17,7 +18,10 @@
 import { centerOf, claimsTerritory, recomputeTerritory } from './buildings';
 import {
   ATTACK_RANGE,
+  BARRACKS_MIN_IDLE,
   BUILDINGS,
+  INPUT_CAP,
+  OUTPUT_SHARES,
   DAMAGE,
   FIGHT_EVERY,
   GARRISON_KEEP,
@@ -39,7 +43,6 @@ import type { World } from './world';
 export const FIGHTERS: readonly SettlerKind[] = (Object.keys(PROFESSIONS) as SettlerKind[]).filter(
   (k) => PROFESSIONS[k].combat,
 );
-const MELEE_KIND = FIGHTERS.find((k) => !PROFESSIONS[k].combat!.ranged)!;
 const RANGED_KIND = FIGHTERS.find((k) => PROFESSIONS[k].combat!.ranged);
 
 export function isFighter(s: Settler): boolean {
@@ -131,16 +134,12 @@ function spareSoldiers(w: World, b: Building, archer?: boolean): Settler[] {
 }
 
 /**
- * Logistics step: fill military buildings' free slots, outposts before reserves. A spare fighter of
- * the wanted role from a reserve building (the castle) walks over if there is one; otherwise a carrier
- * fetches a weapon (a bow for archer slots, else a sword; either if only one is in stock) and enlists.
+ * Logistics step: fill military buildings' free slots, outposts before reserves, by moving a spare
+ * fighter of the wanted role from a reserve building (the castle) or an outpost further back. New
+ * fighters are not made here — barracks train them (`updateBarracks`), and they find a free slot
+ * themselves (`soldierIdle`).
  */
-export function staffGarrisons(
-  w: World,
-  own: Building[],
-  take: (near: Point) => Settler | undefined,
-  supplyOf: (res: Resource, target: Building) => Building | undefined,
-): void {
+export function staffGarrisons(w: World, own: Building[]): void {
   const military = own.filter((b) => b.done && isMilitary(b));
   const outposts = military.filter((b) => !garrisonOf(b).claimsWhenEmpty);
   const reserves = military.filter((b) => garrisonOf(b).claimsWhenEmpty);
@@ -165,39 +164,112 @@ export function staffGarrisons(
               .sort((p, q) => distance(p, b) - distance(q, b) || p.id - q.id),
           ];
       const reserve = donors.map((r) => ({ r, spare: spareSoldiers(w, r, wantArcher) })).find((x) => x.spare.length > 0);
-      if (reserve) {
-        const s = reserve.spare[0];
-        leaveGarrison(w, reserve.r, s);
-        sendToJoin(s, b);
-        continue;
-      }
-      const order: SettlerKind[] = wantArcher ? [RANGED_KIND!, MELEE_KIND] : [MELEE_KIND, ...(RANGED_KIND ? [RANGED_KIND] : [])];
-      let kind: SettlerKind | undefined;
-      let from: Building | undefined;
-      for (const k of order) {
-        from = supplyOf(PROFESSIONS[k].tool!, b);
-        if (from) {
-          kind = k;
-          break;
-        }
-      }
-      if (!from || !kind) break;
-      const weapon = PROFESSIONS[kind].tool!;
-      const s = take(from.door);
-      if (!s) return;
-      from.outReserved[weapon]++;
-      const archer = !!PROFESSIONS[kind].combat?.ranged;
-      b.garrisonInbound++;
-      if (archer) b.garrisonArchersInbound++;
-      s.tasks = [
-        { t: 'goto', x: from.door.x, y: from.door.y },
-        { t: 'pickup', b: from.id, res: weapon },
-        { t: 'goto', x: b.door.x, y: b.door.y },
-        { t: 'retool', kind },
-        { t: 'join', b: b.id, archer },
-      ];
+      if (!reserve) break;
+      const s = reserve.spare[0];
+      leaveGarrison(w, reserve.r, s);
+      sendToJoin(s, b);
     }
   }
+}
+
+// ---------------------------------------------------------------- barracks
+
+/** Weapons a barracks trains with: the tools of the fighting professions. */
+const WEAPONS: readonly Resource[] = FIGHTERS.map((k) => PROFESSIONS[k].tool!);
+
+const fighterFor = (weapon: Resource) => FIGHTERS.find((k) => PROFESSIONS[k].tool === weapon)!;
+
+/** Weapons a finished barracks wants on its pile (each up to the input limit). */
+export function weaponsWanted(b: Building, res: Resource): number {
+  if (!BUILDINGS[b.type].barracks || !b.done || !WEAPONS.includes(res)) return 0;
+  return INPUT_CAP - b.input[res] - b.inbound[res];
+}
+
+/** The player's weight for an output among `choices` as a fraction (OUTPUT_SHARES defaults). */
+export function shareTargets(w: World, owner: PlayerId, choices: readonly Resource[]): Map<Resource, number> | null {
+  if (choices.length === 0 || !choices.every((r) => OUTPUT_SHARES[r] !== undefined)) return null;
+  const p = w.players.find((q) => q.id === owner);
+  const weights = choices.map((r) => p?.shares?.[r] ?? OUTPUT_SHARES[r]!);
+  const total = weights.reduce((a, b) => a + b, 0);
+  return new Map(choices.map((r, k) => [r, total > 0 ? weights[k] / total : 1 / choices.length]));
+}
+
+/** Living fighters of the player whose weapon is `res` (in garrisons, walking, attacking). */
+export function fightersWith(w: World, owner: PlayerId, res: Resource): number {
+  let n = 0;
+  for (const s of w.settlers) if (s.owner === owner && !w.dying.has(s.id) && isFighter(s) && PROFESSIONS[s.kind].tool === res) n++;
+  return n;
+}
+
+/**
+ * Of `candidates`, the one furthest below the player's target share, given how many units of each the
+ * player already `has`. Ties: candidate order.
+ */
+export function mostBehindShare(
+  w: World,
+  owner: PlayerId,
+  candidates: readonly Resource[],
+  all: readonly Resource[],
+  has: (r: Resource) => number,
+): Resource | null {
+  const target = shareTargets(w, owner, all);
+  if (!target) return null;
+  const total = all.reduce((n, r) => n + has(r), 0);
+  let best: Resource | null = null;
+  let bestGap = -Infinity;
+  for (const r of candidates) {
+    const gap = target.get(r)! * (total + 1) - has(r);
+    if (gap > bestGap) {
+      best = r;
+      bestGap = gap;
+    }
+  }
+  return best;
+}
+
+/**
+ * Whether a barracks should call in a recruit now: it has a weapon, the player keeps
+ * `BARRACKS_MIN_IDLE` idle carriers, and there is more free garrison room than fighters already
+ * looking for one (homeless or in training).
+ */
+export function wantsRecruit(w: World, b: Building): boolean {
+  if (!WEAPONS.some((r) => b.input[r] > 0)) return false;
+  let idle = 0;
+  let looking = 0;
+  for (const s of w.settlers) {
+    if (s.owner !== b.owner || w.dying.has(s.id)) continue;
+    if (s.kind === 'carrier' && s.tasks.length === 0) idle++;
+    else if (s.kind === 'recruit' || (isFighter(s) && s.home === null)) looking++;
+    else if (s.tasks.some((t) => t.t === 'become' && t.kind === 'recruit')) looking++;
+  }
+  if (idle < BARRACKS_MIN_IDLE) return false;
+  let room = 0;
+  for (const o of w.buildings.values()) if (o.owner === b.owner && o.done && isMilitary(o)) room += garrisonSpace(o);
+  return room > looking;
+}
+
+/**
+ * Per tick for a finished barracks: its recruit trains with the weapon the player's army is shortest
+ * of (by `OUTPUT_SHARES`) and leaves as that fighter, homeless, to find a garrison.
+ */
+export function updateBarracks(w: World, b: Building): void {
+  const s = w.getSettler(b.workerId);
+  if (!s || s.inside !== b.id || w.dying.has(s.id)) return;
+  const ready = WEAPONS.filter((r) => b.input[r] > 0);
+  if (ready.length === 0) return;
+  if (++b.timer < BUILDINGS[b.type].barracks!.ticks) return;
+  b.timer = 0;
+  const weapon = mostBehindShare(w, b.owner, ready, WEAPONS, (r) => fightersWith(w, b.owner, r)) ?? ready[0];
+  b.input[weapon]--;
+  s.kind = fighterFor(weapon);
+  s.level = 0;
+  s.hp = maxHp(s);
+  s.home = null;
+  s.inside = null;
+  s.tasks = [];
+  b.workerId = null;
+  b.workerRequested = false;
+  w.stats.trained++;
 }
 
 const distance = (a: Building, b: Building) => Math.hypot(a.door.x - b.door.x, a.door.y - b.door.y);

@@ -1,5 +1,6 @@
 import { buildingIcon, settlerIcon, wareIcon } from '../render/atlas';
 import {
+  OUTPUT_SHARES,
   BUILDINGS,
   CATEGORIES,
   costOf,
@@ -14,11 +15,16 @@ import {
   type ResourceGroup,
 } from '../sim/config';
 import { available, chooseOutput, oreLeft } from '../sim/buildings';
-import { isFighter, keepOf } from '../sim/military';
+import { isFighter, keepOf, wantsRecruit } from '../sim/military';
 import { hasGatherTargetNear } from '../sim/nature';
 import { RESOURCES, type Building, type BuildingType, type Resource, type Settler, type SettlerKind, type Stock } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import type { GameState, Placeable } from './state';
+
+/** Weapons a barracks trains with (tools of the fighting professions). */
+const BARRACKS_WEAPONS: readonly Resource[] = (Object.keys(PROFESSIONS) as SettlerKind[])
+  .filter((k) => PROFESSIONS[k].combat)
+  .map((k) => PROFESSIONS[k].tool!);
 
 const SPEEDS = [1, 2, 4];
 /** Commands that, like buildings, are aimed at a tile from the build menu. */
@@ -461,10 +467,23 @@ export class Hud {
           ? 'идёт'
           : tool && available(this.world, b.owner, tool) === 0
             ? `нет инструмента: ${nameOf(tool).toLowerCase()}`
-            : 'нет свободных носильщиков';
+            : def.barracks
+              ? '—'
+              : 'нет свободных носильщиков';
       rows.push(['Работник', workerName]);
       rows.push(['Статус', this.status(b)]);
       const gather = gatheredBy(b.type);
+      if (def.barracks) {
+        for (const r of BARRACKS_WEAPONS) rows.push([`${nameOf(r)} (запас)`, `${b.input[r]} / ${INPUT_CAP}`]);
+        if (worker && worker.inside === b.id && BARRACKS_WEAPONS.some((r) => b.input[r] > 0)) {
+          rows.push(['Обучение', `${Math.floor((100 * b.timer) / def.barracks.ticks)}%`]);
+        }
+      }
+      const shared = this.sharedChoices(b);
+      if (shared) {
+        const total = shared.reduce((n, r) => n + this.world.shareOf(r), 0) || 1;
+        rows.push(['Состав армии', shared.map((r) => `${nameOf(r).toLowerCase()} ${Math.round((100 * this.world.shareOf(r)) / total)}%`).join(' · ')]);
+      }
       if (def.recipe) {
         for (const r of RESOURCES) {
           if (def.recipe.inputs[r]) rows.push([`${nameOf(r)} (вход)`, `${b.input[r]} / ${INPUT_CAP}`]);
@@ -502,6 +521,8 @@ export class Hud {
       return;
     }
     if (!def.playerBuildable) return;
+    const shared = this.sharedChoices(b);
+    if (shared && shared.length === 2) this.infoEl.append(this.shareControls(shared[0], shared[1]));
     const actions = el('div', 'info-actions');
     if (!b.done || def.recipe || def.residence) {
       const prio = el('button', b.priority ? 'active' : '', b.priority ? '⬆ Приоритет: да' : '⬆ Приоритет');
@@ -523,6 +544,32 @@ export class Hud {
     this.infoEl.append(actions);
   }
 
+  /** Weapons whose proportions this building follows (share-controlled outputs), if any. */
+  private sharedChoices(b: Building): readonly Resource[] | null {
+    const def = BUILDINGS[b.type];
+    const choices = def.barracks ? BARRACKS_WEAPONS : (def.recipe?.outputChoice ?? []);
+    return choices.length > 0 && choices.every((r) => OUTPUT_SHARES[r] !== undefined) ? choices : null;
+  }
+
+  /** «◀ more A · more B ▶» in steps of 10, keeping the two weights summing to 100. */
+  private shareControls(a: Resource, b: Resource): HTMLElement {
+    const row = el('div', 'info-actions');
+    const shift = (toB: number) => {
+      const total = this.world.shareOf(a) + this.world.shareOf(b) || 100;
+      const bw = Math.max(0, Math.min(100, Math.round((100 * this.world.shareOf(b)) / total) + toB));
+      this.world.setShare(b, bw);
+      this.world.setShare(a, 100 - bw);
+    };
+    const moreA = el('button', '', `◀ ${nameOf(a).toLowerCase()}`);
+    moreA.title = `Больше: ${nameOf(a).toLowerCase()}`;
+    moreA.onclick = () => shift(-10);
+    const moreB = el('button', '', `${nameOf(b).toLowerCase()} ▶`);
+    moreB.title = `Больше: ${nameOf(b).toLowerCase()}`;
+    moreB.onclick = () => shift(10);
+    row.append(moreA, moreB);
+    return row;
+  }
+
   private attackControls(b: Building, available: number): HTMLElement {
     const actions = el('div', 'info-actions');
     const less = el('button', '', '−');
@@ -541,8 +588,13 @@ export class Hud {
   }
 
   private status(b: Building): string {
-    if (b.workerId === null) return 'ждёт работника';
     const def = BUILDINGS[b.type];
+    if (def.barracks) {
+      if (!BARRACKS_WEAPONS.some((r) => b.input[r] > 0)) return 'нет оружия';
+      if (b.workerId === null) return wantsRecruit(this.world, b) ? 'ждёт новобранца' : 'гарнизоны полны';
+      return 'обучает';
+    }
+    if (b.workerId === null) return 'ждёт работника';
     const behavior = PROFESSIONS[def.worker!].behavior;
     const w = this.world.getSettler(b.workerId);
     const outside = w !== undefined && w.inside === null;

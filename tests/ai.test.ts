@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { centerOf } from '../src/sim/buildings';
-import { killSettler } from '../src/sim/military';
+import { knownEnemies } from '../src/sim/ai';
+import { AI } from '../src/sim/config';
+import { centerOf, spawnSettler } from '../src/sim/buildings';
+import { enterGarrison, killSettler } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
 import { RESOURCES } from '../src/sim/types';
 import { World } from '../src/sim/world';
@@ -62,7 +64,16 @@ describe('computer player', () => {
 
   it('eventually attacks a passive player and takes the castle', { timeout: LONG }, () => {
     const w = new World(7, { players: 2, ai: [2] });
+    // Every target it picks is one player 2 has explored.
+    const unseen: string[] = [];
+    const attack = w.attack.bind(w);
+    w.attack = (target, count, player) => {
+      const b = w.buildings.get(target);
+      if (player === 2 && b && !w.isExplored(b.door.x, b.door.y, 2)) unseen.push(`${w.tick} ${b.type}`);
+      return attack(target, count, player);
+    };
     for (let i = 0; i < 45 * MINUTE && !w.isDefeated(1); i++) w.step();
+    expect(unseen).toEqual([]);
     const ai = w.ai.find((a) => a.player === 2)!;
     expect(ai.stats.attacks).toBeGreaterThanOrEqual(1);
     expect(w.isDefeated(1)).toBe(true);
@@ -73,6 +84,47 @@ describe('computer player', () => {
   });
 });
 
+describe('fog of war', () => {
+  it('knows only enemy buildings it has explored, and guesses garrisons out of sight', () => {
+    const w = new World(42, { players: 2, ai: [2] });
+    const enemy = w.castleOf(1);
+    expect(w.isExplored(enemy.door.x, enemy.door.y, 2)).toBe(false);
+    expect(knownEnemies(w, 2)).toEqual([]);
+    // Explored once (e.g. by a passing settler) but out of building sight: the garrison is a guess,
+    // even though it is in fact empty.
+    for (const s of soldiers(w, 1)) killSettler(w, s);
+    w.step();
+    w.map.explored[w.map.idx(enemy.door.x, enemy.door.y)] |= 1 << 1;
+    const known = knownEnemies(w, 2);
+    expect(known.map((k) => k.b.id)).toEqual([enemy.id]);
+    expect(enemy.garrison.length).toBe(0);
+    expect(known[0].defenders).toBe(Math.ceil(12 * AI.unseenGarrison));
+  });
+
+  it('prospects for gold, mines and smelts it, and promotes its soldiers', { timeout: LONG }, () => {
+    // 64×64 maps have no gold; this 96×96 one has some on player 2's side.
+    const w = new World(11, { size: 96, players: 2, ai: [2] });
+    let ranked = 0;
+    for (let i = 0; i < 30 * MINUTE && ranked === 0; i++) {
+      w.step();
+      if (i % 100 === 0) ranked = w.settlers.filter((s) => s.owner === 2 && s.kind !== 'carrier' && s.level > 0).length;
+    }
+    expect(ranked).toBeGreaterThan(0);
+    expect(w.stats.produced.gold).toBeGreaterThan(0);
+    expect(ownBuildings(w, 2).some((b) => b.type === 'goldmine' && b.done)).toBe(true);
+    expect(w.ai[0].stats.geologists).toBeGreaterThan(0);
+  });
+
+  it('scouts towards unexplored land while it knows no enemy', { timeout: LONG }, () => {
+    const w = new World(42, { players: 2, ai: [2] });
+    const explored = () => w.map.explored.filter((e) => e & 2).length;
+    const start = explored();
+    run(w, 20 * MINUTE);
+    expect(explored()).toBeGreaterThan(start * 1.5);
+    expect(ownBuildings(w, 1).length).toBe(1);
+  });
+});
+
 describe('victory and defeat', () => {
   /** Player 2's castle left without soldiers, a manned tower of player 1 within attack range. */
   function undefendedCastle() {
@@ -80,7 +132,8 @@ describe('victory and defeat', () => {
     const [a, b] = [w.castleOf(1), w.castleOf(2)];
     a.output.plank = 80;
     a.output.stone = 40;
-    a.output.sword = 6;
+    // Extra swordsmen in the castle (test setup; in play they come from a barracks).
+    for (let k = 0; k < 6; k++) enterGarrison(w, a, spawnSettler(w, 'soldier', a));
     for (const s of soldiers(w, 2)) killSettler(w, s);
     w.step();
     const ca = centerOf(a);

@@ -6,6 +6,7 @@ import {
   BUILDINGS,
   DISPATCH_EVERY,
   MAP_SIZE,
+  OUTPUT_SHARES,
   PROSPECT_RADIUS,
   PROSPECT_TICKS,
   PROSPECT_TILES,
@@ -32,17 +33,28 @@ import {
   leaveGarrison,
   pruneShots,
   removeDead,
+  updateBarracks,
   updateGarrison,
 } from './military';
 import { generateMap, type GameMap } from './map';
-import { createFog, isExplored, isVisible, updateFog, type FogState } from './fog';
+import { createFog, ensureVision, isExplored, isVisible, updateFog, type FogState } from './fog';
 import { updateNature } from './nature';
 import { findPath, staysConnected } from './pathfinding';
 import { createRng, type Rng } from './rng';
 import { mapFromSave, restoreWorld, type SaveData } from './save';
 import { markWalkable } from './regions';
 import { abort, updateSettler } from './settlers';
-import { emptyStock, Terrain, type Building, type BuildingType, type PlayerId, type Settler, type Stock, type Task } from './types';
+import {
+  emptyStock,
+  Terrain,
+  type Building,
+  type BuildingType,
+  type PlayerId,
+  type Resource,
+  type Settler,
+  type Stock,
+  type Task,
+} from './types';
 
 export { doorOf } from './buildings';
 
@@ -66,6 +78,8 @@ export const LOCAL_PLAYER: PlayerId = 1;
 export interface Player {
   id: PlayerId;
   castleId: number;
+  /** The player's weights for share-controlled outputs (weapons); missing ones use `OUTPUT_SHARES`. */
+  shares?: Partial<Record<Resource, number>>;
 }
 
 export interface WorldOptions {
@@ -88,11 +102,12 @@ export class World {
   readonly buildings = new Map<number, Building>();
   readonly settlers: Settler[] = [];
   readonly players: Player[] = [];
-  readonly stats: { produced: Stock; lost: Stock; treesPlanted: number; prospected: number } = {
+  readonly stats: { produced: Stock; lost: Stock; treesPlanted: number; prospected: number; trained: number } = {
     produced: emptyStock(),
     lost: emptyStock(),
     treesPlanted: 0,
     prospected: 0,
+    trained: 0,
   };
   tick = 0;
   /** Bumped whenever the territory changes, so views can redraw the border. */
@@ -269,6 +284,23 @@ export class World {
 
   // --------------------------------------------------------------- commands
 
+  /**
+   * Player command: the weight (0–100) of a share-controlled output (`OUTPUT_SHARES`: swords, bows)
+   * in what the weaponsmith forges and the barracks trains. False for other resources.
+   */
+  setShare(res: Resource, weight: number, player: PlayerId = LOCAL_PLAYER): boolean {
+    const p = this.players.find((q) => q.id === player);
+    if (!p || OUTPUT_SHARES[res] === undefined || !Number.isFinite(weight)) return false;
+    p.shares = { ...p.shares, [res]: Math.max(0, Math.min(100, Math.round(weight))) };
+    return true;
+  }
+
+  /** The player's current weight for a share-controlled output. */
+  shareOf(res: Resource, player: PlayerId = LOCAL_PLAYER): number {
+    const p = this.players.find((q) => q.id === player);
+    return p?.shares?.[res] ?? OUTPUT_SHARES[res] ?? 0;
+  }
+
   /** Player command: serve this building first (materials, inputs, builders). */
   setPriority(id: number, on: boolean, player: PlayerId = LOCAL_PLAYER): boolean {
     const b = this.buildings.get(id);
@@ -389,6 +421,9 @@ export class World {
   // ------------------------------------------------------------- simulation
 
   step(): void {
+    // After a load the derived building vision is missing; rebuild it from the state the previous
+    // tick ended with, exactly as the uninterrupted game had it (the AI reads it).
+    ensureVision(this);
     this.tick++;
     for (const s of this.settlers) {
       s.px = s.x;
@@ -399,6 +434,7 @@ export class World {
     for (const b of this.buildings.values()) {
       updateBuilding(this, b);
       if (b.done && isMilitary(b)) updateGarrison(this, b, assaults);
+      if (b.done && BUILDINGS[b.type].barracks) updateBarracks(this, b);
     }
     for (const s of this.settlers) if (!this.dying.has(s.id)) updateSettler(this, s);
     removeDead(this);

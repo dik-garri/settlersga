@@ -1,4 +1,5 @@
 import { BUILDINGS, OUTPUT_CAP, oreOf, PROFESSIONS, type BuildingDef, type Recipe } from './config';
+import { fightersWith, mostBehindShare } from './military';
 import {
   emptyStock,
   RESOURCES,
@@ -161,6 +162,16 @@ function garrisonSlotsFor(w: World, b: Building, tool: Resource): number {
  * or null when every choice is covered and nothing needs making.
  */
 export function chooseOutput(w: World, b: Building, recipe: Recipe): Resource | null {
+  const choices = recipe.outputChoice ?? [];
+  const awaited = choices.filter(
+    (r) => b.output[r] < OUTPUT_CAP && waitingFor(w, b.owner, r) + (recipe.keepInStock ?? 0) - available(w, b.owner, r) > 0,
+  );
+  if (awaited.length === 0) return null;
+  // Share-controlled outputs (weapons): something is wanted, so make whichever the player's army is
+  // furthest below its target share in (units in stock plus fighters carrying it).
+  const room = choices.filter((r) => b.output[r] < OUTPUT_CAP);
+  const byShare = mostBehindShare(w, b.owner, room, choices, (r) => available(w, b.owner, r) + fightersWith(w, b.owner, r));
+  if (byShare) return byShare;
   let best: Resource | null = null;
   let bestNeed = 0;
   let bestHave = Infinity;

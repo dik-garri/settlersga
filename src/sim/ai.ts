@@ -2,10 +2,19 @@
  * Computer players.
  *
  * Rules: an AI plays only through the same `World` commands a human uses (`placeBuilding`,
- * `sendGeologist`, `attack`, `demolish`, all with its own player id) and only reads what a player
- * can see — in particular, ore under a mountain counts only once the AI's own geologist has
- * prospected it. It has no RNG of its own (ties are broken by tile index), so games stay
- * deterministic, and its state (`AiState`) is plain data saved with the world.
+ * `sendGeologist`, `attack`, `demolish`, `setShare`, all with its own player id) and only reads what
+ * its player can see:
+ * - ore under a mountain counts only once its own geologist has prospected it;
+ * - enemy buildings exist for it only where its fog is explored (`isExplored` on the door tile), and
+ *   it counts their defenders only while they are in its buildings' sight (`inBuildingSight`) —
+ *   otherwise it guesses from the building type; resources beyond its border count only on
+ *   explored tiles;
+ * - with no enemy building known yet it pushes its towers towards foreign land in sight, else
+ *   towards unexplored land and the map center (the map size is public).
+ * It reads only fog state that is saved or derived from saved state (explored bits, building sight),
+ * never settlers' passing sight, so a loaded game makes the same decisions. It has no RNG of its own
+ * (ties are broken by tile index), so games stay deterministic, and its state (`AiState`) is plain
+ * data saved with the world.
  *
  * Cost: an AI thinks every `AI.thinkEvery` ticks (staggered per player). A think looks at its own
  * buildings and, when it wants to build, scores the tiles of its own territory (sampled more sparsely
@@ -15,6 +24,7 @@ import { available, centerOf, claimsTerritory, doorOf, oreLeft, waitingFor } fro
 import {
   AI,
   AI_PLAN,
+  ATTACK_RANGE,
   BUILD_MAX_SLOPE,
   SOLDIER_LEVELS,
   BUILDINGS,
@@ -24,9 +34,10 @@ import {
   PROFESSIONS,
   type BuildingDef,
 } from './config';
+import { inBuildingSight, visionRadius } from './fog';
 import { FIGHTERS, isFighter, isMilitary, keepOf } from './military';
-import { isGatherTarget } from './nature';
-import { RESOURCES, Terrain, type Building, type BuildingType, type PlayerId, type Point } from './types';
+import { hasGatherTargetNear, isGatherTarget } from './nature';
+import { RESOURCES, Terrain, type Building, type BuildingType, type PlayerId, type Point, type Resource } from './types';
 import type { World } from './world';
 
 /** Per computer player; saved with the world. */
@@ -36,6 +47,10 @@ export interface AiState {
   lastAttack: number;
   /** Building type (or 'frontier') → tick before which the AI does not look for a spot again. */
   blockedUntil: Partial<Record<BuildingType | 'frontier', number>>;
+  /** Ore it wants a mine for but knows no deposit of: towers then favour mountains, geologists go out. */
+  wantOre: Resource | null;
+  /** Its weapon shares have been set (once, through `setShare`). */
+  sharesSet: boolean;
   stats: { placed: number; attacks: number; soldiersSent: number; geologists: number; demolished: number };
 }
 
@@ -47,6 +62,8 @@ export function createAi(player: PlayerId): AiState {
     // Finite so it survives a JSON save.
     lastAttack: -AI.attackCooldown,
     blockedUntil: {},
+    wantOre: null,
+    sharesSet: false,
     stats: { placed: 0, attacks: 0, soldiersSent: 0, geologists: 0, demolished: 0 },
   };
 }
@@ -67,16 +84,26 @@ const HOUSES: readonly BuildingType[] = ['house_small', 'house_medium', 'house_l
 function think(w: World, ai: AiState): void {
   const me = ai.player;
   const own = [...w.buildings.values()].filter((b) => b.owner === me);
+  if (!ai.sharesSet) {
+    for (const [res, weight] of Object.entries(AI.weaponShares) as [Resource, number][]) w.setShare(res, weight, me);
+    ai.sharesSet = true;
+  }
 
   for (const b of own) {
     // A worked-out mine only ties up a miner and his food.
     if (b.done && BUILDINGS[b.type].mine && oreLeft(w, b) === 0 && w.demolish(b.id, me)) ai.stats.demolished++;
+    // Likewise a gatherer of something that does not grow back once nothing is left in range:
+    // the plan then rebuilds it where there is some.
+    const gather = gatheredBy(b.type);
+    if (b.done && gather && AI.exhaustible.includes(gather.res) && !hasGatherTargetNear(w, b, gather) && w.demolish(b.id, me)) {
+      ai.stats.demolished++;
+    }
   }
   const attacked = attackIfStrong(w, ai);
 
   const sites = own.filter((b) => !b.done);
   if (sites.length >= AI.maxOpenSites) return;
-  const ctx = new Context(w, me, own);
+  const ctx = new Context(w, me, own, ai.wantOre);
 
   // Keep enough idle carriers: they staff new workplaces, carry goods and become soldiers.
   // Houses release their people over time, so settlers still to come count as available.
@@ -97,8 +124,16 @@ function think(w: World, ai: AiState): void {
     if ((ai.blockedUntil[step.type] ?? -Infinity) > w.tick) continue;
     if (!ctx.affordable(step.type) || !ctx.staffable(step.type, count(step.type) === 0)) continue;
     if (BUILDINGS[step.type].garrison && !ctx.canMan(step.type)) continue;
-    if (tryPlace(ctx, ai, step.type)) return;
-    if (BUILDINGS[step.type].mine) prospect(ctx, ai);
+    const mine = BUILDINGS[step.type].mine;
+    if (tryPlace(ctx, ai, step.type)) {
+      if (mine && ai.wantOre === mine.res) ai.wantOre = null;
+      return;
+    }
+    if (mine) {
+      // No known deposit: look for one (geologist) and lean the next towers towards mountains.
+      ai.wantOre = mine.res;
+      prospect(ctx, ai);
+    }
     ai.blockedUntil[step.type] = w.tick + RETRY_TICKS;
   }
 
@@ -108,6 +143,7 @@ function think(w: World, ai: AiState): void {
   const military = own.filter((b) => isMilitary(b));
   if (
     !attacked &&
+    !enemyInReach(w, me, military) &&
     (ai.blockedUntil.frontier ?? -Infinity) <= w.tick &&
     soldiers >= AI.frontierSoldiers &&
     military.length < AI.maxMilitary &&
@@ -120,6 +156,19 @@ function think(w: World, ai: AiState): void {
       if (!tryPlace(ctx, ai, type)) ai.blockedUntil.frontier = w.tick + RETRY_TICKS;
     }
   }
+}
+
+/**
+ * A known enemy military building lies within attack range of one of its own: new outposts would
+ * only thin out the soldiers it gathers for the attack.
+ */
+function enemyInReach(w: World, me: PlayerId, military: Building[]): boolean {
+  const own = military.filter((b) => b.done).map((b) => centerOf(b));
+  return knownEnemies(w, me).some(({ b }) => {
+    if (!b.done || !isMilitary(b)) return false;
+    const c = centerOf(b);
+    return own.some((o) => Math.hypot(o.x - c.x, o.y - c.y) <= ATTACK_RANGE);
+  });
 }
 
 /** Military buildings the AI pushes its border with, largest garrison first. */
@@ -144,7 +193,8 @@ function prospect(ctx: Context, ai: AiState): void {
   for (const i of ctx.tiles) {
     const x = i % w.map.w;
     const y = Math.floor(i / w.map.w);
-    if (w.map.terrain[i] !== Terrain.Mountain || w.isProspected(x, y, me)) continue;
+    // Walkable only: a tile under a mine would make the geologist's errand fail every time.
+    if (w.map.terrain[i] !== Terrain.Mountain || !w.map.isWalkable(x, y) || w.isProspected(x, y, me)) continue;
     const d = Math.hypot(x - castle.x, y - castle.y);
     if (d < bestD) {
       best = { x, y };
@@ -155,8 +205,24 @@ function prospect(ctx: Context, ai: AiState): void {
 }
 
 /**
- * Sends every spare soldier in range against the enemy military building it most clearly outnumbers.
- * True if it attacked (or is still cooling down from an attack).
+ * Enemy buildings this player knows of: their door tile is explored. Military ones come with the
+ * defenders it can count — the real number while in sight of its buildings, otherwise a guess
+ * (`AI.unseenGarrison` of the capacity).
+ */
+export function knownEnemies(w: World, me: PlayerId): { b: Building; defenders: number }[] {
+  const out: { b: Building; defenders: number }[] = [];
+  for (const b of w.buildings.values()) {
+    if (b.owner === me || w.isDefeated(b.owner) || !w.isExplored(b.door.x, b.door.y, me)) continue;
+    const g = BUILDINGS[b.type].garrison;
+    const seen = inBuildingSight(w, w.map.idx(b.door.x, b.door.y), me);
+    out.push({ b, defenders: !g ? 0 : seen ? b.garrison.length : Math.ceil(g.capacity * AI.unseenGarrison) });
+  }
+  return out;
+}
+
+/**
+ * Sends every spare soldier in range against the known enemy military building it most clearly
+ * outnumbers. True if it attacked (or is still cooling down from an attack).
  */
 function attackIfStrong(w: World, ai: AiState): boolean {
   if (w.tick - ai.lastAttack < AI.attackCooldown) return true;
@@ -166,13 +232,13 @@ function attackIfStrong(w: World, ai: AiState): boolean {
   let target: Building | null = null;
   let send = 0;
   let bestMargin = -Infinity;
-  for (const b of w.buildings.values()) {
-    if (b.owner === me || !b.done || !isMilitary(b) || w.isDefeated(b.owner)) continue;
-    // Own fighters' strength (ranks and professions known) against what a player sees of the target:
-    // the number of defenders and the kind of building (its defense bonus).
+  for (const { b, defenders } of knownEnemies(w, me)) {
+    if (!b.done || !isMilitary(b)) continue;
+    // Own fighters' strength (ranks and professions known) against what it can see of the target:
+    // the defenders it counts and the kind of building (its defense bonus).
     const ready = w.attackerComposition(b.id, Infinity, me);
     const power = ready.reduce((n, s) => n + SOLDIER_LEVELS[s.level].damage * (PROFESSIONS[s.kind].combat?.melee ?? 1), 0);
-    const defense = b.garrison.length * (BUILDINGS[b.type].garrison!.defense ?? 1);
+    const defense = defenders * (BUILDINGS[b.type].garrison!.defense ?? 1);
     if (ready.length < AI.minAttackers || power < AI.attackRatio * defense + 1) continue;
     // Prefer the castle (it ends the game), then the largest margin.
     const margin = power - AI.attackRatio * defense + (w.castleOf(b.owner) === b ? 100 : 0);
@@ -198,18 +264,43 @@ class Context {
   /** Military buildings go as close to the nearest enemy as possible (instead of claiming resources). */
   frontier = false;
   private readonly castle: Point;
-  private readonly enemyCastles: Point[];
+  /**
+   * Centers of the enemy buildings it knows of (fog), or else foreign land its buildings see;
+   * empty = it must still find the enemy.
+   */
+  private readonly enemies: Point[];
 
   constructor(
     readonly w: World,
     readonly me: PlayerId,
     readonly own: Building[],
+    readonly wantOre: Resource | null = null,
   ) {
     this.castle = centerOf(w.castleOf(me));
-    this.enemyCastles = w.players
-      .filter((p) => p.id !== me && !w.isDefeated(p.id))
-      .map((p) => centerOf(w.castleOf(p.id)));
+    const known = knownEnemies(w, me);
+    this.enemies = known.length > 0 ? known.map((e) => centerOf(e.b)) : this.foreignLandInSight();
     this.tiles = this.territory();
+  }
+
+  /** Another player's land in sight of its military buildings (sampled every third tile). */
+  private foreignLandInSight(): Point[] {
+    const { w, me } = this;
+    const m = w.map;
+    const seen = new Set<number>();
+    for (const b of this.own) {
+      if (!b.done || !isMilitary(b)) continue;
+      const c = centerOf(b);
+      const r = visionRadius(b.type);
+      for (let y = Math.floor((c.y - r) / 3) * 3; y <= c.y + r; y += 3) {
+        for (let x = Math.floor((c.x - r) / 3) * 3; x <= c.x + r; x += 3) {
+          if (!m.inBounds(x, y)) continue;
+          const i = m.idx(x, y);
+          const o = m.owner[i];
+          if (o !== 0 && o !== me && !w.isDefeated(o) && inBuildingSight(w, i, me)) seen.add(i);
+        }
+      }
+    }
+    return [...seen].sort((a, b) => a - b).map((i) => ({ x: i % m.w, y: Math.floor(i / m.w) }));
   }
 
   private territory(): number[] {
@@ -267,7 +358,9 @@ class Context {
     const military = this.own.filter((b) => b.done && isMilitary(b));
     const empty = military.filter((b) => b.garrison.length === 0).length;
     const spare = military.reduce((n, b) => n + Math.max(0, b.garrison.length - keepOf(b)), 0);
-    const weapons = FIGHTERS.reduce((n, k) => n + available(this.w, this.me, PROFESSIONS[k].tool!), 0);
+    // Weapons only turn into fighters through a barracks.
+    const trains = this.own.some((b) => b.done && BUILDINGS[b.type].barracks);
+    const weapons = !trains ? 0 : FIGHTERS.reduce((n, k) => n + available(this.w, this.me, PROFESSIONS[k].tool!), 0);
     return spare + weapons - empty - 1 >= AI.homeGuard;
   }
 
@@ -340,11 +433,18 @@ class Context {
         ...this.own.filter((b) => isMilitary(b)).map((b) => Math.hypot(centerOf(b).x - cx, centerOf(b).y - cy)),
       );
       if (nearestOwnMilitary < def.territory * 0.5) return null;
-      const enemy = this.enemyCastles.length
-        ? Math.min(...this.enemyCastles.map((e) => Math.hypot(e.x - cx, e.y - cy)))
-        : 0;
+      const reach = def.territory;
+      if (this.enemies.length === 0) {
+        // Enemy not found yet: scout — towers towards unexplored land, leaning towards the map
+        // center (starts lie around it, so that is where the others are; the map size is public).
+        const unknown = this.unexplored(cx, cy, reach + 3);
+        const toCenter = Math.hypot(cx - m.w / 2, cy - m.h / 2);
+        if (this.frontier) return unknown + fromCastle * 0.2 - toCenter * AI.scoutCenter;
+        return fromCastle + unknown * 0.1 + this.unclaimedResources(cx, cy, reach) * 0.15 - toCenter * AI.scoutCenter * 0.3;
+      }
+      const enemy = Math.min(...this.enemies.map((e) => Math.hypot(e.x - cx, e.y - cy)));
       if (this.frontier) return -enemy;
-      return fromCastle - enemy * 0.4 + this.unclaimedResources(cx, cy, def.territory) * 0.15;
+      return fromCastle - enemy * 0.4 + this.unclaimedResources(cx, cy, reach) * 0.15;
     }
 
     const worker = def.worker ? PROFESSIONS[def.worker] : undefined;
@@ -391,16 +491,39 @@ class Context {
     return n;
   }
 
-  /** Trees, stone, water and mountain not owned by anyone, which a tower here would bring in. */
+  /**
+   * Explored trees, stone, water and mountain not owned by anyone, which a tower here would bring in.
+   * Mountains weigh more while it wants ore it has not found (`wantOre`), and unexplored land is
+   * worth a look then too.
+   */
   private unclaimedResources(cx: number, cy: number, r: number): number {
-    const m = this.w.map;
+    const { w, me } = this;
+    const m = w.map;
+    const mountain = this.wantOre ? 4 : 1;
     let n = 0;
     for (let y = Math.floor(cy - r); y <= Math.ceil(cy + r); y++) {
       for (let x = Math.floor(cx - r); x <= Math.ceil(cx + r); x++) {
         if (!m.inBounds(x, y) || Math.hypot(x - cx, y - cy) > r) continue;
         const i = m.idx(x, y);
         if (m.owner[i] !== 0) continue;
-        if (m.tree[i] || m.stone[i] || m.terrain[i] === Terrain.Mountain || m.terrain[i] === Terrain.Water) n++;
+        if (!w.isExplored(x, y, me)) {
+          if (this.wantOre) n += 0.25;
+          continue;
+        }
+        if (m.terrain[i] === Terrain.Mountain) n += mountain;
+        else if (m.tree[i] || m.stone[i] || m.terrain[i] === Terrain.Water) n++;
+      }
+    }
+    return n;
+  }
+
+  /** Tiles around (cx, cy) the player has never seen (sampled every other tile). */
+  private unexplored(cx: number, cy: number, r: number): number {
+    const { w, me } = this;
+    let n = 0;
+    for (let y = Math.floor(cy - r); y <= Math.ceil(cy + r); y += 2) {
+      for (let x = Math.floor(cx - r); x <= Math.ceil(cx + r); x += 2) {
+        if (w.map.inBounds(x, y) && Math.hypot(x - cx, y - cy) <= r && !w.isExplored(x, y, me)) n++;
       }
     }
     return n;

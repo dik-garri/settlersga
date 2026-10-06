@@ -76,6 +76,8 @@ const STYLES: Partial<Record<SettlerKind, Partial<SettlerStyle>>> = {
   carrier: { tunic: '#3f6fb5', hat: '#6b4423', hatStyle: 'cap' },
   builder: { tunic: '#d08a2c', hat: '#c23b2b', hatStyle: 'cap', work: 'hammer', holds: 'hammer' },
   digger: { tunic: '#8a6a3c', hat: '#5a4636', hatStyle: 'straw', work: 'dig', holds: 'shovel' },
+  // Trainee on his way from the barracks to a garrison, still in plain clothes.
+  recruit: { tunic: '#8a7f6a', hat: '#5a4636' },
   woodcutter: { tunic: '#3d7d3a', hat: '#2e4d22', hatStyle: 'hood', work: 'chop', holds: 'axe' },
   forester: { tunic: '#7a9a3a', hat: '#5a4020', hatStyle: 'straw', work: 'dig', holds: 'shovel' },
   stonecutter: { tunic: '#7d7f86', hat: '#4a3b2c', hatStyle: 'cap', work: 'mine', holds: 'pick' },

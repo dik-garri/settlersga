@@ -1,5 +1,5 @@
 import { isReachable, nearestStorage } from './buildings';
-import { goldWanted, staffGarrisons } from './military';
+import { goldWanted, staffGarrisons, wantsRecruit, weaponsWanted } from './military';
 import { BUILDINGS, costOf, INPUT_CAP, PROFESSIONS, RESOURCE_INFO } from './config';
 import { RESOURCES, type Building, type PlayerId, type Point, type Resource, type Settler } from './types';
 import type { World } from './world';
@@ -17,7 +17,7 @@ export function demand(w: World, b: Building, res: Resource): number {
     const held = recipe.inputsAnyOf.reduce((n, r) => n + b.input[r] + b.inbound[r], 0);
     return INPUT_CAP - held;
   }
-  return goldWanted(w, b, res, INPUT_CAP);
+  return goldWanted(w, b, res, INPUT_CAP) || weaponsWanted(b, res);
 }
 
 /** Hands jobs to idle carriers of every player. */
@@ -44,6 +44,8 @@ function dispatchFor(w: World, owner: PlayerId): void {
   for (const b of own) {
     const kind = BUILDINGS[b.type].worker;
     if (!kind || !b.done || b.workerId !== null || b.workerRequested || !isReachable(w, b)) continue;
+    // A barracks calls its next recruit only when there is a weapon for him and room for a new fighter.
+    if (BUILDINGS[b.type].barracks && !wantsRecruit(w, b)) continue;
     const tool = PROFESSIONS[kind].tool;
     const from = tool ? nearestSupply(w, own, tool, b) : undefined;
     if (tool && !from) continue; // waits for the toolsmith
@@ -58,7 +60,7 @@ function dispatchFor(w: World, owner: PlayerId): void {
     s.tasks.push({ t: 'goto', x: b.door.x, y: b.door.y }, { t: 'become', b: b.id, kind });
   }
 
-  staffGarrisons(w, own, take, (res, target) => nearestPile(w, own, res, target.door));
+  staffGarrisons(w, own);
   if (idle.length === 0) return;
 
   // More construction sites than builders: carriers pick up hammers and become builders.
@@ -158,16 +160,6 @@ function nearestSupply(w: World, own: Building[], res: Resource, target: Buildin
   for (const b of own) {
     if (b === target || !b.done || !isReachable(w, b) || b.output[res] - b.outReserved[res] <= 0) continue;
     if (!best || (target && dist(b.door, target.door) < dist(best.door, target.door))) best = b;
-  }
-  return best;
-}
-
-/** Nearest pile (any building, including a warehouse at the destination) holding unpromised `res`. */
-function nearestPile(w: World, own: Building[], res: Resource, near: Point): Building | undefined {
-  let best: Building | undefined;
-  for (const b of own) {
-    if (!b.done || !isReachable(w, b) || b.output[res] - b.outReserved[res] <= 0) continue;
-    if (!best || dist(b.door, near) < dist(best.door, near)) best = b;
   }
   return best;
 }
