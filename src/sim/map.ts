@@ -1,4 +1,4 @@
-import { TREE_MATURE } from './config';
+import { DEPOSIT_STONE, TREE_MATURE } from './config';
 import { createRng, randInt, type Rng } from './rng';
 import { Terrain } from './types';
 
@@ -6,6 +6,8 @@ export class GameMap {
   readonly terrain: Uint8Array;
   /** 0 = no tree, 1..TREE_MATURE = growth stage. Trees block movement. */
   readonly tree: Uint8Array;
+  /** Stone units left in a deposit on this tile, 0 if none. Deposits block movement. */
+  readonly stone: Uint8Array;
   /** Building id occupying the tile, 0 if none. */
   readonly building: Int32Array;
   /** Building id whose door is on this tile, 0 if none. */
@@ -18,6 +20,7 @@ export class GameMap {
     const n = w * h;
     this.terrain = new Uint8Array(n).fill(Terrain.Grass);
     this.tree = new Uint8Array(n);
+    this.stone = new Uint8Array(n);
     this.building = new Int32Array(n);
     this.door = new Int32Array(n);
   }
@@ -38,7 +41,7 @@ export class GameMap {
   isWalkable(x: number, y: number): boolean {
     if (!this.inBounds(x, y)) return false;
     const i = this.idx(x, y);
-    return this.isPassableTerrain(x, y) && this.tree[i] === 0 && this.building[i] === 0;
+    return this.isPassableTerrain(x, y) && this.tree[i] === 0 && this.stone[i] === 0 && this.building[i] === 0;
   }
 
   /** Free grass tile a building footprint may cover. */
@@ -48,6 +51,7 @@ export class GameMap {
     return (
       this.terrain[i] === Terrain.Grass &&
       this.tree[i] === 0 &&
+      this.stone[i] === 0 &&
       this.building[i] === 0 &&
       this.door[i] === 0
     );
@@ -128,6 +132,21 @@ export function generateMap(seed: number, size: number, cx: number, cy: number):
     }
   }
 
+  const depositAt = (cx0: number, cy0: number, radius: number, chance: number) => {
+    for (let y = Math.floor(cy0 - radius); y <= cy0 + radius; y++) {
+      for (let x = Math.floor(cx0 - radius); x <= cx0 + radius; x++) {
+        if (!map.inBounds(x, y) || Math.hypot(x - cx0, y - cy0) > radius || rng() > chance) continue;
+        const i = map.idx(x, y);
+        if (map.terrain[i] !== Terrain.Grass) continue;
+        map.tree[i] = 0;
+        map.stone[i] = DEPOSIT_STONE[0] + randInt(rng, DEPOSIT_STONE[1] - DEPOSIT_STONE[0] + 1);
+      }
+    }
+  };
+
+  // Scattered stone deposits.
+  for (let k = 0; k < 7; k++) depositAt(4 + randInt(rng, size - 8), 4 + randInt(rng, size - 8), 1.6, 0.65);
+
   // Clear a meadow for the castle.
   for (let y = cy - 6; y <= cy + 6; y++) {
     for (let x = cx - 6; x <= cx + 6; x++) {
@@ -135,6 +154,7 @@ export function generateMap(seed: number, size: number, cx: number, cy: number):
       const i = map.idx(x, y);
       map.terrain[i] = Terrain.Grass;
       map.tree[i] = 0;
+      map.stone[i] = 0;
     }
   }
 
@@ -147,9 +167,13 @@ export function generateMap(seed: number, size: number, cx: number, cy: number):
       if (Math.hypot(x - gx, y - gy) > 3.2) continue;
       const i = map.idx(x, y);
       map.terrain[i] = Terrain.Grass;
+      map.stone[i] = 0;
       if (rng() < 0.7) map.tree[i] = TREE_MATURE;
     }
   }
+
+  // Guarantee a quarry on the other side.
+  depositAt(cx - 8, cy + 4, 2.3, 0.85);
 
   return map;
 }

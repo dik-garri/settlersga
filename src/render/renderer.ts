@@ -1,6 +1,6 @@
 import { Container, Graphics, Sprite, type Application } from 'pixi.js';
 import { BUILD_TICKS_PER_UNIT, BUILDINGS, TREE_MATURE } from '../sim/config';
-import { Terrain, type Building, type BuildingType, type Resource, type Settler } from '../sim/types';
+import { RESOURCES, Terrain, type Building, type BuildingType, type Resource, type Settler } from '../sim/types';
 import type { World } from '../sim/world';
 import type { SpriteAtlas } from './atlas';
 import { depthOf, HALF_H, HALF_W, toScreen, toTile } from './iso';
@@ -55,6 +55,9 @@ export class GameRenderer {
 
   private readonly treeSprites: (Sprite | null)[];
   private readonly treeState: Uint8Array;
+  private readonly depositSprites: (Sprite | null)[];
+  /** Rendered deposit size per tile: 0 = none, otherwise size class + 1. */
+  private readonly depositState: Uint8Array;
   private readonly buildingViews = new Map<number, BuildingView>();
   private readonly settlerViews = new Map<number, SettlerView>();
 
@@ -72,6 +75,8 @@ export class GameRenderer {
     const n = sim.map.w * sim.map.h;
     this.treeSprites = new Array(n).fill(null);
     this.treeState = new Uint8Array(n);
+    this.depositSprites = new Array(n).fill(null);
+    this.depositState = new Uint8Array(n);
     this.buildGround();
   }
 
@@ -112,6 +117,7 @@ export class GameRenderer {
   /** Brings sprites in line with the simulation. `alpha` ∈ [0,1) interpolates between ticks. */
   sync(alpha: number, timeMs: number, ghost: Ghost | null, selected: number | null, hover: { x: number; y: number } | null) {
     this.syncTrees();
+    this.syncDeposits();
     this.syncBuildings();
     this.syncSettlers(alpha, timeMs);
     this.drawMarks(ghost, selected, hover);
@@ -144,6 +150,35 @@ export class GameRenderer {
       }
       const flip = hash(i + 1) % 2 ? -1 : 1;
       s.scale.set(TREE_SCALE[Math.min(stage, TREE_MATURE)] * flip, TREE_SCALE[Math.min(stage, TREE_MATURE)]);
+    }
+  }
+
+  private syncDeposits(): void {
+    const { map } = this.sim;
+    for (let i = 0; i < map.stone.length; i++) {
+      const left = map.stone[i];
+      const state = left === 0 ? 0 : left >= 6 ? 3 : left >= 3 ? 2 : 1;
+      if (state === this.depositState[i]) continue;
+      this.depositState[i] = state;
+      let s = this.depositSprites[i];
+      if (state === 0) {
+        s?.destroy();
+        this.depositSprites[i] = null;
+        continue;
+      }
+      if (!s) {
+        const x = i % map.w;
+        const y = Math.floor(i / map.w);
+        const p = toScreen(x, y);
+        s = new Sprite();
+        s.position.set(p.x, p.y);
+        s.scale.x = hash(i + 3) % 2 ? -1 : 1;
+        s.zIndex = depthOf(x, y);
+        this.objects.addChild(s);
+        this.depositSprites[i] = s;
+      }
+      s.texture = this.atlas.get(`deposit:${state - 1}`);
+      s.anchor.copyFrom(s.texture.defaultAnchor!);
     }
   }
 
@@ -196,10 +231,13 @@ export class GameRenderer {
   /** Goods lying at the door: output pile on the right, input pile on the left. */
   private syncPile(b: Building, v: BuildingView): void {
     if (b.type === 'castle') return;
-    const waiting = b.done
-      ? 0
-      : b.delivered.plank - Math.floor(b.progress / BUILD_TICKS_PER_UNIT);
-    const key = `${b.output.log},${b.output.plank},${b.input.log},${waiting}`;
+    // Materials on a site not yet built in; the builder uses planks first, then stone.
+    const used = b.done ? 0 : Math.floor(b.progress / BUILD_TICKS_PER_UNIT);
+    const usedPlanks = Math.min(used, b.delivered.plank);
+    const waitingPlank = b.done ? 0 : b.delivered.plank - usedPlanks;
+    const waitingStone = b.done ? 0 : b.delivered.stone - Math.min(b.delivered.stone, used - usedPlanks);
+    const out = RESOURCES.map((r) => b.output[r]).join(',');
+    const key = `${out},${b.input.log},${waitingPlank},${waitingStone}`;
     if (key === v.pileKey) return;
     v.pileKey = key;
     // Keep the flag (child 0), drop the old pile.
@@ -211,10 +249,10 @@ export class GameRenderer {
         v.front.addChild(s);
       }
     };
-    stack('log', b.output.log, 8);
-    stack('plank', b.output.plank, 8);
+    for (const r of RESOURCES) stack(r, b.output[r], 8);
     stack('log', b.input.log, -34);
-    stack('plank', waiting, -34);
+    stack('plank', waitingPlank, -34);
+    stack('stone', waitingStone, -50);
   }
 
   private syncSettlers(alpha: number, timeMs: number): void {

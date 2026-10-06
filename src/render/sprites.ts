@@ -276,6 +276,58 @@ export function paintBoulder(ctx: Ctx, variant: number): void {
   }
 }
 
+/** Cut stone block in canvas pixels; (x, y) is the bottom-front corner. */
+function stoneBlock(ctx: Ctx, x: number, y: number, w: number, h: number, tone: number): void {
+  const d = w * 0.35;
+  const base = '#c9c1ae';
+  ctx.fillStyle = shade(base, 0.78 * tone);
+  ctx.fillRect(x, y - h, w, h);
+  ctx.beginPath();
+  ctx.moveTo(x + w, y);
+  ctx.lineTo(x + w + d, y - d * 0.5);
+  ctx.lineTo(x + w + d, y - h - d * 0.5);
+  ctx.lineTo(x + w, y - h);
+  ctx.closePath();
+  ctx.fillStyle = shade(base, 0.6 * tone);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(x, y - h);
+  ctx.lineTo(x + w, y - h);
+  ctx.lineTo(x + w + d, y - h - d * 0.5);
+  ctx.lineTo(x + d, y - h - d * 0.5);
+  ctx.closePath();
+  ctx.fillStyle = shade(base, 1.05 * tone);
+  ctx.fill();
+}
+
+/** Quarriable stone deposit, 56×44 with the base at (28, 34). Size 0–2 shrinks as it is mined. */
+export function paintDeposit(ctx: Ctx, size: number): void {
+  ctx.translate(28, 34);
+  ctx.beginPath();
+  ctx.ellipse(3, 1, 22, 8, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.fill();
+  const blocks: [number, number, number, number, number][][] = [
+    [
+      [-8, 4, 12, 8, 1],
+      [2, 6, 10, 7, 0.92],
+    ],
+    [
+      [-16, 4, 14, 10, 0.95],
+      [-2, 7, 14, 9, 1],
+      [-9, -5, 12, 9, 1.05],
+    ],
+    [
+      [-19, 3, 14, 11, 0.95],
+      [-5, 7, 15, 10, 1],
+      [6, 2, 12, 9, 0.9],
+      [-13, -7, 13, 10, 1.05],
+      [0, -3, 12, 9, 1],
+    ],
+  ];
+  for (const [x, y, w, h, tone] of blocks[size]) stoneBlock(ctx, x, y, w, h, tone);
+}
+
 /** Tree, 48×80 with the trunk base at (24, 72). Variants 0–1 conifers, 2–3 broadleaf. */
 export function paintTree(ctx: Ctx, variant: number): void {
   ctx.translate(24, 72);
@@ -347,6 +399,7 @@ export const BUILDING_CANVAS: Record<BuildingType | 'site', BuildingCanvas> = {
   woodcutter: { w: 150, h: 140, ax: 75, ay: 100 },
   sawmill: { w: 150, h: 140, ax: 75, ay: 100 },
   forester: { w: 150, h: 140, ax: 75, ay: 100 },
+  stonecutter: { w: 150, h: 140, ax: 75, ay: 100 },
   site: { w: 150, h: 90, ax: 75, ay: 50 },
 };
 
@@ -502,6 +555,33 @@ function paintForester(ctx: Ctx): void {
   }
 }
 
+function paintStonecutter(ctx: Ctx): void {
+  const hw = 0.78;
+  const hh = 0.78;
+  const H = 24;
+  const stone = '#9d988c';
+  shadow(ctx, hw, hh);
+  walls(ctx, 0, 0, hw, hh, 0, H, stone);
+  for (let z = 6; z < H; z += 6) {
+    line(ctx, [-hw, hh, z], [hw, hh, z], shade(stone, 0.8));
+    line(ctx, [hw, -hh, z], [hw, hh, z], shade(stone, 0.6));
+  }
+  for (let z = 0, row = 0; z < H; z += 6, row++) {
+    for (let t = -hw + (row % 2 ? 0.12 : 0.28); t < hw; t += 0.32) {
+      line(ctx, [t, hh, z], [t, hh, Math.min(z + 6, H)], shade(stone, 0.8));
+      line(ctx, [hw, t, z], [hw, t, Math.min(z + 6, H)], shade(stone, 0.6));
+    }
+  }
+  frontQuad(ctx, hh, 0.32, 0.68, 0, 16, '#4a3420');
+  sideQuad(ctx, hw, -0.4, -0.12, 11, 17, '#2a2724');
+  gableRoof(ctx, hw, hh, H, 22, '#6e4a33', stone);
+  // Cut blocks stacked by the wall.
+  const [bx, by] = P(-0.55, hh + 0.35, 0);
+  stoneBlock(ctx, bx - 10, by, 9, 6, 1);
+  stoneBlock(ctx, bx, by + 2, 9, 6, 0.92);
+  stoneBlock(ctx, bx - 5, by - 6, 9, 6, 1.05);
+}
+
 function paintSite(ctx: Ctx): void {
   const hw = 0.95;
   const hh = 0.95;
@@ -529,6 +609,7 @@ export const BUILDING_PAINTERS: Record<BuildingType | 'site', (ctx: Ctx) => void
   woodcutter: paintWoodcutter,
   sawmill: paintSawmill,
   forester: paintForester,
+  stonecutter: paintStonecutter,
   site: paintSite,
 };
 
@@ -536,12 +617,13 @@ export const BUILDING_PAINTERS: Record<BuildingType | 'site', (ctx: Ctx) => void
 
 export type SettlerFrame = 'stand' | 'walk' | 'work';
 
-const SETTLER_LOOK: Record<SettlerKind, { tunic: string; hat: string; tool?: 'axe' | 'hammer' | 'shovel' }> = {
+const SETTLER_LOOK: Record<SettlerKind, { tunic: string; hat: string; tool?: 'axe' | 'hammer' | 'shovel' | 'pick' }> = {
   carrier: { tunic: '#3f6fb5', hat: '#6b4423' },
   builder: { tunic: '#d08a2c', hat: '#c23b2b', tool: 'hammer' },
   woodcutter: { tunic: '#3d7d3a', hat: '#2e4d22', tool: 'axe' },
   sawmiller: { tunic: '#8b5a2b', hat: '#d9c9a3' },
   forester: { tunic: '#7a9a3a', hat: '#5a4020', tool: 'shovel' },
+  stonecutter: { tunic: '#7d7f86', hat: '#4a3b2c', tool: 'pick' },
 };
 
 /** Settler, 20×32 with the feet at (10, 29). */
@@ -582,6 +664,14 @@ export function paintSettler(ctx: Ctx, kind: SettlerKind, frame: SettlerFrame): 
       ctx.fillStyle = '#9aa0a6';
       if (look.tool === 'axe') ctx.fillRect(4.5, -27, 4, 3);
       else if (look.tool === 'shovel') ctx.fillRect(2.5, -31, 3.5, 4.5);
+      else if (look.tool === 'pick') {
+        ctx.beginPath();
+        ctx.moveTo(0, -25);
+        ctx.quadraticCurveTo(4.2, -29.5, 9, -25);
+        ctx.strokeStyle = '#9aa0a6';
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+      }
       else ctx.fillRect(2, -28, 5, 2.5);
     }
   } else {
@@ -615,6 +705,8 @@ export function paintWare(ctx: Ctx, res: Resource): void {
     ctx.strokeStyle = '#5a361a';
     ctx.lineWidth = 0.8;
     ctx.stroke();
+  } else if (res === 'stone') {
+    stoneBlock(ctx, -5, 4, 8, 5, 1);
   } else {
     ctx.fillStyle = '#e2bf86';
     ctx.fillRect(-7, -2, 14, 3.5);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { BUILDINGS, START_PLANKS } from '../src/sim/config';
-import type { BuildingType } from '../src/sim/types';
+import { costOf, START_PLANKS, START_STONE } from '../src/sim/config';
+import { RESOURCES, type BuildingType } from '../src/sim/types';
 import { findPath } from '../src/sim/pathfinding';
 import { World } from '../src/sim/world';
 
@@ -20,6 +20,17 @@ function findSpot(world: World, type: BuildingType, near: { x: number; y: number
   }
   if (!best) throw new Error(`no spot for ${type}`);
   return best;
+}
+
+function totalStone(world: World) {
+  return world.map.stone.reduce((sum, v) => sum + v, 0);
+}
+
+/** Units of `res` that exist as goods: in buildings' output and input piles and in carriers' hands. */
+function goodsInWorld(world: World, res: 'plank' | 'stone') {
+  let n = world.settlers.filter((s) => s.carrying === res).length;
+  for (const b of world.buildings.values()) n += b.output[res] + (b.done ? b.input[res] : 0);
+  return n;
 }
 
 function run(world: World, ticks: number) {
@@ -62,11 +73,11 @@ describe('World', () => {
     expect(world.stats.produced.log).toBeGreaterThan(5);
     expect(world.stats.produced.plank).toBeGreaterThan(3);
 
-    const spent = BUILDINGS.woodcutter.cost + BUILDINGS.sawmill.cost;
-    const planksNow =
-      [...world.buildings.values()].reduce((sum, b) => sum + b.output.plank, 0) +
-      world.settlers.filter((s) => s.carrying === 'plank').length;
-    expect(planksNow).toBe(START_PLANKS - spent + world.stats.produced.plank);
+    const spentPlanks = costOf('woodcutter').plank + costOf('sawmill').plank;
+    expect(goodsInWorld(world, 'plank')).toBe(START_PLANKS - spentPlanks + world.stats.produced.plank);
+    // The sawmill's stone came from the castle's starting stock.
+    expect(costOf('sawmill').stone).toBeGreaterThan(0);
+    expect(goodsInWorld(world, 'stone')).toBe(START_STONE - costOf('sawmill').stone);
   });
 
   it('forester plants saplings around the hut', () => {
@@ -105,20 +116,48 @@ describe('World', () => {
     }
   });
 
+  it('stonecutter quarries stone from deposits until they are used up', () => {
+    const world = new World(42);
+    const c = world.castle;
+    const before = totalStone(world);
+    expect(before).toBeGreaterThan(0);
+    // The guaranteed quarry lies south-west of the castle.
+    const spot = findSpot(world, 'stonecutter', { x: c.x - 5, y: c.y + 3 });
+    const hut = world.placeBuilding('stonecutter', spot.x, spot.y)!;
+    expect(hut).not.toBeNull();
+
+    run(world, 5000);
+
+    expect(hut.done).toBe(true);
+    expect(world.getSettler(hut.workerId)?.kind).toBe('stonecutter');
+    expect(world.stats.produced.stone).toBeGreaterThan(5);
+    expect(totalStone(world)).toBe(before - world.stats.produced.stone);
+    expect(goodsInWorld(world, 'stone')).toBe(START_STONE + world.stats.produced.stone);
+    // Deposits block movement only while stone is left.
+    for (let i = 0; i < world.map.stone.length; i++) {
+      const x = i % world.map.w;
+      const y = Math.floor(i / world.map.w);
+      if (world.map.stone[i] > 0) expect(world.map.isWalkable(x, y)).toBe(false);
+    }
+  });
+
   it('never leaves reservations negative', () => {
     const world = new World(7);
     const wc = findSpot(world, 'woodcutter', { x: world.castle.x + 6, y: world.castle.y });
     world.placeBuilding('woodcutter', wc.x, wc.y);
     const fr = findSpot(world, 'forester', { x: world.castle.x + 4, y: world.castle.y + 5 });
     world.placeBuilding('forester', fr.x, fr.y);
+    const st = findSpot(world, 'stonecutter', { x: world.castle.x - 5, y: world.castle.y + 3 });
+    world.placeBuilding('stonecutter', st.x, st.y);
+    const sm = findSpot(world, 'sawmill', { x: world.castle.x + 1, y: world.castle.y - 5 });
+    world.placeBuilding('sawmill', sm.x, sm.y);
     for (let i = 0; i < 3000; i++) {
       world.step();
       for (const b of world.buildings.values()) {
         for (const v of [...Object.values(b.inbound), ...Object.values(b.outReserved), ...Object.values(b.output)]) {
           expect(v).toBeGreaterThanOrEqual(0);
         }
-        expect(b.outReserved.log).toBeLessThanOrEqual(b.output.log);
-        expect(b.outReserved.plank).toBeLessThanOrEqual(b.output.plank);
+        for (const res of RESOURCES) expect(b.outReserved[res]).toBeLessThanOrEqual(b.output[res]);
       }
     }
   });

@@ -3,10 +3,10 @@ export interface Point {
   y: number;
 }
 
-export type Resource = 'log' | 'plank';
-export const RESOURCES: readonly Resource[] = ['log', 'plank'];
+export type Resource = 'log' | 'plank' | 'stone';
+export const RESOURCES: readonly Resource[] = ['log', 'plank', 'stone'];
 export type Stock = Record<Resource, number>;
-export const emptyStock = (): Stock => ({ log: 0, plank: 0 });
+export const emptyStock = (): Stock => ({ log: 0, plank: 0, stone: 0 });
 
 export enum Terrain {
   Water = 0,
@@ -15,8 +15,8 @@ export enum Terrain {
   Rock = 3,
 }
 
-export type BuildingType = 'castle' | 'woodcutter' | 'sawmill' | 'forester';
-export type SettlerKind = 'carrier' | 'builder' | 'woodcutter' | 'sawmiller' | 'forester';
+export type BuildingType = 'castle' | 'woodcutter' | 'sawmill' | 'forester' | 'stonecutter';
+export type SettlerKind = 'carrier' | 'builder' | 'woodcutter' | 'sawmiller' | 'forester' | 'stonecutter';
 
 export interface Building {
   id: number;
@@ -53,7 +53,8 @@ export type Task =
   | { t: 'drop'; b: number; res: Resource }
   /** Worker puts its own product on the building's output pile. */
   | { t: 'store'; b: number; res: Resource }
-  | { t: 'chop'; x: number; y: number; n: number }
+  /** Fell a tree or break stone off a deposit; the settler then carries `res`. */
+  | { t: 'gather'; x: number; y: number; n: number; res: Resource }
   | { t: 'plant'; x: number; y: number; n: number }
   | { t: 'build'; b: number }
   | { t: 'become'; b: number; kind: SettlerKind };

@@ -1,11 +1,29 @@
 import { buildingIcon } from '../render/atlas';
-import { BUILDINGS, INPUT_CAP, OUTPUT_CAP, SETTLER_NAMES } from '../sim/config';
-import type { Building, BuildingType, SettlerKind } from '../sim/types';
+import { BUILDINGS, costOf, GATHERERS, INPUT_CAP, OUTPUT_CAP, SETTLER_NAMES } from '../sim/config';
+import { RESOURCES, type Building, type BuildingType, type Resource, type SettlerKind } from '../sim/types';
 import type { World } from '../sim/world';
 import type { GameState } from './state';
 
 const SPEEDS = [1, 2, 4];
-const PLAYER_BUILDINGS: BuildingType[] = ['woodcutter', 'sawmill', 'forester'];
+const PLAYER_BUILDINGS: BuildingType[] = ['woodcutter', 'sawmill', 'forester', 'stonecutter'];
+
+const RESOURCE_UI: Record<Resource, { icon: string; name: string }> = {
+  log: { icon: '🪵', name: 'Брёвна' },
+  plank: { icon: '🪚', name: 'Доски' },
+  stone: { icon: '🪨', name: 'Камень' },
+};
+
+const GATHER_PLACE: Partial<Record<BuildingType, string>> = {
+  woodcutter: 'в лесу',
+  stonecutter: 'в каменоломне',
+};
+
+function costLabel(type: BuildingType): string {
+  const cost = costOf(type);
+  return RESOURCES.filter((r) => cost[r] > 0)
+    .map((r) => `${cost[r]} ${RESOURCE_UI[r].icon}`)
+    .join(' ');
+}
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -58,7 +76,7 @@ export class Hud {
     PLAYER_BUILDINGS.forEach((type, i) => {
       const def = BUILDINGS[type];
       const b = el('button', 'build-btn');
-      b.append(buildingIcon(type), el('span', 'name', def.name), el('span', 'cost', `${def.cost} доск. · [${i + 1}]`));
+      b.append(buildingIcon(type), el('span', 'name', def.name), el('span', 'cost', `${costLabel(type)} · [${i + 1}]`));
       b.onclick = () => {
         this.selectBuildType(state.placing === type ? null : type);
         b.blur();
@@ -90,9 +108,16 @@ export class Hud {
     const store = world.castle.output;
 
     this.stockEl.innerHTML = '';
-    this.stockEl.append(this.stat('🪵', 'Брёвна', store.log), this.stat('🪚', 'Доски', store.plank));
+    this.stockEl.append(...RESOURCES.map((r) => this.stat(RESOURCE_UI[r].icon, RESOURCE_UI[r].name, store[r])));
 
-    const counts: Record<SettlerKind, number> = { carrier: 0, builder: 0, woodcutter: 0, sawmiller: 0, forester: 0 };
+    const counts: Record<SettlerKind, number> = {
+      carrier: 0,
+      builder: 0,
+      woodcutter: 0,
+      sawmiller: 0,
+      forester: 0,
+      stonecutter: 0,
+    };
     let busy = 0;
     for (const s of world.settlers) {
       counts[s.kind]++;
@@ -101,7 +126,7 @@ export class Hud {
     this.popEl.textContent =
       `Поселенцы: ${world.settlers.length} · носильщики ${busy}/${counts.carrier} заняты · ` +
       `строители ${counts.builder} · лесорубы ${counts.woodcutter} · пильщики ${counts.sawmiller} · ` +
-      `лесничие ${counts.forester}`;
+      `лесничие ${counts.forester} · каменотёсы ${counts.stonecutter}`;
 
     for (const [key, b] of this.speedButtons) {
       b.classList.toggle('active', key === 'pause' ? state.paused : !state.paused && state.speed === key);
@@ -127,13 +152,17 @@ export class Hud {
     this.infoEl.hidden = !b;
     if (!b) return;
     const def = BUILDINGS[b.type];
+    const gather = def.worker ? GATHERERS[def.worker] : undefined;
     const rows: [string, string][] = [];
     if (!b.done) {
       rows.push(['Стройка', `${Math.floor(this.world.buildProgress(b) * 100)}%`]);
-      rows.push(['Доски', `${b.delivered.plank} / ${def.cost} (в пути ${b.inbound.plank})`]);
+      const cost = costOf(b.type);
+      for (const r of RESOURCES) {
+        if (cost[r] > 0) rows.push([RESOURCE_UI[r].name, `${b.delivered[r]} / ${cost[r]} (в пути ${b.inbound[r]})`]);
+      }
       rows.push(['Строитель', b.builderId !== null ? 'на месте или в пути' : 'ожидается']);
     } else if (b.type === 'castle') {
-      rows.push(['Брёвна', String(b.output.log)], ['Доски', String(b.output.plank)]);
+      for (const r of RESOURCES) rows.push([RESOURCE_UI[r].name, String(b.output[r])]);
     } else {
       const worker = this.world.getSettler(b.workerId);
       rows.push(['Работник', worker ? SETTLER_NAMES[worker.kind] : b.workerRequested ? 'идёт' : 'нет свободных']);
@@ -141,10 +170,10 @@ export class Hud {
       if (b.type === 'sawmill') {
         rows.push(['Брёвна (вход)', `${b.input.log} / ${INPUT_CAP}`]);
         rows.push(['Доски', `${b.output.plank} / ${OUTPUT_CAP}`]);
-      } else if (b.type === 'woodcutter') {
-        rows.push(['Брёвна', `${b.output.log} / ${OUTPUT_CAP}`]);
       } else if (b.type === 'forester') {
         rows.push(['Посажено всего', String(this.world.stats.treesPlanted)]);
+      } else if (gather) {
+        rows.push([RESOURCE_UI[gather.res].name, `${b.output[gather.res]} / ${OUTPUT_CAP}`]);
       }
     }
     this.infoEl.innerHTML = '';
@@ -164,7 +193,8 @@ export class Hud {
     const w = this.world.getSettler(b.workerId);
     const outside = w !== undefined && w.inside === null;
     if (b.type === 'forester') return outside ? 'сажает деревья' : 'отдыхает';
-    if (b.output.log >= OUTPUT_CAP) return 'склад полон';
-    return outside ? 'в лесу' : 'отдыхает';
+    const gather = GATHERERS[BUILDINGS[b.type].worker!];
+    if (gather && b.output[gather.res] >= OUTPUT_CAP) return 'склад полон';
+    return outside ? (GATHER_PLACE[b.type] ?? 'работает') : 'отдыхает';
   }
 }

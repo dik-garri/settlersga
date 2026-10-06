@@ -181,6 +181,9 @@ export class InputController {
       case 'Digit3':
         this.cb.onSelectBuildType('forester');
         break;
+      case 'Digit4':
+        this.cb.onSelectBuildType('stonecutter');
+        break;
     }
   }
 }

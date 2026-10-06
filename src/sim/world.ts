@@ -1,8 +1,9 @@
 import {
   BUILD_TICKS_PER_UNIT,
   BUILDINGS,
-  CHOP_TICKS,
+  costOf,
   DISPATCH_EVERY,
+  GATHERERS,
   FORESTER_RADIUS,
   FORESTER_REST_TICKS,
   HANDLE_TICKS,
@@ -18,9 +19,10 @@ import {
   START_BUILDERS,
   START_CARRIERS,
   START_PLANKS,
+  START_STONE,
+  totalCost,
   TREE_MATURE,
-  WOODCUTTER_RADIUS,
-  WOODCUTTER_REST_TICKS,
+  type GatherDef,
 } from './config';
 import { generateMap, type GameMap } from './map';
 import { findPath, staysConnected } from './pathfinding';
@@ -50,7 +52,8 @@ export class World {
 
   private readonly rng: Rng;
   private readonly settlerById = new Map<number, Settler>();
-  private readonly reservedTrees = new Set<number>();
+  /** Trees and stone deposits a gatherer is heading for. */
+  private readonly reservedTargets = new Set<number>();
   /** Tiles a forester is on the way to plant. */
   private readonly reservedPlots = new Set<number>();
   private nextId = 1;
@@ -63,6 +66,7 @@ export class World {
     if (!castle) throw new Error('castle placement failed');
     this.castle = castle;
     castle.output.plank = START_PLANKS;
+    castle.output.stone = START_STONE;
     for (let i = 0; i < START_CARRIERS; i++) this.spawnSettler('carrier', castle);
     for (let i = 0; i < START_BUILDERS; i++) this.spawnSettler('builder', castle);
   }
@@ -77,14 +81,7 @@ export class World {
       }
     }
     const door = doorOf(x, y, def.w, def.h);
-    if (!this.map.inBounds(door.x, door.y)) return false;
-    const i = this.map.idx(door.x, door.y);
-    return (
-      this.map.isPassableTerrain(door.x, door.y) &&
-      this.map.tree[i] === 0 &&
-      this.map.building[i] === 0 &&
-      this.map.door[i] === 0
-    );
+    return this.map.isWalkable(door.x, door.y) && this.map.door[this.map.idx(door.x, door.y)] === 0;
   }
 
   buildingAt(x: number, y: number): Building | undefined {
@@ -101,7 +98,7 @@ export class World {
   /** Construction progress in [0, 1]. */
   buildProgress(b: Building): number {
     if (b.done) return 1;
-    return b.progress / (BUILDINGS[b.type].cost * BUILD_TICKS_PER_UNIT);
+    return b.progress / (totalCost(b.type) * BUILD_TICKS_PER_UNIT);
   }
 
   // --------------------------------------------------------------- commands
@@ -305,14 +302,15 @@ export class World {
         s.tasks.shift();
         return;
       }
-      case 'chop': {
+      case 'gather': {
         const i = this.map.idx(task.x, task.y);
-        if (this.map.tree[i] === 0) return this.abort(s);
+        if (!this.isGatherTarget(task.res, i)) return this.abort(s);
         s.working = true;
         if (--task.n > 0) return;
-        this.map.tree[i] = 0;
-        this.reservedTrees.delete(i);
-        s.carrying = 'log';
+        if (task.res === 'stone') this.map.stone[i]--;
+        else this.map.tree[i] = 0;
+        this.reservedTargets.delete(i);
+        s.carrying = task.res;
         s.tasks.shift();
         return;
       }
@@ -333,11 +331,12 @@ export class World {
           s.tasks.shift();
           return;
         }
-        if (b.progress < b.delivered.plank * BUILD_TICKS_PER_UNIT) {
+        const delivered = b.delivered.log + b.delivered.plank + b.delivered.stone;
+        if (b.progress < delivered * BUILD_TICKS_PER_UNIT) {
           b.progress++;
           s.working = true;
         }
-        if (b.progress >= BUILDINGS[b.type].cost * BUILD_TICKS_PER_UNIT) {
+        if (b.progress >= totalCost(b.type) * BUILD_TICKS_PER_UNIT) {
           b.done = true;
           b.builderId = null;
           s.tasks.shift();
@@ -401,8 +400,8 @@ export class World {
         case 'drop':
           if (b) b.inbound[task.res]--;
           break;
-        case 'chop':
-          this.reservedTrees.delete(this.map.idx(task.x, task.y));
+        case 'gather':
+          this.reservedTargets.delete(this.map.idx(task.x, task.y));
           break;
         case 'plant':
           this.reservedPlots.delete(this.map.idx(task.x, task.y));
@@ -454,24 +453,26 @@ export class World {
         return;
       }
 
-      case 'woodcutter': {
+      case 'woodcutter':
+      case 'stonecutter': {
+        const def = GATHERERS[s.kind]!;
         if (!home) return;
         if (s.inside !== home.id) return this.goHome(s, home);
-        if (home.output.log >= OUTPUT_CAP) return;
-        const tree = this.findTreeFor(s, home);
-        if (!tree) {
+        if (home.output[def.res] >= OUTPUT_CAP) return;
+        const target = this.findGatherTarget(s, home, def);
+        if (!target) {
           s.tasks = [{ t: 'wait', n: 20 }];
           return;
         }
-        this.reservedTrees.add(this.map.idx(tree.x, tree.y));
-        s.path = tree.path;
+        this.reservedTargets.add(this.map.idx(target.x, target.y));
+        s.path = target.path;
         s.tasks = [
-          { t: 'goto', x: tree.x, y: tree.y, adj: true },
-          { t: 'chop', x: tree.x, y: tree.y, n: CHOP_TICKS },
+          { t: 'goto', x: target.x, y: target.y, adj: true },
+          { t: 'gather', x: target.x, y: target.y, n: def.workTicks, res: def.res },
           { t: 'goto', x: home.door.x, y: home.door.y },
-          { t: 'store', b: home.id, res: 'log' },
+          { t: 'store', b: home.id, res: def.res },
           { t: 'enter', b: home.id },
-          { t: 'wait', n: WOODCUTTER_REST_TICKS },
+          { t: 'wait', n: def.restTicks },
         ];
         return;
       }
@@ -534,16 +535,20 @@ export class World {
     return null;
   }
 
-  /** Nearest reachable mature, unreserved tree within the woodcutter's radius. */
-  private findTreeFor(s: Settler, home: Building): (Point & { path: Point[] }) | null {
+  private isGatherTarget(res: Resource, i: number): boolean {
+    return res === 'stone' ? this.map.stone[i] > 0 : this.map.tree[i] === TREE_MATURE;
+  }
+
+  /** Nearest reachable, unreserved tree or deposit within the gatherer's radius. */
+  private findGatherTarget(s: Settler, home: Building, def: GatherDef): (Point & { path: Point[] }) | null {
     const m = this.map;
     const candidates: Point[] = [];
-    const r = WOODCUTTER_RADIUS;
+    const r = def.radius;
     for (let y = home.door.y - r; y <= home.door.y + r; y++) {
       for (let x = home.door.x - r; x <= home.door.x + r; x++) {
         if (!m.inBounds(x, y)) continue;
         const i = m.idx(x, y);
-        if (m.tree[i] !== TREE_MATURE || this.reservedTrees.has(i)) continue;
+        if (!this.isGatherTarget(def.res, i) || this.reservedTargets.has(i)) continue;
         if (dist({ x, y }, home.door) > r) continue;
         candidates.push({ x, y });
       }
@@ -610,7 +615,7 @@ export class World {
 
   private demand(b: Building, res: Resource): number {
     if (!b.done) {
-      return res === 'plank' ? BUILDINGS[b.type].cost - b.delivered.plank - b.inbound.plank : 0;
+      return costOf(b.type)[res] - b.delivered[res] - b.inbound[res];
     }
     if (b.type === 'sawmill' && res === 'log') return INPUT_CAP - b.input.log - b.inbound.log;
     return 0;

@@ -5,6 +5,7 @@ import {
   BUILDING_PAINTERS,
   groundVariants,
   paintBoulder,
+  paintDeposit,
   paintFlag,
   paintGround,
   paintSettler,
@@ -78,13 +79,14 @@ export class SpriteAtlas {
     }
     for (let v = 0; v < 4; v++) a.add(`tree:${v}`, 48, 80, 24, 72, (ctx) => paintTree(ctx, v));
     for (let v = 0; v < 2; v++) a.add(`boulder:${v}`, 52, 40, 26, 30, (ctx) => paintBoulder(ctx, v));
+    for (let v = 0; v < 3; v++) a.add(`deposit:${v}`, 56, 44, 28, 34, (ctx) => paintDeposit(ctx, v));
     for (const [type, c] of Object.entries(BUILDING_CANVAS)) {
       a.add(`building:${type}`, c.w, c.h, c.ax, c.ay, (ctx) => {
         ctx.translate(c.ax, c.ay);
         BUILDING_PAINTERS[type as BuildingType | 'site'](ctx);
       });
     }
-    for (const kind of ['carrier', 'builder', 'woodcutter', 'sawmiller', 'forester'] as SettlerKind[]) {
+    for (const kind of ['carrier', 'builder', 'woodcutter', 'sawmiller', 'forester', 'stonecutter'] as SettlerKind[]) {
       for (const frame of ['stand', 'walk', 'work'] as SettlerFrame[]) {
         a.add(`settler:${kind}:${frame}`, 20, 32, 10, 29, (ctx) => paintSettler(ctx, kind, frame));
       }
