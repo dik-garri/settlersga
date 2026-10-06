@@ -1,5 +1,6 @@
 import type { Camera } from '../render/camera';
 import { toScreen, toTile } from '../render/iso';
+import { TERRAIN } from '../sim/config';
 import { Terrain } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 
@@ -7,14 +8,6 @@ const WIDTH = 220;
 /** Terrain and trees are re-rasterised this often (ms); buildings and the view frame every frame. */
 const BASE_EVERY = 2000;
 
-const TERRAIN_RGB: Record<Terrain, [number, number, number]> = {
-  [Terrain.Water]: [47, 111, 158],
-  [Terrain.Sand]: [216, 196, 138],
-  [Terrain.Grass]: [106, 154, 60],
-  [Terrain.Rock]: [110, 104, 96],
-  [Terrain.Mountain]: [150, 141, 124],
-  [Terrain.Ford]: [95, 151, 180],
-};
 
 /**
  * Isometric overview in the corner: one pixel per tile, rotated like the main view. Clicking it moves
@@ -36,6 +29,8 @@ export class Minimap {
   constructor(
     private readonly world: World,
     private readonly camera: Camera,
+    /** Respect the local player's fog of war. */
+    private readonly fogOn = true,
   ) {
     const { w, h } = world.map;
     this.sx = (WIDTH - 2 * this.pad) / (w + h);
@@ -72,7 +67,7 @@ export class Minimap {
     const { map } = this.world;
     const d = this.image.data;
     for (let i = 0; i < map.terrain.length; i++) {
-      let [r, g, b] = TERRAIN_RGB[map.terrain[i] as Terrain];
+      let [r, g, b] = TERRAIN[map.terrain[i] as Terrain].rgb;
       if (map.tree[i]) [r, g, b] = [52, 96, 42];
       else if (map.stone[i]) [r, g, b] = [200, 192, 176];
       else if (map.crop[i]) [r, g, b] = [184, 160, 80];
@@ -84,6 +79,12 @@ export class Minimap {
       b = Math.min(255, b * light);
       // Another player's land gets a red cast.
       if (map.owner[i] !== LOCAL_PLAYER && map.owner[i] !== 0) r = Math.min(255, r + 70);
+      if (this.fogOn) {
+        const x = i % map.w;
+        const y = (i - x) / map.w;
+        if (!this.world.isExplored(x, y, LOCAL_PLAYER)) [r, g, b] = [8, 10, 14];
+        else if (!this.world.isVisible(x, y, LOCAL_PLAYER)) [r, g, b] = [r * 0.55, g * 0.55, b * 0.55];
+      }
       d[i * 4] = r;
       d[i * 4 + 1] = g;
       d[i * 4 + 2] = b;
@@ -113,6 +114,7 @@ export class Minimap {
     ctx.restore();
 
     for (const b of this.world.buildings.values()) {
+      if (this.fogOn && b.owner !== LOCAL_PLAYER && !this.world.isExplored(b.door.x, b.door.y, LOCAL_PLAYER)) continue;
       const [x, y] = this.point(b.x + (b.w - 1) / 2, b.y + (b.h - 1) / 2);
       ctx.fillStyle = b.owner === LOCAL_PLAYER ? '#ffe08a' : '#e05a4a';
       ctx.fillRect(x - 1.5, y - 1.5, 3, 3);

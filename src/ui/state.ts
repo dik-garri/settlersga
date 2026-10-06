@@ -11,6 +11,8 @@ export interface GameState {
   selected: number | null;
   /** Tile under the cursor, if any. */
   hover: { x: number; y: number } | null;
+  /** Fog of war shown (`?fog=off` turns it off for debugging). */
+  fog: boolean;
 }
 
 export const createState = (): GameState => ({
@@ -19,4 +21,5 @@ export const createState = (): GameState => ({
   placing: null,
   selected: null,
   hover: null,
+  fog: true,
 });

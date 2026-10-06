@@ -12,12 +12,13 @@ import {
   SETTLER_SPEED,
   totalCost,
   UNREACHABLE_TICKS,
+  TERRAIN,
 } from './config';
 import { levelStep } from './digging';
 import { assaultTick, joinTick, soldierIdle } from './military';
 import { canPlant, findGatherTarget, findPlotFor, harvest, isGatherTarget, plant, type Target } from './nature';
 import { findPath } from './pathfinding';
-import { RESOURCES, type Building, type Point, type Settler, type Task } from './types';
+import { RESOURCES, Terrain, type Building, type Point, type Settler, type Task } from './types';
 import type { World } from './world';
 
 const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -207,20 +208,24 @@ function atGoal(s: Settler, task: GotoTarget): boolean {
 }
 
 function move(w: World, s: Settler, task: GotoTarget): void {
+  // `left` is this tick's walking budget in tiles of normal ground; a step into slower terrain
+  // (`TERRAIN[t].speed`, as charged by A*) uses it up faster.
   let left = SETTLER_SPEED;
   while (left > 0 && s.path.length > 0) {
     const t = s.path[0];
     const dx = t.x - s.x;
     const dy = t.y - s.y;
     const d = Math.hypot(dx, dy);
-    if (d > left) {
-      s.x += (dx / d) * left;
-      s.y += (dy / d) * left;
+    const speed = TERRAIN[w.map.terrain[w.map.idx(t.x, t.y)] as Terrain].speed;
+    const reach = left * speed;
+    if (d > reach) {
+      s.x += (dx / d) * reach;
+      s.y += (dy / d) * reach;
       return;
     }
     s.x = t.x;
     s.y = t.y;
-    left -= d;
+    left -= d / speed;
     s.path.shift();
     const next = s.path[0];
     if (next && !w.map.isWalkable(next.x, next.y)) {

@@ -41,7 +41,8 @@ async function main() {
   const world = save ? World.load(save) : new World(seed, { size, players, ai });
   const state = createState();
   const atlas = new SpriteAtlas();
-  const renderer = new GameRenderer(app, world, atlas);
+  state.fog = params.get('fog') !== 'off';
+  const renderer = new GameRenderer(app, world, atlas, state.fog);
   const camera = new Camera(renderer.world, renderer.bounds);
   const c = world.castle;
   const home = toScreen(c.x + 1, c.y + 1);
@@ -54,7 +55,7 @@ async function main() {
       location.search = '?load=1';
     },
   });
-  const minimap = new Minimap(world, camera);
+  const minimap = new Minimap(world, camera, state.fog);
   document.getElementById('hud')!.append(minimap.el);
   const input = new InputController(app.canvas, camera, renderer, world, state, {
     onSelectBuildType: (type) => hud.selectBuildType(type),

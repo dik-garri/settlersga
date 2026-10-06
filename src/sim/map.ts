@@ -1,4 +1,15 @@
-import { DEPOSIT_STONE, FISH_MAX, FORD_EVERY, ORE_AMOUNT, ORE_RESOURCES, RIVERS_PER_64, TREE_MATURE } from './config';
+import {
+  DEPOSIT_STONE,
+  FISH_MAX,
+  FORD_EVERY,
+  ORE_AMOUNT,
+  ORE_RESOURCES,
+  BIOMES,
+  RIVERS_PER_64,
+  TERRAIN,
+  TREE_MATURE,
+  type BuildGround,
+} from './config';
 import { createRng, randInt, type Rng } from './rng';
 import { Terrain, type Point } from './types';
 
@@ -21,6 +32,8 @@ export class GameMap {
   readonly oreAmount: Uint8Array;
   /** Bit (player − 1) set once that player's geologist examined the tile. */
   readonly prospected: Uint8Array;
+  /** Bit (player − 1) set once that player has seen the tile (fog of war; see fog.ts). */
+  readonly explored: Uint8Array;
   /** Player id owning the tile's territory, 0 if nobody. */
   readonly owner: Uint8Array;
   /** Building id occupying the tile, 0 if none. */
@@ -59,6 +72,7 @@ export class GameMap {
     this.ore = new Uint8Array(n);
     this.oreAmount = new Uint8Array(n);
     this.prospected = new Uint8Array(n);
+    this.explored = new Uint8Array(n);
     this.owner = new Uint8Array(n);
     this.building = new Int32Array(n);
     this.door = new Int32Array(n);
@@ -132,8 +146,7 @@ export class GameMap {
   }
 
   isPassableTerrain(x: number, y: number): boolean {
-    const t = this.terrain[this.idx(x, y)];
-    return t === Terrain.Grass || t === Terrain.Sand || t === Terrain.Mountain || t === Terrain.Ford;
+    return TERRAIN[this.terrain[this.idx(x, y)] as Terrain].walkable;
   }
 
   isWalkable(x: number, y: number): boolean {
@@ -142,12 +155,27 @@ export class GameMap {
     return this.isPassableTerrain(x, y) && this.tree[i] === 0 && this.stone[i] === 0 && this.building[i] === 0;
   }
 
-  /** Free tile of the given terrain (grass by default, mountain for mines) a footprint may cover. */
-  isBuildable(x: number, y: number, terrain: Terrain = Terrain.Grass): boolean {
+  /**
+   * Free tile whose terrain accepts the given kind of footprint (`TERRAIN[t].build`): ordinary
+   * buildings by default, mines with 'mountain'. A `Terrain` argument stands for the kind that
+   * terrain accepts (Grass → ordinary, Mountain → mines).
+   */
+  isBuildable(x: number, y: number, ground: BuildGround | Terrain = 'ground'): boolean {
     if (!this.inBounds(x, y)) return false;
+    const want = typeof ground === 'number' ? (TERRAIN[ground].build ?? 'ground') : ground;
+    return TERRAIN[this.terrain[this.idx(x, y)] as Terrain].build === want && this.isFree(x, y);
+  }
+
+  /** Free tile where a tree or a field may be planted. */
+  isPlantable(x: number, y: number): boolean {
+    if (!this.inBounds(x, y)) return false;
+    return TERRAIN[this.terrain[this.idx(x, y)] as Terrain].plantable && this.isFree(x, y);
+  }
+
+  /** Nothing on the tile: no tree, deposit, field, building or door. */
+  private isFree(x: number, y: number): boolean {
     const i = this.idx(x, y);
     return (
-      this.terrain[i] === terrain &&
       this.tree[i] === 0 &&
       this.stone[i] === 0 &&
       this.crop[i] === 0 &&
@@ -198,6 +226,68 @@ function valueNoise(rng: Rng, w: number, h: number, cell: number): Float32Array 
     }
   }
   return out;
+}
+
+/**
+ * Deserts on dry grass far from water and swamps on low, wet ground next to it, from a moisture
+ * noise of their own RNG stream (so the rest of the generation does not shift). Start areas are
+ * left untouched.
+ */
+function addBiomes(map: GameMap, height: Float32Array, starts: readonly Point[], rng: Rng): void {
+  const { w, h } = map;
+  const moisture = fractalNoise(rng, w, h);
+  // Distance (4-neighbour steps) to the nearest water or ford, for every tile.
+  const dist = new Int32Array(w * h).fill(-1);
+  const queue: number[] = [];
+  for (let i = 0; i < dist.length; i++) {
+    const t = map.terrain[i] as Terrain;
+    if (TERRAIN[t].water || t === Terrain.Ford) {
+      dist[i] = 0;
+      queue.push(i);
+    }
+  }
+  for (let q = 0; q < queue.length; q++) {
+    const i = queue[q];
+    const x = i % w;
+    const y = (i - x) / w;
+    for (const [dx, dy] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ]) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (!map.inBounds(nx, ny)) continue;
+      const ni = map.idx(nx, ny);
+      if (dist[ni] >= 0) continue;
+      dist[ni] = dist[i] + 1;
+      queue.push(ni);
+    }
+  }
+  const clear = BIOMES.startClearance;
+  const nearStart = (x: number, y: number) => starts.some((s) => Math.hypot(x - s.x, y - s.y) <= clear);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = map.idx(x, y);
+      const t = map.terrain[i] as Terrain;
+      if ((t !== Terrain.Grass && t !== Terrain.Sand) || nearStart(x, y)) continue;
+      const d = dist[i] < 0 ? Infinity : dist[i];
+      let biome: Terrain | null = null;
+      if (t === Terrain.Grass && moisture[i] < BIOMES.desertDryness && d >= BIOMES.desertWaterDistance) {
+        biome = Terrain.Desert;
+      } else if (
+        moisture[i] > BIOMES.swampWetness &&
+        d <= BIOMES.swampWaterDistance &&
+        height[i] < BIOMES.swampMaxHeight
+      ) {
+        biome = Terrain.Swamp;
+      }
+      if (biome === null) continue;
+      map.terrain[i] = biome;
+      map.tree[i] = 0;
+    }
+  }
 }
 
 function fractalNoise(rng: Rng, w: number, h: number): Float32Array {
@@ -266,6 +356,7 @@ export function generateMap(seed: number, size: number, starts: readonly Point[]
   }
 
   carveRivers(map, height, starts, createRng(seed ^ 0x51ed2704));
+  addBiomes(map, height, starts, createRng(seed ^ 0x6b43a9b5));
 
   const depositAt = (cx0: number, cy0: number, radius: number, chance: number) => {
     for (let y = Math.floor(cy0 - radius); y <= cy0 + radius; y++) {
@@ -519,7 +610,11 @@ function elevate(
         tile[i] = 3;
         break;
       case Terrain.Grass:
+      case Terrain.Desert:
         tile[i] = 4 + Math.min(12, Math.max(0, (n - 0.35) * 30));
+        break;
+      case Terrain.Swamp:
+        tile[i] = 2;
         break;
       case Terrain.Mountain:
         tile[i] = 12 + (Math.max(n, 0.7) - 0.7) * 400;

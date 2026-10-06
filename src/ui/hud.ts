@@ -400,10 +400,13 @@ export class Hud {
     const rows: [string, string][] = [];
     const enemy = b.owner !== LOCAL_PLAYER;
     const canSend = enemy && def.garrison && b.done ? this.world.availableAttackers(b.id) : 0;
+    // Out of sight (fog of war) other players' buildings show only what is known from afar.
+    const sighted = !this.state.fog || this.world.isVisible(b.door.x, b.door.y);
     if (enemy) {
       rows.push(['Владелец', `игрок ${b.owner}`]);
+      if (!sighted) rows.push(['Обзор', 'нет — подойдите ближе']);
       if (def.garrison && b.done) {
-        rows.push(['Защитников', String(b.garrison.length)]);
+        rows.push(['Защитников', sighted ? String(b.garrison.length) : '?']);
         rows.push(['Можно послать', String(canSend)]);
         this.attackCount = Math.max(1, Math.min(this.attackCount, canSend));
         rows.push(['Отправить', String(this.attackCount)]);

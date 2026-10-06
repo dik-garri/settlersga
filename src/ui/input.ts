@@ -2,7 +2,7 @@ import type { Camera } from '../render/camera';
 import type { Area, GameRenderer, Ghost } from '../render/renderer';
 import { BUILDINGS, PROSPECT_RADIUS } from '../sim/config';
 import { Terrain, type BuildingType } from '../sim/types';
-import type { World } from '../sim/world';
+import { LOCAL_PLAYER, type World } from '../sim/world';
 import type { GameState, Placeable } from './state';
 
 const KEY_PAN_SPEED = 900; // screen px per second
@@ -165,8 +165,12 @@ export class InputController {
       if (!e.shiftKey) this.cb.onSelectBuildType(null);
       return;
     }
-    const b = this.world.buildingAt(Math.round(t.x), Math.round(t.y));
-    this.state.selected = b ? b.id : null;
+    const tx = Math.round(t.x);
+    const ty = Math.round(t.y);
+    const b = this.world.buildingAt(tx, ty);
+    // Under the fog nothing can be picked: the player does not know what stands there.
+    const known = !this.state.fog || (b !== undefined && b.owner === LOCAL_PLAYER) || this.world.isExplored(tx, ty);
+    this.state.selected = b && known ? b.id : null;
   }
 
   private onWheel(e: WheelEvent): void {

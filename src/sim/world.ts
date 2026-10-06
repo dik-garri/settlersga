@@ -1,6 +1,7 @@
 import { addBuilding, doorOf, recomputeTerritory, spawnSettler, updateBuilding } from './buildings';
 import {
   BUILD_DIG_SLOPE,
+  type BuildGround,
   BUILD_TICKS_PER_UNIT,
   BUILDINGS,
   DISPATCH_EVERY,
@@ -21,6 +22,7 @@ import { dispatch } from './logistics';
 import { createAi, updateAi, type AiState } from './ai';
 import { attack, availableAttackers, enterGarrison, killSettler, leaveGarrison, removeDead } from './military';
 import { generateMap, type GameMap } from './map';
+import { createFog, isExplored, isVisible, updateFog, type FogState } from './fog';
 import { updateNature } from './nature';
 import { findPath, staysConnected } from './pathfinding';
 import { createRng, type Rng } from './rng';
@@ -82,6 +84,8 @@ export class World {
   tick = 0;
   /** Bumped whenever the territory changes, so views can redraw the border. */
   territoryVersion = 0;
+  /** Bumped whenever a building is added or removed (derived, not saved; drives fog vision). */
+  buildingsVersion = 0;
 
   // Internal state shared by the sim modules.
   readonly rng: Rng;
@@ -98,6 +102,8 @@ export class World {
   readonly ai: AiState[] = [];
   /** Players whose castle has been taken, in order of defeat (saved). */
   readonly defeated: PlayerId[] = [];
+  /** Current sight per player (derived; what was ever seen is `map.explored`). See fog.ts. */
+  readonly fog: FogState = createFog();
   nextId = 1;
 
   constructor(seed = 1, opts: WorldOptions = {}) {
@@ -151,7 +157,7 @@ export class World {
     // A castle founds a territory, everything else must stay inside its owner's.
     const owned = (tx: number, ty: number) =>
       type === 'castle' ? this.map.inBounds(tx, ty) && this.map.owner[this.map.idx(tx, ty)] === 0 : this.owns(tx, ty, player);
-    const ground = def.terrain === 'mountain' ? Terrain.Mountain : Terrain.Grass;
+    const ground: BuildGround = def.terrain === 'mountain' ? 'mountain' : 'ground';
     for (let dy = 0; dy < def.h; dy++) {
       for (let dx = 0; dx < def.w; dx++) {
         if (!this.map.isBuildable(x + dx, y + dy, ground) || !owned(x + dx, y + dy)) return false;
@@ -232,6 +238,16 @@ export class World {
     recomputeTerritory(this);
   }
 
+  /** Fog of war: has the player ever seen the tile? */
+  isExplored(x: number, y: number, player: PlayerId = LOCAL_PLAYER): boolean {
+    return this.map.inBounds(x, y) && isExplored(this, this.map.idx(x, y), player);
+  }
+
+  /** Fog of war: does the player see the tile right now (own buildings or settlers nearby)? */
+  isVisible(x: number, y: number, player: PlayerId = LOCAL_PLAYER): boolean {
+    return this.map.inBounds(x, y) && isVisible(this, this.map.idx(x, y), player);
+  }
+
   isProspected(x: number, y: number, player: PlayerId = LOCAL_PLAYER): boolean {
     return this.map.inBounds(x, y) && (this.map.prospected[this.map.idx(x, y)] & (1 << (player - 1))) !== 0;
   }
@@ -288,6 +304,7 @@ export class World {
     // Jobs aborted above may have re-targeted this building on their way back; drop those too.
     for (const s of this.settlers) if (s.tasks.some((t) => 'b' in t && t.b === id)) abort(this, s);
     this.buildings.delete(id);
+    this.buildingsVersion++;
     b.garrison = [];
     const m = this.map;
     m.door[m.idx(b.door.x, b.door.y)] = 0;
@@ -363,5 +380,6 @@ export class World {
     removeDead(this);
     if (this.tick % DISPATCH_EVERY === 0) dispatch(this);
     if (this.ai.length > 0) updateAi(this);
+    updateFog(this);
   }
 }

@@ -5,6 +5,7 @@ import {
   CROP_RIPE,
   FISH_MAX,
   FISH_RESTOCK,
+  TERRAIN,
   TREE_MATURE,
   type GatherDef,
   type PlantDef,
@@ -48,7 +49,7 @@ const GATHER_RULES: Partial<Record<Resource, GatherRule>> = {
   },
   water: {
     // Unlimited: any shore of open water.
-    isTarget: (m, i) => m.terrain[i] === Terrain.Water && shore(m, i),
+    isTarget: (m, i) => TERRAIN[m.terrain[i] as Terrain].water && shore(m, i),
     take: () => {},
   },
   fish: {
@@ -183,7 +184,7 @@ export function settlerNear(w: World, x: number, y: number): boolean {
 function plotLooksFree(w: World, x: number, y: number, owner: PlayerId, planting: boolean): boolean {
   const m = w.map;
   if (!m.inBounds(x, y) || m.owner[m.idx(x, y)] !== owner) return false;
-  if (!m.isBuildable(x, y) || m.hasDoorNear(x, y)) return false;
+  if (!m.isPlantable(x, y) || m.hasDoorNear(x, y)) return false;
   return planting || !w.reservedPlots.has(m.idx(x, y));
 }
 
@@ -258,7 +259,7 @@ export function updateNature(w: World): void {
     if (m.tree[i] !== TREE_MATURE) return;
     const x = (i % m.w) + randInt(w.rng, 5) - 2;
     const y = Math.floor(i / m.w) + randInt(w.rng, 5) - 2;
-    if (!m.isBuildable(x, y) || m.hasDoorNear(x, y) || settlerNear(w, x, y)) return;
+    if (!m.isPlantable(x, y) || m.hasDoorNear(x, y) || settlerNear(w, x, y)) return;
     if (treesAround(m, x, y) >= 5 || !staysConnected(m, x, y)) return;
     m.tree[m.idx(x, y)] = 1;
     m.touch(m.idx(x, y));
@@ -266,7 +267,7 @@ export function updateNature(w: World): void {
 
   scaled(w, FISH_RESTOCK, () => {
     const i = randInt(w.rng, n);
-    if (m.terrain[i] === Terrain.Water && m.fish[i] < FISH_MAX && w.rng() < 0.5) m.fish[i]++;
+    if (TERRAIN[m.terrain[i] as Terrain].water && m.fish[i] < FISH_MAX && w.rng() < 0.5) m.fish[i]++;
   });
 
   if (w.tick % CROP_GROW_EVERY === 0 && w.fields.size > 0) {

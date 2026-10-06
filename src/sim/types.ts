@@ -47,6 +47,10 @@ export enum Terrain {
   Mountain = 4,
   /** Shallow river crossing: walkable water, nothing can be built or fished there. */
   Ford = 5,
+  /** Dry land: walkable and buildable, but nothing grows. */
+  Desert = 6,
+  /** Wet lowland: walkable but slow; nothing can be built or planted. */
+  Swamp = 7,
 }
 
 export type BuildingType =

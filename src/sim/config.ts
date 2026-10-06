@@ -1,4 +1,12 @@
-import { emptyStock, type BuildingType, type PlantKind, type Resource, type SettlerKind, type Stock } from './types';
+import {
+  emptyStock,
+  Terrain,
+  type BuildingType,
+  type PlantKind,
+  type Resource,
+  type SettlerKind,
+  type Stock,
+} from './types';
 
 export const TICKS_PER_SECOND = 10;
 
@@ -96,6 +104,131 @@ export const DIG_EVERY = 3;
 export const RIVERS_PER_64 = 1.5;
 /** A river gets a walkable ford about this often (tiles), so rivers never cut the land apart. */
 export const FORD_EVERY = 10;
+
+// ----------------------------------------------------------------- terrain
+
+/** What kind of footprint a terrain accepts: ordinary buildings, mines, or none. */
+export type BuildGround = 'ground' | 'mountain';
+
+/**
+ * Rules per terrain type. Adding a terrain = a `Terrain` code, an entry here and a ground sprite
+ * (`GROUND_COLORS`/`GROUND_PRIORITY` in sprites.ts); sim code only reads this table.
+ */
+export interface TerrainDef {
+  name: string;
+  walkable: boolean;
+  /** Footprints it accepts, or null. */
+  build: BuildGround | null;
+  /** Trees and fields grow here (foresters, farmers, natural spread). */
+  plantable: boolean;
+  /** Walking speed factor, ≤ 1 (A* costs scale by its inverse, so the octile heuristic stays admissible). */
+  speed: number;
+  /** Open water: wells draw from it, fish live in it. */
+  water: boolean;
+  /** Minimap colour. */
+  rgb: [number, number, number];
+}
+
+export const TERRAIN: Record<Terrain, TerrainDef> = {
+  [Terrain.Water]: {
+    name: 'Вода',
+    walkable: false,
+    build: null,
+    plantable: false,
+    speed: 1,
+    water: true,
+    rgb: [47, 111, 158],
+  },
+  [Terrain.Sand]: {
+    name: 'Песок',
+    walkable: true,
+    build: null,
+    plantable: false,
+    speed: 1,
+    water: false,
+    rgb: [216, 196, 138],
+  },
+  [Terrain.Grass]: {
+    name: 'Трава',
+    walkable: true,
+    build: 'ground',
+    plantable: true,
+    speed: 1,
+    water: false,
+    rgb: [106, 154, 60],
+  },
+  [Terrain.Rock]: {
+    name: 'Скалы',
+    walkable: false,
+    build: null,
+    plantable: false,
+    speed: 1,
+    water: false,
+    rgb: [110, 104, 96],
+  },
+  [Terrain.Mountain]: {
+    name: 'Горы',
+    walkable: true,
+    build: 'mountain',
+    plantable: false,
+    speed: 1,
+    water: false,
+    rgb: [150, 141, 124],
+  },
+  [Terrain.Ford]: { name: 'Брод', walkable: true, build: null, plantable: false, speed: 1, water: false, rgb: [95, 151, 180] },
+  [Terrain.Desert]: {
+    name: 'Пустыня',
+    walkable: true,
+    build: 'ground',
+    plantable: false,
+    speed: 1,
+    water: false,
+    rgb: [222, 190, 120],
+  },
+  [Terrain.Swamp]: {
+    name: 'Болото',
+    walkable: true,
+    build: null,
+    plantable: false,
+    speed: 0.45,
+    water: false,
+    rgb: [74, 92, 58],
+  },
+};
+
+/** A* step cost multiplier per terrain code (1 / speed), as a typed array for the inner loop. */
+export const TERRAIN_COST: Float32Array = (() => {
+  const codes = Object.keys(TERRAIN).map(Number);
+  const out = new Float32Array(Math.max(...codes) + 1).fill(1);
+  for (const c of codes) out[c] = 1 / TERRAIN[c as Terrain].speed;
+  return out;
+})();
+
+/** Deserts and swamps: per 64×64 tuning; generation keeps them this far from every start. */
+export const BIOMES = {
+  /** Moisture below this, far enough from water, turns grass into desert. */
+  desertDryness: 0.36,
+  desertWaterDistance: 6,
+  /** Moisture above this on low ground close to water turns grass/sand into swamp. */
+  swampWetness: 0.56,
+  swampWaterDistance: 3,
+  swampMaxHeight: 0.44,
+  startClearance: 14,
+};
+
+// ------------------------------------------------------------------- fog
+
+/** Fog of war: how far buildings and settlers see, and how often visibility is refreshed. */
+export const FOG = {
+  /** Buildings see their territory radius plus this, or `buildingRadius` without territory. */
+  territoryMargin: 3,
+  buildingRadius: 5,
+  settlerRadius: 3,
+  /** Settlers stamp their surroundings every this many ticks; a tile stays visible that long after. */
+  settlerEvery: 5,
+  /** Building vision is rebuilt at most this often, and only when buildings or territory changed. */
+  buildingEvery: 10,
+};
 /** Stone units in a deposit tile at generation, inclusive range. */
 export const DEPOSIT_STONE: [number, number] = [4, 8];
 /** Grain field stages: 1 sown … CROP_RIPE harvestable. Fields grow every CROP_GROW_EVERY ticks with CROP_GROW_CHANCE. */

@@ -14,6 +14,8 @@ const TERRAIN_KIND: Record<Terrain, GroundKind> = {
   [Terrain.Rock]: 'rock',
   [Terrain.Mountain]: 'mountain',
   [Terrain.Ford]: 'ford',
+  [Terrain.Desert]: 'desert',
+  [Terrain.Swamp]: 'swamp',
 };
 
 const TREE_SCALE = [0, 0.35, 0.55, 0.78, 1];
@@ -119,6 +121,16 @@ export class GameRenderer {
   private readonly objects = new Container({ sortableChildren: true });
   private readonly ghostLayer = new Container();
   private readonly ghostSprite: Sprite;
+  /**
+   * Fog of war for the local player, above the objects: per chunk a Graphics with black diamonds
+   * over unexplored tiles and a dimming veil over explored ones out of sight. Redrawn (throttled)
+   * only for visible chunks whose per-tile state changed; objects on unexplored tiles are hidden.
+   */
+  private readonly fog = new Container();
+  private readonly fogChunks: Graphics[] = [];
+  /** Per tile as last drawn: 0 unexplored, 1 explored, 2 in sight; 255 forces a redraw. */
+  private readonly fogSeen: Uint8Array;
+  private lastFogSync = -Infinity;
 
   private readonly treeSprites: (Sprite | null)[];
   private readonly treeState: Uint8Array;
@@ -137,8 +149,10 @@ export class GameRenderer {
     app: Application,
     private readonly sim: World,
     private readonly atlas: SpriteAtlas,
+    /** Draw the fog of war (`?fog=off` disables it for debugging). */
+    private readonly fogOn = true,
   ) {
-    this.world.addChild(this.ground, this.territory, this.marks, this.objects, this.ghostLayer);
+    this.world.addChild(this.ground, this.territory, this.marks, this.objects, this.fog, this.ghostLayer);
     app.stage.addChild(this.world);
     this.ghostSprite = new Sprite();
     this.ghostSprite.alpha = 0.75;
@@ -156,11 +170,16 @@ export class GameRenderer {
     this.cropState = new Uint8Array(n);
     const chunks = map.chunksX * map.chunksY;
     this.ownerSeen = new Uint8Array(n).fill(255);
+    this.fogSeen = new Uint8Array(n).fill(255);
     for (let c = 0; c < chunks; c++) {
       const g = new Graphics();
       g.visible = false;
       this.territoryChunks.push(g);
       this.territory.addChild(g);
+      const f = new Graphics();
+      f.visible = false;
+      this.fogChunks.push(f);
+      this.fog.addChild(f);
     }
     this.chunkVisible = new Uint8Array(chunks);
     this.chunkSeen = new Int32Array(chunks).fill(-1);
@@ -401,6 +420,7 @@ export class GameRenderer {
     const c = this.sim.map.chunkOf(Math.round(x), Math.round(y));
     const p = this.surface(x, y);
     this.staticAt.set(obj, { x, y, ox: obj.position.x - p.x, oy: obj.position.y - p.y });
+    obj.visible = this.explored(x, y);
     this.chunkObjects[c].add(obj);
     if (this.chunkVisible[c]) this.objects.addChild(obj);
   }
@@ -430,7 +450,58 @@ export class GameRenderer {
     this.syncChangedTiles();
     this.syncBuildings();
     this.syncSettlers(alpha, timeMs);
+    this.syncFog(timeMs);
     this.drawMarks(ghost, selected, hover, area);
+  }
+
+  /** Whether the local player has seen the tile (always true with the fog off). */
+  private explored(x: number, y: number): boolean {
+    return !this.fogOn || this.sim.isExplored(Math.round(x), Math.round(y), LOCAL_PLAYER);
+  }
+
+  private syncFog(timeMs: number): void {
+    if (!this.fogOn || timeMs - this.lastFogSync < 150) return;
+    this.lastFogSync = timeMs;
+    const { map } = this.sim;
+    for (let c = 0; c < this.fogChunks.length; c++) {
+      if (!this.chunkVisible[c]) continue;
+      const x0 = (c % map.chunksX) * CHUNK;
+      const y0 = Math.floor(c / map.chunksX) * CHUNK;
+      const x1 = Math.min(map.w, x0 + CHUNK);
+      const y1 = Math.min(map.h, y0 + CHUNK);
+      let changed = false;
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
+          const i = map.idx(x, y);
+          const st = !this.sim.isExplored(x, y, LOCAL_PLAYER) ? 0 : this.sim.isVisible(x, y, LOCAL_PLAYER) ? 2 : 1;
+          if (st !== this.fogSeen[i]) {
+            this.fogSeen[i] = st;
+            changed = true;
+          }
+        }
+      }
+      if (!changed) continue;
+      const g = this.fogChunks[c];
+      g.clear();
+      for (const [state, alpha] of [
+        [0, 1],
+        [1, 0.42],
+      ] as const) {
+        let any = false;
+        for (let y = y0; y < y1; y++) {
+          for (let x = x0; x < x1; x++) {
+            if (this.fogSeen[map.idx(x, y)] !== state) continue;
+            g.poly(this.diamond(x, y));
+            any = true;
+          }
+        }
+        if (any) g.fill({ color: 0x05070a, alpha });
+      }
+      for (const obj of this.chunkObjects[c]) {
+        const at = this.staticAt.get(obj);
+        if (at) obj.visible = this.fogSeen[map.idx(Math.round(at.x), Math.round(at.y))] !== 0;
+      }
+    }
   }
 
   private syncVisibleChunks(): void {
@@ -443,6 +514,7 @@ export class GameRenderer {
       this.chunkVisible[c] = visible;
       this.groundChunks[c].visible = visible === 1;
       this.territoryChunks[c].visible = visible === 1;
+      this.fogChunks[c].visible = visible === 1 && this.fogOn;
       for (const obj of this.chunkObjects[c]) {
         if (visible) this.objects.addChild(obj);
         else this.objects.removeChild(obj);
@@ -783,7 +855,11 @@ export class GameRenderer {
       }
       const p = this.surface(x, y);
       const view = this.view;
+      // Other players' settlers show only where the local player has sight.
+      const seen =
+        !this.fogOn || s.owner === LOCAL_PLAYER || this.sim.isVisible(Math.round(x), Math.round(y), LOCAL_PLAYER);
       const onScreen =
+        seen &&
         s.inside === null &&
         p.x > view.x - 40 &&
         p.x < view.x + view.w + 40 &&

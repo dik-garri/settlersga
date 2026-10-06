@@ -61,6 +61,7 @@ export function addBuilding(w: World, type: BuildingType, x: number, y: number, 
   }
   w.map.door[w.map.idx(b.door.x, b.door.y)] = b.id;
   w.buildings.set(b.id, b);
+  w.buildingsVersion++;
   return b;
 }
 

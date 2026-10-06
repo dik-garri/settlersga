@@ -184,7 +184,7 @@ function logEnds(ctx: Ctx, at: [number, number], count: number) {
 
 // ---------------------------------------------------------------- terrain
 
-export type GroundKind = 'grass' | 'sand' | 'water' | 'rock' | 'mountain' | 'ford';
+export type GroundKind = 'grass' | 'sand' | 'water' | 'rock' | 'mountain' | 'ford' | 'desert' | 'swamp';
 
 const GROUND_COLORS: Record<GroundKind, { base: string[]; dots: string[] }> = {
   grass: { base: ['#6a9a3c', '#6f9f40', '#64933a', '#73a145'], dots: ['#7fb04f', '#5a8733', '#88b85a'] },
@@ -193,10 +193,21 @@ const GROUND_COLORS: Record<GroundKind, { base: string[]; dots: string[] }> = {
   rock: { base: ['#8a8378', '#837c71'], dots: ['#9b958b', '#6f695f'] },
   mountain: { base: ['#9a8f7c', '#948a77', '#a09582'], dots: ['#b0a690', '#7e7462', '#8c8a6a'] },
   ford: { base: ['#5f97b4', '#6a9fb8'], dots: ['#cdbb86', '#8fbfd6'] },
+  desert: { base: ['#ddb978', '#d8b271', '#e1c083'], dots: ['#c9a062', '#ecd29a', '#b98f55'] },
+  swamp: { base: ['#4f5f3a', '#55653d', '#4a5a37'], dots: ['#2f4f4f', '#6f7f45', '#3a4a2a'] },
 };
 
 /** Ground kinds in blending order: a tile's higher-priority neighbours fade over its edges. */
-export const GROUND_PRIORITY: readonly GroundKind[] = ['water', 'ford', 'sand', 'grass', 'mountain', 'rock'];
+export const GROUND_PRIORITY: readonly GroundKind[] = [
+  'water',
+  'ford',
+  'swamp',
+  'sand',
+  'desert',
+  'grass',
+  'mountain',
+  'rock',
+];
 
 /**
  * Transition overlays: which edge or corner of a tile the neighbour sits at, as tile-local (u, v)
@@ -299,6 +310,48 @@ export function paintGround(ctx: Ctx, kind: GroundKind, variant: number): void {
       for (let i = 0; i < 14; i++) {
         ctx.fillStyle = 'rgba(214,196,138,0.75)';
         ctx.fillRect(rng() * 52 - 26, rng() * 24 - 12, 2, 1.5);
+      }
+    }
+  } else if (kind === 'desert') {
+    // Wind ripples and a few cracks in baked ground.
+    for (let i = 0; i < 6; i++) {
+      const x = rng() * 46 - 23;
+      const y = rng() * 20 - 10;
+      ctx.beginPath();
+      ctx.moveTo(x - 7, y + 1);
+      ctx.quadraticCurveTo(x, y - 2, x + 7, y + 1);
+      ctx.strokeStyle = dots[i % 2 === 0 ? 1 : 2];
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    for (let i = 0; i < 2; i++) {
+      const x = rng() * 30 - 15;
+      const y = rng() * 12 - 6;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + 3, y + 1.5);
+      ctx.lineTo(x + 5, y + 0.5);
+      ctx.strokeStyle = 'rgba(120,80,40,0.45)';
+      ctx.stroke();
+    }
+  } else if (kind === 'swamp') {
+    // Dark puddles and reed tufts.
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.ellipse(rng() * 36 - 18, rng() * 14 - 7, 5 + rng() * 4, 2 + rng() * 1.5, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(40,70,72,0.75)';
+      ctx.fill();
+    }
+    ctx.strokeStyle = '#7f8f4a';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 7; i++) {
+      const x = rng() * 48 - 24;
+      const y = rng() * 22 - 11;
+      for (const dx of [-1, 0, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(x + dx, y);
+        ctx.lineTo(x + dx * 2, y - 4 - rng() * 2);
+        ctx.stroke();
       }
     }
   } else if (kind === 'mountain') {

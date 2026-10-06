@@ -1,3 +1,4 @@
+import { TERRAIN_COST } from './config';
 import type { GameMap } from './map';
 import { sameRegion } from './regions';
 import type { Point } from './types';
@@ -202,7 +203,8 @@ export function findPath(
       }
       const ni = map.idx(nx, ny);
       if (closed[ni] === stamp) continue;
-      const ng = g[cur] + cost;
+      // Slow terrain (swamp) costs more to enter, so routes go around it when that is cheaper.
+      const ng = g[cur] + cost * TERRAIN_COST[map.terrain[ni]];
       if (seen[ni] !== stamp || ng < g[ni]) {
         seen[ni] = stamp;
         g[ni] = ng;
