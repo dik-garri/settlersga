@@ -5,7 +5,7 @@ import { Terrain } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 
 const WIDTH = 220;
-/** Terrain and trees are re-rasterised this often (ms); buildings and the view frame every frame. */
+/** Terrain and trees are re-rasterised about this often (ms), a slice of rows per frame; buildings and the view frame every frame. */
 const BASE_EVERY = 2000;
 
 
@@ -24,7 +24,8 @@ export class Minimap {
   private readonly sy: number;
   private readonly cx: number;
   private readonly pad = 4;
-  private lastBase = -Infinity;
+  /** Next row to rasterise: the overview is refreshed a slice of rows per frame, never all at once. */
+  private nextRow = 0;
 
   constructor(
     private readonly world: World,
@@ -53,6 +54,7 @@ export class Minimap {
     this.baseCtx = this.base.getContext('2d')!;
     this.image = this.baseCtx.createImageData(w, h);
     this.el.addEventListener('pointerdown', (e) => this.jump(e));
+    this.rasterize(0, world.map.h);
   }
 
   private jump(e: PointerEvent): void {
@@ -63,10 +65,10 @@ export class Minimap {
     this.camera.centerOn(p.x, p.y);
   }
 
-  private rasterize(): void {
+  private rasterize(y0: number, y1: number): void {
     const { map } = this.world;
     const d = this.image.data;
-    for (let i = 0; i < map.terrain.length; i++) {
+    for (let i = y0 * map.w; i < y1 * map.w; i++) {
       let [r, g, b] = TERRAIN[map.terrain[i] as Terrain].rgb;
       if (map.tree[i]) [r, g, b] = [52, 96, 42];
       else if (map.stone[i]) [r, g, b] = [200, 192, 176];
@@ -90,18 +92,21 @@ export class Minimap {
       d[i * 4 + 2] = b;
       d[i * 4 + 3] = 255;
     }
-    this.baseCtx.putImageData(this.image, 0, 0);
+    this.baseCtx.putImageData(this.image, 0, 0, 0, y0, map.w, y1 - y0);
   }
 
   private point(x: number, y: number): [number, number] {
     return [(x - y) * this.sx + this.cx, (x + y) * this.sy + this.pad];
   }
 
-  update(nowMs: number, viewW: number, viewH: number): void {
-    if (nowMs - this.lastBase > BASE_EVERY) {
-      this.lastBase = nowMs;
-      this.rasterize();
-    }
+  update(_nowMs: number, viewW: number, viewH: number): void {
+    // About one full refresh per BASE_EVERY at 60 fps, whatever the map size.
+    const { h } = this.world.map;
+    const rows = Math.max(1, Math.ceil((h * 16) / BASE_EVERY));
+    const y0 = this.nextRow;
+    const y1 = Math.min(h, y0 + rows);
+    this.rasterize(y0, y1);
+    this.nextRow = y1 >= h ? 0 : y1;
     const { ctx } = this;
     ctx.save();
     ctx.clearRect(0, 0, WIDTH, this.el.height);

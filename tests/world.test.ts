@@ -303,3 +303,20 @@ describe('World', () => {
     expect(Object.values(world.stats.lost).every((n) => n === 0)).toBe(true);
   });
 });
+
+describe('settlers on a new building site', () => {
+  it('step off the footprint instead of being walled in', () => {
+    const world = new World(42);
+    const c = world.castle;
+    const spot = findSpot(world, 'woodcutter', { x: c.x + 5, y: c.y + 4 });
+    const s = world.settlers.find((x) => x.kind === 'carrier')!;
+    s.inside = null;
+    s.x = s.px = spot.x;
+    s.y = s.py = spot.y;
+    s.tasks = [];
+    const b = world.placeBuilding('woodcutter', spot.x, spot.y)!;
+    expect(b).not.toBeNull();
+    expect(world.map.isWalkable(Math.round(s.x), Math.round(s.y))).toBe(true);
+    expect(findPath(world.map, Math.round(s.x), Math.round(s.y), c.door.x, c.door.y)).not.toBeNull();
+  });
+});
