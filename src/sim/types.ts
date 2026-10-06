@@ -1,0 +1,79 @@
+export interface Point {
+  x: number;
+  y: number;
+}
+
+export type Resource = 'log' | 'plank';
+export const RESOURCES: readonly Resource[] = ['log', 'plank'];
+export type Stock = Record<Resource, number>;
+export const emptyStock = (): Stock => ({ log: 0, plank: 0 });
+
+export enum Terrain {
+  Water = 0,
+  Sand = 1,
+  Grass = 2,
+  Rock = 3,
+}
+
+export type BuildingType = 'castle' | 'woodcutter' | 'sawmill';
+export type SettlerKind = 'carrier' | 'builder' | 'woodcutter' | 'sawmiller';
+
+export interface Building {
+  id: number;
+  type: BuildingType;
+  /** Top tile of the footprint; footprint spans [x, x+w) × [y, y+h). */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Walkable tile in front of the building where goods are picked up and dropped. */
+  door: Point;
+  done: boolean;
+  /** Construction: materials delivered to the site and work ticks spent. */
+  delivered: Stock;
+  progress: number;
+  builderId: number | null;
+  /** Goods on the way to this building (reserved by carriers). */
+  inbound: Stock;
+  input: Stock;
+  /** Output pile at the door. For the castle this is the warehouse stock. */
+  output: Stock;
+  /** Output units already promised to a carrier. */
+  outReserved: Stock;
+  workerId: number | null;
+  workerRequested: boolean;
+  timer: number;
+}
+
+export type Task =
+  | { t: 'goto'; x: number; y: number; adj?: boolean }
+  | { t: 'enter'; b: number }
+  | { t: 'wait'; n: number }
+  | { t: 'pickup'; b: number; res: Resource }
+  | { t: 'drop'; b: number; res: Resource }
+  /** Worker puts its own product on the building's output pile. */
+  | { t: 'store'; b: number; res: Resource }
+  | { t: 'chop'; x: number; y: number; n: number }
+  | { t: 'build'; b: number }
+  | { t: 'become'; b: number; kind: SettlerKind };
+
+export interface Settler {
+  id: number;
+  kind: SettlerKind;
+  /** Position in tile coordinates (tile centers are integers). */
+  x: number;
+  y: number;
+  /** Position at the previous tick, for render interpolation. */
+  px: number;
+  py: number;
+  /** Remaining tile centers to walk through. */
+  path: Point[];
+  tasks: Task[];
+  carrying: Resource | null;
+  /** Building the settler is hidden inside, or null when outside. */
+  inside: number | null;
+  home: number | null;
+  idleTicks: number;
+  /** True while doing manual work (chopping, building) — used for animation. */
+  working: boolean;
+}
