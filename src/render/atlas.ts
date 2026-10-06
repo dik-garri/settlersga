@@ -1,5 +1,5 @@
 import { CanvasSource, Rectangle, Texture } from 'pixi.js';
-import { ORE_RESOURCES, oreOf, PROFESSIONS, SOLDIER_LEVELS } from '../sim/config';
+import { ORE_RESOURCES, oreOf, SOLDIER_LEVELS } from '../sim/config';
 import { RESOURCES, type BuildingType, type Resource, type SettlerKind } from '../sim/types';
 import {
   BUILDING_CANVAS,
@@ -16,12 +16,45 @@ import {
   paintGroundEdge,
   EDGE_DIRS,
   GROUND_PRIORITY,
-  paintSettler,
+  paintMillSails,
   paintTree,
   paintWare,
   PLAYER_COLORS,
-  type SettlerFrame,
 } from './sprites';
+import { WALK_FRAMES, WORK_FRAMES } from './anim';
+import { ACTION_IDS, ACTIONS, HAT_STYLES, styleOf, TOOLS, type ActionId, type HatStyle, type ToolShape } from './animConfig';
+import { paintFlash, paintGlint, paintGlow, paintPuff, paintSpark } from './fxArt';
+import {
+  actionPose,
+  BODY_FRAMES,
+  holdPose,
+  paintArm,
+  paintBody,
+  paintHat,
+  paintHead,
+  paintSettlerPortrait,
+  paintTunic,
+  SETTLER_AX,
+  SETTLER_AY,
+  SETTLER_H,
+  SETTLER_W,
+} from './settlerArt';
+
+/** Painted settler directions (see `anim.ts`). */
+const PAINTED_DIRS = 5;
+
+/** Typed lookups of the settler layer textures, so per-frame updates build no strings. */
+export interface SettlerTextures {
+  /** [paintedDir][bodyFrame]: walk frames, stand, work stance. */
+  body: Texture[][];
+  tunic: Texture[];
+  head: Texture[];
+  hat: Record<HatStyle, Texture[]>;
+  /** [tool][paintedDir][frame]: walk frames 0..3, then standing. */
+  holdArm: Record<ToolShape, Texture[][]>;
+  /** [action][paintedDir][workFrame]. */
+  workArm: Record<ActionId, Texture[][]>;
+}
 
 const RESOLUTION = 2;
 const SIZE = 1024;
@@ -85,7 +118,24 @@ class AtlasBuilder {
     this.rowH = Math.max(this.rowH, h);
   }
 
+  /** Registers `name` as another name for the already painted sprite `of`. */
+  alias(name: string, of: string): void {
+    const f = this.frames.get(of);
+    if (!f) throw new Error(`alias ${name}: no sprite ${of}`);
+    this.frames.set(name, f);
+  }
+
   build(): Map<string, Texture> {
+    // The last page is cut down to the rows it uses, so a spill-over page costs only what it holds.
+    const last = this.pages[this.pages.length - 1];
+    const used = Math.min(SIZE, this.y + this.rowH + PAD);
+    if (used < SIZE) {
+      const canvas = document.createElement('canvas');
+      canvas.width = SIZE * RESOLUTION;
+      canvas.height = Math.ceil(used * RESOLUTION);
+      canvas.getContext('2d')!.drawImage(last.canvas, 0, 0);
+      last.canvas = canvas;
+    }
     const sources = this.pages.map((p) => new CanvasSource({ resource: p.canvas, resolution: RESOLUTION }));
     const out = new Map<string, Texture>();
     for (const [name, { page, frame, ax, ay }] of this.frames) {
@@ -128,26 +178,72 @@ export class SpriteAtlas {
         BUILDING_PAINTERS[type as keyof typeof BUILDING_PAINTERS](ctx);
       });
     }
-    for (const kind of Object.keys(PROFESSIONS) as SettlerKind[]) {
-      for (const frame of ['stand', 'walk', 'work'] as SettlerFrame[]) {
-        a.add(`settler:${kind}:${frame}`, 20, 32, 10, 29, (ctx) => paintSettler(ctx, kind, frame));
+    // Settler layers: shared by every profession and player (tunic and hat are tinted at runtime).
+    const S = (name: string, paint: (ctx: CanvasRenderingContext2D) => void) =>
+      a.add(name, SETTLER_W, SETTLER_H, SETTLER_AX, SETTLER_AY, paint);
+    // Arm poses repeat across tools' walk frames and actions; each distinct pose is painted once.
+    const arms = new Map<string, string>();
+    const arm = (name: string, pd: number, turns: number, tool: ToolShape, pull: number) => {
+      const key = `${tool}:${pd}:${turns}:${pull}`;
+      const same = arms.get(key);
+      if (same) return a.alias(name, same);
+      arms.set(key, name);
+      S(name, (ctx) => paintArm(ctx, pd, turns, tool, pull));
+    };
+    for (let pd = 0; pd < PAINTED_DIRS; pd++) {
+      for (let f = 0; f < BODY_FRAMES; f++) S(`sb:${pd}:${f}`, (ctx) => paintBody(ctx, pd, f));
+      S(`st:${pd}`, (ctx) => paintTunic(ctx, pd));
+      S(`shd:${pd}`, (ctx) => paintHead(ctx, pd));
+      for (const style of HAT_STYLES) S(`sht:${style}:${pd}`, (ctx) => paintHat(ctx, pd, style));
+      for (const tool of TOOLS) {
+        for (let f = 0; f <= WALK_FRAMES; f++) arm(`sa:hold:${tool}:${pd}:${f}`, pd, holdPose(tool, f), tool, 0);
       }
-    }
-    for (const res of RESOURCES) a.add(`ware:${res}`, 16, 10, 8, 5, (ctx) => paintWare(ctx, res));
-    // Per-player variants: door flags and every fighting profession in the owner's colour.
-    const fighters = (Object.keys(PROFESSIONS) as SettlerKind[]).filter((k) => PROFESSIONS[k].combat);
-    PLAYER_COLORS.forEach((color, k) => {
-      a.add(`flag:${k + 1}`, 14, 28, 2, 26, (ctx) => paintFlag(ctx, color));
-      for (const kind of fighters) {
-        for (const frame of ['stand', 'walk', 'work'] as SettlerFrame[]) {
-          a.add(`settler:${kind}:${frame}:${k + 1}`, 20, 32, 10, 29, (ctx) => paintSettler(ctx, kind, frame, color));
+      for (const action of ACTION_IDS) {
+        for (let f = 0; f < WORK_FRAMES; f++) {
+          const pose = actionPose(action, f);
+          arm(`sa:work:${action}:${pd}:${f}`, pd, pose.arm, ACTIONS[action].tool, pose.pull);
         }
       }
+    }
+    // Live effects.
+    a.add('fx:puff', 32, 32, 16, 16, paintPuff);
+    a.add('fx:spark', 8, 8, 4, 4, paintSpark);
+    a.add('fx:glow', 48, 48, 24, 24, paintGlow);
+    a.add('fx:glint', 16, 6, 8, 3, paintGlint);
+    a.add('fx:flash', 16, 16, 8, 8, paintFlash);
+    a.add('fx:sails', 92, 92, 46, 46, paintMillSails);
+    for (const res of RESOURCES) a.add(`ware:${res}`, 16, 10, 8, 5, (ctx) => paintWare(ctx, res));
+    // Per-player door flags (fighters' colours are tints, see `SettlerTextures`).
+    PLAYER_COLORS.forEach((color, k) => {
+      a.add(`flag:${k + 1}`, 14, 28, 2, 26, (ctx) => paintFlag(ctx, color));
     });
     for (let level = 1; level < SOLDIER_LEVELS.length; level++) {
       a.add(`chevrons:${level}`, 12, 10, 6, 5, (ctx) => paintChevrons(ctx, level));
     }
     this.textures = a.build();
+  }
+
+  /** Settler layer lookups, resolved once. */
+  settlerTextures(): SettlerTextures {
+    const dirs = [...Array(PAINTED_DIRS).keys()];
+    const hat = {} as Record<HatStyle, Texture[]>;
+    for (const style of HAT_STYLES) hat[style] = dirs.map((pd) => this.get(`sht:${style}:${pd}`));
+    const holdArm = {} as Record<ToolShape, Texture[][]>;
+    for (const tool of TOOLS) {
+      holdArm[tool] = dirs.map((pd) => [...Array(WALK_FRAMES + 1).keys()].map((f) => this.get(`sa:hold:${tool}:${pd}:${f}`)));
+    }
+    const workArm = {} as Record<ActionId, Texture[][]>;
+    for (const action of ACTION_IDS) {
+      workArm[action] = dirs.map((pd) => [...Array(WORK_FRAMES).keys()].map((f) => this.get(`sa:work:${action}:${pd}:${f}`)));
+    }
+    return {
+      body: dirs.map((pd) => [...Array(BODY_FRAMES).keys()].map((f) => this.get(`sb:${pd}:${f}`))),
+      tunic: dirs.map((pd) => this.get(`st:${pd}`)),
+      head: dirs.map((pd) => this.get(`shd:${pd}`)),
+      hat,
+      holdArm,
+      workArm,
+    };
   }
 
   get(name: string): Texture {
@@ -205,10 +301,12 @@ export function settlerIcon(kind: SettlerKind, size = 56): HTMLCanvasElement {
   canvas.style.width = `${size}px`;
   canvas.style.height = `${size}px`;
   const ctx = canvas.getContext('2d')!;
-  const scale = (size / 32) * 0.95;
+  const scale = (size / SETTLER_H) * 1.05;
   ctx.scale(dpr * scale, dpr * scale);
-  ctx.translate((size / scale - 20) / 2, 1);
-  paintSettler(ctx, kind, 'work');
+  ctx.translate((size / scale - SETTLER_W) / 2, -1);
+  const st = styleOf(kind);
+  // Facing south-east, mid-swing of the profession's work.
+  paintSettlerPortrait(ctx, 1, st.fighter ? PLAYER_COLORS[0] : st.tunic, st.hat, st.hatStyle, st.work, 1);
   return canvas;
 }
 

@@ -1,9 +1,33 @@
 import { Container, Graphics, MeshSimple, Sprite, Texture, type Application } from 'pixi.js';
-import { BUILD_TICKS_PER_UNIT, BUILDINGS, CROP_KINDS, PROFESSIONS, SHOT_TICKS, TREE_MATURE } from '../sim/config';
+import { BUILD_TICKS_PER_UNIT, BUILDINGS, CROP_KINDS, SHOT_TICKS, TREE_MATURE } from '../sim/config';
 import { RESOURCES, Terrain, type Building, type BuildingType, type Resource, type Settler } from '../sim/types';
 import { CHUNK } from '../sim/map';
 import { LOCAL_PLAYER, type World } from '../sim/world';
-import type { SpriteAtlas } from './atlas';
+import type { SettlerTextures, SpriteAtlas } from './atlas';
+import {
+  dirFromTileVelocity,
+  dirTowards,
+  FACES_AWAY,
+  idleDir,
+  MIRRORED,
+  PAINTED_DIR,
+  WALK_FRAMES,
+  walkBob,
+  walkFrame,
+  workFrame,
+} from './anim';
+import {
+  ACTIONS,
+  GATHER_ACTION,
+  PLANT_ACTION,
+  styleOf,
+  type ActionId,
+  type ActionDef,
+  type SettlerStyle,
+  type SoundId,
+} from './animConfig';
+import { Effects } from './effects';
+import { BODY_STAND, BODY_WORK, CARRY_AT } from './settlerArt';
 import { depthOf, HALF_H, HALF_W, toScreen, toTile } from './iso';
 import { BANNERS, EDGE_DIRS, GROUND_PRIORITY, groundVariants, PLAYER_COLORS, type GroundKind } from './sprites';
 
@@ -53,14 +77,37 @@ interface BuildingView {
   pileKey: string;
 }
 
+/**
+ * A settler on screen: layered sprites (see `settlerArt.ts`) in a root that is mirrored for the
+ * westward directions. Tunic and hat are tinted per profession, or per owner for fighters.
+ */
 interface SettlerView {
   root: Container;
   body: Sprite;
+  tunic: Sprite;
+  head: Sprite;
+  hat: Sprite;
+  /** Near arm with its tool; moved behind the body when the settler faces away. */
+  arm: Sprite;
   ware: Sprite;
   /** Rank badge for fighters above level 0. */
   rank: Sprite;
-  facing: 1 | -1;
+  /** Index into `DIRS` the settler last moved or looked in. */
+  dir: number;
+  /** Tiles walked so far (drives the walk cycle, so feet do not slide). */
+  walked: number;
+  lastX: number;
+  lastY: number;
+  armBehind: boolean;
+  /** Hit points last seen, to flash on a blow. */
+  hp: number;
+  /** Profession the layers are styled for (`retool`/`become` change it). */
+  kind: string;
+  /** Work frame last shown, to fire the action's sound once per loop. */
+  frame: number;
 }
+
+const toTint = (hex: string) => Number.parseInt(hex.slice(1), 16);
 
 /** Visible world area in world pixels. */
 export interface ViewRect {
@@ -149,6 +196,31 @@ export class GameRenderer {
   private readonly buildingViews = new Map<number, BuildingView>();
   private readonly settlerViews = new Map<number, SettlerView>();
 
+  private readonly settlerTex: SettlerTextures;
+  private readonly wareTex = {} as Record<Resource, Texture>;
+  private readonly playerTint = PLAYER_COLORS.map(toTint);
+  private readonly tints = new Map<string, number>();
+  /** Live visual effects (smoke, sails, glows, dust, falling trees, water glints, hit flashes). */
+  private readonly effects: Effects;
+  private nowMs = 0;
+  private lastFrameMs = 0;
+  /** Newest arrow already heard (`World.shots` tick). */
+  private lastShotTick = -1;
+  /** Scratch target of `workTarget`. */
+  private tx = 0;
+  private ty = 0;
+
+  /**
+   * Positional sound hook, set by `main.ts`: sound id and its world pixel position. The renderer
+   * calls it only for things on screen, so the audio side just attenuates and rate-limits.
+   */
+  onSound: ((id: SoundId, x: number, y: number) => void) | null = null;
+  private readonly sound = (id: SoundId, x: number, y: number): void => {
+    const v = this.view;
+    if (!this.onSound || x < v.x - 64 || x > v.x + v.w + 64 || y < v.y - 64 || y > v.y + v.h + 96) return;
+    this.onSound(id, x, y);
+  };
+
   constructor(
     app: Application,
     private readonly sim: World,
@@ -157,6 +229,12 @@ export class GameRenderer {
     private readonly fogOn = true,
   ) {
     this.world.addChild(this.ground, this.territory, this.marks, this.objects, this.shots, this.fog, this.ghostLayer);
+    this.settlerTex = atlas.settlerTextures();
+    for (const r of RESOURCES) this.wareTex[r] = atlas.get(`ware:${r}`);
+    this.effects = new Effects(atlas, sim, (x, y) => this.surface(x, y), this.sound);
+    // Glints sit right on the ground; smoke and sparks above the objects but under the fog.
+    this.world.addChildAt(this.effects.waterLayer, this.world.getChildIndex(this.ground) + 1);
+    this.world.addChildAt(this.effects.fxLayer, this.world.getChildIndex(this.fog));
     app.stage.addChild(this.world);
     this.ghostSprite = new Sprite();
     this.ghostSprite.alpha = 0.75;
@@ -448,12 +526,16 @@ export class GameRenderer {
     area: Area | null = null,
   ) {
     this.view = view;
+    this.nowMs = timeMs;
     this.syncHeights(timeMs);
     this.syncTerritory();
     this.syncVisibleChunks();
     this.syncChangedTiles();
     this.syncBuildings();
     this.syncSettlers(alpha, timeMs);
+    this.swayTrees(timeMs);
+    this.effects.update(this.lastFrameMs ? timeMs - this.lastFrameMs : 16, timeMs, this.chunkVisible);
+    this.lastFrameMs = timeMs;
     this.syncFog(timeMs);
     this.drawShots(alpha);
     this.drawMarks(ghost, selected, hover, area);
@@ -514,6 +596,15 @@ export class GameRenderer {
     const g = this.shots;
     g.clear();
     const now = this.sim.tick + alpha;
+    let newest = this.lastShotTick;
+    for (const shot of this.sim.shots) {
+      if (shot.tick > this.lastShotTick) {
+        newest = Math.max(newest, shot.tick);
+        const from = this.surface(shot.x0, shot.y0);
+        this.sound('twang', from.x, from.y);
+      }
+    }
+    this.lastShotTick = newest;
     for (const shot of this.sim.shots) {
       const p = Math.min(1, Math.max(0, (now - shot.tick) / SHOT_TICKS));
       const a = this.surface(shot.x0, shot.y0);
@@ -571,13 +662,21 @@ export class GameRenderer {
     const { map } = this.sim;
     const stage = map.tree[i];
     if (stage === this.treeState[i]) return;
+    const felled = this.treeState[i] === TREE_MATURE && stage === 0;
     this.treeState[i] = stage;
     let s = this.treeSprites[i];
     const x = i % map.w;
     const y = Math.floor(i / map.w);
     if (stage === 0) {
       if (s) {
-        this.removeStatic(s, x, y);
+        // A felled tree topples over before it goes; the sprite leaves its chunk right away.
+        const sprite = s;
+        if (felled && this.effects.fellTree(sprite, this.nowMs, (t) => t.destroy())) {
+          this.chunkObjects[map.chunkOf(x, y)].delete(sprite);
+          this.sound('fall', sprite.x, sprite.y);
+        } else {
+          this.removeStatic(sprite, x, y);
+        }
         this.treeSprites[i] = null;
       }
       return;
@@ -585,6 +684,7 @@ export class GameRenderer {
     if (!s) {
       const h = hash(i);
       s = new Sprite(this.atlas.get(`tree:${h % 4}`));
+      s.label = 'tree';
       const p = this.surface(x, y);
       s.position.set(p.x + ((h >> 6) % 9) - 4, p.y + ((h >> 10) % 5) - 2);
       s.zIndex = depthOf(x, y);
@@ -759,6 +859,7 @@ export class GameRenderer {
       this.removeStatic(v.body, v.at.x, v.at.y);
       this.removeStatic(v.front, v.doorAt.x, v.doorAt.y);
       this.buildingViews.delete(id);
+      this.effects.detachBuilding(id);
     }
     for (const b of this.sim.buildings.values()) {
       let v = this.buildingViews.get(b.id);
@@ -811,6 +912,7 @@ export class GameRenderer {
     const flag = new Sprite(this.atlas.get(`flag:${b.owner}`));
     flag.position.set(-16, 3);
     front.addChild(flag);
+    this.effects.attachBuilding(b, body);
 
     this.addStatic(body, cx, cy);
     this.addStatic(front, b.door.x, b.door.y);
@@ -879,7 +981,9 @@ export class GameRenderer {
         x += ox;
         y += oy;
       }
-      const p = this.surface(x, y);
+      // Screen point on the terrain (inline `surface`, no allocation per settler).
+      const px = (x - y) * HALF_W;
+      const py = (x + y) * HALF_H - this.sim.map.heightAt(x, y);
       const view = this.view;
       // Other players' settlers show only where the local player has sight.
       const seen =
@@ -887,54 +991,190 @@ export class GameRenderer {
       const onScreen =
         seen &&
         s.inside === null &&
-        p.x > view.x - 40 &&
-        p.x < view.x + view.w + 40 &&
-        p.y > view.y - 20 &&
-        p.y < view.y + view.h + 60;
+        px > view.x - 40 &&
+        px < view.x + view.w + 40 &&
+        py > view.y - 20 &&
+        py < view.y + view.h + 60;
       if (onScreen !== (v.root.parent === this.objects)) {
         if (onScreen) this.objects.addChild(v.root);
         else this.objects.removeChild(v.root);
       }
+      const hurt = s.hp < v.hp;
+      v.hp = s.hp;
+      // Walked distance drives the walk cycle; jumps (entering, leaving, loading) do not count.
+      const step = Math.abs(x - v.lastX) + Math.abs(y - v.lastY);
+      if (step < 1.5) v.walked += Math.hypot(x - v.lastX, y - v.lastY);
+      v.lastX = x;
+      v.lastY = y;
       if (!onScreen) continue;
-
-      const moving = s.x !== s.px || s.y !== s.py;
-      const sdx = s.x - s.px - (s.y - s.py);
-      if (sdx > 0.01) v.facing = 1;
-      else if (sdx < -0.01) v.facing = -1;
-      if (foe) {
-        // Face the opponent.
-        const toFoe = foe.x - foe.y - (s.x - s.y);
-        if (toFoe !== 0) v.facing = toFoe > 0 ? 1 : -1;
+      if (hurt) {
+        this.effects.hit(px, py - 16);
+        this.sound('clash', px, py);
       }
+      if (v.kind !== s.kind) this.styleSettler(v, s);
+      const style = styleOf(s.kind);
 
-      let frame = 'stand';
-      if (s.working) frame = Math.floor(timeMs / 220) % 2 ? 'work' : 'stand';
-      else if (moving) frame = Math.floor(timeMs / 160) % 2 ? 'walk' : 'stand';
-      v.body.texture = this.atlas.get(
-        PROFESSIONS[s.kind].combat ? `settler:${s.kind}:${frame}:${s.owner}` : `settler:${s.kind}:${frame}`,
-      );
+      const dx = s.x - s.px;
+      const dy = s.y - s.py;
+      const moving = dx !== 0 || dy !== 0;
+      const working = s.working || foe !== undefined;
+      let dir = v.dir;
+      if (foe) dir = dirTowards(s.x, s.y, foe.x, foe.y, dir);
+      else if (moving) dir = dirFromTileVelocity(dx, dy, dir);
+      else if (working && this.workTarget(s)) dir = dirTowards(s.x, s.y, this.tx, this.ty, dir);
+      v.dir = dir;
+      // Idle settlers glance around now and then.
+      const shown = moving || working ? dir : idleDir(timeMs, s.id, dir);
+      const pd = PAINTED_DIR[shown];
+      const tex = this.settlerTex;
+
+      let bob = 0;
+      if (working) {
+        const action = this.actionOf(s, style);
+        const def: ActionDef = ACTIONS[action];
+        const f = workFrame(timeMs, s.id, def.loopMs);
+        v.body.texture = tex.body[pd][BODY_WORK];
+        v.arm.texture = tex.workArm[action][pd][f];
+        if (f !== v.frame) {
+          v.frame = f;
+          if (def.sound && f === def.soundFrame) this.sound(def.sound, px, py);
+        }
+      } else {
+        v.frame = -1;
+        const tool = s.carrying !== null ? 'carry' : style.holds;
+        const f = moving ? walkFrame(v.walked) : WALK_FRAMES;
+        v.body.texture = tex.body[pd][moving ? f : BODY_STAND];
+        v.arm.texture = tex.holdArm[tool][pd][f];
+        if (moving) bob = walkBob(f);
+      }
+      v.tunic.texture = tex.tunic[pd];
+      v.head.texture = tex.head[pd];
+      v.hat.texture = tex.hat[style.hatStyle][pd];
+      const behind = FACES_AWAY[pd];
+      if (behind !== v.armBehind) {
+        // Facing away, the near arm, its tool and the goods in hand are hidden behind the body.
+        v.armBehind = behind;
+        v.root.setChildIndex(v.arm, behind ? 0 : 4);
+        v.root.setChildIndex(v.ware, behind ? 0 : 5);
+      }
+      v.root.scale.x = MIRRORED[shown] ? -1 : 1;
+
       v.rank.visible = s.level > 0;
       if (s.level > 0) v.rank.texture = this.atlas.get(`chevrons:${s.level}`);
-      v.body.scale.x = v.facing;
-
-      v.root.position.set(p.x, p.y - (moving && frame === 'walk' ? 1 : 0));
+      v.root.position.set(px, py + bob);
       v.root.zIndex = depthOf(x, y) + 0.01;
       v.ware.visible = s.carrying !== null;
-      if (s.carrying) v.ware.texture = this.atlas.get(`ware:${s.carrying}`);
+      if (s.carrying) {
+        v.ware.texture = this.wareTex[s.carrying];
+        v.ware.position.set(CARRY_AT[pd][0], CARRY_AT[pd][1]);
+      }
+    }
+  }
+
+  /** What a working settler is doing: the task's own action (sowing, reaping…) or the profession's. */
+  private actionOf(s: Settler, style: SettlerStyle): ActionId {
+    const t = s.tasks[0];
+    if (t?.t === 'plant') return PLANT_ACTION[t.what];
+    if (t?.t === 'gather') return GATHER_ACTION[t.res] ?? style.work;
+    return style.work;
+  }
+
+  /** Puts the point a working settler faces in `tx/ty`; false when the task has none. */
+  private workTarget(s: Settler): boolean {
+    const t = s.tasks[0];
+    if (!t) return false;
+    if (t.t === 'gather' || t.t === 'plant' || t.t === 'prospect') {
+      this.tx = t.x;
+      this.ty = t.y;
+      return true;
+    }
+    if (t.t === 'build' || t.t === 'dig' || t.t === 'assault') {
+      const b = this.buildingViews.get(t.b);
+      if (!b) return false;
+      this.tx = b.at.x;
+      this.ty = b.at.y;
+      return true;
+    }
+    return false;
+  }
+
+  /** Tints the layers for the settler's profession (fighters wear their owner's colour). */
+  private styleSettler(v: SettlerView, s: Settler): void {
+    const style = styleOf(s.kind);
+    v.kind = s.kind;
+    v.tunic.tint = style.fighter ? this.playerTint[(s.owner - 1) % this.playerTint.length] : this.tintOf(style.tunic);
+    v.hat.tint = this.tintOf(style.hat);
+  }
+
+  private tintOf(hex: string): number {
+    let t = this.tints.get(hex);
+    if (t === undefined) {
+      t = toTint(hex);
+      this.tints.set(hex, t);
+    }
+    return t;
+  }
+
+  /** Trees in visible chunks lean gently in the wind (a skew about the trunk base). */
+  private swayTrees(timeMs: number): void {
+    // Far out the sway is invisible; skip the work.
+    if (this.view.w > 3200) return;
+    const { map } = this.sim;
+    const t = timeMs * 0.0012;
+    for (let c = 0; c < this.chunkVisible.length; c++) {
+      if (!this.chunkVisible[c]) continue;
+      const x0 = (c % map.chunksX) * CHUNK;
+      const y0 = Math.floor(c / map.chunksX) * CHUNK;
+      const x1 = Math.min(map.w, x0 + CHUNK);
+      const y1 = Math.min(map.h, y0 + CHUNK);
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
+          const tree = this.treeSprites[y * map.w + x];
+          if (tree) tree.skew.x = Math.sin(t + x * 0.37 + y * 0.23) * 0.03;
+        }
+      }
     }
   }
 
   private createSettlerView(s: Settler): SettlerView {
+    const tex = this.settlerTex;
     const root = new Container();
-    const body = new Sprite(this.atlas.get(`settler:${s.kind}:stand`));
-    const ware = new Sprite(this.atlas.get('ware:log'));
-    ware.position.set(0, -27);
+    const layer = (t: Texture) => {
+      const sp = new Sprite(t);
+      sp.anchor.copyFrom(t.defaultAnchor!);
+      return sp;
+    };
+    const body = layer(tex.body[2][BODY_STAND]);
+    const tunic = layer(tex.tunic[2]);
+    const head = layer(tex.head[2]);
+    const hat = layer(tex.hat.cap[2]);
+    const arm = layer(tex.holdArm.none[2][WALK_FRAMES]);
+    const ware = new Sprite(this.wareTex.log);
+    ware.scale.set(0.85);
     ware.visible = false;
     const rank = new Sprite(this.atlas.get('chevrons:1'));
-    rank.position.set(0, -33);
+    rank.position.set(0, -40);
     rank.visible = false;
-    root.addChild(body, ware, rank);
-    const v: SettlerView = { root, body, ware, rank, facing: 1 };
+    root.addChild(body, tunic, head, hat, arm, ware, rank);
+    const v: SettlerView = {
+      root,
+      body,
+      tunic,
+      head,
+      hat,
+      arm,
+      ware,
+      rank,
+      dir: 2,
+      walked: 0,
+      lastX: s.x,
+      lastY: s.y,
+      armBehind: false,
+      hp: s.hp,
+      kind: '',
+      frame: -1,
+    };
+    this.styleSettler(v, s);
     this.settlerViews.set(s.id, v);
     return v;
   }

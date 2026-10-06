@@ -2,7 +2,7 @@
  * Procedural sprite painters. Everything is drawn with Canvas 2D at startup;
  * see atlas.ts for packing into a single texture.
  */
-import type { BuildingType, Resource, SettlerKind } from '../sim/types';
+import type { BuildingType, Resource } from '../sim/types';
 import { createRng } from '../sim/rng';
 import { HALF_H, HALF_W } from './iso';
 
@@ -921,26 +921,12 @@ interface Style {
   deco?: Deco[];
 }
 
-function smoke(ctx: Ctx, x: number, y: number): void {
-  for (const [dx, dy, r] of [
-    [0, 0, 3],
-    [3, -6, 4],
-    [7, -13, 5],
-  ]) {
-    ctx.beginPath();
-    ctx.arc(x + dx, y + dy, r, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(220,220,220,0.55)';
-    ctx.fill();
-  }
-}
-
 function paintDeco(ctx: Ctx, st: Style, deco: Deco): void {
   const { hw, hh, H, rise } = st;
   switch (deco) {
     case 'chimney': {
+      // Smoke is a live effect (see `buildingFxAnchors`).
       box(ctx, -hw * 0.45, -hh * 0.25, 0.08, 0.08, H, rise * 0.8 + 6, '#8c4a3a');
-      const [x, y] = P(-hw * 0.45, -hh * 0.25, H + rise * 0.8 + 10);
-      smoke(ctx, x, y);
       return;
     }
     case 'well': {
@@ -1064,24 +1050,13 @@ function paintDeco(ctx: Ctx, st: Style, deco: Deco): void {
       return;
     }
     case 'furnace': {
-      // Brick stack with a fire glow and dark smoke.
+      // Brick stack and fire mouth; smoke and the pulsing glow are live effects.
       box(ctx, hw * 0.35, -hh * 0.35, 0.16, 0.16, H, st.rise + 14, '#8c4a3a');
       const [gx, gy] = P(hw, hh * 0.2, 6);
-      ctx.fillStyle = '#ff8a2a';
+      ctx.fillStyle = '#5a2a14';
       ctx.fillRect(gx - 1, gy - 6, 6, 6);
-      ctx.fillStyle = '#ffd36a';
-      ctx.fillRect(gx + 0.5, gy - 4, 3, 3);
-      const [sx, sy] = P(hw * 0.35, -hh * 0.35, H + st.rise + 18);
-      for (const [dx, dy, r] of [
-        [0, 0, 4],
-        [4, -7, 5],
-        [9, -15, 6],
-      ]) {
-        ctx.beginPath();
-        ctx.arc(sx + dx, sy + dy, r, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(90,90,90,0.5)';
-        ctx.fill();
-      }
+      ctx.fillStyle = '#ff8a2a';
+      ctx.fillRect(gx, gy - 5, 4, 4);
       return;
     }
     case 'anvil': {
@@ -1314,10 +1289,23 @@ function paintMill(ctx: Ctx): void {
   frontQuad(ctx, a, 0.3, 0.5, 0, 15, '#4a2c14');
   frontQuad(ctx, a, -0.15, 0.05, 30, 38, '#34302b');
   pyramidRoof(ctx, a + 0.12, H, 30, '#6e4a33');
-  // Sails on the front-right wall.
-  const [hx, hy] = P(a + 0.02, 0.1, H - 6);
-  ctx.save();
-  ctx.translate(hx, hy);
+  // The sails are a separate, rotating sprite at `MILL_HUB` (see `paintMillSails`); only the hub here.
+  const [hx, hy] = MILL_HUB;
+  ctx.beginPath();
+  ctx.arc(hx, hy, 3, 0, Math.PI * 2);
+  ctx.fillStyle = '#3b2b1a';
+  ctx.fill();
+  paintDeco(ctx, { hw: a, hh: a, H, wall: stone, roof: '', rise: 0, doorDx: 0.4 }, 'sacks');
+}
+
+const MILL_A = 0.55;
+const MILL_H = 52;
+/** Mill sail hub relative to the footprint center (building anchor), in pixels. */
+export const MILL_HUB: [number, number] = P(MILL_A + 0.02, 0.1, MILL_H - 6);
+
+/** Mill sails, 92×92 around the hub at the centre; rotated at runtime. */
+export function paintMillSails(ctx: Ctx): void {
+  ctx.translate(46, 46);
   for (let k = 0; k < 4; k++) {
     ctx.rotate(Math.PI / 2);
     ctx.fillStyle = '#6b4a26';
@@ -1332,8 +1320,6 @@ function paintMill(ctx: Ctx): void {
   ctx.arc(0, 0, 3, 0, Math.PI * 2);
   ctx.fillStyle = '#3b2b1a';
   ctx.fill();
-  ctx.restore();
-  paintDeco(ctx, { hw: a, hh: a, H, wall: stone, roof: '', rise: 0, doorDx: 0.4 }, 'sacks');
 }
 
 /** Mine entrance dug into the slope, with a cart of its ore. */
@@ -1421,6 +1407,38 @@ export function paintSign(ctx: Ctx, ore: string | null): void {
 }
 
 const styled = (type: BuildingType) => (ctx: Ctx) => paintStyled(ctx, STYLES[type]!);
+
+/** Where live building effects attach, relative to the footprint center (building anchor), in pixels. */
+export interface FxAnchors {
+  smoke: [number, number][];
+  glow: [number, number][];
+  hub: [number, number] | null;
+}
+
+const fxAnchorCache = new Map<BuildingType, FxAnchors>();
+
+/** Chimney tops, fire mouths and the mill hub of a building's sprite (empty lists if none). */
+export function buildingFxAnchors(type: BuildingType): FxAnchors {
+  let a = fxAnchorCache.get(type);
+  if (a) return a;
+  a = { smoke: [], glow: [], hub: type === 'mill' ? MILL_HUB : null };
+  const st = STYLES[type];
+  for (const d of st?.deco ?? []) {
+    const { hw, hh, H, rise } = st!;
+    if (d === 'chimney') a.smoke.push(P(-hw * 0.45, -hh * 0.25, H + rise * 0.8 + 8));
+    if (d === 'furnace') {
+      a.smoke.push(P(hw * 0.35, -hh * 0.35, H + rise + 16));
+      const [gx, gy] = P(hw, hh * 0.2, 6);
+      a.glow.push([gx + 2, gy - 3]);
+    }
+    if (d === 'oven') {
+      const [x, y] = P(hw + 0.3, 0.1, 0);
+      a.glow.push([x - 3, y - 3]);
+    }
+  }
+  fxAnchorCache.set(type, a);
+  return a;
+}
 
 export const BUILDING_PAINTERS: Record<BuildingType | 'site2' | 'site3', (ctx: Ctx) => void> = {
   castle: paintCastle,
@@ -1553,161 +1571,10 @@ export function paintField(ctx: Ctx, stage: number): void {
 
 // ----------------------------------------------------------------- settlers
 
-export type SettlerFrame = 'stand' | 'walk' | 'work';
-
-type Tool = 'axe' | 'hammer' | 'shovel' | 'pick' | 'rod' | 'scythe' | 'bucket' | 'sword' | 'bow';
-
 /** Player colours (index = player id − 1): flags, borders, soldiers' tunics. */
 export const PLAYER_COLORS: readonly string[] = ['#2b5fb4', '#c0392b', '#2e8b57', '#d4a017'];
 
-const SETTLER_LOOK: Record<SettlerKind, { tunic: string; hat: string; tool?: Tool }> = {
-  carrier: { tunic: '#3f6fb5', hat: '#6b4423' },
-  builder: { tunic: '#d08a2c', hat: '#c23b2b', tool: 'hammer' },
-  woodcutter: { tunic: '#3d7d3a', hat: '#2e4d22', tool: 'axe' },
-  sawmiller: { tunic: '#8b5a2b', hat: '#d9c9a3' },
-  forester: { tunic: '#7a9a3a', hat: '#5a4020', tool: 'shovel' },
-  stonecutter: { tunic: '#7d7f86', hat: '#4a3b2c', tool: 'pick' },
-  waterman: { tunic: '#4a90c2', hat: '#e0d6c0', tool: 'bucket' },
-  fisher: { tunic: '#2f6f8f', hat: '#c9b27a', tool: 'rod' },
-  farmer: { tunic: '#c9a44a', hat: '#e3c76a', tool: 'scythe' },
-  miller: { tunic: '#e8e4da', hat: '#9a8f80' },
-  baker: { tunic: '#f0ece2', hat: '#ffffff' },
-  pigfarmer: { tunic: '#8a6d4b', hat: '#5a4636' },
-  butcher: { tunic: '#b83c3c', hat: '#e8e4da' },
-  miner: { tunic: '#555b66', hat: '#d9b44a', tool: 'pick' },
-  geologist: { tunic: '#7a5c3a', hat: '#3b2b1a', tool: 'hammer' },
-  smelter: { tunic: '#6e4a33', hat: '#3b2b1a' },
-  toolsmith: { tunic: '#5a5048', hat: '#8c4a3a', tool: 'hammer' },
-  vinegrower: { tunic: '#7a4a6e', hat: '#e3c76a', tool: 'shovel' },
-  winemaker: { tunic: '#6a2f3a', hat: '#e8e4da' },
-  weaponsmith: { tunic: '#4a4f55', hat: '#8c4a3a', tool: 'hammer' },
-  digger: { tunic: '#8a6a3c', hat: '#5a4636', tool: 'shovel' },
-  // Soldiers wear their player's colour (see `paintSettler`'s `tunic`).
-  soldier: { tunic: PLAYER_COLORS[0], hat: '#8d939a', tool: 'sword' },
-  archer: { tunic: PLAYER_COLORS[0], hat: '#4f6b3a', tool: 'bow' },
-};
-
-/** Settler, 20×32 with the feet at (10, 29). `tunic` overrides the profession colour (player colour for soldiers). */
-export function paintSettler(ctx: Ctx, kind: SettlerKind, frame: SettlerFrame, tunic?: string): void {
-  const look = { ...SETTLER_LOOK[kind], ...(tunic ? { tunic } : {}) };
-  ctx.translate(10, 29);
-  ctx.beginPath();
-  ctx.ellipse(1, 0, 6, 2.2, 0, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(0,0,0,0.25)';
-  ctx.fill();
-  // Legs.
-  ctx.fillStyle = '#3b3128';
-  if (frame === 'walk') {
-    ctx.fillRect(-4, -8, 2.5, 8);
-    ctx.fillRect(1.5, -8, 2.5, 7);
-  } else {
-    ctx.fillRect(-2.5, -8, 2.2, 8);
-    ctx.fillRect(0.5, -8, 2.2, 8);
-  }
-  // Tunic.
-  ctx.fillStyle = look.tunic;
-  ctx.beginPath();
-  ctx.moveTo(-4.5, -8);
-  ctx.lineTo(4.5, -8);
-  ctx.lineTo(3.5, -17);
-  ctx.lineTo(-3.5, -17);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = shade(look.tunic, 0.75);
-  ctx.fillRect(-4.3, -10, 8.6, 1.5);
-  // Arms and tool.
-  ctx.fillStyle = '#e9b98f';
-  if (look.tool === 'bow') {
-    // Always armed: bow drawn and aimed while shooting or fighting, carried at the side otherwise.
-    ctx.fillRect(3.3, frame === 'work' ? -19 : -16, 1.8, 6);
-    ctx.fillRect(-5.1, -16, 1.8, 6);
-    ctx.strokeStyle = '#7a4a22';
-    ctx.lineWidth = 1.3;
-    ctx.beginPath();
-    if (frame === 'work') ctx.arc(6, -17, 6, -Math.PI / 2, Math.PI / 2);
-    else ctx.arc(4, -12, 5, -Math.PI / 2 - 0.3, Math.PI / 2 - 0.3);
-    ctx.stroke();
-    ctx.strokeStyle = '#e8e2d0';
-    ctx.lineWidth = 0.5;
-    ctx.beginPath();
-    if (frame === 'work') {
-      ctx.moveTo(6, -23);
-      ctx.lineTo(3, -17);
-      ctx.lineTo(6, -11);
-    } else {
-      ctx.moveTo(2.5, -16.8);
-      ctx.lineTo(5.5, -7.2);
-    }
-    ctx.stroke();
-  } else if (look.tool === 'sword') {
-    // Always armed: blade raised to strike while fighting, held at the side otherwise.
-    ctx.fillRect(3.3, frame === 'work' ? -22 : -16, 1.8, frame === 'work' ? 7 : 6);
-    ctx.fillRect(-5.1, -16, 1.8, 6);
-    ctx.strokeStyle = '#d6dadf';
-    ctx.lineWidth = 1.4;
-    ctx.beginPath();
-    if (frame === 'work') {
-      ctx.moveTo(4.5, -22);
-      ctx.lineTo(10, -31);
-    } else {
-      ctx.moveTo(5, -10);
-      ctx.lineTo(7, -19);
-    }
-    ctx.stroke();
-    ctx.fillStyle = '#6b4a26';
-    ctx.fillRect(frame === 'work' ? 3 : 4, frame === 'work' ? -23 : -11, 3, 1.5);
-  } else if (frame === 'work') {
-    ctx.fillRect(3, -22, 2, 7);
-    if (look.tool) {
-      ctx.fillStyle = '#6b4a26';
-      ctx.fillRect(3.5, -27, 1.5, 7);
-      ctx.fillStyle = '#9aa0a6';
-      if (look.tool === 'axe') ctx.fillRect(4.5, -27, 4, 3);
-      else if (look.tool === 'shovel') ctx.fillRect(2.5, -31, 3.5, 4.5);
-      else if (look.tool === 'bucket') {
-        ctx.fillStyle = '#7a8a96';
-        ctx.fillRect(2, -21, 5, 5);
-        ctx.fillStyle = '#4f8fbd';
-        ctx.fillRect(2.5, -21, 4, 1.5);
-      } else if (look.tool === 'rod' || look.tool === 'scythe') {
-        ctx.strokeStyle = look.tool === 'rod' ? '#6b4a26' : '#9aa0a6';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        if (look.tool === 'rod') {
-          ctx.moveTo(4, -24);
-          ctx.lineTo(13, -33);
-          ctx.lineTo(13, -22);
-        } else {
-          ctx.moveTo(4, -28);
-          ctx.quadraticCurveTo(10, -30, 11, -24);
-        }
-        ctx.stroke();
-      }
-      else if (look.tool === 'pick') {
-        ctx.beginPath();
-        ctx.moveTo(0, -25);
-        ctx.quadraticCurveTo(4.2, -29.5, 9, -25);
-        ctx.strokeStyle = '#9aa0a6';
-        ctx.lineWidth = 1.6;
-        ctx.stroke();
-      }
-      else ctx.fillRect(2, -28, 5, 2.5);
-    }
-  } else {
-    ctx.fillRect(3.3, -16, 1.8, 6);
-    ctx.fillRect(-5.1, -16, 1.8, 6);
-  }
-  // Head and hat.
-  ctx.beginPath();
-  ctx.arc(0, -20, 3.4, 0, Math.PI * 2);
-  ctx.fillStyle = '#efc49c';
-  ctx.fill();
-  ctx.fillStyle = look.hat;
-  ctx.beginPath();
-  ctx.arc(0, -21, 3.6, Math.PI, 0);
-  ctx.fill();
-  ctx.fillRect(-4.5, -21.5, 9, 1.4);
-}
+// Settlers are layered sprites painted in `settlerArt.ts`.
 
 // -------------------------------------------------------------------- goods
 

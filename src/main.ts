@@ -1,10 +1,12 @@
 import { Application } from 'pixi.js';
+import { AudioEngine } from './audio/audio';
 import { SpriteAtlas } from './render/atlas';
 import { Camera } from './render/camera';
 import { toScreen } from './render/iso';
 import { GameRenderer } from './render/renderer';
 import { TICKS_PER_SECOND } from './sim/config';
 import { World } from './sim/world';
+import { audioControls } from './ui/audioControls';
 import { Hud } from './ui/hud';
 import { InputController } from './ui/input';
 import { Minimap } from './ui/minimap';
@@ -55,6 +57,18 @@ async function main() {
       location.search = '?load=1';
     },
   });
+  // Sound: starts on the first gesture; controls join the speed panel (top right).
+  const audio = new AudioEngine();
+  const unlock = () => audio.unlock();
+  window.addEventListener('pointerdown', unlock, true);
+  window.addEventListener('keydown', unlock, true);
+  renderer.onSound = (id, x, y) => audio.at(id, x, y);
+  const hudEl = document.getElementById('hud')!;
+  hudEl.querySelector('.panel.speed')?.append(audioControls(audio));
+  hudEl.addEventListener('click', (e) => {
+    if (e.target instanceof Element && e.target.closest('button')) audio.ui('click');
+  });
+
   const minimap = new Minimap(world, camera, state.fog);
   document.getElementById('hud')!.append(minimap.el);
   const input = new InputController(app.canvas, camera, renderer, world, state, {
@@ -82,12 +96,14 @@ async function main() {
     camera.apply(app.screen.width, app.screen.height);
     const now = performance.now();
     const view = camera.viewRect(app.screen.width, app.screen.height);
+    audio.listen(camera.x, camera.y, view.w / 2, camera.zoom);
+    audio.update();
     renderer.sync(acc / TICK_MS, now, view, input.ghost(), state.selected, state.hover, input.area());
     hud.update(now);
     minimap.update(now, app.screen.width, app.screen.height);
   });
 
-  Object.assign(window, { world, seed, state, renderer, camera });
+  Object.assign(window, { world, seed, state, renderer, camera, audio });
   if (save) console.info(`Loaded save at tick ${world.tick}`);
   else console.info(`Settlers prototype, seed ${seed} (add ?seed=${seed} to replay this map)`);
 }

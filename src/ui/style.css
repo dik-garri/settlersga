@@ -358,3 +358,15 @@ button.danger {
     display: none;
   }
 }
+
+.audio-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.audio-controls .volume {
+  width: 72px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
