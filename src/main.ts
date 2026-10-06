@@ -34,7 +34,9 @@ async function main() {
     params.delete('load');
     history.replaceState(null, '', `${location.pathname}${params.size ? `?${params}` : ''}`);
   }
-  const world = save ? World.load(save) : new World(seed, { size });
+  // The local player and one (for now passive) opponent unless ?players= says otherwise.
+  const players = params.has('players') ? Number(params.get('players')) : 2;
+  const world = save ? World.load(save) : new World(seed, { size, players });
   const state = createState();
   const atlas = new SpriteAtlas();
   const renderer = new GameRenderer(app, world, atlas);

@@ -28,6 +28,7 @@ export const RESOURCES = [
   'hammer',
   'grapes',
   'wine',
+  'sword',
 ] as const;
 export type Resource = (typeof RESOURCES)[number];
 export type Stock = Record<Resource, number>;
@@ -72,6 +73,7 @@ export type BuildingType =
   | 'warehouse'
   | 'vineyard'
   | 'winery'
+  | 'weaponsmith'
   | 'tower';
 
 export type SettlerKind =
@@ -94,7 +96,8 @@ export type SettlerKind =
   | 'toolsmith'
   | 'vinegrower'
   | 'winemaker'
-  | 'guard';
+  | 'weaponsmith'
+  | 'soldier';
 
 /** Player ids start at 1; 0 means "nobody" in per-tile ownership. */
 export type PlayerId = number;
@@ -132,6 +135,9 @@ export interface Building {
   spawned: number;
   /** Player flag: served first by logistics and builders. */
   priority: boolean;
+  /** Military building: soldiers stationed here (settler ids) and soldiers on their way in. */
+  garrison: number[];
+  garrisonInbound: number;
 }
 
 export type Task =
@@ -152,7 +158,11 @@ export type Task =
   | { t: 'prospect'; x: number; y: number; n: number }
   | { t: 'become'; b: number; kind: SettlerKind }
   /** Take up a profession that has no workplace (e.g. builder), using the tool in hand. */
-  | { t: 'retool'; kind: SettlerKind };
+  | { t: 'retool'; kind: SettlerKind }
+  /** Soldier moves into a military building's garrison (reserved via `garrisonInbound`). */
+  | { t: 'join'; b: number }
+  /** Soldier attacks an enemy military building: duel its defenders at the door, take it when empty. */
+  | { t: 'assault'; b: number; n: number };
 
 export interface Settler {
   id: number;
@@ -174,4 +184,8 @@ export interface Settler {
   idleTicks: number;
   /** True while doing manual work (chopping, building) — used for animation. */
   working: boolean;
+  /** Hit points; only soldiers have them (0 for everyone else). */
+  hp: number;
+  /** Settler this soldier is fighting right now, or null. */
+  opponent: number | null;
 }

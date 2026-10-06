@@ -1,6 +1,6 @@
 import { DEPOSIT_STONE, FISH_MAX, ORE_AMOUNT, ORE_RESOURCES, TREE_MATURE } from './config';
 import { createRng, randInt, type Rng } from './rng';
-import { Terrain } from './types';
+import { Terrain, type Point } from './types';
 
 /** Edge length, in tiles, of the square chunks used to track changes. */
 export const CHUNK = 16;
@@ -143,7 +143,9 @@ export class GameMap {
 
   /** A water or other blocked tile that can be worked from an orthogonally adjacent walkable tile. */
   hasWalkableNeighbor(x: number, y: number): boolean {
-    return this.isWalkable(x + 1, y) || this.isWalkable(x - 1, y) || this.isWalkable(x, y + 1) || this.isWalkable(x, y - 1);
+    return (
+      this.isWalkable(x + 1, y) || this.isWalkable(x - 1, y) || this.isWalkable(x, y + 1) || this.isWalkable(x, y - 1)
+    );
   }
 
   hasDoorNear(x: number, y: number): boolean {
@@ -197,8 +199,14 @@ function fractalNoise(rng: Rng, w: number, h: number): Float32Array {
   return out;
 }
 
-/** Generates terrain and forests. The area around (cx, cy) is cleared for the castle. */
-export function generateMap(seed: number, size: number, cx: number, cy: number): GameMap {
+/** The guaranteed coal/iron mountain, relative to each start; `elevate` gives it a summit. */
+const START_MOUNTAIN = { dx: -2, dy: -8, r: 2.8 };
+
+/**
+ * Generates terrain, forests and ore. Around every start position (castle center) a meadow is
+ * cleared and a grove, a quarry, a coal/iron mountain and a pond are guaranteed.
+ */
+export function generateMap(seed: number, size: number, starts: readonly Point[]): GameMap {
   const rng = createRng(seed);
   const map = new GameMap(size, size);
   const height = fractalNoise(rng, size, size);
@@ -256,78 +264,86 @@ export function generateMap(seed: number, size: number, cx: number, cy: number):
   const deposits = Math.max(1, Math.round((7 * size * size) / (64 * 64)));
   for (let k = 0; k < deposits; k++) depositAt(4 + randInt(rng, size - 8), 4 + randInt(rng, size - 8), 1.6, 0.65);
 
-  // Clear a meadow for the castle.
-  for (let y = cy - 6; y <= cy + 6; y++) {
-    for (let x = cx - 6; x <= cx + 6; x++) {
-      if (!map.inBounds(x, y)) continue;
-      const i = map.idx(x, y);
-      map.terrain[i] = Terrain.Grass;
-      map.tree[i] = 0;
-      map.stone[i] = 0;
-      map.fish[i] = 0;
-      map.ore[i] = 0;
-      map.oreAmount[i] = 0;
+  const prepareStart = (cx: number, cy: number) => {
+    // Clear a meadow for the castle.
+    for (let y = cy - 6; y <= cy + 6; y++) {
+      for (let x = cx - 6; x <= cx + 6; x++) {
+        if (!map.inBounds(x, y)) continue;
+        const i = map.idx(x, y);
+        map.terrain[i] = Terrain.Grass;
+        map.tree[i] = 0;
+        map.stone[i] = 0;
+        map.fish[i] = 0;
+        map.ore[i] = 0;
+        map.oreAmount[i] = 0;
+      }
     }
-  }
 
-  // Guarantee a grove a short walk from the castle.
-  const gx = cx + 8;
-  const gy = cy - 3;
-  for (let y = gy - 3; y <= gy + 3; y++) {
-    for (let x = gx - 3; x <= gx + 3; x++) {
-      if (!map.inBounds(x, y)) continue;
-      if (Math.hypot(x - gx, y - gy) > 3.2) continue;
-      const i = map.idx(x, y);
-      map.terrain[i] = Terrain.Grass;
-      map.stone[i] = 0;
-      map.fish[i] = 0;
-      map.ore[i] = 0;
-      map.oreAmount[i] = 0;
-      if (rng() < 0.7) map.tree[i] = TREE_MATURE;
+    // Guarantee a grove a short walk from the castle.
+    const gx = cx + 8;
+    const gy = cy - 3;
+    for (let y = gy - 3; y <= gy + 3; y++) {
+      for (let x = gx - 3; x <= gx + 3; x++) {
+        if (!map.inBounds(x, y)) continue;
+        if (Math.hypot(x - gx, y - gy) > 3.2) continue;
+        const i = map.idx(x, y);
+        map.terrain[i] = Terrain.Grass;
+        map.stone[i] = 0;
+        map.fish[i] = 0;
+        map.ore[i] = 0;
+        map.oreAmount[i] = 0;
+        if (rng() < 0.7) map.tree[i] = TREE_MATURE;
+      }
     }
-  }
 
-  // Guarantee a quarry on the other side.
-  depositAt(cx - 7, cy + 3, 2.3, 0.85);
+    // Guarantee a quarry on the other side.
+    depositAt(cx - 7, cy + 3, 2.3, 0.85);
 
-  // Guarantee a small mountain with coal and iron inside the starting territory.
-  const mx = cx - 2;
-  const my = cy - 8;
-  for (let y = my - 3; y <= my + 3; y++) {
-    for (let x = mx - 3; x <= mx + 3; x++) {
-      if (!map.inBounds(x, y) || Math.hypot(x - mx, y - my) > 2.8) continue;
-      const i = map.idx(x, y);
-      map.terrain[i] = Terrain.Mountain;
-      map.tree[i] = 0;
-      map.stone[i] = 0;
-      map.fish[i] = 0;
-      map.ore[i] = ORE_RESOURCES.indexOf(x < mx ? 'coal' : 'ironore') + 1;
-      map.oreAmount[i] = ORE_AMOUNT[1];
+    // Guarantee a small mountain with coal and iron inside the starting territory.
+    const mx = cx + START_MOUNTAIN.dx;
+    const my = cy + START_MOUNTAIN.dy;
+    for (let y = my - 3; y <= my + 3; y++) {
+      for (let x = mx - 3; x <= mx + 3; x++) {
+        if (!map.inBounds(x, y) || Math.hypot(x - mx, y - my) > START_MOUNTAIN.r) continue;
+        const i = map.idx(x, y);
+        map.terrain[i] = Terrain.Mountain;
+        map.tree[i] = 0;
+        map.stone[i] = 0;
+        map.fish[i] = 0;
+        map.ore[i] = ORE_RESOURCES.indexOf(x < mx ? 'coal' : 'ironore') + 1;
+        map.oreAmount[i] = ORE_AMOUNT[1];
+      }
     }
-  }
 
-  // Guarantee a pond inside the starting territory: water for wells, fish for fishers.
-  const px = cx - 1;
-  const py = cy + 8;
-  for (let y = py - 3; y <= py + 3; y++) {
-    for (let x = px - 3; x <= px + 3; x++) {
-      if (!map.inBounds(x, y)) continue;
-      const d = Math.hypot(x - px, y - py);
-      const i = map.idx(x, y);
-      map.ore[i] = 0;
-      map.oreAmount[i] = 0;
-      if (d <= 1.7) {
-        map.terrain[i] = Terrain.Water;
-        map.fish[i] = FISH_MAX;
-      } else if (d <= 2.7 && map.terrain[i] !== Terrain.Water) {
-        map.terrain[i] = Terrain.Sand;
-      } else continue;
-      map.tree[i] = 0;
-      map.stone[i] = 0;
+    // Guarantee a pond inside the starting territory: water for wells, fish for fishers.
+    const px = cx - 1;
+    const py = cy + 8;
+    for (let y = py - 3; y <= py + 3; y++) {
+      for (let x = px - 3; x <= px + 3; x++) {
+        if (!map.inBounds(x, y)) continue;
+        const d = Math.hypot(x - px, y - py);
+        const i = map.idx(x, y);
+        map.ore[i] = 0;
+        map.oreAmount[i] = 0;
+        if (d <= 1.7) {
+          map.terrain[i] = Terrain.Water;
+          map.fish[i] = FISH_MAX;
+        } else if (d <= 2.7 && map.terrain[i] !== Terrain.Water) {
+          map.terrain[i] = Terrain.Sand;
+        } else continue;
+        map.tree[i] = 0;
+        map.stone[i] = 0;
+      }
     }
-  }
+  };
+  for (const st of starts) prepareStart(st.x, st.y);
 
-  elevate(map, height, { cx, cy, r: 6 }, { x: mx, y: my, r: 2.8 });
+  elevate(
+    map,
+    height,
+    starts.map((st) => ({ cx: st.x, cy: st.y, r: 6 })),
+    starts.map((st) => ({ x: st.x + START_MOUNTAIN.dx, y: st.y + START_MOUNTAIN.dy, r: START_MOUNTAIN.r })),
+  );
   return map;
 }
 
@@ -339,8 +355,8 @@ export function generateMap(seed: number, size: number, cx: number, cy: number):
 function elevate(
   map: GameMap,
   noise: Float32Array,
-  meadow: { cx: number; cy: number; r: number },
-  summit: { x: number; y: number; r: number },
+  meadows: { cx: number; cy: number; r: number }[],
+  summits: { x: number; y: number; r: number }[],
 ): void {
   const { w, h } = map;
   const tile = new Float32Array(w * h);
@@ -364,40 +380,43 @@ function elevate(
         break;
     }
   }
-  // Level the castle meadow to its mean height, easing back to the natural ground over a few tiles.
+  // Level each castle meadow to its mean height, easing back to the natural ground over a few tiles.
   const BLEND = 4;
-  let sum = 0;
-  let count = 0;
-  for (let y = meadow.cy - meadow.r; y <= meadow.cy + meadow.r; y++) {
-    for (let x = meadow.cx - meadow.r; x <= meadow.cx + meadow.r; x++) {
-      if (map.inBounds(x, y) && map.terrain[map.idx(x, y)] === Terrain.Grass) {
-        sum += tile[map.idx(x, y)];
-        count++;
+  for (const meadow of meadows) {
+    let sum = 0;
+    let count = 0;
+    for (let y = meadow.cy - meadow.r; y <= meadow.cy + meadow.r; y++) {
+      for (let x = meadow.cx - meadow.r; x <= meadow.cx + meadow.r; x++) {
+        if (map.inBounds(x, y) && map.terrain[map.idx(x, y)] === Terrain.Grass) {
+          sum += tile[map.idx(x, y)];
+          count++;
+        }
+      }
+    }
+    const level = count ? sum / count : 6;
+    const reach = meadow.r + BLEND;
+    for (let y = meadow.cy - reach; y <= meadow.cy + reach; y++) {
+      for (let x = meadow.cx - reach; x <= meadow.cx + reach; x++) {
+        if (!map.inBounds(x, y)) continue;
+        const i = map.idx(x, y);
+        const t = map.terrain[i];
+        if (t !== Terrain.Grass && t !== Terrain.Sand) continue;
+        const d = Math.max(Math.abs(x - meadow.cx), Math.abs(y - meadow.cy));
+        const k = Math.min(1, Math.max(0, (d - meadow.r) / BLEND));
+        tile[i] = level + (tile[i] - level) * k;
       }
     }
   }
-  const level = count ? sum / count : 6;
-  const reach = meadow.r + BLEND;
-  for (let y = meadow.cy - reach; y <= meadow.cy + reach; y++) {
-    for (let x = meadow.cx - reach; x <= meadow.cx + reach; x++) {
-      if (!map.inBounds(x, y)) continue;
-      const i = map.idx(x, y);
-      const t = map.terrain[i];
-      if (t !== Terrain.Grass && t !== Terrain.Sand) continue;
-      const d = Math.max(Math.abs(x - meadow.cx), Math.abs(y - meadow.cy));
-      const k = Math.min(1, Math.max(0, (d - meadow.r) / BLEND));
-      tile[i] = level + (tile[i] - level) * k;
+  // Give each guaranteed mountain a summit.
+  for (const summit of summits)
+    for (let y = Math.floor(summit.y - summit.r); y <= summit.y + summit.r; y++) {
+      for (let x = Math.floor(summit.x - summit.r); x <= summit.x + summit.r; x++) {
+        if (!map.inBounds(x, y)) continue;
+        const d = Math.hypot(x - summit.x, y - summit.y);
+        const i = map.idx(x, y);
+        if (d <= summit.r && map.terrain[i] === Terrain.Mountain) tile[i] = Math.max(tile[i], 14 + (summit.r - d) * 16);
+      }
     }
-  }
-  // Give the guaranteed mountain a summit.
-  for (let y = Math.floor(summit.y - summit.r); y <= summit.y + summit.r; y++) {
-    for (let x = Math.floor(summit.x - summit.r); x <= summit.x + summit.r; x++) {
-      if (!map.inBounds(x, y)) continue;
-      const d = Math.hypot(x - summit.x, y - summit.y);
-      const i = map.idx(x, y);
-      if (d <= summit.r && map.terrain[i] === Terrain.Mountain) tile[i] = Math.max(tile[i], 14 + (summit.r - d) * 16);
-    }
-  }
   // Each corner averages its tiles; any water around it pins it to the water surface.
   for (let vy = 0; vy <= h; vy++) {
     for (let vx = 0; vx <= w; vx++) {

@@ -39,7 +39,7 @@ const MENU = (Object.keys(CATEGORIES) as Category[]).map((category) => ({
 const isBuilding = (p: Placeable): p is BuildingType => p in BUILDINGS;
 
 /** Shown permanently in the top bar; everything else is in the stock panel (📦). */
-const PINNED: readonly Resource[] = ['plank', 'stone', 'bread', 'fish', 'meat', 'coal', 'iron', 'gold'];
+const PINNED: readonly Resource[] = ['plank', 'stone', 'bread', 'fish', 'meat', 'coal', 'iron', 'gold', 'sword'];
 
 const nameOf = (r: Resource) => RESOURCE_INFO[r].name;
 
@@ -100,6 +100,8 @@ export class Hud {
   private lastUpdate = 0;
   /** Building whose demolition awaits a second click. */
   private confirmDemolish: number | null = null;
+  /** Soldiers to send with the next attack (clamped to what is available). */
+  private attackCount = 1;
   /** Re-render the info panel only when its content changes, so buttons in it stay clickable. */
   private infoKey = '';
   private toastTimer = 0;
@@ -261,7 +263,10 @@ export class Hud {
 
     const counts = new Map<SettlerKind, number>();
     let busy = 0;
+    let people = 0;
     for (const s of world.settlers) {
+      if (s.owner !== LOCAL_PLAYER) continue;
+      people++;
       counts.set(s.kind, (counts.get(s.kind) ?? 0) + 1);
       if (s.kind === 'carrier' && s.tasks.length > 0) busy++;
     }
@@ -270,7 +275,7 @@ export class Hud {
       .map(([kind, n]) => `${PROFESSIONS[kind].name.toLowerCase()} ${n}`)
       .join(' · ');
     this.popEl.textContent =
-      `Поселенцы: ${world.settlers.length} · носильщики ${busy}/${counts.get('carrier') ?? 0} заняты` +
+      `Поселенцы: ${people} · носильщики ${busy}/${counts.get('carrier') ?? 0} заняты` +
       (workers ? ` · ${workers}` : '');
 
     for (const [key, b] of this.speedButtons) {
@@ -346,7 +351,17 @@ export class Hud {
     if (this.confirmDemolish !== null && this.confirmDemolish !== b.id) this.confirmDemolish = null;
     const def = BUILDINGS[b.type];
     const rows: [string, string][] = [];
-    if (!b.done) {
+    const enemy = b.owner !== LOCAL_PLAYER;
+    const canSend = enemy && def.garrison && b.done ? this.world.availableAttackers(b.id) : 0;
+    if (enemy) {
+      rows.push(['Владелец', `игрок ${b.owner}`]);
+      if (def.garrison && b.done) {
+        rows.push(['Защитников', String(b.garrison.length)]);
+        rows.push(['Можно послать', String(canSend)]);
+        this.attackCount = Math.max(1, Math.min(this.attackCount, canSend));
+        rows.push(['Отправить', String(this.attackCount)]);
+      }
+    } else if (!b.done) {
       rows.push(['Стройка', `${Math.floor(this.world.buildProgress(b) * 100)}%`]);
       const cost = costOf(b.type);
       for (const r of RESOURCES) {
@@ -356,8 +371,13 @@ export class Hud {
     } else if (def.residence) {
       rows.push(['Жители', `${b.spawned} / ${def.residence.capacity}`]);
       rows.push(['Статус', b.spawned < def.residence.capacity ? 'заселяется' : 'заселён']);
-    } else if (def.storage) {
-      for (const r of RESOURCES) if (b.output[r] > 0) rows.push([nameOf(r), String(b.output[r])]);
+    } else if (def.garrison || def.storage) {
+      if (def.garrison) {
+        rows.push(['Гарнизон', `${b.garrison.length} / ${def.garrison.capacity}`]);
+        if (b.garrisonInbound > 0) rows.push(['Идут в гарнизон', String(b.garrisonInbound)]);
+      }
+      if (def.territory) rows.push(['Радиус земли', `${def.territory} клеток`]);
+      for (const r of RESOURCES) if (def.storage && b.output[r] > 0) rows.push([nameOf(r), String(b.output[r])]);
     } else {
       const worker = this.world.getSettler(b.workerId);
       const tool = PROFESSIONS[def.worker!].tool;
@@ -403,6 +423,10 @@ export class Hud {
     const table = el('dl');
     for (const [k, v] of rows) table.append(el('dt', '', k), el('dd', '', v));
     this.infoEl.append(table);
+    if (enemy) {
+      if (def.garrison && b.done) this.infoEl.append(this.attackControls(b, canSend));
+      return;
+    }
     if (!def.playerBuildable) return;
     const actions = el('div', 'info-actions');
     if (!b.done || def.recipe || def.residence) {
@@ -423,6 +447,23 @@ export class Hud {
     };
     actions.append(demolish);
     this.infoEl.append(actions);
+  }
+
+  private attackControls(b: Building, available: number): HTMLElement {
+    const actions = el('div', 'info-actions');
+    const less = el('button', '', '−');
+    less.onclick = () => (this.attackCount = Math.max(1, this.attackCount - 1));
+    const more = el('button', '', '+');
+    more.onclick = () => (this.attackCount = Math.min(available, this.attackCount + 1));
+    const go = el('button', available > 0 ? 'danger' : '', `⚔ Атаковать (${Math.min(this.attackCount, available)})`);
+    go.disabled = available === 0;
+    go.title = available > 0 ? 'Солдаты из ваших военных зданий поблизости' : 'Рядом нет свободных солдат';
+    go.onclick = () => {
+      const sent = this.world.attack(b.id, this.attackCount);
+      this.toast(sent > 0 ? `В атаку: ${sent}` : 'Некого отправить');
+    };
+    actions.append(less, more, go);
+    return actions;
   }
 
   private status(b: Building): string {

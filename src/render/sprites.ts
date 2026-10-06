@@ -445,6 +445,7 @@ export const BUILDING_CANVAS: Record<BuildingType | 'site2' | 'site3', BuildingC
   ironsmelter: SMALL,
   goldsmelter: SMALL,
   toolsmith: SMALL,
+  weaponsmith: SMALL,
   tower: { w: 150, h: 210, ax: 75, ay: 170 },
   site2: { w: 150, h: 90, ax: 75, ay: 50 },
   site3: { w: 220, h: 120, ax: 110, ay: 65 },
@@ -1080,6 +1081,16 @@ const STYLES: Partial<Record<BuildingType, Style>> = {
   },
   ironsmelter: { hw: 0.7, hh: 0.7, H: 22, wall: '#8f7f6e', roof: '#4a4f55', rise: 18, doorDx: 0.5, deco: ['furnace'] },
   goldsmelter: { hw: 0.7, hh: 0.7, H: 22, wall: '#a89c80', roof: '#7a5a20', rise: 18, doorDx: 0.5, deco: ['furnace'] },
+  weaponsmith: {
+    hw: 0.7,
+    hh: 0.7,
+    H: 24,
+    wall: '#b9a98c',
+    roof: '#3f3a36',
+    rise: 22,
+    doorDx: 0.5,
+    deco: ['furnace', 'anvil'],
+  },
   toolsmith: {
     hw: 0.7,
     hh: 0.7,
@@ -1237,6 +1248,7 @@ export const BUILDING_PAINTERS: Record<BuildingType | 'site2' | 'site3', (ctx: C
   ironsmelter: styled('ironsmelter'),
   goldsmelter: styled('goldsmelter'),
   toolsmith: styled('toolsmith'),
+  weaponsmith: styled('weaponsmith'),
   warehouse: styled('warehouse'),
   vineyard: styled('vineyard'),
   winery: styled('winery'),
@@ -1344,7 +1356,10 @@ export function paintField(ctx: Ctx, stage: number): void {
 
 export type SettlerFrame = 'stand' | 'walk' | 'work';
 
-type Tool = 'axe' | 'hammer' | 'shovel' | 'pick' | 'rod' | 'scythe' | 'bucket';
+type Tool = 'axe' | 'hammer' | 'shovel' | 'pick' | 'rod' | 'scythe' | 'bucket' | 'sword';
+
+/** Player colours (index = player id − 1): flags, borders, soldiers' tunics. */
+export const PLAYER_COLORS: readonly string[] = ['#2b5fb4', '#c0392b', '#2e8b57', '#d4a017'];
 
 const SETTLER_LOOK: Record<SettlerKind, { tunic: string; hat: string; tool?: Tool }> = {
   carrier: { tunic: '#3f6fb5', hat: '#6b4423' },
@@ -1366,12 +1381,14 @@ const SETTLER_LOOK: Record<SettlerKind, { tunic: string; hat: string; tool?: Too
   toolsmith: { tunic: '#5a5048', hat: '#8c4a3a', tool: 'hammer' },
   vinegrower: { tunic: '#7a4a6e', hat: '#e3c76a', tool: 'shovel' },
   winemaker: { tunic: '#6a2f3a', hat: '#e8e4da' },
-  guard: { tunic: '#a83232', hat: '#8d939a' },
+  weaponsmith: { tunic: '#4a4f55', hat: '#8c4a3a', tool: 'hammer' },
+  // Soldiers wear their player's colour (see `paintSettler`'s `tunic`).
+  soldier: { tunic: PLAYER_COLORS[0], hat: '#8d939a', tool: 'sword' },
 };
 
-/** Settler, 20×32 with the feet at (10, 29). */
-export function paintSettler(ctx: Ctx, kind: SettlerKind, frame: SettlerFrame): void {
-  const look = SETTLER_LOOK[kind];
+/** Settler, 20×32 with the feet at (10, 29). `tunic` overrides the profession colour (player colour for soldiers). */
+export function paintSettler(ctx: Ctx, kind: SettlerKind, frame: SettlerFrame, tunic?: string): void {
+  const look = { ...SETTLER_LOOK[kind], ...(tunic ? { tunic } : {}) };
   ctx.translate(10, 29);
   ctx.beginPath();
   ctx.ellipse(1, 0, 6, 2.2, 0, 0, Math.PI * 2);
@@ -1399,7 +1416,24 @@ export function paintSettler(ctx: Ctx, kind: SettlerKind, frame: SettlerFrame): 
   ctx.fillRect(-4.3, -10, 8.6, 1.5);
   // Arms and tool.
   ctx.fillStyle = '#e9b98f';
-  if (frame === 'work') {
+  if (look.tool === 'sword') {
+    // Always armed: blade raised to strike while fighting, held at the side otherwise.
+    ctx.fillRect(3.3, frame === 'work' ? -22 : -16, 1.8, frame === 'work' ? 7 : 6);
+    ctx.fillRect(-5.1, -16, 1.8, 6);
+    ctx.strokeStyle = '#d6dadf';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    if (frame === 'work') {
+      ctx.moveTo(4.5, -22);
+      ctx.lineTo(10, -31);
+    } else {
+      ctx.moveTo(5, -10);
+      ctx.lineTo(7, -19);
+    }
+    ctx.stroke();
+    ctx.fillStyle = '#6b4a26';
+    ctx.fillRect(frame === 'work' ? 3 : 4, frame === 'work' ? -23 : -11, 3, 1.5);
+  } else if (frame === 'work') {
     ctx.fillRect(3, -22, 2, 7);
     if (look.tool) {
       ctx.fillStyle = '#6b4a26';
@@ -1673,11 +1707,22 @@ function paintTool(ctx: Ctx, res: Resource): void {
       handle(-6, 4, 3, -2);
       ctx.fillRect(1, -5, 6, 4);
       return;
+    case 'sword':
+      ctx.strokeStyle = '#d6dadf';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(-6, 4);
+      ctx.lineTo(6, -4);
+      ctx.stroke();
+      handle(-7, 5, -5, 3);
+      ctx.fillStyle = '#8a6a2c';
+      ctx.fillRect(-6, 1, 3, 3);
+      return;
   }
 }
 
-/** Flag on a pole marking a door, 14×28 with the pole base at (2, 26). */
-export function paintFlag(ctx: Ctx): void {
+/** Flag on a pole marking a door, 14×28 with the pole base at (2, 26), in the owner's colour. */
+export function paintFlag(ctx: Ctx, color = PLAYER_COLORS[0]): void {
   ctx.translate(2, 26);
   ctx.strokeStyle = '#4a3420';
   ctx.lineWidth = 1.5;
@@ -1685,7 +1730,7 @@ export function paintFlag(ctx: Ctx): void {
   ctx.moveTo(0, 0);
   ctx.lineTo(0, -24);
   ctx.stroke();
-  ctx.fillStyle = '#2b5fb4';
+  ctx.fillStyle = color;
   ctx.beginPath();
   ctx.moveTo(0, -24);
   ctx.lineTo(10, -21);

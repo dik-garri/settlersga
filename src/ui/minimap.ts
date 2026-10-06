@@ -81,6 +81,8 @@ export class Minimap {
       r = Math.min(255, r * light);
       g = Math.min(255, g * light);
       b = Math.min(255, b * light);
+      // Another player's land gets a red cast.
+      if (map.owner[i] !== LOCAL_PLAYER && map.owner[i] !== 0) r = Math.min(255, r + 70);
       d[i * 4] = r;
       d[i * 4 + 1] = g;
       d[i * 4 + 2] = b;

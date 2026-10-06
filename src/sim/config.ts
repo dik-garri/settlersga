@@ -23,18 +23,28 @@ export const UNREACHABLE_TICKS = 100;
 export const BUILDER_STALL_TICKS = 40;
 
 export const START_CARRIERS = 12;
+/** Soldiers each player's castle starts with. */
+export const START_SOLDIERS = 3;
+/** Military buildings keep at least this many soldiers when sending others out (to attack or to man towers). */
+export const GARRISON_KEEP = 1;
+/** Combat: soldiers within this distance (tiles, building centers) of the target can join an attack. */
+export const ATTACK_RANGE = 30;
+/** Combat: one blow every FIGHT_EVERY ticks; damage per blow is uniform in [min, max]. */
+export const FIGHT_EVERY = 6;
+export const DAMAGE: [number, number] = [12, 24];
 export const START_BUILDERS = 3;
 export const START_PLANKS = 20;
 export const START_STONE = 10;
 /** Tools in the castle at the start, enough for the first workplaces. */
 export const START_TOOLS: Partial<Stock> = { axe: 3, saw: 2, pickaxe: 4, shovel: 2, scythe: 2, rod: 2, hammer: 2 };
 /** Display names and stock-panel groups, kept with the data so new resources are one entry. */
-export type ResourceGroup = 'building' | 'food' | 'metal' | 'tools';
+export type ResourceGroup = 'building' | 'food' | 'metal' | 'tools' | 'military';
 export const RESOURCE_GROUPS: Record<ResourceGroup, string> = {
   building: 'Стройматериалы',
   food: 'Еда',
   metal: 'Руда и металл',
   tools: 'Инструменты',
+  military: 'Оружие',
 };
 /**
  * `storeLimit`: surplus is hauled to warehouses only while fewer than this many units are stored;
@@ -66,6 +76,7 @@ export const RESOURCE_INFO: Record<Resource, { name: string; group: ResourceGrou
   hammer: { name: 'Молотки', group: 'tools' },
   grapes: { name: 'Виноград', group: 'food' },
   wine: { name: 'Вино', group: 'food' },
+  sword: { name: 'Мечи', group: 'military' },
 };
 
 /** Field plantings stored in `map.crop` (stage) with their kind in `map.cropKind` (index here). */
@@ -112,9 +123,19 @@ export const FISH_RESTOCK = 2;
  * - farm: harvests ripe plantings like a gatherer, otherwise plants new ones;
  * - workshop: stays inside and runs the building's recipe;
  * - garrison: stays inside so the building claims territory;
- * - prospect: a carrier on a geologist errand; turns back into a carrier once the errand is done.
+ * - prospect: a carrier on a geologist errand; turns back into a carrier once the errand is done;
+ * - soldier: lives in a military building's garrison; looks for a free one when homeless.
  */
-export type Behavior = 'carrier' | 'builder' | 'gather' | 'plant' | 'farm' | 'workshop' | 'garrison' | 'prospect';
+export type Behavior =
+  | 'carrier'
+  | 'builder'
+  | 'gather'
+  | 'plant'
+  | 'farm'
+  | 'workshop'
+  | 'garrison'
+  | 'prospect'
+  | 'soldier';
 
 export interface GatherDef {
   res: Resource;
@@ -135,6 +156,8 @@ export interface PlantDef {
 export interface ProfessionDef {
   name: string;
   behavior: Behavior;
+  /** Hit points when taking up the profession (soldiers). */
+  hp?: number;
   /** Tool a carrier must fetch from storage to take up the profession (it is used up). */
   tool?: Resource;
   gather?: GatherDef;
@@ -183,7 +206,8 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
   },
   winemaker: { name: 'Винодел', behavior: 'workshop' },
   geologist: { name: 'Геолог', behavior: 'prospect' },
-  guard: { name: 'Стражник', behavior: 'garrison' },
+  weaponsmith: { name: 'Оружейник', behavior: 'workshop' },
+  soldier: { name: 'Солдат', behavior: 'soldier', tool: 'sword', hp: 100 },
 };
 
 // --------------------------------------------------------------- buildings
@@ -231,6 +255,11 @@ export interface BuildingDef {
   territory?: number;
   /** Residence: releases `capacity` new carriers, one every `everyTicks`, once built. */
   residence?: { capacity: number; everyTicks: number };
+  /**
+   * Military building: holds up to `capacity` soldiers. It claims `territory` while at least one
+   * soldier is inside, or always if `claimsWhenEmpty` (the castle).
+   */
+  garrison?: { capacity: number; claimsWhenEmpty?: boolean };
   /** Footprint terrain: ordinary buildings need grass, mines need mountain. */
   terrain?: 'mountain';
   /** Mine: each recipe cycle also takes one unit of ore of this resource from a tile within `radius`. */
@@ -253,7 +282,17 @@ function mine(name: string, res: Resource): BuildingDef {
 }
 
 export const BUILDINGS: Record<BuildingType, BuildingDef> = {
-  castle: { name: 'Замок', w: 3, h: 3, cost: {}, worker: null, playerBuildable: false, storage: true, territory: 10 },
+  castle: {
+    name: 'Замок',
+    w: 3,
+    h: 3,
+    cost: {},
+    worker: null,
+    playerBuildable: false,
+    storage: true,
+    territory: 10,
+    garrison: { capacity: 12, claimsWhenEmpty: true },
+  },
 
   house_small: {
     name: 'Малый дом',
@@ -451,15 +490,26 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     recipe: { inputs: { grapes: 2 }, outputs: { wine: 1 }, ticks: 80 },
   },
 
+  weaponsmith: {
+    name: 'Оружейник',
+    w: 2,
+    h: 2,
+    cost: { plank: 3, stone: 2 },
+    worker: 'weaponsmith',
+    playerBuildable: true,
+    category: 'military',
+    recipe: { inputs: { iron: 1, coal: 1 }, outputs: { sword: 1 }, ticks: 80 },
+  },
   tower: {
     name: 'Сторожевая башня',
     w: 2,
     h: 2,
     cost: { plank: 2, stone: 3 },
-    worker: 'guard',
+    worker: null,
     playerBuildable: true,
     category: 'military',
     territory: 8,
+    garrison: { capacity: 3 },
   },
 };
 

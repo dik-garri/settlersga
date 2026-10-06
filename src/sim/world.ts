@@ -10,12 +10,14 @@ import {
   PROSPECT_TILES,
   START_BUILDERS,
   START_CARRIERS,
+  START_SOLDIERS,
   START_PLANKS,
   START_STONE,
   START_TOOLS,
   totalCost,
 } from './config';
 import { dispatch } from './logistics';
+import { attack, availableAttackers, enterGarrison, leaveGarrison, removeDead } from './military';
 import { generateMap, type GameMap } from './map';
 import { updateNature } from './nature';
 import { findPath, staysConnected } from './pathfinding';
@@ -26,6 +28,20 @@ import { abort, updateSettler } from './settlers';
 import { emptyStock, Terrain, type Building, type BuildingType, type PlayerId, type Settler, type Stock, type Task } from './types';
 
 export { doorOf } from './buildings';
+
+/**
+ * Castle centers: the map center for one player, otherwise evenly spaced on a circle around it
+ * (two players sit in opposite corners of the diagonal).
+ */
+export function startPositions(size: number, players: number): { x: number; y: number }[] {
+  const c = Math.floor(size / 2);
+  if (players <= 1) return [{ x: c, y: c }];
+  const r = size * 0.3;
+  return Array.from({ length: players }, (_, k) => {
+    const a = Math.PI / 4 + (2 * Math.PI * k) / players;
+    return { x: Math.round(c + r * Math.cos(a)), y: Math.round(c + r * Math.sin(a)) };
+  });
+}
 
 /** The player sitting at this browser. */
 export const LOCAL_PLAYER: PlayerId = 1;
@@ -38,6 +54,8 @@ export interface Player {
 export interface WorldOptions {
   /** Map edge length in tiles. */
   size?: number;
+  /** Number of players, each with a castle (default 1). Player 1 is `LOCAL_PLAYER`. */
+  players?: number;
   /** Restore this snapshot instead of generating a new world (see `World.load`). */
   from?: SaveData;
 }
@@ -70,6 +88,8 @@ export class World {
   readonly reservedPlots = new Set<number>();
   /** Tiles with a grain field; derived from `map.crop`, so not saved. */
   readonly fields = new Set<number>();
+  /** Settlers killed this tick; dropped from `settlers` at its end (see `killSettler`). */
+  readonly dying = new Set<number>();
   nextId = 1;
 
   constructor(seed = 1, opts: WorldOptions = {}) {
@@ -81,9 +101,9 @@ export class World {
       return;
     }
     const size = opts.size ?? MAP_SIZE;
-    const c = Math.floor(size / 2);
-    this.map = generateMap(seed, size, c, c);
-    this.addPlayer(c - 1, c - 1);
+    const starts = startPositions(size, opts.players ?? 1);
+    this.map = generateMap(seed, size, starts);
+    for (const st of starts) this.addPlayer(st.x - 1, st.y - 1);
   }
 
   static load(save: SaveData): World {
@@ -102,6 +122,7 @@ export class World {
     recomputeTerritory(this);
     for (let i = 0; i < START_CARRIERS; i++) spawnSettler(this, 'carrier', castle);
     for (let i = 0; i < START_BUILDERS; i++) spawnSettler(this, 'builder', castle);
+    for (let i = 0; i < START_SOLDIERS; i++) enterGarrison(this, castle, spawnSettler(this, 'soldier', castle));
     return player;
   }
 
@@ -200,11 +221,33 @@ export class World {
   demolish(id: number, player: PlayerId = LOCAL_PLAYER): boolean {
     const b = this.buildings.get(id);
     if (!b || b.owner !== player || !BUILDINGS[b.type].playerBuildable) return false;
+    this.removeBuilding(b);
+    return true;
+  }
+
+  /** Player command: send up to `count` spare soldiers in range against an enemy military building. */
+  attack(targetId: number, count: number, player: PlayerId = LOCAL_PLAYER): number {
+    return attack(this, targetId, count, player);
+  }
+
+  /** How many soldiers `attack` could send against the target right now. */
+  availableAttackers(targetId: number, player: PlayerId = LOCAL_PLAYER): number {
+    return availableAttackers(this, targetId, player);
+  }
+
+  /**
+   * Removes a building with no ownership checks (demolition, burning after a conquest): aborts every
+   * job involving it, sends its worker back to carrying and its soldiers to find another garrison,
+   * and frees the tiles.
+   */
+  removeBuilding(b: Building): void {
+    const id = b.id;
     for (const s of this.settlers) {
       if (s.tasks.some((t) => 'b' in t && t.b === id)) abort(this, s);
       if (s.home === id) {
         abort(this, s);
-        s.kind = 'carrier';
+        if (s.kind === 'soldier') leaveGarrison(this, b, s);
+        else s.kind = 'carrier';
         s.home = null;
       }
       if (s.inside === id) s.inside = null;
@@ -212,6 +255,7 @@ export class World {
     // Jobs aborted above may have re-targeted this building on their way back; drop those too.
     for (const s of this.settlers) if (s.tasks.some((t) => 'b' in t && t.b === id)) abort(this, s);
     this.buildings.delete(id);
+    b.garrison = [];
     const m = this.map;
     m.door[m.idx(b.door.x, b.door.y)] = 0;
     for (let dy = 0; dy < b.h; dy++) {
@@ -221,7 +265,6 @@ export class World {
       }
     }
     if (BUILDINGS[b.type].territory) recomputeTerritory(this);
-    return true;
   }
 
   /**
@@ -278,7 +321,8 @@ export class World {
     }
     updateNature(this);
     for (const b of this.buildings.values()) updateBuilding(this, b);
-    for (const s of this.settlers) updateSettler(this, s);
+    for (const s of this.settlers) if (!this.dying.has(s.id)) updateSettler(this, s);
+    removeDead(this);
     if (this.tick % DISPATCH_EVERY === 0) dispatch(this);
   }
 }

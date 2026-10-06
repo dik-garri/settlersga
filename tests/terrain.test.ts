@@ -20,15 +20,15 @@ function meanHeight(map: GameMap, t: Terrain): number {
 
 describe('terrain heights', () => {
   it('are deterministic per seed', () => {
-    const a = generateMap(42, 64, 32, 32);
-    const b = generateMap(42, 64, 32, 32);
+    const a = generateMap(42, 64, [{ x: 32, y: 32 }]);
+    const b = generateMap(42, 64, [{ x: 32, y: 32 }]);
     expect(a.height).toEqual(b.height);
-    expect(a.height).not.toEqual(generateMap(43, 64, 32, 32).height);
+    expect(a.height).not.toEqual(generateMap(43, 64, [{ x: 32, y: 32 }]).height);
   });
 
   it('keep water at the bottom, grass gentle, mountains raised and peaks highest', () => {
     for (const seed of [42, 7, 123]) {
-      const map = generateMap(seed, 128, 64, 64);
+      const map = generateMap(seed, 128, [{ x: 64, y: 64 }]);
       for (let y = 0; y < map.h; y++) {
         for (let x = 0; x < map.w; x++) {
           if (map.terrain[map.idx(x, y)] !== Terrain.Water) continue;
@@ -46,8 +46,21 @@ describe('terrain heights', () => {
 
   it('level the castle meadow', () => {
     for (const seed of [42, 7, 999]) {
-      const map = generateMap(seed, 64, 32, 32);
+      const map = generateMap(seed, 64, [{ x: 32, y: 32 }]);
       expect(map.heightRange(28, 28, 36, 36)).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('level every start meadow when several players share the map', () => {
+    for (const seed of [42, 7]) {
+      const starts = [
+        { x: 24, y: 24 },
+        { x: 72, y: 72 },
+      ];
+      const map = generateMap(seed, 96, starts);
+      for (const st of starts) {
+        expect(map.heightRange(st.x - 4, st.y - 4, st.x + 4, st.y + 4)).toBeLessThanOrEqual(1);
+      }
     }
   });
 
