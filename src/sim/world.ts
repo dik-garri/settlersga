@@ -17,7 +17,8 @@ import {
   totalCost,
 } from './config';
 import { dispatch } from './logistics';
-import { attack, availableAttackers, enterGarrison, leaveGarrison, removeDead } from './military';
+import { createAi, updateAi, type AiState } from './ai';
+import { attack, availableAttackers, enterGarrison, killSettler, leaveGarrison, removeDead } from './military';
 import { generateMap, type GameMap } from './map';
 import { updateNature } from './nature';
 import { findPath, staysConnected } from './pathfinding';
@@ -56,6 +57,8 @@ export interface WorldOptions {
   size?: number;
   /** Number of players, each with a castle (default 1). Player 1 is `LOCAL_PLAYER`. */
   players?: number;
+  /** Players controlled by the computer (see `ai.ts`). */
+  ai?: PlayerId[];
   /** Restore this snapshot instead of generating a new world (see `World.load`). */
   from?: SaveData;
 }
@@ -90,6 +93,10 @@ export class World {
   readonly fields = new Set<number>();
   /** Settlers killed this tick; dropped from `settlers` at its end (see `killSettler`). */
   readonly dying = new Set<number>();
+  /** Computer players' state (saved). */
+  readonly ai: AiState[] = [];
+  /** Players whose castle has been taken, in order of defeat (saved). */
+  readonly defeated: PlayerId[] = [];
   nextId = 1;
 
   constructor(seed = 1, opts: WorldOptions = {}) {
@@ -104,6 +111,7 @@ export class World {
     const starts = startPositions(size, opts.players ?? 1);
     this.map = generateMap(seed, size, starts);
     for (const st of starts) this.addPlayer(st.x - 1, st.y - 1);
+    for (const p of opts.ai ?? []) if (this.players.some((pl) => pl.id === p)) this.ai.push(createAi(p));
   }
 
   static load(save: SaveData): World {
@@ -197,6 +205,29 @@ export class World {
   buildProgress(b: Building): number {
     if (b.done) return 1;
     return b.progress / (totalCost(b.type) * BUILD_TICKS_PER_UNIT);
+  }
+
+  isDefeated(player: PlayerId): boolean {
+    return this.defeated.includes(player);
+  }
+
+  /** 'won' once every other player is defeated, 'lost' once this one is, else 'playing'. */
+  outcome(player: PlayerId = LOCAL_PLAYER): 'playing' | 'won' | 'lost' {
+    if (this.isDefeated(player)) return 'lost';
+    const others = this.players.filter((p) => p.id !== player);
+    return others.length > 0 && others.every((p) => this.isDefeated(p.id)) ? 'won' : 'playing';
+  }
+
+  /**
+   * A player whose castle was taken is out: its settlers die and its remaining buildings burn, so
+   * the land is free for the others. Called by the conquest (`military.ts`).
+   */
+  defeatPlayer(player: PlayerId): void {
+    if (this.isDefeated(player)) return;
+    this.defeated.push(player);
+    for (const s of this.settlers) if (s.owner === player) killSettler(this, s);
+    for (const b of [...this.buildings.values()]) if (b.owner === player) this.removeBuilding(b);
+    recomputeTerritory(this);
   }
 
   isProspected(x: number, y: number, player: PlayerId = LOCAL_PLAYER): boolean {
@@ -324,5 +355,6 @@ export class World {
     for (const s of this.settlers) if (!this.dying.has(s.id)) updateSettler(this, s);
     removeDead(this);
     if (this.tick % DISPATCH_EVERY === 0) dispatch(this);
+    if (this.ai.length > 0) updateAi(this);
   }
 }

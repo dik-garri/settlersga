@@ -97,6 +97,9 @@ export class Hud {
   private readonly infoEl = el('div', 'panel info');
   private readonly hintEl = el('div', 'hint');
   private readonly toastEl = el('div', 'toast');
+  private readonly endEl = el('div', 'panel end-screen');
+  /** The end screen was shown (and possibly dismissed to keep watching). */
+  private ended = false;
   private lastUpdate = 0;
   /** Building whose demolition awaits a second click. */
   private confirmDemolish: number | null = null;
@@ -215,7 +218,8 @@ export class Hud {
     this.showTab(0);
 
     this.infoEl.hidden = true;
-    root.append(top, this.stockPanel, this.statsPanel, speed, build, this.infoEl, this.hintEl, this.toastEl);
+    this.endEl.hidden = true;
+    root.append(top, this.stockPanel, this.statsPanel, speed, build, this.infoEl, this.hintEl, this.toastEl, this.endEl);
   }
 
   showTab(t: number): void {
@@ -250,6 +254,8 @@ export class Hud {
     if (nowMs - this.lastUpdate < 150) return;
     this.lastUpdate = nowMs;
     const { world, state } = this;
+    const outcome = world.outcome(LOCAL_PLAYER);
+    if (outcome !== 'playing' && !this.ended) this.showEnd(outcome);
     for (const [r, value] of this.stockValues) value.textContent = String(inStorage(world, r));
     if (world.tick - this.lastSampleTick >= TICKS_PER_SECOND * 60) {
       this.lastSampleTick = world.tick;
@@ -299,6 +305,47 @@ export class Hud {
     s.append(wareIcon(r, 20), value);
     this.stockValues.push([r, value]);
     return s;
+  }
+
+  /** Victory or defeat: time played, a few totals, and a way to start over or keep watching. */
+  private showEnd(outcome: 'won' | 'lost'): void {
+    this.ended = true;
+    const { world } = this;
+    const seconds = Math.floor(world.tick / TICKS_PER_SECOND);
+    const time = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    // Per-player facts only: `stats.produced` counts every player together.
+    const mine = (p: number) => p === LOCAL_PLAYER;
+    const land = world.map.owner.reduce((n, o) => n + (o !== 0 ? 1 : 0), 0);
+    const ownLand = world.map.owner.reduce((n, o) => n + (mine(o) ? 1 : 0), 0);
+    const soldiersOf = (own: boolean) => world.settlers.filter((s) => s.kind === 'soldier' && mine(s.owner) === own).length;
+    const rows: [string, string][] = [
+      ['Время игры', time],
+      ['Ваших зданий', String([...world.buildings.values()].filter((b) => mine(b.owner)).length)],
+      ['Ваших солдат', String(soldiersOf(true))],
+      ['Солдат у противников', String(soldiersOf(false))],
+      ['Ваша доля земли', `${land ? Math.round((100 * ownLand) / land) : 0}%`],
+    ];
+    this.endEl.innerHTML = '';
+    this.endEl.append(
+      el('h2', outcome === 'won' ? 'won' : 'lost', outcome === 'won' ? 'Победа!' : 'Поражение'),
+      el('p', '', outcome === 'won' ? 'Все замки противников взяты.' : 'Ваш замок захвачен.'),
+    );
+    const table = el('dl');
+    for (const [k, v] of rows) table.append(el('dt', '', k), el('dd', '', v));
+    this.endEl.append(table);
+    const actions = el('div', 'info-actions');
+    const again = el('button', 'active', 'Новая игра');
+    again.onclick = () => {
+      const params = new URLSearchParams(location.search);
+      params.set('seed', String(Math.floor(Math.random() * 1e9)));
+      params.delete('load');
+      location.search = `?${params}`;
+    };
+    const watch = el('button', '', 'Смотреть дальше');
+    watch.onclick = () => (this.endEl.hidden = true);
+    actions.append(again, watch);
+    this.endEl.append(actions);
+    this.endEl.hidden = false;
   }
 
   private renderStats(): void {

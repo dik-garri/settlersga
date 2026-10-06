@@ -1,9 +1,10 @@
+import type { AiState } from './ai';
 import { GameMap } from './map';
-import type { Building, Settler } from './types';
+import type { Building, PlayerId, Settler } from './types';
 import type { Player, World } from './world';
 
 /** Bump when the save layout changes incompatibly. */
-export const SAVE_VERSION = 7;
+export const SAVE_VERSION = 8;
 
 const MAP_LAYERS = [
   'terrain',
@@ -36,6 +37,8 @@ export interface SaveData {
   settlers: Settler[];
   reservedTargets: number[];
   reservedPlots: number[];
+  ai: AiState[];
+  defeated: PlayerId[];
 }
 
 function encode(a: Uint8Array | Int32Array): string {
@@ -71,6 +74,8 @@ export function saveWorld(w: World): SaveData {
     settlers: w.settlers,
     reservedTargets: [...w.reservedTargets],
     reservedPlots: [...w.reservedPlots],
+    ai: w.ai,
+    defeated: w.defeated,
   });
 }
 
@@ -99,4 +104,6 @@ export function restoreWorld(w: World, raw: SaveData): void {
   }
   for (const i of data.reservedTargets) w.reservedTargets.add(i);
   for (const i of data.reservedPlots) w.reservedPlots.add(i);
+  w.ai.push(...data.ai);
+  w.defeated.push(...data.defeated);
 }
