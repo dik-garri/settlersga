@@ -12,9 +12,9 @@ import {
   totalCost,
   UNREACHABLE_TICKS,
 } from './config';
-import { canPlant, findGatherTarget, findPlotFor, harvest, isGatherTarget } from './nature';
+import { canPlant, findGatherTarget, findPlotFor, harvest, isGatherTarget, plant, type Target } from './nature';
 import { findPath } from './pathfinding';
-import { RESOURCES, type Building, type Point, type Settler } from './types';
+import { RESOURCES, type Building, type Point, type Settler, type Task } from './types';
 import type { World } from './world';
 
 const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -103,12 +103,10 @@ export function updateSettler(w: World, s: Settler): void {
       const i = w.map.idx(task.x, task.y);
       s.working = true;
       if (--task.n > 0) return;
-      // Checked once, at the moment the sapling would block the tile.
-      if (!canPlant(w, task.x, task.y, s.owner, true)) return abort(w, s);
-      w.map.tree[i] = 1;
-      w.map.touch(i);
+      // Checked once, at the moment the planting would occupy the tile.
+      if (!canPlant(w, task.what, task.x, task.y, s.owner, true)) return abort(w, s);
+      plant(w, task.what, i);
       w.reservedPlots.delete(i);
-      w.stats.treesPlanted++;
       s.tasks.shift();
       return;
     }
@@ -269,6 +267,38 @@ function goToStorage(w: World, s: Settler): void {
   if (store) goHome(s, store);
 }
 
+function startGathering(w: World, s: Settler, home: Building): boolean {
+  const def = PROFESSIONS[s.kind].gather!;
+  if (home.output[def.res] >= OUTPUT_CAP) return false;
+  const target = findGatherTarget(w, s, home, def);
+  if (!target) return false;
+  w.reservedTargets.add(w.map.idx(target.x, target.y));
+  setOuting(s, home, target, { t: 'gather', x: target.x, y: target.y, n: def.workTicks, res: def.res }, def.restTicks);
+  s.tasks.splice(3, 0, { t: 'store', b: home.id, res: def.res });
+  return true;
+}
+
+function startPlanting(w: World, s: Settler, home: Building): boolean {
+  const def = PROFESSIONS[s.kind].plant!;
+  const plot = findPlotFor(w, s, home, def);
+  if (!plot) return false;
+  w.reservedPlots.add(w.map.idx(plot.x, plot.y));
+  setOuting(s, home, plot, { t: 'plant', x: plot.x, y: plot.y, n: def.workTicks, what: def.what }, def.restTicks);
+  return true;
+}
+
+/** Walk to the target (path already found), do the work, come back inside and rest. */
+function setOuting(s: Settler, home: Building, target: Target, work: Task, rest: number): void {
+  s.path = target.path;
+  s.tasks = [
+    { t: 'goto', x: target.x, y: target.y, adj: true },
+    work,
+    { t: 'goto', x: home.door.x, y: home.door.y },
+    { t: 'enter', b: home.id },
+    { t: 'wait', n: rest },
+  ];
+}
+
 function idle(w: World, s: Settler): void {
   s.idleTicks++;
   const prof = PROFESSIONS[s.kind];
@@ -304,47 +334,15 @@ function idle(w: World, s: Settler): void {
       return;
     }
 
-    case 'gather': {
-      const def = prof.gather!;
+    case 'gather':
+    case 'plant':
+    case 'farm': {
       if (!home) return;
       if (s.inside !== home.id) return goHome(s, home);
-      if (home.output[def.res] >= OUTPUT_CAP) return;
-      const target = findGatherTarget(w, s, home, def);
-      if (!target) {
-        s.tasks = [{ t: 'wait', n: 20 }];
-        return;
-      }
-      w.reservedTargets.add(w.map.idx(target.x, target.y));
-      s.path = target.path;
-      s.tasks = [
-        { t: 'goto', x: target.x, y: target.y, adj: true },
-        { t: 'gather', x: target.x, y: target.y, n: def.workTicks, res: def.res },
-        { t: 'goto', x: home.door.x, y: home.door.y },
-        { t: 'store', b: home.id, res: def.res },
-        { t: 'enter', b: home.id },
-        { t: 'wait', n: def.restTicks },
-      ];
-      return;
-    }
-
-    case 'plant': {
-      const def = prof.plant!;
-      if (!home) return;
-      if (s.inside !== home.id) return goHome(s, home);
-      const plot = findPlotFor(w, s, home, def);
-      if (!plot) {
-        s.tasks = [{ t: 'wait', n: 40 }];
-        return;
-      }
-      w.reservedPlots.add(w.map.idx(plot.x, plot.y));
-      s.path = plot.path;
-      s.tasks = [
-        { t: 'goto', x: plot.x, y: plot.y, adj: true },
-        { t: 'plant', x: plot.x, y: plot.y, n: def.workTicks },
-        { t: 'goto', x: home.door.x, y: home.door.y },
-        { t: 'enter', b: home.id },
-        { t: 'wait', n: def.restTicks },
-      ];
+      // Farmers harvest first and only sow when nothing is ripe.
+      if (prof.gather && startGathering(w, s, home)) return;
+      if (prof.plant && startPlanting(w, s, home)) return;
+      s.tasks = [{ t: 'wait', n: 20 }];
       return;
     }
 

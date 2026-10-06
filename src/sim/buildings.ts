@@ -36,6 +36,7 @@ export function addBuilding(w: World, type: BuildingType, x: number, y: number, 
     workerRequested: false,
     timer: 0,
     unreachableUntil: 0,
+    spawned: 0,
   };
   for (let dy = 0; dy < def.h; dy++) {
     for (let dx = 0; dx < def.w; dx++) {
@@ -94,8 +95,18 @@ function canRunRecipe(b: Building, recipe: Recipe): boolean {
   );
 }
 
-/** Workshops run their recipe while the worker is inside and materials and pile space allow. */
+/**
+ * Residences release their settlers one by one; workshops run their recipe while the worker is inside
+ * and materials and pile space allow.
+ */
 export function updateBuilding(w: World, b: Building): void {
+  const home = BUILDINGS[b.type].residence;
+  if (home && b.done && b.spawned < home.capacity && ++b.timer >= home.everyTicks) {
+    b.timer = 0;
+    b.spawned++;
+    spawnSettler(w, 'carrier', b);
+    return;
+  }
   const recipe = BUILDINGS[b.type].recipe;
   if (!recipe || !b.done) return;
   const worker = w.getSettler(b.workerId);

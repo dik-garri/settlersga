@@ -6,7 +6,7 @@
  */
 import { TICKS_PER_SECOND } from '../src/sim/config';
 import { findPath } from '../src/sim/pathfinding';
-import { RESOURCES } from '../src/sim/types';
+import { RESOURCES, type BuildingType } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { arg, placeNear } from './scenario';
 
@@ -19,20 +19,41 @@ const ticksPerMinute = TICKS_PER_SECOND * 60;
 for (const seed of seeds) {
   const w = new World(seed, { size });
   const c = w.castle;
-  placeNear(w, 'stonecutter', c.x - 5, c.y + 3);
-  placeNear(w, 'woodcutter', c.x + 5, c.y - 1);
-  placeNear(w, 'forester', c.x + 5, c.y + 3);
-  placeNear(w, 'sawmill', c.x + 1, c.y + 5);
+  // Standard opening: wood and stone first, housing, then the food chain around the starting pond.
+  const plan: [number, BuildingType, number, number][] = [
+    [0, 'stonecutter', -5, 3],
+    [0, 'woodcutter', 5, -1],
+    [0, 'forester', 5, 3],
+    [0, 'sawmill', 1, 5],
+    [0, 'house_small', -3, -4],
+    [5, 'waterworks', 0, 8],
+    [5, 'farm', 6, 5],
+    [5, 'mill', 3, -4],
+    [5, 'bakery', -5, -1],
+    [5, 'house_medium', 0, -6],
+    [10, 'tower', -8, -8],
+    [15, 'fisher', -2, 8],
+    [15, 'pigfarm', 7, -4],
+    [15, 'slaughterhouse', -6, 6],
+  ];
 
   const rows: string[] = [];
   let last = { ...w.stats.produced };
   const t0 = performance.now();
   for (let i = 1; i <= minutes * ticksPerMinute; i++) {
+    if ((i - 1) % ticksPerMinute === 0) {
+      for (const [minute, type, dx, dy] of plan) {
+        if (minute * ticksPerMinute === i - 1) placeNear(w, type, c.x + dx, c.y + dy);
+      }
+    }
     w.step();
-    if (i === 10 * ticksPerMinute) placeNear(w, 'tower', c.x - 8, c.y - 8);
     if (i % (window * ticksPerMinute) === 0) {
       const p = w.stats.produced;
-      rows.push(RESOURCES.map((r) => `${r}+${p[r] - last[r]}`).join(' '));
+      rows.push(
+        RESOURCES.filter((r) => p[r] > last[r])
+          .map((r) => `${r}+${p[r] - last[r]}`)
+          .join(' ') || '—',
+      );
       last = { ...p };
     }
   }
@@ -44,7 +65,10 @@ for (const seed of seeds) {
   console.log(`seed ${seed}`);
   rows.forEach((r, k) => console.log(`  ${(k * window).toString().padStart(3)}–${(k + 1) * window} min: ${r}`));
   console.log(
-    `  buildings ${done}/${w.buildings.size} · settlers ${w.settlers.length} · stock ${JSON.stringify(c.output)}` +
+    `  buildings ${done}/${w.buildings.size} · settlers ${w.settlers.length} · stock ` +
+      RESOURCES.filter((r) => c.output[r] > 0)
+        .map((r) => `${r}:${c.output[r]}`)
+        .join(' ') +
       ` · lost ${lost} · blocked doors ${blocked} · ${(ms / (minutes * ticksPerMinute)).toFixed(3)} ms/tick`,
   );
 }

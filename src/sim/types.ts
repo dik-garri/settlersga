@@ -3,10 +3,13 @@ export interface Point {
   y: number;
 }
 
-export type Resource = 'log' | 'plank' | 'stone';
-export const RESOURCES: readonly Resource[] = ['log', 'plank', 'stone'];
+export const RESOURCES = ['log', 'plank', 'stone', 'water', 'fish', 'grain', 'flour', 'bread', 'pig', 'meat'] as const;
+export type Resource = (typeof RESOURCES)[number];
 export type Stock = Record<Resource, number>;
-export const emptyStock = (): Stock => ({ log: 0, plank: 0, stone: 0 });
+export const emptyStock = (): Stock => Object.fromEntries(RESOURCES.map((r) => [r, 0])) as Stock;
+
+/** What a planting profession puts into the ground. */
+export type PlantKind = 'tree' | 'grain';
 
 export enum Terrain {
   Water = 0,
@@ -15,8 +18,39 @@ export enum Terrain {
   Rock = 3,
 }
 
-export type BuildingType = 'castle' | 'woodcutter' | 'sawmill' | 'forester' | 'stonecutter' | 'tower';
-export type SettlerKind = 'carrier' | 'builder' | 'woodcutter' | 'sawmiller' | 'forester' | 'stonecutter' | 'guard';
+export type BuildingType =
+  | 'castle'
+  | 'house_small'
+  | 'house_medium'
+  | 'house_large'
+  | 'woodcutter'
+  | 'sawmill'
+  | 'forester'
+  | 'stonecutter'
+  | 'waterworks'
+  | 'fisher'
+  | 'farm'
+  | 'mill'
+  | 'bakery'
+  | 'pigfarm'
+  | 'slaughterhouse'
+  | 'tower';
+
+export type SettlerKind =
+  | 'carrier'
+  | 'builder'
+  | 'woodcutter'
+  | 'sawmiller'
+  | 'forester'
+  | 'stonecutter'
+  | 'waterman'
+  | 'fisher'
+  | 'farmer'
+  | 'miller'
+  | 'baker'
+  | 'pigfarmer'
+  | 'butcher'
+  | 'guard';
 
 /** Player ids start at 1; 0 means "nobody" in per-tile ownership. */
 export type PlayerId = number;
@@ -50,6 +84,8 @@ export interface Building {
   timer: number;
   /** Tick until which no route to the door is known; logistics and builders skip it until then. */
   unreachableUntil: number;
+  /** Residence: settlers released so far. */
+  spawned: number;
 }
 
 export type Task =
@@ -63,7 +99,7 @@ export type Task =
   | { t: 'store'; b: number; res: Resource }
   /** Fell a tree or break stone off a deposit; the settler then carries `res`. */
   | { t: 'gather'; x: number; y: number; n: number; res: Resource }
-  | { t: 'plant'; x: number; y: number; n: number }
+  | { t: 'plant'; x: number; y: number; n: number; what: PlantKind }
   /** `stall`: consecutive ticks without material to work with. */
   | { t: 'build'; b: number; stall: number }
   | { t: 'become'; b: number; kind: SettlerKind };

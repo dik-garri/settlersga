@@ -52,8 +52,9 @@ body {
 
 .stock {
   display: flex;
-  gap: 18px;
-  font-size: 16px;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 15px;
 }
 
 .stat {
@@ -113,8 +114,30 @@ button.active {
   bottom: 14px;
   transform: translateX(-50%);
   display: flex;
+  flex-direction: column;
   gap: 6px;
   padding: 6px;
+  max-width: calc(100% - 24px);
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.tab {
+  font-size: 13px;
+  padding: 2px 12px;
+}
+
+.build-row {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+}
+
+.build-row[hidden] {
+  display: none;
 }
 
 .build-btn {
@@ -167,7 +190,7 @@ button.active {
 .hint {
   position: absolute;
   left: 50%;
-  bottom: 150px;
+  bottom: 178px;
   transform: translateX(-50%);
   color: var(--muted);
   font-size: 12px;

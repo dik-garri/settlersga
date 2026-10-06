@@ -1,4 +1,5 @@
 import { CanvasSource, Rectangle, Texture } from 'pixi.js';
+import { PROFESSIONS } from '../sim/config';
 import { RESOURCES, type BuildingType, type SettlerKind } from '../sim/types';
 import {
   BUILDING_CANVAS,
@@ -6,6 +7,7 @@ import {
   groundVariants,
   paintBoulder,
   paintDeposit,
+  paintField,
   paintFlag,
   paintGround,
   paintSettler,
@@ -19,30 +21,46 @@ const RESOLUTION = 2;
 const SIZE = 1024;
 const PAD = 2;
 
-/** Packs procedurally painted sprites into one canvas so the GPU can batch them. */
+interface Page {
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+}
+
+/**
+ * Packs procedurally painted sprites into canvas pages (shelf packing). A new page starts when one
+ * fills up, so content can grow freely; the GPU batches up to 16 textures per draw call.
+ */
 class AtlasBuilder {
-  readonly canvas = document.createElement('canvas');
-  private readonly ctx: CanvasRenderingContext2D;
-  private readonly frames = new Map<string, { frame: Rectangle; ax: number; ay: number }>();
+  private readonly pages: Page[] = [];
+  private readonly frames = new Map<string, { page: number; frame: Rectangle; ax: number; ay: number }>();
   private x = PAD;
   private y = PAD;
   private rowH = 0;
 
   constructor() {
-    this.canvas.width = SIZE * RESOLUTION;
-    this.canvas.height = SIZE * RESOLUTION;
-    this.ctx = this.canvas.getContext('2d')!;
+    this.newPage();
+  }
+
+  private newPage(): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = SIZE * RESOLUTION;
+    canvas.height = SIZE * RESOLUTION;
+    this.pages.push({ canvas, ctx: canvas.getContext('2d')! });
+    this.x = PAD;
+    this.y = PAD;
+    this.rowH = 0;
   }
 
   /** Paints a w×h sprite; (ax, ay) is the anchor point in sprite pixels. */
   add(name: string, w: number, h: number, ax: number, ay: number, paint: (ctx: CanvasRenderingContext2D) => void) {
+    if (w + 2 * PAD > SIZE || h + 2 * PAD > SIZE) throw new Error(`sprite ${name} is larger than an atlas page`);
     if (this.x + w + PAD > SIZE) {
       this.x = PAD;
       this.y += this.rowH + PAD;
       this.rowH = 0;
     }
-    if (this.y + h + PAD > SIZE) throw new Error('sprite atlas is full');
-    const { ctx } = this;
+    if (this.y + h + PAD > SIZE) this.newPage();
+    const { ctx } = this.pages[this.pages.length - 1];
     ctx.save();
     ctx.scale(RESOLUTION, RESOLUTION);
     ctx.translate(this.x, this.y);
@@ -51,16 +69,21 @@ class AtlasBuilder {
     ctx.clip();
     paint(ctx);
     ctx.restore();
-    this.frames.set(name, { frame: new Rectangle(this.x, this.y, w, h), ax: ax / w, ay: ay / h });
+    this.frames.set(name, {
+      page: this.pages.length - 1,
+      frame: new Rectangle(this.x, this.y, w, h),
+      ax: ax / w,
+      ay: ay / h,
+    });
     this.x += w + PAD;
     this.rowH = Math.max(this.rowH, h);
   }
 
   build(): Map<string, Texture> {
-    const source = new CanvasSource({ resource: this.canvas, resolution: RESOLUTION });
+    const sources = this.pages.map((p) => new CanvasSource({ resource: p.canvas, resolution: RESOLUTION }));
     const out = new Map<string, Texture>();
-    for (const [name, { frame, ax, ay }] of this.frames) {
-      out.set(name, new Texture({ source, frame, defaultAnchor: { x: ax, y: ay } }));
+    for (const [name, { page, frame, ax, ay }] of this.frames) {
+      out.set(name, new Texture({ source: sources[page], frame, defaultAnchor: { x: ax, y: ay } }));
     }
     return out;
   }
@@ -79,14 +102,15 @@ export class SpriteAtlas {
     }
     for (let v = 0; v < 4; v++) a.add(`tree:${v}`, 48, 80, 24, 72, (ctx) => paintTree(ctx, v));
     for (let v = 0; v < 2; v++) a.add(`boulder:${v}`, 52, 40, 26, 30, (ctx) => paintBoulder(ctx, v));
+    for (let v = 1; v <= 4; v++) a.add(`field:${v}`, 66, 40, 33, 24, (ctx) => paintField(ctx, v));
     for (let v = 0; v < 3; v++) a.add(`deposit:${v}`, 56, 44, 28, 34, (ctx) => paintDeposit(ctx, v));
     for (const [type, c] of Object.entries(BUILDING_CANVAS)) {
       a.add(`building:${type}`, c.w, c.h, c.ax, c.ay, (ctx) => {
         ctx.translate(c.ax, c.ay);
-        BUILDING_PAINTERS[type as BuildingType | 'site'](ctx);
+        BUILDING_PAINTERS[type as keyof typeof BUILDING_PAINTERS](ctx);
       });
     }
-    for (const kind of ['carrier', 'builder', 'woodcutter', 'sawmiller', 'forester', 'stonecutter', 'guard'] as SettlerKind[]) {
+    for (const kind of Object.keys(PROFESSIONS) as SettlerKind[]) {
       for (const frame of ['stand', 'walk', 'work'] as SettlerFrame[]) {
         a.add(`settler:${kind}:${frame}`, 20, 32, 10, 29, (ctx) => paintSettler(ctx, kind, frame));
       }

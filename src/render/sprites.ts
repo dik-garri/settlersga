@@ -394,14 +394,29 @@ export interface BuildingCanvas {
   ay: number;
 }
 
-export const BUILDING_CANVAS: Record<BuildingType | 'site', BuildingCanvas> = {
+const SMALL: BuildingCanvas = { w: 150, h: 140, ax: 75, ay: 100 };
+const LARGE: BuildingCanvas = { w: 220, h: 190, ax: 110, ay: 135 };
+
+/** Sprite canvas per building; `site2`/`site3` are construction sites for 2×2 and 3×3 footprints. */
+export const BUILDING_CANVAS: Record<BuildingType | 'site2' | 'site3', BuildingCanvas> = {
   castle: { w: 220, h: 250, ax: 110, ay: 190 },
-  woodcutter: { w: 150, h: 140, ax: 75, ay: 100 },
-  sawmill: { w: 150, h: 140, ax: 75, ay: 100 },
-  forester: { w: 150, h: 140, ax: 75, ay: 100 },
-  stonecutter: { w: 150, h: 140, ax: 75, ay: 100 },
+  house_small: SMALL,
+  house_medium: SMALL,
+  house_large: LARGE,
+  woodcutter: SMALL,
+  sawmill: SMALL,
+  forester: SMALL,
+  stonecutter: SMALL,
+  waterworks: SMALL,
+  fisher: SMALL,
+  farm: LARGE,
+  mill: { w: 150, h: 210, ax: 75, ay: 165 },
+  bakery: SMALL,
+  pigfarm: SMALL,
+  slaughterhouse: SMALL,
   tower: { w: 150, h: 210, ax: 75, ay: 170 },
-  site: { w: 150, h: 90, ax: 75, ay: 50 },
+  site2: { w: 150, h: 90, ax: 75, ay: 50 },
+  site3: { w: 220, h: 120, ax: 110, ay: 65 },
 };
 
 function paintCastle(ctx: Ctx): void {
@@ -624,49 +639,419 @@ function paintTower(ctx: Ctx): void {
   ctx.fill();
 }
 
-function paintSite(ctx: Ctx): void {
-  const hw = 0.95;
-  const hh = 0.95;
+function paintSite(ctx: Ctx, half: number): void {
+  const hw = half - 0.05;
+  const hh = half - 0.05;
   poly(ctx, [[-hw, -hh, 0], [hw, -hh, 0], [hw, hh, 0], [-hw, hh, 0]], '#9a7a50');
   const rng = createRng(77);
-  for (let i = 0; i < 40; i++) {
-    const [x, y] = P(rng() * 1.8 - 0.9, rng() * 1.8 - 0.9, 0);
+  for (let i = 0; i < 40 * half; i++) {
+    const [x, y] = P((rng() * 2 - 1) * hw, (rng() * 2 - 1) * hh, 0);
     ctx.fillStyle = rng() < 0.5 ? '#86683f' : '#ab8b5f';
     ctx.fillRect(x, y, 2, 1);
   }
-  const post = (dx: number, dy: number) => {
-    line(ctx, [dx, dy, 0], [dx, dy, 20], '#6b4a26', 2.5);
-  };
-  post(-0.75, -0.75);
-  post(0.75, -0.75);
-  line(ctx, [-0.75, -0.75, 18], [0.75, -0.75, 18], '#7a5530', 2);
-  post(-0.75, 0.75);
-  post(0.75, 0.75);
-  line(ctx, [0.75, -0.75, 18], [0.75, 0.75, 18], '#7a5530', 2);
-  line(ctx, [-0.75, 0.75, 18], [0.75, 0.75, 18], '#7a5530', 2);
+  const k = half - 0.25;
+  const post = (dx: number, dy: number) => line(ctx, [dx, dy, 0], [dx, dy, 20], '#6b4a26', 2.5);
+  post(-k, -k);
+  post(k, -k);
+  line(ctx, [-k, -k, 18], [k, -k, 18], '#7a5530', 2);
+  post(-k, k);
+  post(k, k);
+  line(ctx, [k, -k, 18], [k, k, 18], '#7a5530', 2);
+  line(ctx, [-k, k, 18], [k, k, 18], '#7a5530', 2);
 }
 
-export const BUILDING_PAINTERS: Record<BuildingType | 'site', (ctx: Ctx) => void> = {
+// ------------------------------------------------- data-described buildings
+
+type Deco = 'chimney' | 'well' | 'nets' | 'pen' | 'sacks' | 'oven' | 'meat' | 'hay';
+
+/** A gabled building described by data, so new building types rarely need a hand-written painter. */
+interface Style {
+  hw: number;
+  hh: number;
+  H: number;
+  wall: string;
+  roof: string;
+  rise: number;
+  /** Door position along the front wall (tile units from the footprint center). */
+  doorDx: number;
+  timber?: boolean;
+  /** Number of window rows. */
+  floors?: number;
+  deco?: Deco[];
+}
+
+function smoke(ctx: Ctx, x: number, y: number): void {
+  for (const [dx, dy, r] of [
+    [0, 0, 3],
+    [3, -6, 4],
+    [7, -13, 5],
+  ]) {
+    ctx.beginPath();
+    ctx.arc(x + dx, y + dy, r, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(220,220,220,0.55)';
+    ctx.fill();
+  }
+}
+
+function paintDeco(ctx: Ctx, st: Style, deco: Deco): void {
+  const { hw, hh, H, rise } = st;
+  switch (deco) {
+    case 'chimney': {
+      box(ctx, -hw * 0.45, -hh * 0.25, 0.08, 0.08, H, rise * 0.8 + 6, '#8c4a3a');
+      const [x, y] = P(-hw * 0.45, -hh * 0.25, H + rise * 0.8 + 10);
+      smoke(ctx, x, y);
+      return;
+    }
+    case 'well': {
+      const [x, y] = P(-hw - 0.2, hh + 0.25, 0);
+      ctx.fillStyle = '#8f8a80';
+      ctx.fillRect(x - 7, y - 8, 14, 8);
+      ctx.beginPath();
+      ctx.ellipse(x, y - 8, 7, 3, 0, 0, Math.PI * 2);
+      ctx.fillStyle = '#2f6f9e';
+      ctx.fill();
+      ctx.strokeStyle = '#5e3b1f';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(x - 6, y - 8);
+      ctx.lineTo(x - 6, y - 20);
+      ctx.moveTo(x + 6, y - 8);
+      ctx.lineTo(x + 6, y - 20);
+      ctx.stroke();
+      ctx.fillStyle = '#7f3f22';
+      ctx.beginPath();
+      ctx.moveTo(x - 9, y - 19);
+      ctx.lineTo(x, y - 25);
+      ctx.lineTo(x + 9, y - 19);
+      ctx.closePath();
+      ctx.fill();
+      return;
+    }
+    case 'nets': {
+      const a = P(hw + 0.25, -hh * 0.6, 0);
+      const b = P(hw + 0.25, hh * 0.6, 0);
+      ctx.strokeStyle = '#5e3b1f';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(a[0], a[1]);
+      ctx.lineTo(a[0], a[1] - 16);
+      ctx.moveTo(b[0], b[1]);
+      ctx.lineTo(b[0], b[1] - 16);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(230,220,190,0.8)';
+      ctx.lineWidth = 0.7;
+      for (let t = 0; t <= 1.001; t += 0.2) {
+        ctx.beginPath();
+        ctx.moveTo(a[0] + (b[0] - a[0]) * t, a[1] - 15 + (b[1] - a[1]) * t);
+        ctx.lineTo(a[0] + (b[0] - a[0]) * t, a[1] - 3 + (b[1] - a[1]) * t);
+        ctx.stroke();
+      }
+      for (let k = 0; k < 4; k++) {
+        ctx.beginPath();
+        ctx.moveTo(a[0], a[1] - 15 + k * 4);
+        ctx.lineTo(b[0], b[1] - 15 + k * 4);
+        ctx.stroke();
+      }
+      return;
+    }
+    case 'pen': {
+      const pts: V3[] = [
+        [-hw - 0.1, hh + 0.15, 0],
+        [hw * 0.2, hh + 0.15, 0],
+        [hw * 0.2, hh + 0.65, 0],
+        [-hw - 0.1, hh + 0.65, 0],
+      ];
+      poly(ctx, pts, '#8a6a3c');
+      const [px, py] = P(-hw * 0.45, hh + 0.4, 0);
+      ctx.fillStyle = '#e8a0a0';
+      ctx.beginPath();
+      ctx.ellipse(px, py - 4, 6, 3.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(px + 6, py - 5, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      for (let k = 0; k < 4; k++) {
+        const dx = -hw - 0.1 + ((hw * 0.3 + 0.1) * k) / 3;
+        line(ctx, [dx, hh + 0.65, 0], [dx, hh + 0.65, 7], '#6b4a26', 1.5);
+      }
+      line(ctx, [-hw - 0.1, hh + 0.65, 5], [hw * 0.2, hh + 0.65, 5], '#6b4a26', 1.5);
+      return;
+    }
+    case 'sacks': {
+      const [x, y] = P(-hw * 0.3, hh + 0.3, 0);
+      for (const [dx, dy] of [
+        [-6, 0],
+        [2, 1],
+        [-2, -5],
+      ]) {
+        ctx.fillStyle = '#efe9da';
+        ctx.beginPath();
+        ctx.ellipse(x + dx, y + dy - 4, 4, 5, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#b9ad94';
+        ctx.lineWidth = 0.8;
+        ctx.stroke();
+      }
+      return;
+    }
+    case 'oven': {
+      const [x, y] = P(hw + 0.3, 0.1, 0);
+      ctx.fillStyle = '#b7643e';
+      ctx.beginPath();
+      ctx.ellipse(x, y - 1, 12, 9, 0, Math.PI, 0);
+      ctx.fill();
+      ctx.fillStyle = '#ffb347';
+      ctx.beginPath();
+      ctx.ellipse(x - 3, y - 2, 3.5, 3, 0, Math.PI, 0);
+      ctx.fill();
+      return;
+    }
+    case 'meat': {
+      for (const dy of [-0.35, 0.1]) {
+        const [x, y] = P(hw, dy, H * 0.55);
+        ctx.fillStyle = '#b5413a';
+        ctx.beginPath();
+        ctx.ellipse(x + 2, y + 3, 3, 4.5, 0.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#3b2b1a';
+        ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        ctx.moveTo(x + 2, y - 3);
+        ctx.lineTo(x + 2, y - 1);
+        ctx.stroke();
+      }
+      return;
+    }
+    case 'hay': {
+      const [x, y] = P(hw + 0.35, hh * 0.4, 0);
+      ctx.fillStyle = '#d9b44a';
+      ctx.beginPath();
+      ctx.ellipse(x, y - 6, 10, 8, 0, Math.PI, 0);
+      ctx.fillRect(x - 10, y - 6, 20, 5);
+      ctx.fill();
+      ctx.strokeStyle = '#b8932f';
+      ctx.lineWidth = 0.8;
+      for (let k = -6; k <= 6; k += 4) {
+        ctx.beginPath();
+        ctx.moveTo(x + k, y - 1);
+        ctx.lineTo(x + k * 0.6, y - 12);
+        ctx.stroke();
+      }
+      return;
+    }
+  }
+}
+
+function paintStyled(ctx: Ctx, st: Style): void {
+  const { hw, hh, H, wall, doorDx } = st;
+  const beam = '#5b3a1e';
+  shadow(ctx, hw, hh);
+  // Ground-level decorations behind the walls go first, the rest after the roof.
+  for (const d of st.deco ?? []) if (d === 'pen' || d === 'hay') paintDeco(ctx, st, d);
+  walls(ctx, 0, 0, hw, hh, 0, H, wall);
+  if (st.timber) {
+    for (let t = -hw; t <= hw + 0.001; t += hw / 2) line(ctx, [t, hh, 0], [t, hh, H], beam, 2);
+    for (let t = -hh; t <= hh + 0.001; t += hh / 2) line(ctx, [hw, t, 0], [hw, t, H], shade(beam, 0.8), 2);
+  }
+  const floors = st.floors ?? 1;
+  for (let f = 0; f < floors; f++) {
+    const z0 = 8 + (f * (H - 8)) / floors;
+    const z1 = z0 + 7;
+    for (const dx of [-hw * 0.55, -hw * 0.1]) frontQuad(ctx, hh, dx - 0.1, dx + 0.08, z0, z1, '#34302b');
+    for (const dy of [-hh * 0.45, hh * 0.25]) sideQuad(ctx, hw, dy - 0.1, dy + 0.08, z0, z1, '#2a2724');
+    if (f > 0) line(ctx, [-hw, hh, z0 - 3], [hw, hh, z0 - 3], shade(wall, 0.75), 1.5);
+  }
+  frontQuad(ctx, hh, doorDx - 0.18, Math.min(hw - 0.04, doorDx + 0.18), 0, 15, '#4a2c14');
+  gableRoof(ctx, hw, hh, H, st.rise, st.roof, wall);
+  for (const d of st.deco ?? []) if (d !== 'pen' && d !== 'hay') paintDeco(ctx, st, d);
+}
+
+const STYLES: Partial<Record<BuildingType, Style>> = {
+  house_small: {
+    hw: 0.7,
+    hh: 0.7,
+    H: 22,
+    wall: '#ead9b8',
+    roof: '#b4472f',
+    rise: 22,
+    doorDx: 0.5,
+    timber: true,
+    deco: ['chimney'],
+  },
+  house_medium: {
+    hw: 0.75,
+    hh: 0.75,
+    H: 36,
+    wall: '#e4d3b0',
+    roof: '#943a2a',
+    rise: 24,
+    doorDx: 0.5,
+    timber: true,
+    floors: 2,
+    deco: ['chimney'],
+  },
+  house_large: {
+    hw: 1.25,
+    hh: 1.1,
+    H: 36,
+    wall: '#ded0b4',
+    roof: '#5d6b7c',
+    rise: 30,
+    doorDx: 1,
+    floors: 2,
+    deco: ['chimney'],
+  },
+  waterworks: { hw: 0.6, hh: 0.6, H: 20, wall: '#a8a294', roof: '#6e4a33', rise: 20, doorDx: 0.5, deco: ['well'] },
+  fisher: { hw: 0.65, hh: 0.65, H: 20, wall: '#a07a50', roof: '#c4a35a', rise: 22, doorDx: 0.5, deco: ['nets'] },
+  farm: {
+    hw: 1.2,
+    hh: 1.0,
+    H: 30,
+    wall: '#9c4a32',
+    roof: '#5a4030',
+    rise: 34,
+    doorDx: 1,
+    deco: ['hay'],
+  },
+  bakery: {
+    hw: 0.7,
+    hh: 0.7,
+    H: 24,
+    wall: '#efe2c4',
+    roof: '#a8502f',
+    rise: 22,
+    doorDx: 0.5,
+    timber: true,
+    deco: ['oven', 'chimney', 'sacks'],
+  },
+  pigfarm: { hw: 0.6, hh: 0.6, H: 20, wall: '#a07a50', roof: '#c4a35a', rise: 20, doorDx: 0.5, deco: ['pen'] },
+  slaughterhouse: { hw: 0.7, hh: 0.7, H: 24, wall: '#c9c0ae', roof: '#7a2e24', rise: 22, doorDx: 0.5, deco: ['meat'] },
+};
+
+function paintMill(ctx: Ctx): void {
+  const a = 0.55;
+  const H = 52;
+  const stone = '#b8b0a0';
+  shadow(ctx, 0.7, 0.7, 0.5);
+  walls(ctx, 0, 0, a, a, 0, H, stone);
+  for (let z = 8; z < H; z += 8) {
+    line(ctx, [-a, a, z], [a, a, z], shade(stone, 0.82));
+    line(ctx, [a, -a, z], [a, a, z], shade(stone, 0.6));
+  }
+  frontQuad(ctx, a, 0.3, 0.5, 0, 15, '#4a2c14');
+  frontQuad(ctx, a, -0.15, 0.05, 30, 38, '#34302b');
+  pyramidRoof(ctx, a + 0.12, H, 30, '#6e4a33');
+  // Sails on the front-right wall.
+  const [hx, hy] = P(a + 0.02, 0.1, H - 6);
+  ctx.save();
+  ctx.translate(hx, hy);
+  for (let k = 0; k < 4; k++) {
+    ctx.rotate(Math.PI / 2);
+    ctx.fillStyle = '#6b4a26';
+    ctx.fillRect(-1, 0, 2, 40);
+    ctx.fillStyle = 'rgba(240,232,212,0.92)';
+    ctx.fillRect(1, 10, 8, 28);
+    ctx.strokeStyle = '#8a7a5c';
+    ctx.lineWidth = 0.6;
+    ctx.strokeRect(1, 10, 8, 28);
+  }
+  ctx.beginPath();
+  ctx.arc(0, 0, 3, 0, Math.PI * 2);
+  ctx.fillStyle = '#3b2b1a';
+  ctx.fill();
+  ctx.restore();
+  paintDeco(ctx, { hw: a, hh: a, H, wall: stone, roof: '', rise: 0, doorDx: 0.4 }, 'sacks');
+}
+
+const styled = (type: BuildingType) => (ctx: Ctx) => paintStyled(ctx, STYLES[type]!);
+
+export const BUILDING_PAINTERS: Record<BuildingType | 'site2' | 'site3', (ctx: Ctx) => void> = {
   castle: paintCastle,
+  house_small: styled('house_small'),
+  house_medium: styled('house_medium'),
+  house_large: styled('house_large'),
   woodcutter: paintWoodcutter,
   sawmill: paintSawmill,
   forester: paintForester,
   stonecutter: paintStonecutter,
+  waterworks: styled('waterworks'),
+  fisher: styled('fisher'),
+  farm: styled('farm'),
+  mill: paintMill,
+  bakery: styled('bakery'),
+  pigfarm: styled('pigfarm'),
+  slaughterhouse: styled('slaughterhouse'),
   tower: paintTower,
-  site: paintSite,
+  site2: (ctx) => paintSite(ctx, 1),
+  site3: (ctx) => paintSite(ctx, 1.5),
 };
+
+// -------------------------------------------------------------------- fields
+
+/** Grain field on one tile, 66×40 with the tile center at (33, 24). Stage 1 sown … 4 ripe. */
+export function paintField(ctx: Ctx, stage: number): void {
+  ctx.translate(33, 24);
+  ctx.beginPath();
+  ctx.moveTo(0, -15);
+  ctx.lineTo(30, 0);
+  ctx.lineTo(0, 15);
+  ctx.lineTo(-30, 0);
+  ctx.closePath();
+  ctx.fillStyle = stage <= 2 ? '#8a6a42' : stage === 3 ? '#6f7d3a' : '#a08a3a';
+  ctx.fill();
+  ctx.save();
+  ctx.clip();
+  // Furrows run along the tile's x axis.
+  for (let k = -0.8; k <= 0.8; k += 0.2) {
+    const [x0, y0] = P(-0.5, k * 0.5, 0);
+    const [x1, y1] = P(0.5, k * 0.5, 0);
+    ctx.strokeStyle = 'rgba(60,40,20,0.35)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+  }
+  ctx.restore();
+  if (stage === 1) return;
+  const rng = createRng(31 + stage);
+  const color = stage === 2 ? '#7fb04f' : stage === 3 ? '#5f9a35' : '#e2c25a';
+  const height = stage === 2 ? 2 : stage === 3 ? 6 : 9;
+  for (let k = 0; k < 46; k++) {
+    const [x, y] = P(rng() - 0.5, rng() - 0.5, 0);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + (rng() - 0.5) * 2, y - height);
+    ctx.stroke();
+    if (stage === 4) {
+      ctx.fillStyle = '#f0d77a';
+      ctx.fillRect(x - 1, y - height - 1, 2, 2);
+    }
+  }
+}
 
 // ----------------------------------------------------------------- settlers
 
 export type SettlerFrame = 'stand' | 'walk' | 'work';
 
-const SETTLER_LOOK: Record<SettlerKind, { tunic: string; hat: string; tool?: 'axe' | 'hammer' | 'shovel' | 'pick' }> = {
+type Tool = 'axe' | 'hammer' | 'shovel' | 'pick' | 'rod' | 'scythe' | 'bucket';
+
+const SETTLER_LOOK: Record<SettlerKind, { tunic: string; hat: string; tool?: Tool }> = {
   carrier: { tunic: '#3f6fb5', hat: '#6b4423' },
   builder: { tunic: '#d08a2c', hat: '#c23b2b', tool: 'hammer' },
   woodcutter: { tunic: '#3d7d3a', hat: '#2e4d22', tool: 'axe' },
   sawmiller: { tunic: '#8b5a2b', hat: '#d9c9a3' },
   forester: { tunic: '#7a9a3a', hat: '#5a4020', tool: 'shovel' },
   stonecutter: { tunic: '#7d7f86', hat: '#4a3b2c', tool: 'pick' },
+  waterman: { tunic: '#4a90c2', hat: '#e0d6c0', tool: 'bucket' },
+  fisher: { tunic: '#2f6f8f', hat: '#c9b27a', tool: 'rod' },
+  farmer: { tunic: '#c9a44a', hat: '#e3c76a', tool: 'scythe' },
+  miller: { tunic: '#e8e4da', hat: '#9a8f80' },
+  baker: { tunic: '#f0ece2', hat: '#ffffff' },
+  pigfarmer: { tunic: '#8a6d4b', hat: '#5a4636' },
+  butcher: { tunic: '#b83c3c', hat: '#e8e4da' },
   guard: { tunic: '#a83232', hat: '#8d939a' },
 };
 
@@ -708,6 +1093,25 @@ export function paintSettler(ctx: Ctx, kind: SettlerKind, frame: SettlerFrame): 
       ctx.fillStyle = '#9aa0a6';
       if (look.tool === 'axe') ctx.fillRect(4.5, -27, 4, 3);
       else if (look.tool === 'shovel') ctx.fillRect(2.5, -31, 3.5, 4.5);
+      else if (look.tool === 'bucket') {
+        ctx.fillStyle = '#7a8a96';
+        ctx.fillRect(2, -21, 5, 5);
+        ctx.fillStyle = '#4f8fbd';
+        ctx.fillRect(2.5, -21, 4, 1.5);
+      } else if (look.tool === 'rod' || look.tool === 'scythe') {
+        ctx.strokeStyle = look.tool === 'rod' ? '#6b4a26' : '#9aa0a6';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        if (look.tool === 'rod') {
+          ctx.moveTo(4, -24);
+          ctx.lineTo(13, -33);
+          ctx.lineTo(13, -22);
+        } else {
+          ctx.moveTo(4, -28);
+          ctx.quadraticCurveTo(10, -30, 11, -24);
+        }
+        ctx.stroke();
+      }
       else if (look.tool === 'pick') {
         ctx.beginPath();
         ctx.moveTo(0, -25);
@@ -751,11 +1155,82 @@ export function paintWare(ctx: Ctx, res: Resource): void {
     ctx.stroke();
   } else if (res === 'stone') {
     stoneBlock(ctx, -5, 4, 8, 5, 1);
-  } else {
+  } else if (res === 'plank') {
     ctx.fillStyle = '#e2bf86';
     ctx.fillRect(-7, -2, 14, 3.5);
     ctx.fillStyle = '#b8935c';
     ctx.fillRect(-7, 1, 14, 1);
+  } else {
+    paintFood(ctx, res);
+  }
+}
+
+function blob(ctx: Ctx, x: number, y: number, rx: number, ry: number, fill: string, stroke?: string): void {
+  ctx.beginPath();
+  ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+  ctx.fillStyle = fill;
+  ctx.fill();
+  if (stroke) {
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+  }
+}
+
+function paintFood(ctx: Ctx, res: Resource): void {
+  switch (res) {
+    case 'water':
+      ctx.fillStyle = '#7a8a96';
+      ctx.fillRect(-4, -3, 8, 7);
+      blob(ctx, 0, -3, 4, 1.5, '#4f8fbd');
+      return;
+    case 'fish':
+      blob(ctx, -1, 0, 5.5, 2.5, '#9fb7c6', '#5f7d8f');
+      ctx.fillStyle = '#9fb7c6';
+      ctx.beginPath();
+      ctx.moveTo(4, 0);
+      ctx.lineTo(7.5, -3);
+      ctx.lineTo(7.5, 3);
+      ctx.closePath();
+      ctx.fill();
+      return;
+    case 'grain':
+      ctx.strokeStyle = '#d9b44a';
+      ctx.lineWidth = 1.2;
+      for (let k = -3; k <= 3; k += 1.5) {
+        ctx.beginPath();
+        ctx.moveTo(0, 4);
+        ctx.lineTo(k, -4);
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#8a6a2c';
+      ctx.fillRect(-2, 0, 4, 1.5);
+      return;
+    case 'flour':
+      blob(ctx, 0, 0, 4.5, 4.5, '#f2ede2', '#b9ad94');
+      ctx.fillStyle = '#b9ad94';
+      ctx.fillRect(-1.5, -5, 3, 1.5);
+      return;
+    case 'bread':
+      blob(ctx, 0, 0, 6, 3.5, '#b8783a', '#7a4a1e');
+      ctx.strokeStyle = '#e0b07a';
+      ctx.lineWidth = 0.8;
+      for (const k of [-2.5, 0, 2.5]) {
+        ctx.beginPath();
+        ctx.moveTo(k - 1, -2);
+        ctx.lineTo(k + 1, 1);
+        ctx.stroke();
+      }
+      return;
+    case 'pig':
+      blob(ctx, -1, 0, 5.5, 3.5, '#e8a0a0', '#b86e6e');
+      blob(ctx, 4.5, -1, 2.5, 2.2, '#e8a0a0', '#b86e6e');
+      return;
+    case 'meat':
+      blob(ctx, -1, 0, 5, 3.5, '#b5413a', '#7a221c');
+      ctx.fillStyle = '#efe6d2';
+      ctx.fillRect(3, -1, 4, 2);
+      return;
   }
 }
 

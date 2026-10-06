@@ -1,25 +1,98 @@
-import { TREE_MATURE, type GatherDef, type PlantDef } from './config';
+import {
+  CROP_GROW_CHANCE,
+  CROP_GROW_EVERY,
+  CROP_RIPE,
+  FISH_MAX,
+  FISH_RESTOCK,
+  TREE_MATURE,
+  type GatherDef,
+  type PlantDef,
+} from './config';
 import type { GameMap } from './map';
 import { findPath, staysConnected } from './pathfinding';
 import { markWalkable } from './regions';
 import { randInt } from './rng';
-import type { Building, PlayerId, Point, Resource, Settler } from './types';
+import { Terrain, type Building, type PlantKind, type PlayerId, type Point, type Resource, type Settler } from './types';
 import type { World } from './world';
 
+/** Map area the per-tick nature rates are tuned for; larger maps get proportionally more work. */
+const REFERENCE_AREA = 64 * 64;
+
+interface GatherRule {
+  /** Whether the tile currently yields the resource. */
+  isTarget(m: GameMap, i: number): boolean;
+  /** Effect of taking one unit from the tile. */
+  take(w: World, i: number): void;
+}
+
+const shore = (m: GameMap, i: number) => m.hasWalkableNeighbor(i % m.w, Math.floor(i / m.w));
+
 /** Which map tiles yield a resource and what working them does to the tile. */
-const GATHER_RULES: Partial<Record<Resource, { isTarget(m: GameMap, i: number): boolean; take(m: GameMap, i: number): void }>> = {
+const GATHER_RULES: Partial<Record<Resource, GatherRule>> = {
   log: {
     isTarget: (m, i) => m.tree[i] === TREE_MATURE,
-    take: (m, i) => {
-      m.tree[i] = 0;
-      m.touch(i);
+    take: (w, i) => {
+      w.map.tree[i] = 0;
+      w.map.touch(i);
+      markWalkable(w.map, i % w.map.w, Math.floor(i / w.map.w));
     },
   },
   stone: {
     isTarget: (m, i) => m.stone[i] > 0,
-    take: (m, i) => {
-      m.stone[i]--;
-      m.touch(i);
+    take: (w, i) => {
+      w.map.stone[i]--;
+      w.map.touch(i);
+      markWalkable(w.map, i % w.map.w, Math.floor(i / w.map.w));
+    },
+  },
+  water: {
+    // Unlimited: any shore of open water.
+    isTarget: (m, i) => m.terrain[i] === Terrain.Water && shore(m, i),
+    take: () => {},
+  },
+  fish: {
+    isTarget: (m, i) => m.fish[i] > 0 && shore(m, i),
+    take: (w, i) => {
+      w.map.fish[i]--;
+    },
+  },
+  grain: {
+    isTarget: (m, i) => m.crop[i] === CROP_RIPE,
+    take: (w, i) => {
+      w.map.crop[i] = 0;
+      w.map.touch(i);
+      w.fields.delete(i);
+    },
+  },
+};
+
+interface PlantRule {
+  /** Costlier checks, run only on the chosen candidate and again at planting time. */
+  isSafe(w: World, x: number, y: number): boolean;
+  /** Whether a tile counts towards `PlantDef.maxNearby`. */
+  counts(m: GameMap, i: number): boolean;
+  plant(w: World, i: number): void;
+}
+
+const PLANT_RULES: Record<PlantKind, PlantRule> = {
+  tree: {
+    // Saplings block movement, so they must not cut routes.
+    isSafe: (w, x, y) => !settlerNear(w, x, y) && staysConnected(w.map, x, y),
+    counts: (m, i) => m.tree[i] > 0,
+    plant: (w, i) => {
+      w.map.tree[i] = 1;
+      w.map.touch(i);
+      w.stats.treesPlanted++;
+    },
+  },
+  grain: {
+    // Fields stay walkable.
+    isSafe: () => true,
+    counts: (m, i) => m.crop[i] > 0,
+    plant: (w, i) => {
+      w.map.crop[i] = 1;
+      w.map.touch(i);
+      w.fields.add(i);
     },
   },
 };
@@ -33,10 +106,9 @@ export function isGatherTarget(w: World, res: Resource, i: number, owner: Player
   return !!rule && w.map.owner[i] === owner && rule.isTarget(w.map, i);
 }
 
-/** Removes one unit of `res` from the tile. */
+/** Takes one unit of `res` from the tile. */
 export function harvest(w: World, res: Resource, i: number): void {
-  GATHER_RULES[res]!.take(w.map, i);
-  markWalkable(w.map, i % w.map.w, Math.floor(i / w.map.w));
+  GATHER_RULES[res]!.take(w, i);
 }
 
 /** Nearest reachable, unreserved target within the gatherer's radius of its hut. */
@@ -61,6 +133,18 @@ export function findGatherTarget(w: World, s: Settler, home: Building, def: Gath
   return null;
 }
 
+/** Whether anything the gatherer could work exists within its radius (ignores reservations and routes). */
+export function hasGatherTargetNear(w: World, home: Building, def: GatherDef): boolean {
+  const m = w.map;
+  for (let y = home.door.y - def.radius; y <= home.door.y + def.radius; y++) {
+    for (let x = home.door.x - def.radius; x <= home.door.x + def.radius; x++) {
+      if (!m.inBounds(x, y) || dist({ x, y }, home.door) > def.radius) continue;
+      if (isGatherTarget(w, def.res, m.idx(x, y), home.owner)) return true;
+    }
+  }
+  return false;
+}
+
 export function treesAround(m: GameMap, x: number, y: number): number {
   let count = 0;
   for (let dy = -1; dy <= 1; dy++) {
@@ -79,61 +163,81 @@ export function settlerNear(w: World, x: number, y: number): boolean {
   );
 }
 
-/**
- * Whether a sapling may go on this tile: own free grass, not next to a door, nobody standing there,
- * and blocking it does not cut any walking route.
- * `planting` skips the reservation check for the forester who holds it.
- */
-export function canPlant(w: World, x: number, y: number, owner: PlayerId, planting = false): boolean {
-  return plotLooksFree(w, x, y, owner, planting) && plotIsSafe(w, x, y);
-}
-
-/** Cheap per-tile checks, fine to run over a whole search radius. */
-function plotLooksFree(w: World, x: number, y: number, owner: PlayerId, planting = false): boolean {
+/** Own free grass, away from doors, not already promised to another planter. Cheap per tile. */
+function plotLooksFree(w: World, x: number, y: number, owner: PlayerId, planting: boolean): boolean {
   const m = w.map;
   if (!m.inBounds(x, y) || m.owner[m.idx(x, y)] !== owner) return false;
   if (!m.isBuildable(x, y) || m.hasDoorNear(x, y)) return false;
   return planting || !w.reservedPlots.has(m.idx(x, y));
 }
 
-/** Costlier checks (other settlers, route connectivity), run only on the chosen candidate. */
-function plotIsSafe(w: World, x: number, y: number): boolean {
-  return !settlerNear(w, x, y) && staysConnected(w.map, x, y);
+/** Full check, used when the planting actually happens. `planting` skips the planter's own reservation. */
+export function canPlant(w: World, what: PlantKind, x: number, y: number, owner: PlayerId, planting = false): boolean {
+  return plotLooksFree(w, x, y, owner, planting) && PLANT_RULES[what].isSafe(w, x, y);
 }
 
-/** A random reachable free plot around the forester's hut, spreading the new forest out. */
+export function plant(w: World, what: PlantKind, i: number): void {
+  PLANT_RULES[what].plant(w, i);
+}
+
+/** How many plantings of the kind lie within the radius of the hut's door. */
+function plantingsNear(w: World, home: Building, def: PlantDef): number {
+  const m = w.map;
+  const rule = PLANT_RULES[def.what];
+  let n = 0;
+  for (let y = home.door.y - def.radius; y <= home.door.y + def.radius; y++) {
+    for (let x = home.door.x - def.radius; x <= home.door.x + def.radius; x++) {
+      if (m.inBounds(x, y) && dist({ x, y }, home.door) <= def.radius && rule.counts(m, m.idx(x, y))) n++;
+    }
+  }
+  return n;
+}
+
+/** A random reachable free plot around the hut, spreading plantings out; null when none or enough. */
 export function findPlotFor(w: World, s: Settler, home: Building, def: PlantDef): Target | null {
+  if (def.maxNearby !== undefined && plantingsNear(w, home, def) >= def.maxNearby) return null;
   const candidates: Point[] = [];
   const r = def.radius;
   for (let y = home.door.y - r; y <= home.door.y + r; y++) {
     for (let x = home.door.x - r; x <= home.door.x + r; x++) {
       const d = dist({ x, y }, home.door);
-      if (d < 2 || d > r || !plotLooksFree(w, x, y, s.owner)) continue;
-      if (treesAround(w.map, x, y) >= 4) continue;
+      if (d < 2 || d > r || !plotLooksFree(w, x, y, s.owner, false)) continue;
+      if (def.what === 'tree' && treesAround(w.map, x, y) >= 4) continue;
       candidates.push({ x, y });
     }
   }
   for (let attempt = 0; attempt < 12 && candidates.length > 0; attempt++) {
     const [c] = candidates.splice(randInt(w.rng, candidates.length), 1);
-    if (!plotIsSafe(w, c.x, c.y)) continue;
+    if (!PLANT_RULES[def.what].isSafe(w, c.x, c.y)) continue;
     const path = findPath(w.map, Math.round(s.x), Math.round(s.y), c.x, c.y, true);
     if (path) return { ...c, path };
   }
   return null;
 }
 
-/** Saplings grow, mature trees occasionally seed a neighbouring tile. */
-export function updateTrees(w: World): void {
+/** Runs `attempt` on average `perReferenceArea` times per tick, scaled to the map's area. */
+function scaled(w: World, perReferenceArea: number, attempt: () => void): void {
+  let expected = (perReferenceArea * w.map.w * w.map.h) / REFERENCE_AREA;
+  while (expected > 0) {
+    if (expected >= 1 || w.rng() < expected) attempt();
+    expected -= 1;
+  }
+}
+
+/** Trees grow and seed, fields ripen, fish restock. */
+export function updateNature(w: World): void {
   const m = w.map;
   const n = m.w * m.h;
-  for (let k = 0; k < 20; k++) {
+
+  scaled(w, 20, () => {
     const i = randInt(w.rng, n);
     if (m.tree[i] > 0 && m.tree[i] < TREE_MATURE && w.rng() < 0.3) {
       m.tree[i]++;
       m.touch(i);
     }
-  }
-  if (w.rng() < 0.1) {
+  });
+
+  scaled(w, 0.1, () => {
     const i = randInt(w.rng, n);
     if (m.tree[i] !== TREE_MATURE) return;
     const x = (i % m.w) + randInt(w.rng, 5) - 2;
@@ -142,5 +246,20 @@ export function updateTrees(w: World): void {
     if (treesAround(m, x, y) >= 5 || !staysConnected(m, x, y)) return;
     m.tree[m.idx(x, y)] = 1;
     m.touch(m.idx(x, y));
+  });
+
+  scaled(w, FISH_RESTOCK, () => {
+    const i = randInt(w.rng, n);
+    if (m.terrain[i] === Terrain.Water && m.fish[i] < FISH_MAX && w.rng() < 0.5) m.fish[i]++;
+  });
+
+  if (w.tick % CROP_GROW_EVERY === 0 && w.fields.size > 0) {
+    // Sorted so the RNG is consumed in the same order after a save/load.
+    for (const i of [...w.fields].sort((a, b) => a - b)) {
+      if (m.crop[i] < CROP_RIPE && w.rng() < CROP_GROW_CHANCE) {
+        m.crop[i]++;
+        m.touch(i);
+      }
+    }
   }
 }

@@ -1,4 +1,4 @@
-import { DEPOSIT_STONE, TREE_MATURE } from './config';
+import { DEPOSIT_STONE, FISH_MAX, TREE_MATURE } from './config';
 import { createRng, randInt, type Rng } from './rng';
 import { Terrain } from './types';
 
@@ -11,6 +11,10 @@ export class GameMap {
   readonly tree: Uint8Array;
   /** Stone units left in a deposit on this tile, 0 if none. Deposits block movement. */
   readonly stone: Uint8Array;
+  /** Grain field stage, 0 = no field. Fields are walkable but not buildable. */
+  readonly crop: Uint8Array;
+  /** Fish left in a water tile. */
+  readonly fish: Uint8Array;
   /** Player id owning the tile's territory, 0 if nobody. */
   readonly owner: Uint8Array;
   /** Building id occupying the tile, 0 if none. */
@@ -34,6 +38,8 @@ export class GameMap {
     this.terrain = new Uint8Array(n).fill(Terrain.Grass);
     this.tree = new Uint8Array(n);
     this.stone = new Uint8Array(n);
+    this.crop = new Uint8Array(n);
+    this.fish = new Uint8Array(n);
     this.owner = new Uint8Array(n);
     this.building = new Int32Array(n);
     this.door = new Int32Array(n);
@@ -44,8 +50,8 @@ export class GameMap {
   }
 
   /**
-   * Records that a tile's visible contents (tree, stone) changed, so views only re-scan dirty chunks.
-   * Every runtime write to `tree` or `stone` must call this.
+   * Records that a tile's visible contents (tree, stone, crop) changed, so views only re-scan dirty chunks.
+   * Every runtime write to `tree`, `stone` or `crop` must call this.
    */
   touch(i: number): void {
     this.chunkVersion[this.chunkOf(i % this.w, Math.floor(i / this.w))]++;
@@ -78,9 +84,15 @@ export class GameMap {
       this.terrain[i] === Terrain.Grass &&
       this.tree[i] === 0 &&
       this.stone[i] === 0 &&
+      this.crop[i] === 0 &&
       this.building[i] === 0 &&
       this.door[i] === 0
     );
+  }
+
+  /** A water or other blocked tile that can be worked from an orthogonally adjacent walkable tile. */
+  hasWalkableNeighbor(x: number, y: number): boolean {
+    return this.isWalkable(x + 1, y) || this.isWalkable(x - 1, y) || this.isWalkable(x, y + 1) || this.isWalkable(x, y - 1);
   }
 
   hasDoorNear(x: number, y: number): boolean {
@@ -152,6 +164,7 @@ export function generateMap(seed: number, size: number, cx: number, cy: number):
       else if (h < 0.35) t = Terrain.Sand;
       else if (h > 0.72) t = Terrain.Rock;
       map.terrain[i] = t;
+      if (t === Terrain.Water) map.fish[i] = FISH_MAX;
       if (t === Terrain.Grass && forest[i] > 0.55 && rng() < 0.75) {
         map.tree[i] = rng() < 0.85 ? TREE_MATURE : 2 + randInt(rng, 2);
       }
@@ -165,6 +178,7 @@ export function generateMap(seed: number, size: number, cx: number, cy: number):
         const i = map.idx(x, y);
         if (map.terrain[i] !== Terrain.Grass) continue;
         map.tree[i] = 0;
+        map.fish[i] = 0;
         map.stone[i] = DEPOSIT_STONE[0] + randInt(rng, DEPOSIT_STONE[1] - DEPOSIT_STONE[0] + 1);
       }
     }
@@ -183,6 +197,7 @@ export function generateMap(seed: number, size: number, cx: number, cy: number):
       map.terrain[i] = Terrain.Grass;
       map.tree[i] = 0;
       map.stone[i] = 0;
+      map.fish[i] = 0;
     }
   }
 
@@ -196,12 +211,32 @@ export function generateMap(seed: number, size: number, cx: number, cy: number):
       const i = map.idx(x, y);
       map.terrain[i] = Terrain.Grass;
       map.stone[i] = 0;
+      map.fish[i] = 0;
       if (rng() < 0.7) map.tree[i] = TREE_MATURE;
     }
   }
 
   // Guarantee a quarry on the other side.
   depositAt(cx - 7, cy + 3, 2.3, 0.85);
+
+  // Guarantee a pond inside the starting territory: water for wells, fish for fishers.
+  const px = cx - 1;
+  const py = cy + 8;
+  for (let y = py - 3; y <= py + 3; y++) {
+    for (let x = px - 3; x <= px + 3; x++) {
+      if (!map.inBounds(x, y)) continue;
+      const d = Math.hypot(x - px, y - py);
+      const i = map.idx(x, y);
+      if (d <= 1.7) {
+        map.terrain[i] = Terrain.Water;
+        map.fish[i] = FISH_MAX;
+      } else if (d <= 2.7 && map.terrain[i] !== Terrain.Water) {
+        map.terrain[i] = Terrain.Sand;
+      } else continue;
+      map.tree[i] = 0;
+      map.stone[i] = 0;
+    }
+  }
 
   return map;
 }

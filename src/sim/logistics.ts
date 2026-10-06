@@ -47,16 +47,19 @@ function dispatchFor(w: World, owner: PlayerId): void {
     ];
   }
 
-  for (const b of own) {
-    for (const res of RESOURCES) {
-      let need = demand(w, b, res);
-      while (need-- > 0) {
-        const from = nearestSupply(w, own, res, b);
-        if (!from) break;
-        const s = take(from.door);
-        if (!s) return;
-        assignDelivery(s, from, b, res);
-      }
+  // Demands are served one unit per round, least-stocked consumer first, so a scarce resource is
+  // shared fairly instead of the oldest building taking it all.
+  for (const res of RESOURCES) {
+    const wanting = own.filter((b) => demand(w, b, res) > 0);
+    while (wanting.length > 0) {
+      wanting.sort((a, b) => stocked(a, res) - stocked(b, res) || a.id - b.id);
+      const b = wanting[0];
+      const from = nearestSupply(w, own, res, b);
+      if (!from) break;
+      const s = take(from.door);
+      if (!s) return;
+      assignDelivery(s, from, b, res);
+      if (demand(w, b, res) <= 0) wanting.shift();
     }
   }
 
@@ -72,6 +75,11 @@ function dispatchFor(w: World, owner: PlayerId): void {
       }
     }
   }
+}
+
+/** How much of `res` the consumer already has or has coming. */
+function stocked(b: Building, res: Resource): number {
+  return (b.done ? b.input[res] : b.delivered[res]) + b.inbound[res];
 }
 
 function nearestSupply(w: World, own: Building[], res: Resource, target: Building): Building | undefined {

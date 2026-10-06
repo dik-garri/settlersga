@@ -12,6 +12,9 @@ const DRAG_THRESHOLD = 5;
 
 export interface InputCallbacks {
   onSelectBuildType(type: BuildingType | null): void;
+  /** Digit 1–9: pick a building on the open build-menu tab. */
+  onHotkey(n: number): void;
+  onNextTab(): void;
   onMessage(text: string): void;
 }
 
@@ -173,21 +176,12 @@ export class InputController {
         e.preventDefault();
         this.state.paused = !this.state.paused;
         break;
-      case 'Digit1':
-        this.cb.onSelectBuildType('woodcutter');
+      case 'Tab':
+        e.preventDefault();
+        this.cb.onNextTab();
         break;
-      case 'Digit2':
-        this.cb.onSelectBuildType('sawmill');
-        break;
-      case 'Digit3':
-        this.cb.onSelectBuildType('forester');
-        break;
-      case 'Digit4':
-        this.cb.onSelectBuildType('stonecutter');
-        break;
-      case 'Digit5':
-        this.cb.onSelectBuildType('tower');
-        break;
+      default:
+        if (/^Digit[1-9]$/.test(e.code)) this.cb.onHotkey(Number(e.code.slice(5)));
     }
   }
 }

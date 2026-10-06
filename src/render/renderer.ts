@@ -86,6 +86,8 @@ export class GameRenderer {
   private readonly treeSprites: (Sprite | null)[];
   private readonly treeState: Uint8Array;
   private readonly depositSprites: (Sprite | null)[];
+  private readonly cropSprites: (Sprite | null)[];
+  private readonly cropState: Uint8Array;
   /** Rendered deposit size per tile: 0 = none, otherwise size class + 1. */
   private readonly depositState: Uint8Array;
   private readonly buildingViews = new Map<number, BuildingView>();
@@ -108,6 +110,8 @@ export class GameRenderer {
     this.treeState = new Uint8Array(n);
     this.depositSprites = new Array(n).fill(null);
     this.depositState = new Uint8Array(n);
+    this.cropSprites = new Array(n).fill(null);
+    this.cropState = new Uint8Array(n);
     const chunks = map.chunksX * map.chunksY;
     this.ownerSeen = new Uint8Array(n).fill(255);
     for (let c = 0; c < chunks; c++) {
@@ -244,6 +248,7 @@ export class GameRenderer {
           const i = map.idx(x, y);
           this.syncTree(i);
           this.syncDeposit(i);
+          this.syncCrop(i);
         }
       }
     }
@@ -343,6 +348,31 @@ export class GameRenderer {
     if (border) g.stroke({ width: 3, color: 0x2b5fb4, alpha: 0.85 });
   }
 
+  /** Fields are flat, so they live in the ground layer of their chunk rather than among sorted objects. */
+  private syncCrop(i: number): void {
+    const { map } = this.sim;
+    const stage = map.crop[i];
+    if (stage === this.cropState[i]) return;
+    this.cropState[i] = stage;
+    let s = this.cropSprites[i];
+    if (stage === 0) {
+      s?.destroy();
+      this.cropSprites[i] = null;
+      return;
+    }
+    const x = i % map.w;
+    const y = Math.floor(i / map.w);
+    if (!s) {
+      s = new Sprite();
+      const p = toScreen(x, y);
+      s.position.set(p.x, p.y);
+      this.groundChunks[map.chunkOf(x, y)].addChild(s);
+      this.cropSprites[i] = s;
+    }
+    s.texture = this.atlas.get(`field:${stage}`);
+    s.anchor.copyFrom(s.texture.defaultAnchor!);
+  }
+
   private syncDeposit(i: number): void {
     const { map } = this.sim;
     const left = map.stone[i];
@@ -398,7 +428,7 @@ export class GameRenderer {
     const body = new Container();
     body.position.set(p.x, p.y);
     body.zIndex = depthOf(cx, cy) + 0.25;
-    const site = new Sprite(this.atlas.get('building:site'));
+    const site = new Sprite(this.atlas.get(b.w >= 3 ? 'building:site3' : 'building:site2'));
     const main = new Sprite();
     body.addChild(site, main);
 

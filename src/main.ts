@@ -51,6 +51,8 @@ async function main() {
   });
   const input = new InputController(app.canvas, camera, renderer, world, state, {
     onSelectBuildType: (type) => hud.selectBuildType(type),
+    onHotkey: (n) => hud.hotkey(n),
+    onNextTab: () => hud.nextTab(),
     onMessage: (text) => hud.toast(text),
   });
 

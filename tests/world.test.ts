@@ -295,6 +295,6 @@ describe('World', () => {
         for (const res of RESOURCES) expect(b.outReserved[res]).toBeLessThanOrEqual(b.output[res]);
       }
     }
-    expect(world.stats.lost).toEqual({ log: 0, plank: 0, stone: 0 });
+    expect(Object.values(world.stats.lost).every((n) => n === 0)).toBe(true);
   });
 });

@@ -4,8 +4,6 @@ import {
   BUILDINGS,
   DISPATCH_EVERY,
   MAP_SIZE,
-  MAX_POPULATION,
-  SPAWN_CARRIER_EVERY,
   START_BUILDERS,
   START_CARRIERS,
   START_PLANKS,
@@ -14,7 +12,7 @@ import {
 } from './config';
 import { dispatch } from './logistics';
 import { generateMap, type GameMap } from './map';
-import { updateTrees } from './nature';
+import { updateNature } from './nature';
 import { findPath, staysConnected } from './pathfinding';
 import { createRng, type Rng } from './rng';
 import { mapFromSave, restoreWorld, type SaveData } from './save';
@@ -61,8 +59,10 @@ export class World {
   readonly settlerById = new Map<number, Settler>();
   /** Trees and stone deposits a gatherer is heading for. */
   readonly reservedTargets = new Set<number>();
-  /** Tiles a forester is on the way to plant. */
+  /** Tiles a planter is on the way to plant. */
   readonly reservedPlots = new Set<number>();
+  /** Tiles with a grain field; derived from `map.crop`, so not saved. */
+  readonly fields = new Set<number>();
   nextId = 1;
 
   constructor(seed = 1, opts: WorldOptions = {}) {
@@ -70,6 +70,7 @@ export class World {
     if (opts.from) {
       this.map = mapFromSave(opts.from);
       restoreWorld(this, opts.from);
+      for (let i = 0; i < this.map.crop.length; i++) if (this.map.crop[i] > 0) this.fields.add(i);
       return;
     }
     const size = opts.size ?? MAP_SIZE;
@@ -186,15 +187,9 @@ export class World {
       s.px = s.x;
       s.py = s.y;
     }
-    updateTrees(this);
+    updateNature(this);
     for (const b of this.buildings.values()) updateBuilding(this, b);
     for (const s of this.settlers) updateSettler(this, s);
     if (this.tick % DISPATCH_EVERY === 0) dispatch(this);
-    if (this.tick % SPAWN_CARRIER_EVERY === 0) {
-      for (const p of this.players) {
-        const population = this.settlers.filter((s) => s.owner === p.id).length;
-        if (population < MAX_POPULATION) spawnSettler(this, 'carrier', this.castleOf(p.id));
-      }
-    }
   }
 }

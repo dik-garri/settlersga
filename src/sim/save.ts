@@ -3,9 +3,9 @@ import type { Building, Settler, Stock } from './types';
 import type { Player, World } from './world';
 
 /** Bump when the save layout changes incompatibly. */
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
-const MAP_LAYERS = ['terrain', 'tree', 'stone', 'owner', 'building', 'door'] as const;
+const MAP_LAYERS = ['terrain', 'tree', 'stone', 'crop', 'fish', 'owner', 'building', 'door'] as const;
 type MapLayer = (typeof MAP_LAYERS)[number];
 
 /** Plain-JSON snapshot of the whole simulation. */
