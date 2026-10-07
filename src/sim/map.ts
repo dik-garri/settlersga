@@ -38,6 +38,11 @@ export class GameMap {
   readonly wear: Uint8Array;
   /** Player id owning the tile's territory, 0 if nobody. */
   readonly owner: Uint8Array;
+  /**
+   * Player whose pioneer claimed the tile (0: nobody). Land military buildings claim wins over it;
+   * `recomputeTerritory` gives the rest of the claimed tiles to their claimant.
+   */
+  readonly claimed: Uint8Array;
   /** Building id occupying the tile, 0 if none. */
   readonly building: Int32Array;
   /** Building id whose door is on this tile, 0 if none. */
@@ -77,6 +82,7 @@ export class GameMap {
     this.explored = new Uint8Array(n);
     this.wear = new Uint8Array(n);
     this.owner = new Uint8Array(n);
+    this.claimed = new Uint8Array(n);
     this.building = new Int32Array(n);
     this.door = new Int32Array(n);
     this.height = new Uint8Array((w + 1) * (h + 1));

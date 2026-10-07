@@ -17,6 +17,8 @@ import {
   totalCost,
 } from './config';
 import { levelTarget, needsDigger, needsLevelling } from './digging';
+import { dismissSpecialist, sendPioneer, sendThief } from './specialists';
+import { attackStrength } from './strength';
 import { createEconomy, orderTool, orderWorkers, setAccepts, setDistribution, type EconomyState } from './economy';
 import { rebuildWorn, updatePaths } from './paths';
 import { dispatch } from './logistics';
@@ -114,18 +116,28 @@ export class World {
   readonly buildings = new Map<number, Building>();
   readonly settlers: Settler[] = [];
   readonly players: Player[] = [];
-  readonly stats: { produced: Stock; lost: Stock; treesPlanted: number; prospected: number; trained: number } = {
+  readonly stats: {
+    produced: Stock;
+    lost: Stock;
+    treesPlanted: number;
+    prospected: number;
+    trained: number;
+    thievesCaught: number;
+  } = {
     produced: emptyStock(),
     lost: emptyStock(),
     treesPlanted: 0,
     prospected: 0,
     trained: 0,
+    thievesCaught: 0,
   };
   tick = 0;
   /** Bumped whenever the territory changes, so views can redraw the border. */
   territoryVersion = 0;
   /** Bumped whenever a building is added or removed (derived, not saved; drives fog vision). */
   buildingsVersion = 0;
+  /** Tiles pioneers ever claimed (`map.claimed`; derived, recounted on load) — lets territory skip the pass when 0. */
+  pioneerLand = 0;
 
   // Internal state shared by the sim modules.
   readonly rng: Rng;
@@ -165,6 +177,7 @@ export class World {
       restoreWorld(this, opts.from);
       for (let i = 0; i < this.map.crop.length; i++) if (this.map.crop[i] > 0) this.fields.add(i);
       rebuildWorn(this);
+      for (const p of this.map.claimed) if (p !== 0) this.pioneerLand++;
       return;
     }
     const size = opts.size ?? MAP_SIZE;
@@ -446,6 +459,31 @@ export class World {
    * Player command: the nearest idle carrier becomes a geologist, examines up to `PROSPECT_TILES`
    * unexplored mountain tiles around (x, y) and turns back into a carrier. False if impossible.
    */
+  /** Player command: order `count` specialists (pioneers, thieves) — the same orders as workers. */
+  orderSpecialist(kind: SettlerKind, count: number, player: PlayerId = LOCAL_PLAYER): boolean {
+    return orderWorkers(this, player, kind, count);
+  }
+
+  /** Player command: send an idle pioneer to push the border around (x, y) (`specialists.ts`). */
+  sendPioneer(x: number, y: number, player: PlayerId = LOCAL_PLAYER): boolean {
+    return sendPioneer(this, x, y, player);
+  }
+
+  /** Player command: send an idle thief to rob a foreign building (`specialists.ts`). */
+  sendThief(targetId: number, player: PlayerId = LOCAL_PLAYER): boolean {
+    return sendThief(this, targetId, player);
+  }
+
+  /** Player command: an idle specialist on own land becomes a carrier again; the order drops by one. */
+  dismissSpecialist(kind: SettlerKind, player: PlayerId = LOCAL_PLAYER): boolean {
+    return dismissSpecialist(this, kind, player);
+  }
+
+  /** The player's attack strength on foreign land, in per cent (`strength.ts`). */
+  strengthOf(player: PlayerId = LOCAL_PLAYER): number {
+    return attackStrength(this, player);
+  }
+
   sendGeologist(x: number, y: number, player: PlayerId = LOCAL_PLAYER): boolean {
     const m = this.map;
     if (!this.owns(x, y, player) || m.terrain[m.idx(x, y)] !== Terrain.Mountain) return false;

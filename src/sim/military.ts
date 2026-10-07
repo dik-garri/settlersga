@@ -36,6 +36,7 @@ import {
   type GarrisonDef,
 } from './config';
 import { randInt } from './rng';
+import { fieldFactor } from './strength';
 import { abort } from './settlers';
 import type { Building, PlayerId, Point, Resource, Settler, SettlerKind, Task } from './types';
 import type { World } from './world';
@@ -436,12 +437,16 @@ export function attack(w: World, targetId: number, count: number, player: Player
 
 /** One blow of a duel: either side may land it, in proportion to its strength. */
 function blow(w: World, attacker: Settler, defender: Settler, b: Building): void {
-  const sa = strength(attacker, null);
-  const sd = strength(defender, b);
+  // Fighting strength where each stands (`strength.ts`): the attacker on foreign land at his owner's
+  // attack strength, the defender at home at his owner's defence strength.
+  const fa = fieldFactor(w, attacker);
+  const fd = fieldFactor(w, defender);
+  const sa = strength(attacker, null) * fa;
+  const sd = strength(defender, b) * fd;
   const hitter = w.rng() < sd / (sa + sd) ? defender : attacker;
   const victim = hitter === defender ? attacker : defender;
   const base = DAMAGE[0] + randInt(w.rng, DAMAGE[1] - DAMAGE[0] + 1);
-  victim.hp -= base * strength(hitter, null);
+  victim.hp -= base * strength(hitter, null) * (hitter === attacker ? fa : fd);
   if (victim.hp <= 0) killSettler(w, victim);
 }
 
@@ -450,7 +455,10 @@ function shoot(w: World, archer: Settler, target: Settler, from: Point): void {
   const ranged = PROFESSIONS[archer.kind].combat!.ranged!;
   archer.reload = ranged.every;
   w.shots.push({ x0: from.x, y0: from.y, x1: target.x, y1: target.y, tick: w.tick, owner: archer.owner });
-  target.hp -= (ranged.damage[0] + randInt(w.rng, ranged.damage[1] - ranged.damage[0] + 1)) * SOLDIER_LEVELS[archer.level].damage;
+  target.hp -=
+    (ranged.damage[0] + randInt(w.rng, ranged.damage[1] - ranged.damage[0] + 1)) *
+    SOLDIER_LEVELS[archer.level].damage *
+    fieldFactor(w, archer);
   if (target.hp <= 0) killSettler(w, target);
 }
 

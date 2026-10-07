@@ -20,6 +20,7 @@
  * buildings and, when it wants to build, scores the tiles of its own territory (sampled more sparsely
  * on large territories) and tries `canPlace` on the best `AI.placeTries` spots only.
  */
+import { attackStrength } from './strength';
 import { available, centerOf, claimsTerritory, doorOf, oreLeft, waitingFor } from './buildings';
 import {
   AI,
@@ -29,6 +30,7 @@ import {
   SOLDIER_LEVELS,
   BUILDINGS,
   costOf,
+  totalCost,
   gatheredBy,
   oreOf,
   PROFESSIONS,
@@ -46,7 +48,7 @@ export interface AiState {
   nextThink: number;
   lastAttack: number;
   /** Building type (or 'frontier') → tick before which the AI does not look for a spot again. */
-  blockedUntil: Partial<Record<BuildingType | 'frontier', number>>;
+  blockedUntil: Partial<Record<BuildingType | 'frontier' | 'decor', number>>;
   /** Ore it wants a mine for but knows no deposit of: towers then favour mountains, geologists go out. */
   wantOre: Resource | null;
   /** Its weapon shares have been set (once, through `setShare`). */
@@ -166,6 +168,18 @@ function think(w: World, ai: AiState): void {
     ai.blockedUntil[step.type] = w.tick + RETRY_TICKS;
   }
 
+  // Spare materials go into eyecatchers: they raise its settlement value and so its army's strength
+  // on foreign land (`strength.ts`), one per `AI.decorEvery` buildings.
+  const decor = own.filter((b) => BUILDINGS[b.type].eyecatcher).length;
+  if (decor * AI.decorEvery < own.length && (ai.blockedUntil.decor ?? -Infinity) <= w.tick) {
+    const spare = (Object.entries(AI.decorSpare) as [Resource, number][]).every(([r, n]) => available(w, me, r) >= n);
+    const type = spare ? EYECATCHERS.find((t) => ctx.affordable(t)) : undefined;
+    if (type) {
+      if (tryPlace(ctx, ai, type)) return;
+      ai.blockedUntil.decor = w.tick + RETRY_TICKS;
+    }
+  }
+
   // Army ready but no enemy in reach: push military buildings towards the nearest enemy.
   // Only when every military building is manned and the new one can be manned too.
   // Short of ore (`wantOre`), it expands towards mountains even with an enemy in reach: saving
@@ -207,6 +221,10 @@ function enemyInReach(w: World, me: PlayerId, military: Building[]): boolean {
 }
 
 /** Buildings with a sight of their own (lookout towers), for scouting. */
+/** Eyecatchers, the costliest first: the most settlement value per placement. */
+const EYECATCHERS = (Object.keys(BUILDINGS) as BuildingType[])
+  .filter((t) => BUILDINGS[t].eyecatcher && BUILDINGS[t].playerBuildable)
+  .sort((a, b) => totalCost(b) - totalCost(a));
 const LOOKOUTS = (Object.keys(BUILDINGS) as BuildingType[]).filter((t) => BUILDINGS[t].vision && BUILDINGS[t].playerBuildable);
 
 /** Military buildings the AI pushes its border with, largest garrison first. */
@@ -277,7 +295,12 @@ function attackIfStrong(w: World, ai: AiState): boolean {
     const ready = w.attackerComposition(b.id, Infinity, me);
     // Only swordsmen take a building: a party without one could only kill, never conquer.
     if (!ready.some((s) => PROFESSIONS[s.kind].combat?.captures)) continue;
-    const power = ready.reduce((n, s) => n + SOLDIER_LEVELS[s.level].damage * (PROFESSIONS[s.kind].combat?.melee ?? 1), 0);
+    // Its fighters fight there at its attack strength (its own settlement value, which it knows);
+    // the defenders' strength it cannot know, so it assumes the base 100 %.
+    const power =
+      (ready.reduce((n, s) => n + SOLDIER_LEVELS[s.level].damage * (PROFESSIONS[s.kind].combat?.melee ?? 1), 0) *
+        attackStrength(w, me)) /
+      100;
     const defense = defenders * (BUILDINGS[b.type].garrison!.defense ?? 1);
     if (ready.length < AI.minAttackers || power < AI.attackRatio * defense + 1) continue;
     // Prefer the castle (it ends the game), then the largest margin.

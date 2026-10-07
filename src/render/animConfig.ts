@@ -97,6 +97,9 @@ const STYLES: Partial<Record<SettlerKind, Partial<SettlerStyle>>> = {
   weaponsmith: { tunic: '#4a4f55', hat: '#8c4a3a', hatStyle: 'cap', work: 'hammer', holds: 'hammer' },
   soldier: { hat: '#9aa0a6', hatStyle: 'helmet', work: 'sword', holds: 'sword', fighter: true },
   archer: { hat: '#4f6b3a', hatStyle: 'hood', work: 'shoot', holds: 'bow', fighter: true },
+  // Specialists: the pioneer digs border stones in, the thief goes about in a dark hood, hands free.
+  pioneer: { tunic: '#a8743a', hat: '#6b4a2a', hatStyle: 'straw', work: 'dig', holds: 'shovel' },
+  thief: { tunic: '#2e2a30', hat: '#1e1b20', hatStyle: 'hood', work: 'sow' },
 };
 
 /** Work done on a planting or gathering task overrides the profession's default `work`. */

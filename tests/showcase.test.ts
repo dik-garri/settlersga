@@ -26,5 +26,9 @@ describe('dev showcase (?demo)', () => {
     // Free carriers crowd outside near buildings (`idle.ts`).
     const crowd = w.settlers.filter((s) => s.kind === 'carrier' && s.tasks.length === 0 && s.idleAt !== null);
     expect(crowd.filter((s) => s.inside === null).length).toBeGreaterThan(2);
+    // Specialists at work: a pioneer has claimed land, a thief is on his errand.
+    expect(w.pioneerLand).toBeGreaterThan(0);
+    const thief = w.settlers.find((s) => s.kind === 'thief');
+    expect(thief?.errand?.b).toBeDefined();
   });
 });

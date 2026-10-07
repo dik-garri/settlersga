@@ -145,7 +145,46 @@ export const START_CONDITIONS: Record<StartLevel, StartDef> = {
  * a tool, only as many as ordered); the defaults equal the start's, so nothing is recruited unasked.
  * `World.orderWorkers` changes them.
  */
-export const ORDERABLE: readonly SettlerKind[] = ['builder', 'digger'];
+export const ORDERABLE: readonly SettlerKind[] = ['builder', 'digger', 'pioneer', 'thief'];
+
+/**
+ * Specialists (Settlers 4), ordered like workers and sent on errands (`specialists.ts`):
+ * - pioneer: claims neutral tiles next to his owner's land within `radius` of where he was sent, one
+ *   every `claimTicks` ticks of work, up to `maxTiles` per errand; land a military building claims
+ *   always wins over his (`recomputeTerritory`);
+ * - thief: robs a foreign building's door pile or stock (`stealTicks` of work, one unit of its most
+ *   plentiful good) and carries it home. On hostile land, every `checkEvery` ticks, any hostile fighter
+ *   outdoors within `catchRadius` or garrisoned building whose door is within it catches him with
+ *   `catchChance`.
+ */
+export const PIONEER = { radius: 4, claimTicks: 40, maxTiles: 24 };
+export const THIEF = { stealTicks: 30, checkEvery: 10, catchRadius: 4, catchChance: 0.12 };
+
+/**
+ * Fighting strength, after Settlers 4 (settlers-united wiki, «fighting strength calculation»): a
+ * player's settlement value is the wood (planks, logs) and stone built into their finished buildings
+ * at `points` each, gold at `goldPoints`, eyecatchers' materials `eyecatcher` times over. Attack
+ * strength starts at `start` per cent (fewer players, more — `perPlayer` less per player beyond one,
+ * never below `min`) and rises with value along `steps` (`[up to %, value points per 1 %]`, diminishing
+ * returns) up to `max`. Fighters on their own (or an ally's) land always fight at 100 %; on foreign
+ * land at the attack strength. Defence equals 100 % until attack strength passes it, then grows at
+ * half its pace. Our buildings are much cheaper than S4's, hence `points` above one.
+ */
+export const STRENGTH = {
+  points: 3,
+  goldPoints: 6,
+  eyecatcher: 3,
+  start: 55,
+  perPlayer: 5,
+  min: 25,
+  max: 150,
+  steps: [
+    [50, 10],
+    [100, 20],
+    [125, 40],
+    [150, 80],
+  ] as readonly (readonly [number, number])[],
+};
 /** Display names and stock-panel groups, kept with the data so new resources are one entry. */
 export type ResourceGroup = 'building' | 'food' | 'metal' | 'tools' | 'military';
 export const RESOURCE_GROUPS: Record<ResourceGroup, string> = {
@@ -380,7 +419,9 @@ export type Behavior =
   | 'prospect'
   | 'soldier'
   | 'hunt'
-  | 'digger';
+  | 'digger'
+  | 'pioneer'
+  | 'thief';
 
 export interface GatherDef {
   res: Resource;
@@ -475,6 +516,9 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
   /** Carries a hammer on his errand and brings it back (see `World.sendGeologist`). */
   geologist: { name: 'Геолог', behavior: 'prospect', tool: 'hammer' },
   weaponsmith: { name: 'Оружейник', behavior: 'workshop' },
+  /** Specialists (`ORDERABLE`, `specialists.ts`). */
+  pioneer: { name: 'Первопроходец', behavior: 'pioneer', tool: 'shovel' },
+  thief: { name: 'Вор', behavior: 'thief' },
   recruit: { name: 'Новобранец', behavior: 'workshop' },
   soldier: { name: 'Мечник', behavior: 'soldier', tool: 'sword', hp: 100, combat: { melee: 1, captures: true } },
   archer: {
@@ -506,7 +550,7 @@ export interface Recipe {
 }
 
 /** Build-menu tab. */
-export type Category = 'housing' | 'resources' | 'food' | 'mining' | 'metal' | 'military';
+export type Category = 'housing' | 'resources' | 'food' | 'mining' | 'metal' | 'military' | 'decor';
 
 export const CATEGORIES: Record<Category, string> = {
   housing: 'Поселение',
@@ -515,6 +559,7 @@ export const CATEGORIES: Record<Category, string> = {
   mining: 'Горное дело',
   metal: 'Металл',
   military: 'Военное',
+  decor: 'Украшения',
 };
 
 export interface BuildingDef {
@@ -556,6 +601,8 @@ export interface BuildingDef {
    * within `range`, take one of `beds`, regain a hit point every `healEvery` ticks and go back.
    */
   infirmary?: { beds: number; healEvery: number; range: number };
+  /** Eyecatcher (decoration): no worker, no territory; its materials count extra in the owner's settlement value (`STRENGTH`). */
+  eyecatcher?: boolean;
 }
 
 /**
@@ -865,6 +912,14 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     category: 'military',
     infirmary: { beds: 4, healEvery: 3, range: 30 },
   },
+
+  // Eyecatchers, as in Settlers 4: built for show, they raise the settlement value and so the army's
+  // strength on foreign land (STRENGTH). Our own small set of designs.
+  flowerbed: { name: 'Клумба', w: 1, h: 1, cost: { plank: 1, stone: 1 }, worker: null, playerBuildable: true, category: 'decor', eyecatcher: true },
+  column: { name: 'Колонна', w: 1, h: 1, cost: { stone: 3 }, worker: null, playerBuildable: true, category: 'decor', eyecatcher: true },
+  statue: { name: 'Статуя', w: 1, h: 1, cost: { stone: 4, gold: 1 }, worker: null, playerBuildable: true, category: 'decor', eyecatcher: true },
+  fountain: { name: 'Фонтан', w: 2, h: 2, cost: { stone: 5, plank: 1 }, worker: null, playerBuildable: true, category: 'decor', eyecatcher: true },
+  obelisk: { name: 'Обелиск', w: 1, h: 1, cost: { stone: 6, gold: 2 }, worker: null, playerBuildable: true, category: 'decor', eyecatcher: true },
 };
 
 /** Fills the missing resources of a partial stock with zeros. */
@@ -996,6 +1051,9 @@ export const AI = {
    */
   reserve: { stone: 4 } as Partial<Record<Resource, number>>,
   reserveFloor: { stone: 1 } as Partial<Record<Resource, number>>,
+  /** At most one eyecatcher per this many own buildings, built only while it holds `decorSpare`. */
+  decorEvery: 8,
+  decorSpare: { stone: 12, plank: 10 } as Partial<Record<Resource, number>>,
 };
 
 // ---------------------------------------------------------------- wild animals

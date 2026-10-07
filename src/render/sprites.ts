@@ -546,6 +546,8 @@ export interface BuildingCanvas {
 
 const SMALL: BuildingCanvas = { w: 150, h: 140, ax: 75, ay: 100 };
 const LARGE: BuildingCanvas = { w: 220, h: 190, ax: 110, ay: 135 };
+/** Eyecatchers on one tile: narrow and tall enough for a column or an obelisk. */
+const DECOR: BuildingCanvas = { w: 80, h: 120, ax: 40, ay: 92 };
 
 /** Sprite canvas per building; `site2`/`site3` are construction sites for 2×2 and 3×3 footprints. */
 export const BUILDING_CANVAS: Record<BuildingType | 'site2' | 'site3', BuildingCanvas> = {
@@ -580,6 +582,11 @@ export const BUILDING_CANVAS: Record<BuildingType | 'site2' | 'site3', BuildingC
   fortress: { w: 230, h: 260, ax: 115, ay: 195 },
   lookout: { w: 150, h: 210, ax: 75, ay: 170 },
   infirmary: SMALL,
+  flowerbed: DECOR,
+  column: DECOR,
+  statue: DECOR,
+  fountain: SMALL,
+  obelisk: DECOR,
   site2: { w: 150, h: 90, ax: 75, ay: 50 },
   site3: { w: 220, h: 120, ax: 110, ay: 65 },
 };
@@ -804,6 +811,102 @@ function paintLookout(ctx: Ctx): void {
   line(ctx, [-p, p, H + 11], [p, p, H + 11], '#5e3b1f', 2);
   line(ctx, [p, -p, H + 11], [p, p, H + 11], '#4a2e18', 2);
   pyramidRoof(ctx, p + 0.06, H + 18, 20, '#6e4a2a');
+}
+
+// ------------------------------------------------------------------ eyecatchers
+
+const MARBLE = '#d9d3c4';
+
+/** A round bed of flowers in a ring of stones. */
+function paintFlowerbed(ctx: Ctx): void {
+  shadow(ctx, 0.4, 0.4, 0.2);
+  box(ctx, 0, 0, 0.42, 0.42, 0, 4, '#9a9284');
+  box(ctx, 0, 0, 0.34, 0.34, 0, 5, '#5a3a22');
+  const rng = createRng(17);
+  const colors = ['#e8483a', '#f2c641', '#f4f0e6', '#b65ad8', '#ff8a3a'];
+  for (let k = 0; k < 26; k++) {
+    const [x, y] = P(rng() * 0.6 - 0.3, rng() * 0.6 - 0.3, 6);
+    ctx.fillStyle = '#3f7a2a';
+    ctx.fillRect(x - 0.5, y - 3, 1, 3);
+    blob(ctx, x, y - 3, 1.8, 1.6, colors[k % colors.length]);
+  }
+}
+
+/** A single fluted column on a square plinth, with a capital. */
+function paintColumn(ctx: Ctx): void {
+  shadow(ctx, 0.3, 0.3, 0.6);
+  box(ctx, 0, 0, 0.3, 0.3, 0, 6, shade(MARBLE, 0.85));
+  box(ctx, 0, 0, 0.13, 0.13, 6, 50, MARBLE);
+  for (const t of [-0.07, 0, 0.07]) {
+    line(ctx, [t, 0.13, 8], [t, 0.13, 54], shade(MARBLE, 0.8));
+    line(ctx, [0.13, t, 8], [0.13, t, 54], shade(MARBLE, 0.65));
+  }
+  box(ctx, 0, 0, 0.22, 0.22, 56, 5, shade(MARBLE, 0.95));
+}
+
+/** A figure with a raised arm on a plinth, in pale stone with a gilt trim. */
+function paintStatue(ctx: Ctx): void {
+  shadow(ctx, 0.32, 0.32, 0.6);
+  box(ctx, 0, 0, 0.32, 0.32, 0, 14, shade(MARBLE, 0.85));
+  box(ctx, 0, 0, 0.33, 0.33, 13, 2, '#c9a23a');
+  const [x, y] = P(0, 0, 15);
+  ctx.fillStyle = MARBLE;
+  ctx.beginPath();
+  ctx.moveTo(x - 5, y);
+  ctx.lineTo(x + 5, y);
+  ctx.lineTo(x + 3.5, y - 22);
+  ctx.lineTo(x - 3.5, y - 22);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = shade(MARBLE, 0.75);
+  ctx.fillRect(x + 1, y - 22, 2.5, 22);
+  blob(ctx, x, y - 26, 3.4, 3.6, MARBLE, shade(MARBLE, 0.7));
+  ctx.strokeStyle = MARBLE;
+  ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  ctx.moveTo(x + 3, y - 19);
+  ctx.lineTo(x + 8, y - 30);
+  ctx.stroke();
+  blob(ctx, x + 8.5, y - 32, 1.8, 1.8, '#e2b93b');
+}
+
+/** A round basin with a spouting middle bowl. */
+function paintFountain(ctx: Ctx): void {
+  shadow(ctx, 0.85, 0.85, 0.3);
+  box(ctx, 0, 0, 0.82, 0.82, 0, 8, shade(MARBLE, 0.82));
+  box(ctx, 0, 0, 0.7, 0.7, 2, 6, '#3f86b8');
+  box(ctx, 0, 0, 0.12, 0.12, 8, 18, MARBLE);
+  box(ctx, 0, 0, 0.32, 0.32, 26, 4, shade(MARBLE, 0.95));
+  box(ctx, 0, 0, 0.26, 0.26, 27, 3, '#5aa4d4');
+  const [x, y] = P(0, 0, 30);
+  ctx.strokeStyle = 'rgba(220,240,255,0.9)';
+  ctx.lineWidth = 1.5;
+  for (const dx of [-6, 0, 6]) {
+    ctx.beginPath();
+    ctx.moveTo(x, y - 8);
+    ctx.quadraticCurveTo(x + dx, y - 16, x + dx * 1.8, y);
+    ctx.stroke();
+  }
+}
+
+/** A tall tapering obelisk with a gilt tip. */
+function paintObelisk(ctx: Ctx): void {
+  shadow(ctx, 0.3, 0.3, 0.9);
+  box(ctx, 0, 0, 0.3, 0.3, 0, 8, shade(MARBLE, 0.8));
+  const H = 62;
+  for (let k = 0; k < 6; k++) {
+    const t0 = k / 6;
+    const r = 0.16 - 0.07 * t0;
+    box(ctx, 0, 0, r, r, 8 + t0 * H, H / 6 + 0.5, '#b8b0a0');
+  }
+  const [x, y] = P(0, 0, 8 + H);
+  ctx.fillStyle = '#e2b93b';
+  ctx.beginPath();
+  ctx.moveTo(x - 3, y);
+  ctx.lineTo(x + 3, y);
+  ctx.lineTo(x, y - 8);
+  ctx.closePath();
+  ctx.fill();
 }
 
 /** Big tower: a broader, taller stone tower with a crenellated platform and a high roof. */
@@ -1528,6 +1631,11 @@ export const BUILDING_PAINTERS: Record<BuildingType | 'site2' | 'site3', (ctx: C
   barracks: styled('barracks'),
   lookout: paintLookout,
   infirmary: styled('infirmary'),
+  flowerbed: paintFlowerbed,
+  column: paintColumn,
+  statue: paintStatue,
+  fountain: paintFountain,
+  obelisk: paintObelisk,
   warehouse: styled('warehouse'),
   tower: paintTower,
   bigtower: paintBigTower,

@@ -19,6 +19,7 @@ import { canPlant, findGatherTarget, findPlotFor, harvest, isGatherTarget, plant
 import { findPath } from './pathfinding';
 import { pathSpeed, wearTile } from './paths';
 import { restIdle } from './idle';
+import { claimTick, pioneerIdle, stealTick, thiefIdle, thiefWatch } from './specialists';
 import { findGame, huntTick, releaseHunt } from './hunting';
 import { RESOURCES, Terrain, type Building, type Point, type Settler, type Task } from './types';
 import type { World } from './world';
@@ -30,6 +31,10 @@ type GotoTarget = { x: number; y: number; adj?: boolean };
 /** Runs one tick of the settler's task queue, or its profession's idle behaviour when the queue is empty. */
 export function updateSettler(w: World, s: Settler): void {
   s.working = false;
+  if (s.kind === 'thief') {
+    thiefWatch(w, s);
+    if (w.dying.has(s.id)) return; // caught
+  }
   const task = s.tasks[0];
   // A defender called out to a duel stands and fights; the attacker's `assault` task resolves it.
   if (s.opponent !== null && task?.t !== 'assault') {
@@ -142,6 +147,10 @@ export function updateSettler(w: World, s: Settler): void {
       return assaultTick(w, s, task);
     case 'heal':
       return healTick(w, s, task);
+    case 'claim':
+      return claimTick(w, s, task);
+    case 'steal':
+      return stealTick(w, s, task);
     case 'prospect': {
       s.working = true;
       if (--task.n > 0) return;
@@ -390,6 +399,12 @@ function idle(w: World, s: Settler): void {
       // Work comes from the logistics dispatcher; meanwhile hang about with the others outside.
       restIdle(w, s);
       return;
+
+    case 'pioneer':
+      return pioneerIdle(w, s);
+
+    case 'thief':
+      return thiefIdle(w, s);
 
     case 'builder': {
       // Prefer sites that have material waiting, then the nearest.

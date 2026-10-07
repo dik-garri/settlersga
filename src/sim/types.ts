@@ -83,7 +83,12 @@ export type BuildingType =
   | 'fortress'
   | 'barracks'
   | 'lookout'
-  | 'infirmary';
+  | 'infirmary'
+  | 'flowerbed'
+  | 'column'
+  | 'statue'
+  | 'fountain'
+  | 'obelisk';
 
 export type SettlerKind =
   | 'carrier'
@@ -108,7 +113,9 @@ export type SettlerKind =
   | 'archer'
   | 'recruit'
   | 'hunter'
-  | 'digger';
+  | 'digger'
+  | 'pioneer'
+  | 'thief';
 
 /** Player ids start at 1; 0 means "nobody" in per-tile ownership. */
 export type PlayerId = number;
@@ -199,7 +206,11 @@ export type Task =
    */
   | { t: 'hunt'; a: number; n: number; chase: number; res: Resource }
   /** Wounded fighter lies in an infirmary until healed (`n` counts ticks to the next hit point). */
-  | { t: 'heal'; b: number; n: number };
+  | { t: 'heal'; b: number; n: number }
+  /** Pioneer moves the border stone onto a neutral tile: after `n` ticks it is the owner's land. */
+  | { t: 'claim'; x: number; y: number; n: number }
+  /** Thief at a foreign building's door: after `n` ticks he takes one good and carries it home. */
+  | { t: 'steal'; b: number; n: number };
 
 export interface Settler {
   id: number;
@@ -238,4 +249,9 @@ export interface Settler {
   stroll: Point | null;
   strollIn: number;
   chatWith: number | null;
+  /**
+   * Specialist errand (`specialists.ts`): where a pioneer was sent to push the border (`n`: tiles he
+   * may still claim), or the building `b` a thief was sent to rob. Absent on everyone else (and on saves made before specialists).
+   */
+  errand?: { x: number; y: number; b?: number; n?: number } | null;
 }

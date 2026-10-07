@@ -1,3 +1,4 @@
+import { attackStrength, defenceStrength } from '../src/sim/strength';
 import { describe, expect, it } from 'vitest';
 import { centerOf, spawnSettler } from '../src/sim/buildings';
 import { BUILDINGS, SOLDIER_LEVELS, START_SOLDIERS } from '../src/sim/config';
@@ -91,9 +92,15 @@ describe('defence', () => {
     run(w, 15000);
     const takenByAttacker = 1e9 - attacker.hp;
     const takenByDefender = 1e9 - defender.hp;
-    // Tower defense 1.2: the defender should land about 1.2× as many blows.
-    expect(takenByAttacker / takenByDefender).toBeGreaterThan(1.05);
-    expect(takenByAttacker / takenByDefender).toBeLessThan(1.4);
+    // Tower defense 1.2, and fighting strength (`strength.ts`): the attacker fights on foreign land
+    // at his owner's attack strength, the defender at home at his defence strength. A side lands
+    // blows in proportion to its strength and each blow hurts in proportion to it too, so the
+    // defender's damage dealt over the attacker's is 1.2 × (fd / fa)².
+    const fa = attackStrength(w, 1) / 100;
+    const fd = defenceStrength(w, 2) / 100;
+    const expected = 1.2 * (fd / fa) ** 2;
+    expect(takenByAttacker / takenByDefender).toBeGreaterThan(expected * 0.85);
+    expect(takenByAttacker / takenByDefender).toBeLessThan(expected * 1.15);
   });
 });
 

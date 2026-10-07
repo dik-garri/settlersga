@@ -42,12 +42,49 @@ function placeNear(w: World, type: BuildingType, x: number, y: number, done = fa
   return null;
 }
 
+/** A finished building of `owner`'s on the free spot nearest (x, y), placed directly (dev aid). */
+function placeFor(w: World, type: BuildingType, owner: number, x: number, y: number): Building | null {
+  for (let r = 0; r <= 10; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r || !w.canPlace(type, x + dx, y + dy, owner)) continue;
+        const b = addBuilding(w, type, x + dx, y + dy, owner, true);
+        recomputeTerritory(w);
+        return b;
+      }
+    }
+  }
+  return null;
+}
+
+/** An own tile next to neutral land, on the side away from the other player (where to send a pioneer). */
+function borderTile(w: World, cx: number, cy: number): { x: number; y: number } | null {
+  const m = w.map;
+  const away = w.castleOf(2);
+  let best: { x: number; y: number } | null = null;
+  let bestD = -Infinity;
+  for (let y = 1; y < m.h - 1; y++) {
+    for (let x = 1; x < m.w - 1; x++) {
+      if (m.owner[m.idx(x, y)] !== 0 || !m.isWalkable(x, y)) continue;
+      if (![[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => m.owner[m.idx(x + dx, y + dy)] === LOCAL_PLAYER)) continue;
+      if (Math.hypot(x - cx, y - cy) > 40) continue;
+      const d = Math.hypot(x - away.x, y - away.y);
+      if (d > bestD) {
+        bestD = d;
+        best = { x, y };
+      }
+    }
+  }
+  return best;
+}
+
 function run(w: World, ticks: number): void {
   for (let i = 0; i < ticks; i++) w.step();
 }
 
 export function buildShowcase(): World {
-  const w = new World(SHOWCASE_SEED, { size: SIZE, players: 1 });
+  // A second, passive player far away: someone for the thief to rob.
+  const w = new World(SHOWCASE_SEED, { size: SIZE, players: 2 });
   const c = w.castle;
   const cx = c.x + 1;
   const cy = c.y + 1;
@@ -56,7 +93,7 @@ export function buildShowcase(): World {
   c.output.plank += 400;
   c.output.stone += 400;
   for (let i = 0; i < 48; i++) enterGarrison(w, c, spawnSettler(w, 'soldier', c));
-  for (let i = 0; i < 40; i++) spawnSettler(w, 'carrier', c);
+  for (let i = 0; i < 64; i++) spawnSettler(w, 'carrier', c);
   for (let i = 0; i < 4; i++) spawnSettler(w, 'digger', c);
   // Builders and diggers come only as ordered (as in Settlers 4): order plenty.
   w.orderWorkers('builder', 16);
@@ -161,6 +198,34 @@ export function buildShowcase(): World {
   if (best >= 0) {
     spawnSettler(w, 'carrier', c); // an idle carrier to become the geologist
     w.sendGeologist(best % m.w, Math.floor(best / m.w));
+  }
+  // Specialists at work: a pioneer pushing the border out past the ring of towers, and a thief at a
+  // warehouse of the other player's (both start close to their goal, so they are busy as it opens).
+  w.orderSpecialist('pioneer', 1);
+  w.orderSpecialist('thief', 1);
+  run(w, 120);
+  const pioneer = w.settlers.find((s) => s.kind === 'pioneer');
+  const edge = borderTile(w, cx, cy);
+  if (pioneer && edge) {
+    pioneer.x = pioneer.px = edge.x;
+    pioneer.y = pioneer.py = edge.y;
+    pioneer.inside = null;
+    w.sendPioneer(edge.x, edge.y);
+  }
+  const other = w.castleOf(2);
+  const store = placeFor(w, 'warehouse', 2, other.x + 8, other.y + 6);
+  const thief = w.settlers.find((s) => s.kind === 'thief');
+  if (store && thief) {
+    store.unreachableUntil = FROZEN;
+    (['plank', 'stone', 'fish', 'iron'] as Resource[]).forEach((r, k) => (store.output[r] += 4 + k));
+    // Player 1 has scouted it.
+    for (let y = store.y - 3; y <= store.door.y + 3; y++) {
+      for (let x = store.x - 3; x <= store.door.x + 3; x++) if (m.inBounds(x, y)) m.explored[m.idx(x, y)] |= 1;
+    }
+    thief.x = thief.px = store.door.x - 4;
+    thief.y = thief.py = store.door.y + 3;
+    thief.inside = null;
+    w.sendThief(store.id);
   }
   // A few wounded in the castle: they walk to the infirmary and lie there while the demo opens.
   for (const id of c.garrison.slice(0, 3)) {

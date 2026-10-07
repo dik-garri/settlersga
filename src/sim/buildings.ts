@@ -361,5 +361,14 @@ export function recomputeTerritory(w: World): void {
       }
     }
   }
+  // Pioneers' land (`specialists.ts`) where no military building claims the tile.
+  if (w.pioneerLand > 0) {
+    for (let i = 0; i < m.claimed.length; i++) {
+      const p = m.claimed[i];
+      if (p === 0 || m.owner[i] !== 0) continue;
+      if (w.defeated.includes(p)) m.claimed[i] = 0;
+      else m.owner[i] = p;
+    }
+  }
   w.territoryVersion++;
 }
