@@ -17,18 +17,37 @@ describe('terrain table', () => {
     const map = new GameMap(4, 4);
     const at = (t: Terrain) => {
       map.terrain[map.idx(1, 1)] = t;
-      return { walk: map.isWalkable(1, 1), build: map.isBuildable(1, 1), plant: map.isPlantable(1, 1) };
+      return {
+        walk: map.isWalkable(1, 1),
+        build: map.isBuildable(1, 1),
+        plant: map.isPlantable(1, 1),
+      };
     };
     expect(at(Terrain.Grass)).toEqual({ walk: true, build: true, plant: true });
-    expect(at(Terrain.Desert)).toEqual({ walk: true, build: true, plant: false });
-    expect(at(Terrain.Swamp)).toEqual({ walk: true, build: false, plant: false });
-    expect(at(Terrain.Sand)).toEqual({ walk: true, build: false, plant: false });
-    expect(at(Terrain.Water)).toEqual({ walk: false, build: false, plant: false });
+    expect(at(Terrain.Desert)).toEqual({
+      walk: true,
+      build: true,
+      plant: false,
+    });
+    expect(at(Terrain.Swamp)).toEqual({
+      walk: false,
+      build: false,
+      plant: false,
+    });
+    expect(at(Terrain.Sand)).toEqual({
+      walk: true,
+      build: false,
+      plant: false,
+    });
+    expect(at(Terrain.Water)).toEqual({
+      walk: false,
+      build: false,
+      plant: false,
+    });
     expect(map.isBuildable(1, 1, Terrain.Mountain)).toBe(false);
     map.terrain[map.idx(1, 1)] = Terrain.Mountain;
     expect(map.isBuildable(1, 1, 'mountain')).toBe(true);
     expect(map.isBuildable(1, 1)).toBe(false);
-    expect(TERRAIN[Terrain.Swamp].speed).toBeLessThan(1);
   });
 
   it('nothing is planted on desert, even inside own territory', () => {
@@ -74,9 +93,9 @@ describe('deserts and swamps', () => {
   });
 });
 
-describe('slow terrain', () => {
-  it('A* walks round a swamp when a dry way is not much longer, and through it when it must', () => {
-    // A two-tile-wide swamp band with a dry gap two rows off the straight line.
+describe('impassable swamp', () => {
+  it('A* walks round a swamp and finds no way when the swamp closes the gap', () => {
+    // A two-tile-wide swamp band across the map with one dry gap.
     const map = new GameMap(20, 20);
     for (let y = 0; y < 20; y++) {
       if (y === 12) continue;
@@ -84,36 +103,59 @@ describe('slow terrain', () => {
       map.terrain[map.idx(11, y)] = Terrain.Swamp;
     }
     const path = findPath(map, 2, 10, 17, 10)!;
+    expect(path).not.toBeNull();
     expect(path.some((p) => map.terrain[map.idx(p.x, p.y)] === Terrain.Swamp)).toBe(false);
     map.terrain[map.idx(10, 12)] = Terrain.Swamp;
     map.terrain[map.idx(11, 12)] = Terrain.Swamp;
-    expect(findPath(map, 2, 10, 17, 10)).not.toBeNull();
+    expect(findPath(map, 2, 10, 17, 10)).toBeNull();
   });
 
-  it('settlers walk more slowly across swamp', () => {
-    const ticksToWalk = (swamp: boolean) => {
-      const w = new World(42);
-      const s = w.settlers.find((x) => x.kind === 'carrier')!;
-      const from = w.castle.door;
-      const to = { x: from.x + 6, y: from.y };
-      for (let x = from.x + 1; x <= to.x; x++) {
-        const i = w.map.idx(x, from.y);
-        w.map.terrain[i] = swamp ? Terrain.Swamp : Terrain.Grass;
-        w.map.tree[i] = 0;
-        w.map.stone[i] = 0;
-        // Walls on both sides, so the route has to follow the row.
-        for (const dy of [-1, 1]) w.map.terrain[w.map.idx(x, from.y + dy)] = Terrain.Rock;
+  it('never cuts land off: all land that swamps alone would separate stays reachable', () => {
+    for (const size of [64, 96, 128, 192]) {
+      for (const seed of [42, 7, 123, 5, 8, 13]) {
+        const players = size >= 128 ? 4 : 2;
+        const w = new World(seed, { size, players });
+        const m = w.map;
+        /** Tiles reachable from the first castle by terrain alone (trees and boulders can be cleared). */
+        const reach = (throughSwamp: boolean) => {
+          const out = new Uint8Array(m.w * m.h);
+          const start = m.idx(w.castleOf(1).door.x, w.castleOf(1).door.y);
+          const queue = [start];
+          out[start] = 1;
+          for (let q = 0; q < queue.length; q++) {
+            const i = queue[q];
+            const x = i % m.w;
+            const y = (i - x) / m.w;
+            for (const [dx, dy] of [
+              [1, 0],
+              [-1, 0],
+              [0, 1],
+              [0, -1],
+            ]) {
+              const nx = x + dx;
+              const ny = y + dy;
+              if (!m.inBounds(nx, ny)) continue;
+              const j = m.idx(nx, ny);
+              const ok = m.isPassableTerrain(nx, ny) || (throughSwamp && m.terrain[j] === Terrain.Swamp);
+              if (!ok || out[j]) continue;
+              out[j] = 1;
+              queue.push(j);
+            }
+          }
+          return out;
+        };
+        const dry = reach(false);
+        const wet = reach(true);
+        for (const p of w.players) {
+          const d = w.castleOf(p.id).door;
+          expect(dry[m.idx(d.x, d.y)], `size ${size} seed ${seed} player ${p.id}`).toBe(1);
+        }
+        let cut = 0;
+        for (let i = 0; i < dry.length; i++) {
+          if (wet[i] && !dry[i] && m.terrain[i] !== Terrain.Swamp) cut++;
+        }
+        expect(cut, `size ${size} seed ${seed}`).toBe(0);
       }
-      s.tasks = [{ t: 'goto', x: to.x, y: to.y }];
-      let n = 0;
-      while (s.tasks.length > 0 && n < 1000) {
-        w.step();
-        n++;
-      }
-      return n;
-    };
-    const dry = ticksToWalk(false);
-    const wet = ticksToWalk(true);
-    expect(wet).toBeGreaterThan(dry * 1.8);
+    }
   });
 });

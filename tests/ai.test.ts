@@ -128,13 +128,15 @@ describe('fog of war', () => {
   it('puts a lookout tower at a border with foreign land and so finds the enemy castle', { timeout: LONG }, () => {
     const w = new World(42, { players: 2, ai: [2] });
     let found = -1;
-    for (let t = 0; t < 40 * MINUTE && found < 0; t++) {
+    for (let t = 0; t < 45 * MINUTE && found < 0; t++) {
       w.step();
       if (t % 100 === 0 && knownEnemies(w, 2).some((e) => e.b === w.castleOf(1))) found = t;
     }
     expect(ownBuildings(w, 2).some((b) => b.type === 'lookout')).toBe(true);
     expect(found).toBeGreaterThan(0);
-    expect(found).toBeLessThan(36 * MINUTE);
+    // Without lookouts it never finds it on this map (its towers stop ~25 tiles short); the
+    // guaranteed far mountain since 2.5 pulls its first towers away, so it now takes ~37 minutes.
+    expect(found).toBeLessThan(40 * MINUTE);
   });
 });
 
