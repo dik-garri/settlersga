@@ -434,9 +434,11 @@ def _finish(obj, mat, bevel=0.0, smooth=False):
     return obj
 
 
-def pad(loc, hx, hy, mat, verts=96, jitter=0.12, seed=1, thickness=0.012, power=4.0):
-    """A flat, ragged, squarish patch on the ground (half sizes `hx`, `hy`): the trodden earth around
-    buildings. A superellipse with a jittered edge."""
+def pad(loc, hx, hy, mat, verts=96, jitter=0.12, seed=1, core=0.7, reach=1.3, grain=38.0):
+    """A ragged, squarish patch of trodden earth (half sizes `hx`, `hy`; a superellipse with a wobbly
+    edge) that fades into the grass the way Settlers 4 ground does: solid inside `core`, then the
+    earth breaks up in a grainy, noisy fringe out to `reach` (alpha in the sprite, so the game's grass
+    shows through). The material gets the alpha; it must be the pad's own."""
     import random
 
     rnd = random.Random(seed)
@@ -444,22 +446,64 @@ def pad(loc, hx, hy, mat, verts=96, jitter=0.12, seed=1, thickness=0.012, power=
     # A smooth wobble (a few low-frequency waves), not per-vertex noise.
     waves = [(rnd.randint(2, 7), rnd.uniform(0, math.tau), rnd.uniform(0.3, 1.0)) for _ in range(4)]
     norm = sum(w[2] for w in waves)
-    pts = []
-    for i in range(verts):
-        a = i / verts * math.tau
-        c, s_ = math.cos(a), math.sin(a)
-        k = 1 + jitter * sum(amp * math.sin(f * a + ph) for f, ph, amp in waves) / norm
-        x = math.copysign(abs(c) ** (2 / power), c) * hx * k
-        y = math.copysign(abs(s_) ** (2 / power), s_) * hy * k
-        pts.append((cx + x, cy + y, cz))
+
+    def ring(scale):
+        pts = []
+        for i in range(verts):
+            a = i / verts * math.tau
+            c, s_ = math.cos(a), math.sin(a)
+            k = scale * (1 + jitter * sum(amp * math.sin(f * a + ph) for f, ph, amp in waves) / norm)
+            x = math.copysign(abs(c) ** 0.7, c) * hx * k
+            y = math.copysign(abs(s_) ** 0.7, s_) * hy * k
+            pts.append((cx + x, cy + y, cz + 0.003))
+        return pts
+
+    inner, outer = ring(core), ring(reach)
+    vs = [(cx, cy, cz + 0.003)] + inner + outer
+    faces = [(0, 1 + i, 1 + (i + 1) % verts) for i in range(verts)]
+    faces += [(1 + i, 1 + verts + i, 1 + verts + (i + 1) % verts, 1 + (i + 1) % verts) for i in range(verts)]
     mesh = bpy.data.meshes.new('pad')
-    mesh.from_pydata([(cx, cy, cz)] + pts, [], [(0, i + 1, (i + 1) % verts + 1) for i in range(verts)])
+    mesh.from_pydata(vs, [], faces)
+    edge = mesh.attributes.new('edge', 'FLOAT', 'POINT')
+    edge.data.foreach_set('value', [1.0] * (1 + verts) + [0.0] * verts)
     obj = bpy.data.objects.new('pad', mesh)
     bpy.context.scene.collection.objects.link(obj)
     obj.data.materials.append(mat)
-    mod = obj.modifiers.new('Solid', 'SOLIDIFY')
-    mod.thickness = thickness
-    mod.offset = 1
+    # Alpha: the radial fade, broken up by fine noise so the border is grainy, not a line.
+    nodes, links = mat.node_tree.nodes, mat.node_tree.links
+    bsdf = nodes['Principled BSDF']
+    attr = nodes.new('ShaderNodeAttribute')
+    attr.attribute_name = 'edge'
+    coord = nodes.new('ShaderNodeTexCoord')
+    noise = nodes.new('ShaderNodeTexNoise')
+    noise.inputs['Scale'].default_value = grain
+    noise.inputs['Detail'].default_value = 6
+    links.new(coord.outputs['Object'], noise.inputs['Vector'])
+    blotch = nodes.new('ShaderNodeTexNoise')
+    blotch.inputs['Scale'].default_value = grain / 5
+    blotch.inputs['Detail'].default_value = 4
+    links.new(coord.outputs['Object'], blotch.inputs['Vector'])
+    # v = edge + blotches (±0.55) + grain (±0.3): the threshold wanders in and out as clumps.
+    def spread(sock, half):
+        r = nodes.new('ShaderNodeMapRange')
+        r.inputs['From Min'].default_value = 0.3
+        r.inputs['From Max'].default_value = 0.7
+        r.inputs['To Min'].default_value = -half
+        r.inputs['To Max'].default_value = half
+        links.new(sock, r.inputs['Value'])
+        return r.outputs['Result']
+
+    add1 = nodes.new('ShaderNodeMath')
+    links.new(attr.outputs['Fac'], add1.inputs[0])
+    links.new(spread(blotch.outputs['Fac'], 0.55), add1.inputs[1])
+    add2 = nodes.new('ShaderNodeMath')
+    links.new(add1.outputs['Value'], add2.inputs[0])
+    links.new(spread(noise.outputs['Fac'], 0.3), add2.inputs[1])
+    alpha = nodes.new('ShaderNodeMapRange')
+    alpha.inputs['From Min'].default_value = 0.22
+    alpha.inputs['From Max'].default_value = 0.36
+    links.new(add2.outputs['Value'], alpha.inputs['Value'])
+    links.new(alpha.outputs['Result'], bsdf.inputs['Alpha'])
     return obj
 
 
