@@ -135,8 +135,6 @@ export interface BuildingFx {
 }
 
 export const BUILDING_FX: Partial<Record<BuildingType, BuildingFx>> = {
-  house_small: { smoke: 'always' },
-  house_medium: { smoke: 'always' },
   bakery: { smoke: 'working', glow: true },
   toolsmith: { smoke: 'working', sound: 'hammer' },
   weaponsmith: { smoke: 'working', sound: 'hammer' },
