@@ -12,6 +12,11 @@ import type { World } from './world';
  *   settlers stamp their surroundings every `FOG.settlerEvery` ticks.
  * Cost: O(settlers × disc) every few ticks plus O(map + buildings × disc) per building change.
  * The AI reads only `explored` and building sight (`inBuildingSight`), both reproducible after a load.
+ *
+ * Allies share their sight: every query below tests the player's `sightMask` — its own bit and its
+ * allies' bits — so a player sees what its team's buildings and settlers see and knows what its team
+ * has explored. Nothing new is stored: the per-player bits stay as they are, and the mask is derived
+ * from the (saved) teams.
  */
 export interface FogState {
   vision: Uint8Array;
@@ -104,10 +109,26 @@ export function ensureVision(w: World): void {
   }
 }
 
+/** Player bits a player sees with: its own and its allies' (teams are fixed for a game). */
+const masks = new WeakMap<World['players'], number[]>();
+/** Forgets the cached masks (after teams are assigned). */
+export function resetSightMasks(w: World): void {
+  masks.delete(w.players);
+}
+
+export function sightMask(w: World, player: PlayerId): number {
+  let m = masks.get(w.players);
+  if (!m || m.length !== w.players.length) {
+    m = w.players.map((p) => w.players.reduce((bits, q) => (w.allied(p.id, q.id) ? bits | (1 << (q.id - 1)) : bits), 0));
+    masks.set(w.players, m);
+  }
+  return m[player - 1] ?? 1 << (player - 1);
+}
+
 /** Whether a tile is within sight of the player's buildings — derived from saved state only, so
  * deterministic across save/load (unlike settlers' passing sight). The AI uses this. */
 export function inBuildingSight(w: World, i: number, player: PlayerId): boolean {
-  return ((w.fog.vision[i] ?? 0) & (1 << (player - 1))) !== 0;
+  return ((w.fog.vision[i] ?? 0) & sightMask(w, player)) !== 0;
 }
 
 /** Called once per tick at the end of `World.step`. */
@@ -130,11 +151,19 @@ export function updateFog(w: World): void {
 }
 
 export function isExplored(w: World, i: number, player: PlayerId): boolean {
-  return (w.map.explored[i] & (1 << (player - 1))) !== 0;
+  return (w.map.explored[i] & sightMask(w, player)) !== 0;
 }
 
 export function isVisible(w: World, i: number, player: PlayerId): boolean {
-  if ((w.fog.vision[i] ?? 0) & (1 << (player - 1))) return true;
-  const seen = w.fog.seenUntil[player - 1];
-  return !!seen && seen[i] >= w.tick;
+  const mask = sightMask(w, player);
+  if ((w.fog.vision[i] ?? 0) & mask) return true;
+  if (mask === 1 << (player - 1)) {
+    const seen = w.fog.seenUntil[player - 1];
+    return !!seen && seen[i] >= w.tick;
+  }
+  // Allies' settlers too.
+  for (let k = 0; k < w.fog.seenUntil.length; k++) {
+    if (mask & (1 << k) && w.fog.seenUntil[k][i] >= w.tick) return true;
+  }
+  return false;
 }

@@ -40,7 +40,7 @@ import {
   updateGarrison,
 } from './military';
 import { generateMap, type GameMap } from './map';
-import { createFog, ensureVision, isExplored, isVisible, updateFog, type FogState } from './fog';
+import { createFog, ensureVision, isExplored, isVisible, resetSightMasks, updateFog, type FogState } from './fog';
 import { updateNature } from './nature';
 import { findPath, staysConnected } from './pathfinding';
 import { createRng, type Rng } from './rng';
@@ -187,6 +187,7 @@ export class World {
     opts.teams?.forEach((team, k) => {
       if (this.players[k] && Number.isFinite(team)) this.players[k].team = team;
     });
+    resetSightMasks(this);
     for (const p of opts.ai ?? []) if (this.players.some((pl) => pl.id === p)) this.ai.push(createAi(p));
     spawnAnimals(this, starts);
   }
