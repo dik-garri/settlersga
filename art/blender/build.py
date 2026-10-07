@@ -63,70 +63,132 @@ def column(x, y, h, stone, base):
     lib.box((x, y, h - 0.02), (0.13, 0.13, 0.05), base, bevel=0.01)
 
 
-def build_woodcutter():
-    walls = lib.mat_stones('walls', (0.86, 0.86, 0.88), (0.6, 0.62, 0.68), (0.28, 0.27, 0.3), scale=11)
-    trim = lib.mat_grain('trim', (0.82, 0.8, 0.74), (0.92, 0.9, 0.84), scale=10, stretch=(1, 1, 1), bump=0.2)
-    roof = lib.mat_tiles('roof', (0.86, 0.45, 0.2), (0.72, 0.32, 0.14), (0.32, 0.13, 0.06), scale=5, along='y')
-    shingles = lib.mat_grain('shingles', (0.32, 0.22, 0.13), (0.5, 0.36, 0.2), scale=12, stretch=(1, 4, 1), bump=0.8)
-    dark = lib.mat_flat('dark', (0.08, 0.06, 0.05))
-    door = wood('door')
-    beam = wood('beam')
-    logs = wood('logs', light=True)
-    cut = cut_ends()
-    iron = lib.mat_flat('iron', (0.55, 0.57, 0.62), rough=0.35)
-    ivy = leaves('ivy')
-
-    lib.pad((0.05, -0.05, 0), 0.98, 0.98, earth(), jitter=0.08, seed=3)
-
-    # House: ridge along Y, gable with the door towards the camera's lower left (−Y).
-    cx, cy = -0.12, 0.12
-    L, W, H, rh = 1.0, 1.15, 0.62, 0.42
+def log_cabin(cx, cy, L, W, H, logs, ends, r=0.045, gable_h=0.0, gable_axis='x', overhang=0.07, door=None):
+    """Walls of horizontal round logs crossing at the corners (ends sticking out), the two walls of
+    each axis half a log apart. With `gable_h`, the walls across `gable_axis` (the gable ends) keep
+    stacking shorter logs into the roof triangle. `door`: (x, width, height) cut into the −Y wall."""
     x0, x1, y0, y1 = cx - L / 2, cx + L / 2, cy - W / 2, cy + W / 2
-    lib.box((cx, cy, H / 2), (L, W, H), walls)
-    lib.gable((cx, cy, H), L - 0.02, rh - 0.02, y0 + 0.01, walls, along='y')
-    lib.gable((cx, cy, H), L - 0.02, rh - 0.02, y1 - 0.01, walls, along='y')
-    for x in (x0, x1):
-        for y in (y0, y1):
-            column(x, y, H, trim, trim)
-    lib.box((cx, y0 - 0.01, H - 0.02), (L + 0.08, 0.06, 0.05), trim, bevel=0.01)
-    lib.box((x1 + 0.01, cy, H - 0.02), (0.06, W + 0.08, 0.05), trim, bevel=0.01)
-    lib.prism_roof((cx, cy, H), W, L, rh, roof, overhang=0.1, thickness=0.06, along='y')
-    lib.box((cx, cy, H + rh + 0.02), (0.09, W + 0.22, 0.07), lib.mat_flat('ridge', (0.6, 0.24, 0.1)), bevel=0.025)
-    # Door with a stone frame, a small window above it, a shuttered window on the side.
-    dx = cx + 0.18
-    lib.box((dx, y0 - 0.02, 0.21), (0.24, 0.04, 0.42), door, bevel=0.01)
-    lib.box((dx - 0.15, y0 - 0.03, 0.23), (0.05, 0.05, 0.46), trim, bevel=0.01)
-    lib.box((dx + 0.15, y0 - 0.03, 0.23), (0.05, 0.05, 0.46), trim, bevel=0.01)
-    lib.box((dx, y0 - 0.03, 0.47), (0.36, 0.06, 0.06), trim, bevel=0.01)
-    lib.box((cx - 0.22, y0 - 0.015, 0.4), (0.15, 0.04, 0.17), dark)
-    lib.box((cx - 0.22, y0 - 0.03, 0.31), (0.21, 0.05, 0.035), trim)
-    lib.cylinder((cx, y0 - 0.01, H + 0.15), 0.06, 0.03, dark, rot=(math.pi / 2, 0, 0), verts=16)
-    lib.box((x1 + 0.015, cy + 0.18, 0.4), (0.04, 0.15, 0.17), dark)
-    # Lean-to shelter on the +X side with the log pile under it.
-    sx0, sx1 = x1 + 0.05, x1 + 0.45
-    for y in (cy - 0.35, cy + 0.42):
-        lib.box((sx1, y, 0.24), (0.05, 0.05, 0.48), beam)
-    lib.box((sx1, cy + 0.035, 0.47), (0.06, 0.85, 0.05), beam)
-    tilt = math.atan2(0.18, sx1 - sx0)
-    lib.box(((sx0 + sx1) / 2 + 0.02, cy + 0.035, 0.55), (sx1 - sx0 + 0.16, 0.95, 0.035), shingles, rot=(0, tilt, 0))
-    for row, n in enumerate((5, 4, 3)):
+    step = 2 * r * 0.92
+    k = 0
+    z = r
+    while z < H + gable_h - r * 0.5:
+        for along_x in (True, False):
+            zz = z + (0 if along_x else step / 2)
+            above = zz + r - H  # a wall log must stay under the eaves
+            if above > 0:
+                # Gable triangle: only the walls across the ridge continue, shrinking.
+                gable_wall = (gable_axis == 'x') != along_x
+                if not gable_wall or gable_h <= 0:
+                    continue
+                span = (W if gable_axis == 'x' else L) * max(0.0, 1 - above / gable_h)
+                if span < 0.08:
+                    continue
+            if along_x:
+                length = L + 2 * overhang if above <= 0 else span
+                for y in (y0, y1):
+                    if door and y == y0 and above <= 0 and zz < door[2]:
+                        dx, dw, _ = door
+                        left = (x0 - overhang, dx - dw / 2)
+                        right = (dx + dw / 2, x1 + overhang)
+                        for a, b in (left, right):
+                            lib.cylinder(((a + b) / 2, y, zz), r, b - a, logs, rot=(0, math.pi / 2, 0), verts=10)
+                        continue
+                    lib.cylinder((cx, y, zz), r, length, logs, rot=(0, math.pi / 2, 0), verts=10)
+                    if above <= 0:
+                        for x in (x0 - overhang, x1 + overhang):
+                            lib.cylinder((x, y, zz), r * 0.92, 0.006, ends, rot=(0, math.pi / 2, 0), verts=10)
+            else:
+                length = W + 2 * overhang if above <= 0 else span
+                for x in (x0, x1):
+                    lib.cylinder((x, cy, zz), r, length, logs, rot=(math.pi / 2, 0, 0), verts=10)
+                    if above <= 0:
+                        for y in (y0 - overhang, y1 + overhang):
+                            lib.cylinder((x, y, zz), r * 0.92, 0.006, ends, rot=(math.pi / 2, 0, 0), verts=10)
+        z += step
+        k += 1
+
+
+def plank_roof(cx, cy, L, W, H, rh, boards, axis='x', overhang=0.12, width=0.085, seed=1):
+    """Gable roof of individual boards running down the slopes (ridge along `axis`), uneven in
+    length, tone and lie, with dark gaps between them."""
+    import random
+
+    rnd = random.Random(seed)
+    along, across = (L, W) if axis == 'x' else (W, L)
+    run = across / 2 + overhang
+    drop = overhang * rh / (across / 2)
+    rise = rh + drop
+    angle = math.atan2(rise, run)
+    slope = math.hypot(run, rise)
+    n = int((along + 2 * overhang) / width)
+    for side in (-1, 1):
         for k in range(n):
-            y = cy - 0.27 + (k + row * 0.5) * 0.14
-            z = 0.06 + row * 0.105
-            lib.cylinder(((sx0 + sx1) / 2 + 0.02, y, z), 0.06, 0.34, logs, rot=(0, math.pi / 2, 0), verts=12)
-            lib.cylinder((sx1 + 0.17, y, z), 0.056, 0.006, cut, rot=(0, math.pi / 2, 0), verts=12)
-    # Chopping block with an axe, chips around it.
-    bx, by = 0.62, -0.72
-    lib.cylinder((bx, by, 0.09), 0.11, 0.18, logs, verts=14)
-    lib.cylinder((bx, by, 0.183), 0.105, 0.008, cut, verts=14)
-    lib.box((bx - 0.02, by, 0.29), (0.025, 0.025, 0.22), beam, rot=(0.3, 0.15, 0))
-    lib.box((bx - 0.02, by + 0.02, 0.2), (0.025, 0.11, 0.06), iron)
-    for k, (x, y) in enumerate(((0.4, -0.85), (0.8, -0.55), (0.5, -0.55), (0.75, -0.9))):
-        lib.box((x, y, 0.015), (0.06, 0.03, 0.015), cut, rot=(0, 0, k * 1.3))
-    # Ivy climbing the back corner and the gable.
-    for k, (x, y, z, r) in enumerate(((x0 + 0.02, y0 + 0.05, 0.15, 0.09), (x0 + 0.03, y0 + 0.08, 0.32, 0.08),
-                                      (x0 + 0.06, y0 + 0.02, 0.46, 0.07), (x0 - 0.02, y0 + 0.2, 0.1, 0.08))):
-        lib.lumpy((x, y, z), r, ivy, strength=0.5, noise=0.5, seed=k)
+            t = -along / 2 - overhang + (k + 0.5) * (along + 2 * overhang) / n
+            ln = slope + rnd.uniform(-0.1, 0.1)
+            off = rnd.uniform(-0.02, 0.02)
+            mid_h = side * (run / 2) + side * off * math.cos(angle)
+            z = H - drop + rise / 2 + 0.02 + rnd.uniform(-0.006, 0.006)
+            tilt = side * angle
+            mat = boards[rnd.randrange(len(boards))]
+            yaw = rnd.uniform(-0.07, 0.07)
+            if axis == 'x':
+                lib.box((cx + t, cy + mid_h, z), (width * 0.9, ln, 0.022), mat, rot=(-tilt, 0, yaw), bevel=0.004)
+            else:
+                lib.box((cx + mid_h, cy + t, z), (ln, width * 0.9, 0.022), mat, rot=(0, tilt, yaw), bevel=0.004)
+    # Ridge log.
+    if axis == 'x':
+        lib.cylinder((cx, cy, H + rh + 0.035), 0.04, along + 2 * overhang + 0.06, boards[0], rot=(0, math.pi / 2, 0), verts=10)
+    else:
+        lib.cylinder((cx, cy, H + rh + 0.035), 0.04, along + 2 * overhang + 0.06, boards[0], rot=(math.pi / 2, 0, 0), verts=10)
+
+
+def build_woodcutter():
+    """A log cabin after the Settlers 4 woodcutter: round-log walls, a roof of loose boards, a lower
+    annex at the side and a stack of logs in front, on trodden earth."""
+    logs = lib.mat_grain('logs', (0.36, 0.18, 0.08), (0.62, 0.36, 0.17), scale=7, stretch=(1, 1, 6), bump=1.0)
+    ends = lib.mat_grain('ends', (0.82, 0.6, 0.32), (0.93, 0.76, 0.48), scale=30, stretch=(1, 1, 1), bump=0.4)
+    boards = [
+        lib.mat_grain(f'board{k}', a, b, scale=4, stretch=(1, 9, 1), bump=0.6)
+        for k, (a, b) in enumerate((
+            ((0.5, 0.34, 0.12), (0.76, 0.58, 0.26)),
+            ((0.38, 0.24, 0.1), (0.6, 0.42, 0.18)),
+            ((0.62, 0.46, 0.2), (0.84, 0.68, 0.36)),
+            ((0.44, 0.36, 0.22), (0.62, 0.52, 0.34)),
+        ))
+    ]
+    dark = lib.mat_flat('dark', (0.07, 0.05, 0.04))
+    lib.pad((0.05, -0.08, 0), 1.0, 0.98, lib.mat_grain('earth', (0.34, 0.18, 0.09), (0.66, 0.42, 0.22), scale=16,
+                                                       stretch=(1, 1, 1), bump=1.0, detail=12), jitter=0.1, seed=5)
+
+    # Main cabin: ridge along X, so its big board slope faces the camera; the door on the −Y wall.
+    cx, cy, L, W, H, rh = -0.22, 0.12, 0.95, 0.85, 0.52, 0.46
+    log_cabin(cx, cy, L, W, H, logs, ends, gable_h=rh, gable_axis='x', door=(cx + 0.12, 0.24, 0.36))
+    lib.box((cx + 0.12, cy - W / 2 + 0.03, 0.18), (0.22, 0.06, 0.36), dark)
+    for dx in (-0.13, 0.13):
+        lib.box((cx + 0.12 + dx, cy - W / 2 - 0.04, 0.19), (0.04, 0.04, 0.38), boards[1])
+    lib.box((cx + 0.12, cy - W / 2 - 0.04, 0.39), (0.32, 0.05, 0.04), boards[1])
+    plank_roof(cx, cy, L, W, H, rh, boards, axis='x', seed=2)
+
+    # Lower annex on the +X side, ridge along Y.
+    ax, ay, aL, aW, aH, arh = 0.52, 0.2, 0.48, 0.68, 0.36, 0.24
+    log_cabin(ax, ay, aL, aW, aH, logs, ends, r=0.04, gable_h=arh, gable_axis='y', overhang=0.05)
+    lib.box((ax, ay - aW / 2 - 0.01, 0.16), (0.18, 0.04, 0.2), dark)
+    plank_roof(ax, ay, aL, aW, aH, arh, boards, axis='y', overhang=0.09, seed=4)
+
+    # Stack of logs in front, lying along X: 4, 3, 2, 1.
+    px, py = 0.6, -0.6
+    for row, n in enumerate((4, 3, 2, 1)):
+        for k in range(n):
+            y = py + (k - (n - 1) / 2) * 0.115
+            z = 0.055 + row * 0.095
+            lib.cylinder((px, y, z), 0.055, 0.6, logs, rot=(0, math.pi / 2, 0), verts=12)
+            for sgn in (-1, 1):
+                lib.cylinder((px + sgn * 0.3, y, z), 0.051, 0.006, ends, rot=(0, math.pi / 2, 0), verts=12)
+    # Chopping block and a few chips by the door.
+    lib.cylinder((-0.55, -0.6, 0.08), 0.1, 0.16, logs, verts=14)
+    lib.cylinder((-0.55, -0.6, 0.163), 0.095, 0.006, ends, verts=14)
+    for k, (x, y) in enumerate(((-0.35, -0.7), (-0.7, -0.45), (-0.2, -0.55), (0.0, -0.8))):
+        lib.box((x, y, 0.015), (0.06, 0.03, 0.015), ends, rot=(0, 0, k * 1.3))
 
 
 def build_tree():
