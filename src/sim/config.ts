@@ -18,9 +18,9 @@ export const SETTLER_SPEED = 0.2;
 export const BUILD_TICKS_PER_UNIT = 30;
 export const HANDLE_TICKS = 3;
 
-/** Per-resource pile limits at a workplace door. */
-export const OUTPUT_CAP = 4;
-export const INPUT_CAP = 4;
+/** Pile limits at a workplace door, per resource: every good a building uses or makes, up to this many units each. */
+export const OUTPUT_CAP = 8;
+export const INPUT_CAP = 8;
 
 export const DISPATCH_EVERY = 5;
 /** A free settler stands where its last job ended this long before it walks off to an idle crowd. */
@@ -534,7 +534,7 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
 
 /**
  * A workshop turns `inputs` (all of them) plus one unit of any of `inputsAnyOf` into `outputs`
- * every `ticks` while its worker is inside. `inputsAnyOf` share one input pile limit.
+ * every `ticks` while its worker is inside. Each input, `inputsAnyOf` alternatives included, has its own pile limit.
  */
 export interface Recipe {
   inputs: Partial<Stock>;
