@@ -22,7 +22,7 @@ import {
   PLAYER_COLORS,
   type GroundKind,
 } from './sprites';
-import { DIRS, WALK_FRAMES, WORK_FRAMES } from './anim';
+import { WALK_FRAMES, WORK_FRAMES } from './anim';
 import { ART3D_BUILDINGS, ART3D_PILES, ART3D_STAGED, ART3D_STAGES, ART3D_SPRITES, PILE, PILE_MAX, type Art3d } from './art3d';
 import { ACTION_IDS, ACTIONS, HAT_STYLES, styleOf, TOOLS, type ActionId, type HatStyle, type ToolShape } from './animConfig';
 import { paintFlash, paintGlint, paintGlow, paintPuff, paintSpark } from './fxArt';
@@ -251,13 +251,6 @@ export class SpriteAtlas {
     this.textures = a.build();
   }
 
-  /** [dir][column] of the 3D carrier sheet (`?art=3d`), or null. */
-  carrier3d(): Texture[][] | null {
-    const art = this.art3d;
-    if (!art) return null;
-    return DIRS.map((_, d) => Array.from({ length: art.carrier.columns }, (_, c) => this.get(`c3d:${d}:${c}`)));
-  }
-
   /** Settler layer lookups, resolved once. */
   settlerTextures(): SettlerTextures {
     const dirs = [...Array(PAINTED_DIRS).keys()];
@@ -392,12 +385,10 @@ export function wareIcon(res: Resource, size = 18): HTMLCanvasElement {
 
 /** Standalone settler portrait for HTML UI. */
 export function settlerIcon(kind: SettlerKind, size = 56): HTMLCanvasElement {
-  const sheet = kind === 'carrier' ? iconArt?.images.get('carrier') : undefined;
-  if (sheet && iconArt) {
-    // Standing, facing south-east (row 1 of the sheet).
-    const { cell, columns, walk } = iconArt.carrier;
-    const r = sheet.width / (cell[0] * columns);
-    return imageIcon(sheet, size, '', [walk * cell[0] * r, 1 * cell[1] * r, cell[0] * r, cell[1] * r]);
+  if (iconArt) {
+    // Standing with the profession's tool, facing south-east.
+    const { page, rect } = iconArt.settlers.portrait(styleOf(kind).holds, 1);
+    return imageIcon(page, size, '', rect);
   }
   const canvas = document.createElement('canvas');
   const dpr = window.devicePixelRatio || 1;
@@ -466,15 +457,4 @@ function addArt3d(a: AtlasBuilder, art: Art3d): void {
   one('tree:0', 'tree');
   for (let v = 1; v < 4; v++) a.alias(`tree:${v}`, 'tree:0');
   for (let v = 0; v < 3; v++) one(`deposit:${v}`, `deposit${v}`);
-  const { cell, anchor, columns } = art.carrier;
-  const sheet = art.images.get('carrier')!;
-  const [w, h] = cell;
-  const r = sheet.width / (w * columns); // the sheet's resolution
-  for (let d = 0; d < DIRS.length; d++) {
-    for (let c = 0; c < columns; c++) {
-      a.add(`c3d:${d}:${c}`, w, h, anchor[0], anchor[1], (ctx) =>
-        ctx.drawImage(sheet, c * w * r, d * h * r, w * r, h * r, 0, 0, w, h),
-      );
-    }
-  }
 }

@@ -27,6 +27,7 @@ import {
   type SoundId,
 } from './animConfig';
 import { Effects } from './effects';
+import { setFrame, type Settler3d } from './settler3d';
 import { BODY_STAND, BODY_WORK, CARRY_AT } from './settlerArt';
 import { depthOf, HALF_H, HALF_W, toScreen, toTile } from './iso';
 import { ART3D_BANNERS, ART3D_STAGES, PILE_MAX } from './art3d';
@@ -221,8 +222,8 @@ export class GameRenderer {
   private readonly settlerViews = new Map<number, SettlerView>();
 
   private readonly settlerTex: SettlerTextures;
-  /** [dir][column] of the pre-rendered carrier (`?art=3d`), replacing the layered figure. */
-  private readonly carrier3d: Texture[][] | null;
+  /** Pre-rendered 3D settlers (`?art=3d`), replacing the layered figure. */
+  private readonly settler3d: Settler3d | null;
   private readonly wareTex = {} as Record<Resource, Texture>;
   private readonly playerTint = PLAYER_COLORS.map(toTint);
   private readonly tints = new Map<string, number>();
@@ -256,7 +257,7 @@ export class GameRenderer {
   ) {
     this.world.addChild(this.ground, this.territory, this.marks, this.hints, this.objects, this.shots, this.fog, this.ghostLayer);
     this.settlerTex = atlas.settlerTextures();
-    this.carrier3d = atlas.carrier3d();
+    this.settler3d = atlas.art3d?.settlers ?? null;
     for (const r of RESOURCES) this.wareTex[r] = atlas.get(`ware:${r}`);
     this.effects = new Effects(atlas, sim, (x, y) => this.surface(x, y), this.sound);
     // Glints sit right on the ground; smoke and sparks above the objects but under the fog.
@@ -1246,36 +1247,62 @@ export class GameRenderer {
       const pd = PAINTED_DIR[shown];
       const tex = this.settlerTex;
 
-      let bob = 0;
+      // Work or hold frame: the same indices drive the layered figure and the 3D frames.
+      let action: ActionId | null = null;
+      let f: number;
       if (working) {
-        const action = this.actionOf(s, style);
+        action = this.actionOf(s, style);
         const def: ActionDef = ACTIONS[action];
-        const f = workFrame(timeMs, s.id, def.loopMs);
-        v.body.texture = tex.body[pd][BODY_WORK];
-        v.arm.texture = tex.workArm[action][pd][f];
+        f = workFrame(timeMs, s.id, def.loopMs);
         if (f !== v.frame) {
           v.frame = f;
           if (def.sound && f === def.soundFrame) this.sound(def.sound, px, py);
         }
       } else {
         v.frame = -1;
-        const tool = s.carrying !== null ? 'carry' : style.holds;
-        const f = moving ? walkFrame(v.walked) : WALK_FRAMES;
-        v.body.texture = tex.body[pd][moving ? f : BODY_STAND];
-        v.arm.texture = tex.holdArm[tool][pd][f];
-        if (moving) bob = walkBob(f);
+        f = moving ? walkFrame(v.walked) : WALK_FRAMES;
       }
-      v.tunic.texture = tex.tunic[pd];
-      v.head.texture = tex.head[pd];
-      v.hat.texture = tex.hat[style.hatStyle][pd];
-      const behind = FACES_AWAY[pd];
-      if (behind !== v.armBehind) {
-        // Facing away, the near arm, its tool and the goods in hand are hidden behind the body.
-        v.armBehind = behind;
-        v.root.setChildIndex(v.arm, behind ? 0 : 4);
-        v.root.setChildIndex(v.ware, behind ? 0 : 5);
+      const tool = s.carrying !== null ? 'carry' : style.holds;
+      const s3d = this.settler3d;
+      let bob = 0;
+      if (s3d) {
+        // Pre-rendered figure: full frame, its tunic/shield part tinted, the hat on top; 8 painted
+        // directions, so no mirroring.
+        const fr = action ? s3d.work[action][shown][f] : s3d.hold[tool][shown][f];
+        setFrame(v.body, fr.full);
+        v.tunic.visible = fr.tint !== null;
+        if (fr.tint) setFrame(v.tunic, fr.tint);
+        const hat = s3d.hats[style.hatStyle][shown];
+        v.hat.visible = hat !== null;
+        if (hat) setFrame(v.hat, hat);
+        v.head.visible = v.arm.visible = false;
+        v.root.scale.x = 1;
+        const away = s3d.carryBehind[shown];
+        if (away !== v.armBehind) {
+          v.armBehind = away;
+          v.root.setChildIndex(v.ware, away ? 0 : 5);
+        }
+      } else {
+        if (action) {
+          v.body.texture = tex.body[pd][BODY_WORK];
+          v.arm.texture = tex.workArm[action][pd][f];
+        } else {
+          v.body.texture = tex.body[pd][moving ? f : BODY_STAND];
+          v.arm.texture = tex.holdArm[tool][pd][f];
+          if (moving) bob = walkBob(f);
+        }
+        v.tunic.texture = tex.tunic[pd];
+        v.head.texture = tex.head[pd];
+        v.hat.texture = tex.hat[style.hatStyle][pd];
+        const behind = FACES_AWAY[pd];
+        if (behind !== v.armBehind) {
+          // Facing away, the near arm, its tool and the goods in hand are hidden behind the body.
+          v.armBehind = behind;
+          v.root.setChildIndex(v.arm, behind ? 0 : 4);
+          v.root.setChildIndex(v.ware, behind ? 0 : 5);
+        }
+        v.root.scale.x = MIRRORED[shown] ? -1 : 1;
       }
-      v.root.scale.x = MIRRORED[shown] ? -1 : 1;
 
       v.rank.visible = s.level > 0;
       if (s.level > 0) v.rank.texture = this.atlas.get(`chevrons:${s.level}`);
@@ -1284,23 +1311,8 @@ export class GameRenderer {
       v.ware.visible = s.carrying !== null;
       if (s.carrying) {
         v.ware.texture = this.wareTex[s.carrying];
-        v.ware.position.set(CARRY_AT[pd][0], CARRY_AT[pd][1]);
-      }
-      const c3d = this.carrier3d && s.kind === 'carrier' && !working ? this.carrier3d : null;
-      v.tunic.visible = v.head.visible = v.hat.visible = v.arm.visible = c3d === null;
-      if (c3d) {
-        // One pre-rendered sprite per direction and frame; goods go where the hands are.
-        const meta = this.atlas.art3d!.carrier;
-        const f = moving ? walkFrame(v.walked) : meta.walk;
-        v.body.texture = c3d[shown][(s.carrying !== null ? meta.carryColumn : 0) + f];
-        v.root.scale.x = 1;
-        const away = meta.carryBehind[shown];
-        if (away !== v.armBehind) {
-          v.armBehind = away;
-          v.root.setChildIndex(v.arm, away ? 0 : 4);
-          v.root.setChildIndex(v.ware, away ? 0 : 5);
-        }
-        if (s.carrying !== null) v.ware.position.set(meta.carryAt[shown][f][0], meta.carryAt[shown][f][1]);
+        const at = s3d ? s3d.carryAt[shown][action ? WALK_FRAMES : f] : CARRY_AT[pd];
+        v.ware.position.set(at[0], at[1]);
       }
     }
   }
@@ -1336,7 +1348,9 @@ export class GameRenderer {
   private styleSettler(v: SettlerView, s: Settler): void {
     const style = styleOf(s.kind);
     v.kind = s.kind;
-    v.tunic.tint = style.fighter ? this.playerTint[(s.owner - 1) % this.playerTint.length] : this.tintOf(style.tunic);
+    // 3D figures wear their owner's colour, as in Settlers 4 (the tool and hat tell the profession).
+    const own = style.fighter || this.settler3d !== null;
+    v.tunic.tint = own ? this.playerTint[(s.owner - 1) % this.playerTint.length] : this.tintOf(style.tunic);
     v.hat.tint = this.tintOf(style.hat);
   }
 
@@ -1387,7 +1401,7 @@ export class GameRenderer {
     ware.scale.set(0.85);
     ware.visible = false;
     const rank = new Sprite(this.atlas.get('chevrons:1'));
-    rank.position.set(0, -40);
+    rank.position.set(0, this.settler3d ? this.settler3d.rankY : -40);
     rank.visible = false;
     root.addChild(body, tunic, head, hat, arm, ware, rank);
     const v: SettlerView = {

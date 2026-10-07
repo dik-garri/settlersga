@@ -440,11 +440,16 @@ def save_rgba(px, path):
     bpy.data.images.remove(img)
 
 
-def build_settlers(out, tmp, only=None):
+def build_settlers(out, tmp, only=None, hats=None):
     """Renders every pose group in every direction plus the hat layers; writes settlers-*.png and
     settlers.json into `out`. `only`: a list of group keys to render (for quick looks)."""
     scene = lib.reset_scene(samples=14)
+    # Small frames render fine on the CPU; it keeps the GPU (and the machine) cool, and Metal kernel
+    # compilation has crashed long runs.
+    scene.cycles.device = 'CPU'
     lib.setup_camera(scene, CELL_W, CELL_H, ANCHOR_X, ANCHOR_Y)
+    cache = os.path.join(tmp, 'settlers-cache')
+    os.makedirs(cache, exist_ok=True)
     fig = Figure()
     mask_mat = mask_material()
     pack = Packer()
@@ -462,17 +467,30 @@ def build_settlers(out, tmp, only=None):
     for key, frames in poses():
         if only and key not in only:
             continue
+        # Each group is cached (uint8) once rendered, so an interrupted run resumes where it stopped.
+        cached = os.path.join(cache, key.replace(':', '-') + f'-{DIRS}.npz')
+        if os.path.exists(cached):
+            data = np.load(cached)['frames'].astype(np.float32) / 255
+        else:
+            data = []
+            for d in range(DIRS):
+                for shape, kw in frames:
+                    fig.show(shape)
+                    fig.pose(yaws[d], **kw)
+                    full = render_full(scene, path)
+                    mask = render_mask(scene, mpath, mask_mat)[..., 0]
+                    tint = full.copy()
+                    tint[..., 3] = full[..., 3] * np.clip(mask, 0, 1)
+                    data += [full, tint]
+            data = np.stack(data)
+            np.savez_compressed(cached, frames=np.round(np.clip(data, 0, 1) * 255).astype(np.uint8))
         rows = []
+        k = 0
         for d in range(DIRS):
             row = []
-            for shape, kw in frames:
-                fig.show(shape)
-                fig.pose(yaws[d], **kw)
-                full = render_full(scene, path)
-                mask = render_mask(scene, mpath, mask_mat)[..., 0:1]
-                tint = full.copy()
-                tint[..., 3] = full[..., 3] * np.clip(mask[..., 0], 0, 1)
-                row.append([pack.add(full), pack.add(tint)])
+            for _ in frames:
+                row.append([pack.add(data[k]), pack.add(data[k + 1])])
+                k += 2
             rows.append(row)
         meta['groups'][key] = rows
         print('settlers: rendered', key, flush=True)
@@ -487,7 +505,7 @@ def build_settlers(out, tmp, only=None):
         meta['carryAt'].append(row)
         behind = lib.camera_depth(scene, fig.hand_point()) > lib.camera_depth(scene, (0, 0, 0.45))
         meta['carryBehind'].append(bool(behind))
-    if not only:
+    if hats if hats is not None else not only:
         meta['hats'] = render_hats(scene, fig, yaws, pack, path)
     meta['pages'] = pack.save(out, 'settlers')
     meta['frames'] = pack.frames
