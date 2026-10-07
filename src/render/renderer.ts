@@ -1,4 +1,4 @@
-import { Container, Graphics, MeshSimple, Sprite, Texture, type Application } from 'pixi.js';
+import { CanvasSource, Container, Graphics, MeshSimple, Sprite, Texture, type Application } from 'pixi.js';
 import { BUILD_TICKS_PER_UNIT, BUILDINGS, CROP_KINDS, SHOT_TICKS, TREE_MATURE } from '../sim/config';
 import { RESOURCES, Terrain, type Building, type BuildingType, type Resource, type Settler } from '../sim/types';
 import { CHUNK } from '../sim/map';
@@ -188,12 +188,21 @@ export class GameRenderer {
   private hintAt = 0;
   private readonly ghostSprite: Sprite;
   /**
-   * Fog of war for the local player, above the objects: per chunk a Graphics with black diamonds
-   * over unexplored tiles and a dimming veil over explored ones out of sight. Redrawn (throttled)
-   * only for visible chunks whose per-tile state changed; objects on unexplored tiles are hidden.
+   * Fog of war for the local player, above the objects, soft-edged as in Settlers 4: per chunk a
+   * tiny canvas with one pixel per tile (plus a one-tile margin) whose alpha is that tile's darkness
+   * — black where unexplored, a veil where explored but out of sight — stretched over the chunk's
+   * tile corners (raised by the terrain height) with linear filtering, so darkness fades smoothly
+   * across tile boundaries. Redrawn (throttled) only for visible chunks whose per-tile state
+   * changed; objects on unexplored tiles are hidden.
    */
   private readonly fog = new Container();
-  private readonly fogChunks: Graphics[] = [];
+  private readonly fogChunks: Container[] = [];
+  /** Per chunk: the darkness canvas and its mesh (built lazily, rebuilt when heights change). */
+  private readonly fogCanvas: (HTMLCanvasElement | null)[] = [];
+  private readonly fogMesh: (MeshSimple | null)[] = [];
+  private readonly fogTex: (Texture | null)[] = [];
+  /** Per chunk: tile states (with the margin) as last drawn. */
+  private readonly fogPrev: (Uint8Array | null)[] = [];
   /** Per tile as last drawn: 0 unexplored, 1 explored, 2 in sight; 255 forces a redraw. */
   private readonly fogSeen: Uint8Array;
   private lastFogSync = -Infinity;
@@ -276,10 +285,14 @@ export class GameRenderer {
       g.visible = false;
       this.territoryChunks.push(g);
       this.territory.addChild(g);
-      const f = new Graphics();
+      const f = new Container();
       f.visible = false;
       this.fogChunks.push(f);
       this.fog.addChild(f);
+      this.fogCanvas.push(null);
+      this.fogMesh.push(null);
+      this.fogTex.push(null);
+      this.fogPrev.push(null);
     }
     this.chunkVisible = new Uint8Array(chunks);
     this.chunkSeen = new Int32Array(chunks).fill(-1);
@@ -496,6 +509,9 @@ export class GameRenderer {
       if (!this.chunkReady[c]) continue; // built from the new heights when it comes into view
       this.buildChunkGround(c);
       this.drawTerritoryChunk(c);
+      // The fog mesh follows the new heights (its texture is kept).
+      this.fogMesh[c]?.destroy();
+      this.fogMesh[c] = null;
       for (const obj of this.chunkObjects[c]) {
         const at = this.staticAt.get(obj);
         if (!at) continue;
@@ -638,39 +654,85 @@ export class GameRenderer {
       const y0 = Math.floor(c / map.chunksX) * CHUNK;
       const x1 = Math.min(map.w, x0 + CHUNK);
       const y1 = Math.min(map.h, y0 + CHUNK);
-      let changed = false;
-      for (let y = y0; y < y1; y++) {
-        for (let x = x0; x < x1; x++) {
-          const i = map.idx(x, y);
-          const st = !this.sim.isExplored(x, y, LOCAL_PLAYER) ? 0 : this.sim.isVisible(x, y, LOCAL_PLAYER) ? 2 : 1;
-          if (st !== this.fogSeen[i]) {
-            this.fogSeen[i] = st;
+      // The chunk's tiles plus a one-tile margin (it feeds the blend at the edges), as last drawn.
+      const W = CHUNK + 2;
+      let prev = this.fogPrev[c];
+      let changed = prev === null || this.fogMesh[c] === null;
+      if (!prev) prev = this.fogPrev[c] = new Uint8Array(W * W);
+      for (let ty = 0; ty < W; ty++) {
+        for (let tx = 0; tx < W; tx++) {
+          const x = Math.min(map.w - 1, Math.max(0, x0 - 1 + tx));
+          const y = Math.min(map.h - 1, Math.max(0, y0 - 1 + ty));
+          const st = this.fogState(x, y);
+          if (st !== prev[ty * W + tx]) {
+            prev[ty * W + tx] = st;
             changed = true;
           }
+          if (x >= x0 && x < x1 && y >= y0 && y < y1) this.fogSeen[map.idx(x, y)] = st;
         }
       }
       if (!changed) continue;
-      const g = this.fogChunks[c];
-      g.clear();
-      for (const [state, alpha] of [
-        [0, 1],
-        [1, 0.42],
-      ] as const) {
-        let any = false;
-        for (let y = y0; y < y1; y++) {
-          for (let x = x0; x < x1; x++) {
-            if (this.fogSeen[map.idx(x, y)] !== state) continue;
-            g.poly(this.diamond(x, y));
-            any = true;
-          }
-        }
-        if (any) g.fill({ color: 0x05070a, alpha });
-      }
+      this.drawFogChunk(c, x0, y0, x1, y1, prev);
       for (const obj of this.chunkObjects[c]) {
         const at = this.staticAt.get(obj);
         if (at) obj.visible = this.fogSeen[map.idx(Math.round(at.x), Math.round(at.y))] !== 0;
       }
     }
+  }
+
+  private fogState(x: number, y: number): number {
+    return !this.sim.isExplored(x, y, LOCAL_PLAYER) ? 0 : this.sim.isVisible(x, y, LOCAL_PLAYER) ? 2 : 1;
+  }
+
+  private drawFogChunk(c: number, x0: number, y0: number, x1: number, y1: number, states: Uint8Array): void {
+    const W = CHUNK + 2;
+    let canvas = this.fogCanvas[c];
+    if (!canvas) {
+      canvas = document.createElement('canvas');
+      canvas.width = W;
+      canvas.height = W;
+      this.fogCanvas[c] = canvas;
+    }
+    const ctx = canvas.getContext('2d')!;
+    const img = ctx.createImageData(W, W);
+    const ALPHA = [255, 107, 0]; // unexplored, explored out of sight (0.42), in sight
+    for (let k = 0; k < W * W; k++) {
+      img.data[k * 4] = 5;
+      img.data[k * 4 + 1] = 7;
+      img.data[k * 4 + 2] = 10;
+      img.data[k * 4 + 3] = ALPHA[states[k]];
+    }
+    ctx.putImageData(img, 0, 0);
+    let tex = this.fogTex[c];
+    if (tex) tex.source.update();
+    else tex = this.fogTex[c] = new Texture({ source: new CanvasSource({ resource: canvas, scaleMode: 'linear' }) });
+    if (this.fogMesh[c]) return;
+    const vertices: number[] = [];
+    const uvs: number[] = [];
+    const indices: number[] = [];
+    const cols = x1 - x0 + 1;
+    for (let vy = y0; vy <= y1; vy++) {
+      for (let vx = x0; vx <= x1; vx++) {
+        const p = this.corner(vx, vy);
+        vertices.push(p.x, p.y);
+        // Corner (vx, vy) sits at tile coordinate (vx − ½, vy − ½); texel k's centre is tile x0 − 1 + k.
+        uvs.push((vx - x0 + 1) / W, (vy - y0 + 1) / W);
+      }
+    }
+    for (let y = 0; y < y1 - y0; y++) {
+      for (let x = 0; x < x1 - x0; x++) {
+        const a = y * cols + x;
+        indices.push(a, a + 1, a + cols + 1, a, a + cols + 1, a + cols);
+      }
+    }
+    const mesh = new MeshSimple({
+      texture: tex,
+      vertices: new Float32Array(vertices),
+      uvs: new Float32Array(uvs),
+      indices: new Uint32Array(indices),
+    });
+    this.fogMesh[c] = mesh;
+    this.fogChunks[c].addChild(mesh);
   }
 
   /** Each arrow flies on a shallow arc from the shooter's shoulder to the target. */
