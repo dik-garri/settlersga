@@ -1059,6 +1059,8 @@ export const AI = {
    * start positions (public, like the map size) instead of spreading outposts everywhere.
    */
   maxScoutOutposts: 8,
+  /** …plus one more every this many ticks (10 game minutes). */
+  scoutOutpostEvery: 10 * 60 * TICKS_PER_SECOND,
   /**
    * Own tiles this close (steps) to the border are kept for military buildings, mines and gatherers:
    * workshops and houses stay in the core, so there is always room to push the border.

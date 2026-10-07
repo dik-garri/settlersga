@@ -229,7 +229,12 @@ function think(w: World, ai: AiState): void {
     (ai.blockedUntil.frontier ?? -Infinity) <= w.tick &&
     (soldiers >= AI.frontierSoldiers || cramped) &&
     military.length < AI.maxMilitary &&
-    (ctx.knowsEnemy || cramped || garrisoned < AI.maxScoutOutposts) &&
+    // The cap grows slowly, so an enemy further away than its first outposts reach is still found.
+    // Foreign land in sight already shows where the enemy is: no cap then, outposts push into contact.
+    (ctx.knowsEnemy ||
+      ctx.scoutingBorder ||
+      cramped ||
+      garrisoned < AI.maxScoutOutposts + Math.floor(w.tick / AI.scoutOutpostEvery)) &&
     military.every((b) => b.done && (b.garrison.length > 0 || !BUILDINGS[b.type].garrison))
   ) {
     // The largest military building it can pay for and man: more spare fighters at the front. Short
