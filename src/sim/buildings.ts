@@ -110,6 +110,10 @@ export function spawnSettler(w: World, kind: SettlerKind, at: Building): Settler
     opponent: null,
     level: 0,
     reload: 0,
+    idleAt: null,
+    stroll: null,
+    strollIn: 0,
+    chatWith: null,
   };
   w.settlers.push(s);
   w.settlerById.set(s.id, s);

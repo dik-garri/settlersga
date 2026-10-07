@@ -34,6 +34,7 @@ import { depthOf, HALF_H, HALF_W, toScreen, toTile } from './iso';
 import { ART3D_BANNERS, ART3D_STAGES, PILE_MAX } from './art3d';
 import { needsLevelling } from '../sim/digging';
 import { pathLevel } from '../sim/paths';
+import { chatPartner } from '../sim/idle';
 import { BANNERS, EDGE_DIRS, GROUND_PRIORITY, groundVariants, PATH_VARIANTS, PLAYER_COLORS, type GroundKind } from './sprites';
 
 const TERRAIN_KIND: Record<Terrain, GroundKind> = {
@@ -1292,9 +1293,12 @@ export class GameRenderer {
       if (foe) dir = dirTowards(s.x, s.y, foe.x, foe.y, dir);
       else if (moving) dir = dirFromTileVelocity(dx, dy, dir);
       else if (working && this.workTarget(s)) dir = dirTowards(s.x, s.y, this.tx, this.ty, dir);
+      // Idle settlers chatting in pairs (`idle.ts`) face each other.
+      const partner = !moving && !working && s.chatWith !== null ? chatPartner(this.sim, s) : undefined;
+      if (partner) dir = dirTowards(s.x, s.y, partner.x, partner.y, dir);
       v.dir = dir;
-      // Idle settlers glance around now and then.
-      const shown = moving || working ? dir : idleDir(timeMs, s.id, dir);
+      // Idle settlers glance around now and then (not while talking to someone).
+      const shown = moving || working || partner ? dir : idleDir(timeMs, s.id, dir);
       const pd = PAINTED_DIR[shown];
       const tex = this.settlerTex;
 

@@ -5,7 +5,7 @@ import type { Building, PlayerId, Settler } from './types';
 import type { Player, World } from './world';
 
 /** Bump when the save layout changes incompatibly. */
-export const SAVE_VERSION = 17;
+export const SAVE_VERSION = 18;
 
 const MAP_LAYERS = [
   'terrain',
@@ -45,6 +45,7 @@ export interface SaveData {
   animals: Animal[];
   nextAnimalId: number;
   animalRngState: number;
+  idleRngState: number;
 }
 
 function encode(a: Uint8Array | Int32Array): string {
@@ -85,6 +86,7 @@ export function saveWorld(w: World): SaveData {
     animals: w.animals,
     nextAnimalId: w.nextAnimalId,
     animalRngState: w.animalRng.state,
+    idleRngState: w.idleRng.state,
   });
 }
 
@@ -118,4 +120,5 @@ export function restoreWorld(w: World, raw: SaveData): void {
   w.animals.push(...data.animals);
   w.nextAnimalId = data.nextAnimalId;
   w.animalRng.state = data.animalRngState;
+  w.idleRng.state = data.idleRngState;
 }

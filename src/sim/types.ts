@@ -225,4 +225,13 @@ export interface Settler {
   level: number;
   /** Archers: ticks until the next shot. */
   reload: number;
+  /**
+   * Idle crowd (`idle.ts`): the building a free settler hangs about, where it is strolling to (its
+   * `path` belongs to the stroll while this is set), ticks until the next stroll, and the settler it
+   * stands chatting with (an id; check it still exists and is idle before use).
+   */
+  idleAt: number | null;
+  stroll: Point | null;
+  strollIn: number;
+  chatWith: number | null;
 }
