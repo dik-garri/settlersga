@@ -142,8 +142,6 @@ export function updateAnimals(w: World): void {
       a.rest--;
       continue;
     }
-    // Something was built or planted where it stands: it walks out, ignoring its habitat on the way.
-    const stuck = !habitable(map, def, Math.round(a.x), Math.round(a.y));
     const dx = a.tx - a.x;
     const dy = a.ty - a.y;
     const d = Math.hypot(dx, dy);
@@ -157,7 +155,13 @@ export function updateAnimals(w: World): void {
       const nx = a.x + (dx / d) * def.speed;
       const ny = a.y + (dy / d) * def.speed;
       // The world changes under its feet (a site, a sapling): stop and rest instead of walking in.
-      if (!stuck && !habitable(map, def, Math.round(nx), Math.round(ny))) {
+      // Checked only when it enters another tile, and not when it walks out of an unfit one.
+      const nextTile = Math.round(nx) !== Math.round(a.x) || Math.round(ny) !== Math.round(a.y);
+      if (
+        nextTile &&
+        !habitable(map, def, Math.round(nx), Math.round(ny)) &&
+        habitable(map, def, Math.round(a.x), Math.round(a.y))
+      ) {
         a.tx = a.x;
         a.ty = a.y;
         a.rest = restTicks(rng, def);
@@ -167,7 +171,9 @@ export function updateAnimals(w: World): void {
       a.y = ny;
       continue;
     }
-    // Choose the next leg: a habitable spot near home, reachable in a straight line.
+    // Choose the next leg: a habitable spot near home, reachable in a straight line. Something built
+    // or planted where it stands: it walks out, ignoring its habitat on the way.
+    const stuck = !habitable(map, def, Math.round(a.x), Math.round(a.y));
     let found = false;
     for (let k = 0; k < LEG_TRIES && !found; k++) {
       const tx = a.hx + rng() * def.roam * 2 - def.roam;

@@ -70,8 +70,8 @@ class Rig:
 def quadruped(r, coat, belly, dark, hoof, body_len, body_h, shoulder, leg_r, neck_len, head_len, stocky=1.0):
     """A four-legged animal: barrel body, legs on hip pivots, a neck pivot carrying the head."""
     hip_z = shoulder - body_h * 0.35
-    r.attach(lib.sphere((0, 0, shoulder), 0.5, coat, scale=(body_len / 2, body_h * 0.42 * stocky, body_h / 2)))
-    r.attach(lib.sphere((0, 0, shoulder - body_h * 0.18), 0.5, belly, scale=(body_len * 0.38, body_h * 0.36 * stocky, body_h * 0.3)))
+    r.attach(lib.sphere((0, 0, shoulder), 1.0, coat, scale=(body_len / 2, body_h * 0.42 * stocky, body_h / 2)))
+    r.attach(lib.sphere((0, 0, shoulder - body_h * 0.14), 1.0, belly, scale=(body_len * 0.36, body_h * 0.34 * stocky, body_h * 0.32)))
     for fx, side, sign in ((0.32, -1, 1), (0.32, 1, -1), (-0.32, -1, -1), (-0.32, 1, 1)):
         x = fx * body_len
         y = side * body_h * 0.22 * stocky
@@ -89,8 +89,8 @@ def quadruped(r, coat, belly, dark, hoof, body_len, body_h, shoulder, leg_r, nec
     r.attach(lib.cylinder((cx, 0, cz), body_h * 0.2, neck_len, coat, rot=(0, math.pi / 2 - ang, 0), radius2=body_h * 0.15, verts=10), neck)
     hx = nx + math.cos(ang) * neck_len
     hz = nz + math.sin(ang) * neck_len
-    r.attach(lib.sphere((hx + head_len * 0.3, 0, hz), 0.5, coat, scale=(head_len / 2, head_len * 0.28, head_len * 0.3)), neck)
-    r.attach(lib.sphere((hx + head_len * 0.68, 0, hz - head_len * 0.06), 0.5, belly, scale=(head_len * 0.22, head_len * 0.2, head_len * 0.2)), neck)
+    r.attach(lib.sphere((hx + head_len * 0.3, 0, hz), 1.0, coat, scale=(head_len / 2, head_len * 0.28, head_len * 0.3)), neck)
+    r.attach(lib.sphere((hx + head_len * 0.72, 0, hz - head_len * 0.06), 1.0, belly, scale=(head_len * 0.2, head_len * 0.18, head_len * 0.18)), neck)
     r.neck = neck
     # Tail.
     r.attach(lib.cylinder((-body_len / 2 - 0.02, 0, shoulder), 0.015, 0.12, dark, rot=(0, -0.5, 0), verts=6))
@@ -103,11 +103,11 @@ def build_deer(r):
     dark = lib.mat_grain('legs', (0.42, 0.24, 0.12), (0.55, 0.33, 0.17), scale=14, stretch=(1, 1, 3), bump=0.2)
     hoof = lib.mat_flat('hoof', (0.12, 0.09, 0.07))
     antler = lib.mat_flat('antler', (0.9, 0.84, 0.7))
-    neck, (hx, hz) = quadruped(r, coat, belly, dark, hoof, 0.46, 0.2, 0.38, 0.022, 0.2, 0.15)
+    neck, (hx, hz) = quadruped(r, coat, belly, dark, hoof, 0.46, 0.2, 0.32, 0.024, 0.18, 0.15)
     for side in (-1, 1):
         r.attach(lib.cylinder((hx + 0.02, side * 0.035, hz + 0.1), 0.008, 0.16, antler, rot=(side * 0.35, -0.3, 0), verts=6), neck)
         r.attach(lib.cylinder((hx + 0.06, side * 0.06, hz + 0.15), 0.006, 0.08, antler, rot=(side * 0.5, 0.4, 0), verts=6), neck)
-        r.attach(lib.sphere((hx - 0.01, side * 0.045, hz + 0.05), 0.5, coat, scale=(0.02, 0.03, 0.012)), neck)
+        r.attach(lib.sphere((hx - 0.01, side * 0.045, hz + 0.05), 1.0, coat, scale=(0.02, 0.03, 0.012)), neck)
 
 
 def build_donkey(r):
@@ -115,10 +115,10 @@ def build_donkey(r):
     belly = lib.mat_flat('belly', (0.88, 0.87, 0.84))
     dark = lib.mat_flat('dark', (0.22, 0.21, 0.2))
     hoof = lib.mat_flat('hoof', (0.12, 0.1, 0.09))
-    neck, (hx, hz) = quadruped(r, coat, belly, coat, hoof, 0.48, 0.24, 0.32, 0.028, 0.16, 0.17, stocky=1.15)
+    neck, (hx, hz) = quadruped(r, coat, belly, coat, hoof, 0.48, 0.24, 0.3, 0.032, 0.15, 0.17, stocky=1.15)
     for side in (-1, 1):
-        r.attach(lib.sphere((hx, side * 0.04, hz + 0.08), 0.5, coat, scale=(0.025, 0.018, 0.075)), neck)
-        r.attach(lib.sphere((hx, side * 0.04, hz + 0.13), 0.5, dark, scale=(0.018, 0.012, 0.022)), neck)
+        r.attach(lib.sphere((hx, side * 0.04, hz + 0.08), 1.0, coat, scale=(0.025, 0.018, 0.075)), neck)
+        r.attach(lib.sphere((hx, side * 0.04, hz + 0.13), 1.0, dark, scale=(0.018, 0.012, 0.022)), neck)
     # Dark mane along the neck.
     r.attach(lib.box((hx - 0.08, 0, hz - 0.01), (0.14, 0.02, 0.04), dark, rot=(0, -0.85, 0)), neck)
 
@@ -131,17 +131,17 @@ def bird(r, body, belly, beak_mat, leg_mat, length, height, neck_h, head_r, legs
             p = r.pivot('hip', (0, side * length * 0.15, lift))
             r.attach(lib.cylinder((0, side * length * 0.15, lift / 2), 0.006, lift, leg_mat, verts=6), p)
             r.legs.append((p, sign))
-    r.attach(lib.sphere((0, 0, lift + height * 0.45), 0.5, body, scale=(length / 2, length * 0.32, height * 0.45)))
-    r.attach(lib.sphere((0.01, 0, lift + height * 0.3), 0.5, belly, scale=(length * 0.4, length * 0.28, height * 0.28)))
+    r.attach(lib.sphere((0, 0, lift + height * 0.45), 1.0, body, scale=(length / 2, length * 0.32, height * 0.45)))
+    r.attach(lib.sphere((0.01, 0, lift + height * 0.32), 1.0, belly, scale=(length * 0.4, length * 0.28, height * 0.3)))
     if tail is not None:
-        r.attach(lib.sphere((-length * 0.48, 0, lift + height * 0.75), 0.5, tail, scale=(length * 0.18, length * 0.1, height * 0.3)))
+        r.attach(lib.sphere((-length * 0.48, 0, lift + height * 0.75), 1.0, tail, scale=(length * 0.18, length * 0.1, height * 0.3)))
     neck = r.pivot('neck', (length * 0.35, 0, lift + height * 0.65))
     hx, hz = length * 0.42, lift + height * 0.65 + neck_h
     r.attach(lib.sphere((hx, 0, hz), head_r, body), neck)
     r.attach(lib.cylinder((hx + head_r * 1.3, 0, hz - head_r * 0.2), head_r * 0.45, head_r * 1.2, beak_mat,
                           rot=(0, math.pi / 2, 0), radius2=head_r * 0.15, verts=8), neck)
     if comb is not None:
-        r.attach(lib.sphere((hx, 0, hz + head_r * 0.9), 0.5, comb, scale=(head_r * 0.8, head_r * 0.3, head_r * 0.5)), neck)
+        r.attach(lib.sphere((hx, 0, hz + head_r * 0.9), 1.0, comb, scale=(head_r * 0.8, head_r * 0.3, head_r * 0.5)), neck)
     r.neck = neck
 
 
@@ -168,6 +168,9 @@ def render_kind(kind):
     scene = lib.reset_scene(samples=32)
     # Small sprites render fine on the CPU, and the GPU may be busy with other renders.
     scene.cycles.device = 'CPU'
+    # A few threads only, so a batch of renders does not overheat the machine.
+    scene.render.threads_mode = 'FIXED'
+    scene.render.threads = 4
     lib.setup_camera(scene, w, h, ax, ay)
     r = Rig()
     BUILDERS[kind](r)
