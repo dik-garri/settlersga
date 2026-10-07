@@ -1,0 +1,189 @@
+import { ANIMAL_KINDS, ANIMAL_START_CLEARANCE, ANIMALS, type AnimalDef, type AnimalKind, TERRAIN } from './config';
+import type { GameMap } from './map';
+import { randInt, type Rng } from './rng';
+import { Terrain } from './types';
+import type { World } from './world';
+
+/**
+ * A wild animal: owner-less plain data, wandering in straight legs between resting spells around its
+ * herd's home. Animals never occupy tiles (nothing waits for them, they block no route); they only
+ * walk where their habitat allows. All randomness comes from `World.animalRng`, a stream of its own,
+ * so animals never shift the economy's random sequence.
+ */
+export interface Animal {
+  id: number;
+  kind: AnimalKind;
+  x: number;
+  y: number;
+  /** Position at the previous tick (the renderer interpolates). */
+  px: number;
+  py: number;
+  /** Where the current leg ends (equal to x, y while resting). */
+  tx: number;
+  ty: number;
+  /** Ticks left resting before the next leg. */
+  rest: number;
+  /** Herd home: members roam within `roam` of it. */
+  hx: number;
+  hy: number;
+}
+
+/** Tries per new leg before an animal just rests again. */
+const LEG_TRIES = 6;
+/** Tries to find a home spot per herd at generation. */
+const HOME_TRIES = 60;
+
+function isWater(map: GameMap, x: number, y: number): boolean {
+  return map.inBounds(x, y) && TERRAIN[map.terrain[map.idx(x, y)] as Terrain].water;
+}
+
+function nearWater(map: GameMap, x: number, y: number): boolean {
+  return isWater(map, x + 1, y) || isWater(map, x - 1, y) || isWater(map, x, y + 1) || isWater(map, x, y - 1);
+}
+
+function nearTree(map: GameMap, x: number, y: number, r = 2): boolean {
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      if (map.inBounds(x + dx, y + dy) && map.tree[map.idx(x + dx, y + dy)] > 0) return true;
+    }
+  }
+  return false;
+}
+
+/** Whether an animal of this habitat may stand on the tile. */
+export function habitable(map: GameMap, def: AnimalDef, x: number, y: number): boolean {
+  if (!map.inBounds(x, y)) return false;
+  const t = map.terrain[map.idx(x, y)] as Terrain;
+  if (def.habitat === 'shore') {
+    // Ducks paddle in water next to land and waddle along the bank.
+    if (TERRAIN[t].water || t === Terrain.Ford) {
+      const land = (ax: number, ay: number) => map.inBounds(ax, ay) && map.isWalkable(ax, ay) && !isWater(map, ax, ay);
+      return land(x + 1, y) || land(x - 1, y) || land(x, y + 1) || land(x, y - 1);
+    }
+    return map.isWalkable(x, y) && nearWater(map, x, y);
+  }
+  if (t !== Terrain.Grass || !map.isWalkable(x, y)) return false;
+  return def.habitat === 'forest' ? nearTree(map, x, y) : true;
+}
+
+/** Every tile a straight leg crosses is habitable (sampled every half tile). */
+function legClear(map: GameMap, def: AnimalDef, x0: number, y0: number, x1: number, y1: number): boolean {
+  const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0) * 2);
+  for (let k = 1; k <= n; k++) {
+    const t = k / n;
+    if (!habitable(map, def, Math.round(x0 + (x1 - x0) * t), Math.round(y0 + (y1 - y0) * t))) return false;
+  }
+  return true;
+}
+
+function restTicks(rng: Rng, def: AnimalDef): number {
+  return def.rest[0] + randInt(rng, def.rest[1] - def.rest[0] + 1);
+}
+
+/** Places the herds of every kind on a new map, away from the start positions and anyone's land. */
+export function spawnAnimals(w: World, starts: { x: number; y: number }[]): void {
+  const { map } = w;
+  const rng = w.animalRng;
+  const area = (map.w * map.h) / (64 * 64);
+  for (const kind of ANIMAL_KINDS) {
+    const def: AnimalDef = ANIMALS[kind];
+    const herds = Math.round(def.herds * area);
+    for (let h = 0; h < herds; h++) {
+      let home: { x: number; y: number } | null = null;
+      for (let k = 0; k < HOME_TRIES && !home; k++) {
+        const x = randInt(rng, map.w);
+        const y = randInt(rng, map.h);
+        if (!habitable(map, def, x, y) || map.owner[map.idx(x, y)] !== 0) continue;
+        if (starts.some((s) => Math.hypot(x - s.x, y - s.y) < ANIMAL_START_CLEARANCE)) continue;
+        home = { x, y };
+      }
+      if (!home) continue;
+      const size = def.herd[0] + randInt(rng, def.herd[1] - def.herd[0] + 1);
+      for (let m = 0; m < size; m++) {
+        // Members start around the home spot, on habitable tiles.
+        let x = home.x;
+        let y = home.y;
+        for (let k = 0; k < 8; k++) {
+          const cx = home.x + randInt(rng, 5) - 2;
+          const cy = home.y + randInt(rng, 5) - 2;
+          if (habitable(map, def, cx, cy)) {
+            x = cx;
+            y = cy;
+            break;
+          }
+        }
+        w.animals.push({
+          id: w.nextAnimalId++,
+          kind,
+          x,
+          y,
+          px: x,
+          py: y,
+          tx: x,
+          ty: y,
+          rest: restTicks(rng, def),
+          hx: home.x,
+          hy: home.y,
+        });
+      }
+    }
+  }
+}
+
+/** One tick for every animal: O(1) each, plus a few habitat checks when a new leg is chosen. */
+export function updateAnimals(w: World): void {
+  const { map } = w;
+  const rng = w.animalRng;
+  for (const a of w.animals) {
+    a.px = a.x;
+    a.py = a.y;
+    const def: AnimalDef = ANIMALS[a.kind];
+    if (a.rest > 0) {
+      a.rest--;
+      continue;
+    }
+    const dx = a.tx - a.x;
+    const dy = a.ty - a.y;
+    const d = Math.hypot(dx, dy);
+    if (d > 1e-6) {
+      if (d <= def.speed) {
+        a.x = a.tx;
+        a.y = a.ty;
+        a.rest = restTicks(rng, def);
+        continue;
+      }
+      const nx = a.x + (dx / d) * def.speed;
+      const ny = a.y + (dy / d) * def.speed;
+      // The world changes under its feet (a site, a sapling): stop and rest instead of walking in.
+      // Checked only when it enters another tile, and not when it walks out of an unfit one.
+      const nextTile = Math.round(nx) !== Math.round(a.x) || Math.round(ny) !== Math.round(a.y);
+      if (
+        nextTile &&
+        !habitable(map, def, Math.round(nx), Math.round(ny)) &&
+        habitable(map, def, Math.round(a.x), Math.round(a.y))
+      ) {
+        a.tx = a.x;
+        a.ty = a.y;
+        a.rest = restTicks(rng, def);
+        continue;
+      }
+      a.x = nx;
+      a.y = ny;
+      continue;
+    }
+    // Choose the next leg: a habitable spot near home, reachable in a straight line. Something built
+    // or planted where it stands: it walks out, ignoring its habitat on the way.
+    const stuck = !habitable(map, def, Math.round(a.x), Math.round(a.y));
+    let found = false;
+    for (let k = 0; k < LEG_TRIES && !found; k++) {
+      const tx = a.hx + rng() * def.roam * 2 - def.roam;
+      const ty = a.hy + rng() * def.roam * 2 - def.roam;
+      if (!habitable(map, def, Math.round(tx), Math.round(ty))) continue;
+      if (!stuck && !legClear(map, def, a.x, a.y, tx, ty)) continue;
+      a.tx = tx;
+      a.ty = ty;
+      found = true;
+    }
+    if (!found) a.rest = restTicks(rng, def);
+  }
+}

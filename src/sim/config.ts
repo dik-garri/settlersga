@@ -832,3 +832,38 @@ export const AI = {
   /** Its army make-up (weights for `World.setShare`): mostly swordsmen, archers for the towers. */
   weaponShares: { sword: 65, bow: 35 } as Partial<Record<Resource, number>>,
 };
+
+// ---------------------------------------------------------------- wild animals
+
+/** Where an animal lives: open grass, grass at a forest's edge, or water edges (shallow water too). */
+export type Habitat = 'meadow' | 'forest' | 'shore';
+
+/**
+ * Wild animals (see `animals.ts`): owner-less, wandering in herds around a home spot. Data only, so a
+ * new animal is an entry here plus its sprites. `herds` is per 64×64 of map, scaled by area.
+ */
+export interface AnimalDef {
+  name: string;
+  habitat: Habitat;
+  /** Tiles per tick while moving. */
+  speed: number;
+  /** Members per herd, inclusive range. */
+  herd: [number, number];
+  herds: number;
+  /** How far (tiles) members roam from the herd's home. */
+  roam: number;
+  /** Ticks resting (grazing) between legs, inclusive range. */
+  rest: [number, number];
+}
+
+export const ANIMALS = {
+  deer: { name: 'Олень', habitat: 'forest', speed: 0.055, herd: [2, 4], herds: 2, roam: 6, rest: [30, 120] },
+  donkey: { name: 'Осёл', habitat: 'meadow', speed: 0.03, herd: [1, 3], herds: 1, roam: 5, rest: [60, 200] },
+  duck: { name: 'Утка', habitat: 'shore', speed: 0.025, herd: [2, 5], herds: 2, roam: 4, rest: [20, 90] },
+  chicken: { name: 'Курица', habitat: 'meadow', speed: 0.03, herd: [3, 6], herds: 1, roam: 3, rest: [10, 60] },
+} satisfies Record<string, AnimalDef>;
+
+export type AnimalKind = keyof typeof ANIMALS;
+export const ANIMAL_KINDS = Object.keys(ANIMALS) as AnimalKind[];
+/** Herds keep at least this far (tiles) from every start position. */
+export const ANIMAL_START_CLEARANCE = 16;

@@ -3,9 +3,10 @@
  * with `?art=3d` they replace the procedural woodcutter, sawmill, stonecutter, tower and large house
  * (with construction stages), tree, stone deposit, wares, door piles and every settler.
  * Every sprite keeps the anchor convention of the sprite it replaces, so the renderer is unchanged
- * except for settlers, whose pre-rendered frames (`settler3d.ts`) replace the layered figure.
+ * except for settlers, whose pre-rendered frames (`settler3d.ts`) replace the layered figure. Animal
+ * sheets (`animal-<kind>.png`, see `animalArt.ts`) are loaded here too.
  */
-
+import { ANIMAL_KINDS } from '../sim/config';
 import { RESOURCES, type Resource } from '../sim/types';
 import { buildSettler3d, type Settler3d, type SettlersMeta } from './settler3d';
 
@@ -100,5 +101,14 @@ export async function loadArt3d(): Promise<Art3d> {
   const wares = (await (await fetch(`${base}wares.json`)).json()) as WaresMeta;
   const strips = [...ART3D_PILES.map((r) => `piles-${r}`), 'wares'];
   await Promise.all(strips.map(async (n) => images.set(n, await loadImage(`${base}${n}.png`))));
+  // Animal sheets are optional: a kind without one falls back to the procedural painter.
+  await Promise.all(
+    ANIMAL_KINDS.map((k) =>
+      loadImage(`${base}animal-${k}.png`).then(
+        (img) => images.set(`animal-${k}`, img),
+        () => undefined,
+      ),
+    ),
+  );
   return { images, settlers, ground, wares };
 }

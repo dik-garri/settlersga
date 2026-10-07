@@ -27,6 +27,7 @@ import {
   type SoundId,
 } from './animConfig';
 import { Effects } from './effects';
+import { AnimalLayer } from './animals';
 import { setFrame, type Settler3d } from './settler3d';
 import { BODY_STAND, BODY_WORK, CARRY_AT } from './settlerArt';
 import { depthOf, HALF_H, HALF_W, toScreen, toTile } from './iso';
@@ -224,6 +225,8 @@ export class GameRenderer {
   private readonly settlerViews = new Map<number, SettlerView>();
 
   private readonly settlerTex: SettlerTextures;
+  /** Wild animals (`animals.ts`). */
+  private readonly animals: AnimalLayer;
   /** Pre-rendered 3D settlers (`?art=3d`), replacing the layered figure. */
   private readonly settler3d: Settler3d | null;
   private readonly wareTex = {} as Record<Resource, Texture>;
@@ -259,6 +262,7 @@ export class GameRenderer {
   ) {
     this.world.addChild(this.ground, this.territory, this.marks, this.hints, this.objects, this.shots, this.fog, this.ghostLayer);
     this.settlerTex = atlas.settlerTextures();
+    this.animals = new AnimalLayer(sim, this.objects, (n) => atlas.get(n), fogOn);
     this.settler3d = atlas.art3d?.settlers ?? null;
     for (const r of RESOURCES) this.wareTex[r] = atlas.get(`ware:${r}`);
     this.effects = new Effects(atlas, sim, (x, y) => this.surface(x, y), this.sound);
@@ -590,6 +594,7 @@ export class GameRenderer {
     this.syncChangedTiles();
     this.syncBuildings();
     this.syncSettlers(alpha, timeMs);
+    this.animals.sync(alpha, timeMs, view);
     this.swayTrees(timeMs);
     this.effects.update(this.lastFrameMs ? timeMs - this.lastFrameMs : 16, timeMs, this.chunkVisible);
     this.lastFrameMs = timeMs;

@@ -1,10 +1,11 @@
 import type { AiState } from './ai';
+import type { Animal } from './animals';
 import { GameMap } from './map';
 import type { Building, PlayerId, Settler } from './types';
 import type { Player, World } from './world';
 
 /** Bump when the save layout changes incompatibly. */
-export const SAVE_VERSION = 15;
+export const SAVE_VERSION = 16;
 
 const MAP_LAYERS = [
   'terrain',
@@ -40,6 +41,9 @@ export interface SaveData {
   reservedPlots: number[];
   ai: AiState[];
   defeated: PlayerId[];
+  animals: Animal[];
+  nextAnimalId: number;
+  animalRngState: number;
 }
 
 function encode(a: Uint8Array | Int32Array): string {
@@ -77,6 +81,9 @@ export function saveWorld(w: World): SaveData {
     reservedPlots: [...w.reservedPlots],
     ai: w.ai,
     defeated: w.defeated,
+    animals: w.animals,
+    nextAnimalId: w.nextAnimalId,
+    animalRngState: w.animalRng.state,
   });
 }
 
@@ -107,4 +114,7 @@ export function restoreWorld(w: World, raw: SaveData): void {
   for (const i of data.reservedPlots) w.reservedPlots.add(i);
   w.ai.push(...data.ai);
   w.defeated.push(...data.defeated);
+  w.animals.push(...data.animals);
+  w.nextAnimalId = data.nextAnimalId;
+  w.animalRng.state = data.animalRngState;
 }

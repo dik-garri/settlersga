@@ -24,6 +24,7 @@ import {
 } from './sprites';
 import { WALK_FRAMES, WORK_FRAMES } from './anim';
 import { ART3D_BUILDINGS, ART3D_PILES, ART3D_STAGED, ART3D_STAGES, ART3D_SPRITES, PILE, PILE_MAX, type Art3d } from './art3d';
+import { addAnimalSprites } from './animals';
 import { ACTION_IDS, ACTIONS, HAT_STYLES, styleOf, TOOLS, type ActionId, type HatStyle, type ToolShape } from './animConfig';
 import { paintFlash, paintGlint, paintGlow, paintPuff, paintSpark } from './fxArt';
 import {
@@ -247,6 +248,7 @@ export class SpriteAtlas {
     for (let level = 1; level < SOLDIER_LEVELS.length; level++) {
       a.add(`chevrons:${level}`, 12, 10, 6, 5, (ctx) => paintChevrons(ctx, level));
     }
+    addAnimalSprites((...args) => a.add(...args), art3d);
     if (art3d) addArt3d(a, art3d);
     this.textures = a.build();
   }

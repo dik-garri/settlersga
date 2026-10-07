@@ -14,7 +14,8 @@
     "sim:ai": "tsx tools/aivsai.ts",
     "art:render": "blender -b --factory-startup -P art/blender/build.py --",
     "art:ground": "blender -b --factory-startup -P art/textures/ground.py",
-    "art:settlers": "blender -b --factory-startup -P art/blender/build.py -- settlers && python3 art/tools/quantize.py public/art/3d/settlers-*.png"
+    "art:settlers": "blender -b --factory-startup -P art/blender/build.py -- settlers && python3 art/tools/quantize.py public/art/3d/settlers-*.png",
+    "art:animals": "blender -b --factory-startup -P art/blender/animals.py -- && python3 art/tools/quantize.py public/art/3d/animal-*.png"
   },
   "dependencies": {
     "pixi.js": "^8.22.0"
