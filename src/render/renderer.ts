@@ -31,7 +31,7 @@ import { AnimalLayer } from './animals';
 import { setFrame, type Settler3d } from './settler3d';
 import { BODY_STAND, BODY_WORK, CARRY_AT } from './settlerArt';
 import { depthOf, HALF_H, HALF_W, toScreen, toTile } from './iso';
-import { ART3D_BANNERS, ART3D_STAGES, ART3D_YARDS, PILE_MAX } from './art3d';
+import { ART3D_BANNERS, ART3D_STAGES, ART3D_YARDS, PILE_MAX, SETTLER_3D_SCALE } from './art3d';
 
 /** Goods kinds shown on an open storage yard, and the ring they stand on (screen px from its centre). */
 const YARD_KINDS = 8;
@@ -1505,7 +1505,8 @@ export class GameRenderer {
         v.hat.visible = hat !== null;
         if (hat) setFrame(v.hat, hat);
         v.head.visible = v.arm.visible = false;
-        v.root.scale.x = 1;
+        // The 3D figure is rendered large for detail; shrunk to Settlers 4 proportions next to buildings.
+        v.root.scale.set(SETTLER_3D_SCALE, SETTLER_3D_SCALE);
         const away = s3d.carryBehind[shown];
         if (away !== v.armBehind) {
           v.armBehind = away;

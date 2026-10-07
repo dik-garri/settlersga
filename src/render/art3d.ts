@@ -44,6 +44,9 @@ export interface Art3d {
 /** Frames of the 3D mill sails over a quarter turn (`SAIL_FRAMES` in buildings.py); same canvas as the mill. */
 export const MILL_SAIL_FRAMES = 12;
 
+/** Scale of the 3D settler figures on screen: rendered large for detail, shown at S4 proportions (a settler about a third as tall as a small house). */
+export const SETTLER_3D_SCALE = 0.72;
+
 /** Construction stages rendered per building (`STAGES` in build.py): 0 stakes … 3 roof half on. */
 export const ART3D_STAGES = 4;
 /**
@@ -95,10 +98,10 @@ export const ART3D_STAGED = Object.keys(ART3D_BUILDINGS);
  * by buildings.py's `note_banner` when it renders); replaces `BANNERS` in `sprites.ts` under `?art=3d`.
  */
 export const ART3D_BANNERS: Record<string, { x: number; y: number }> = {
-  tower: { x: 3.2, y: -73.3 },
+  tower: { x: 3.2, y: -49.8 },
   castle: { x: 1.6, y: -101.7 },
   fortress: { x: 12.8, y: -67.9 },
-  bigtower: { x: 4.2, y: -89.3 },
+  bigtower: { x: 4.2, y: -58.0 },
 };
 /**
  * Live-effect anchors of 3D buildings, from the sprite anchor (printed by buildings.py's `note_fx`

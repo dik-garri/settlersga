@@ -487,7 +487,7 @@ def build_tower():
     earth_pad((0.12, -0.18, 0), 0.82, 0.92, seed=21)
     lib.tag(0)
 
-    cx, cy, s0, s1, H = 0.05, 0.05, 1.22, 0.98, 1.75  # base width at the foot and the top, height
+    cx, cy, s0, s1, H = 0.05, 0.05, 1.12, 0.94, 1.15  # base width at the foot and the top, height
     corner_stakes(cx - s0 / 2, cx + s0 / 2, cy - s0 / 2, cy + s0 / 2)
     lib.tag(0, until=0)
 
@@ -2566,7 +2566,7 @@ def build_bigtower():
     corner_stakes(-0.8, 0.8, -0.8, 0.8)
     lib.tag(0, until=0)
 
-    cx, cy, s0, s1, H = 0.05, 0.05, 1.42, 1.22, 2.25
+    cx, cy, s0, s1, H = 0.05, 0.05, 1.36, 1.18, 1.45
     lib.box((cx, cy, 0.06), (s0 + 0.12, s0 + 0.12, 0.12), blocks[1], bevel=0.02)
     lib.tag(1)
     scaffold(cx - s0 / 2 - 0.1, cx + s0 / 2 + 0.1, cy - s0 / 2 - 0.1, cy + s0 / 2 + 0.1, 2.0, beam)
@@ -2627,7 +2627,7 @@ def build_lookout():
     corner_stakes(-0.6, 0.6, -0.6, 0.6)
     lib.tag(0, until=0)
 
-    H, b0, b1 = 2.05, 0.6, 0.34  # platform height, half-spread at the foot and at the top
+    H, b0, b1 = 1.3, 0.55, 0.34  # platform height, half-spread at the foot and at the top
     feet = [(-b0, -b0), (b0, -b0), (b0, b0), (-b0, b0)]
     heads = [(-b1, -b1), (b1, -b1), (b1, b1), (-b1, b1)]
     for (x, y) in feet:
