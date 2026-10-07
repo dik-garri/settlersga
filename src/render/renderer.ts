@@ -33,7 +33,8 @@ import { BODY_STAND, BODY_WORK, CARRY_AT } from './settlerArt';
 import { depthOf, HALF_H, HALF_W, toScreen, toTile } from './iso';
 import { ART3D_BANNERS, ART3D_STAGES, PILE_MAX } from './art3d';
 import { needsLevelling } from '../sim/digging';
-import { BANNERS, EDGE_DIRS, GROUND_PRIORITY, groundVariants, PLAYER_COLORS, type GroundKind } from './sprites';
+import { pathLevel } from '../sim/paths';
+import { BANNERS, EDGE_DIRS, GROUND_PRIORITY, groundVariants, PATH_VARIANTS, PLAYER_COLORS, type GroundKind } from './sprites';
 
 const TERRAIN_KIND: Record<Terrain, GroundKind> = {
   [Terrain.Water]: 'water',
@@ -215,6 +216,9 @@ export class GameRenderer {
   private readonly treeState: Uint8Array;
   private readonly depositSprites: (Sprite | null)[];
   private readonly cropSprites: (Sprite | null)[];
+  /** Worn path decals per tile (`paths.ts`) and the level last drawn. */
+  private readonly pathSprites: (Sprite | null)[];
+  private readonly pathState: Uint8Array;
   /** Geologist signs for the local player; state is ore code + 1, 0 = none. */
   private readonly signSprites: (Sprite | null)[];
   private readonly signState: Uint8Array;
@@ -281,6 +285,8 @@ export class GameRenderer {
     this.depositSprites = new Array(n).fill(null);
     this.depositState = new Uint8Array(n);
     this.cropSprites = new Array(n).fill(null);
+    this.pathSprites = new Array(n).fill(null);
+    this.pathState = new Uint8Array(n);
     this.signSprites = new Array(n).fill(null);
     this.signState = new Uint8Array(n);
     this.cropState = new Uint8Array(n);
@@ -529,10 +535,10 @@ export class GameRenderer {
       const y0 = Math.floor(c / map.chunksX) * CHUNK;
       for (let y = y0; y < Math.min(map.h, y0 + CHUNK); y++) {
         for (let x = x0; x < Math.min(map.w, x0 + CHUNK); x++) {
-          const crop = this.cropSprites[map.idx(x, y)];
-          if (crop) {
+          for (const decal of [this.cropSprites[map.idx(x, y)], this.pathSprites[map.idx(x, y)]]) {
+            if (!decal) continue;
             const p = this.surface(x, y);
-            crop.position.set(p.x, p.y);
+            decal.position.set(p.x, p.y);
           }
         }
       }
@@ -809,6 +815,7 @@ export class GameRenderer {
           this.syncTree(i);
           this.syncDeposit(i);
           this.syncCrop(i);
+          this.syncPath(i);
           this.syncSign(i);
         }
       }
@@ -984,6 +991,32 @@ export class GameRenderer {
       this.cropSprites[i] = s;
     }
     s.texture = this.atlas.get(`field:${CROP_KINDS[map.cropKind[i]]}:${stage}`);
+    s.anchor.copyFrom(s.texture.defaultAnchor!);
+  }
+
+  /** Worn paths: a ground decal per level (dusty path, road), under fields and everything standing. */
+  private syncPath(i: number): void {
+    const { map } = this.sim;
+    const level = pathLevel(map.wear[i]);
+    if (level === this.pathState[i]) return;
+    this.pathState[i] = level;
+    let s = this.pathSprites[i];
+    if (level === 0) {
+      s?.destroy();
+      this.pathSprites[i] = null;
+      return;
+    }
+    const x = i % map.w;
+    const y = Math.floor(i / map.w);
+    if (!s) {
+      s = new Sprite();
+      const p = this.surface(x, y);
+      s.position.set(p.x, p.y);
+      // Right above the ground mesh (child 0), below the field decals.
+      this.groundChunks[map.chunkOf(x, y)].addChildAt(s, Math.min(1, this.groundChunks[map.chunkOf(x, y)].children.length));
+      this.pathSprites[i] = s;
+    }
+    s.texture = this.atlas.get(`path:${level}:${hash(i) % PATH_VARIANTS}`);
     s.anchor.copyFrom(s.texture.defaultAnchor!);
   }
 

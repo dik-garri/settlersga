@@ -124,7 +124,7 @@ function think(w: World, ai: AiState): void {
   let sought = false;
   for (const step of AI_PLAN) {
     if (count(step.type) >= step.count) continue;
-    if (step.after && !own.some((b) => b.type === step.after && b.done)) continue;
+    if (step.after && !prerequisiteMet(w, me, own, step.after)) continue;
     if ((ai.blockedUntil[step.type] ?? -Infinity) > w.tick) {
       // Waiting to retry a mine whose ore it is already looking for keeps that search first.
       const waiting = BUILDINGS[step.type].mine;
@@ -589,4 +589,15 @@ class Context {
     }
     return n;
   }
+}
+
+/**
+ * A plan step's prerequisite stands — or, for a mine, its ore is in stock: Settlers 4 mines dig a
+ * deposit out fast (one food buys up to ten attempts), so a small deposit may be worked out and the
+ * mine demolished before the smelter that needs its ore was built.
+ */
+function prerequisiteMet(w: World, me: PlayerId, own: Building[], after: BuildingType): boolean {
+  if (own.some((b) => b.type === after && b.done)) return true;
+  const mine = BUILDINGS[after].mine;
+  return !!mine && available(w, me, mine.res) > 0;
 }

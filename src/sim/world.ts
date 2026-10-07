@@ -8,19 +8,17 @@ import {
   MAP_SIZE,
   OUTPUT_SHARES,
   SOLDIER_LEVELS,
+  PROFESSIONS,
   PROSPECT_RADIUS,
   PROSPECT_TICKS,
   PROSPECT_TILES,
-  START_BUILDERS,
-  START_DIGGERS,
-  START_CARRIERS,
-  START_SOLDIERS,
-  START_PLANKS,
-  START_STONE,
-  START_TOOLS,
+  START_CONDITIONS,
+  type StartLevel,
   totalCost,
 } from './config';
 import { levelTarget, needsDigger, needsLevelling } from './digging';
+import { createEconomy, orderTool, orderWorkers, setAccepts, setDistribution, type EconomyState } from './economy';
+import { rebuildWorn, updatePaths } from './paths';
 import { dispatch } from './logistics';
 import { createAi, updateAi, type AiState } from './ai';
 import { spawnAnimals, updateAnimals, type Animal } from './animals';
@@ -55,6 +53,7 @@ import {
   type PlayerId,
   type Resource,
   type Settler,
+  type SettlerKind,
   type Stock,
   type Task,
 } from './types';
@@ -87,6 +86,8 @@ export interface Player {
   recruitLevel?: number;
   /** Alliance: players with the same team never fight and win together; none = on its own. */
   team?: number;
+  /** Worker orders, toolsmith queue, goods distribution (`economy.ts`). */
+  economy?: EconomyState;
 }
 
 export interface WorldOptions {
@@ -100,6 +101,8 @@ export interface WorldOptions {
   teams?: number[];
   /** Restore this snapshot instead of generating a new world (see `World.load`). */
   from?: SaveData;
+  /** Start goods and workers, as in Settlers 4 (default `medium`). */
+  start?: StartLevel;
 }
 
 /**
@@ -133,6 +136,8 @@ export class World {
   readonly reservedPlots = new Set<number>();
   /** Tiles with a grain field; derived from `map.crop`, so not saved. */
   readonly fields = new Set<number>();
+  /** Tiles with path wear (`paths.ts`); derived from `map.wear`, so not saved. */
+  readonly worn = new Set<number>();
   /** Settlers killed this tick; dropped from `settlers` at its end (see `killSettler`). */
   readonly dying = new Set<number>();
   /** Arrows in flight, for drawing only: damage is applied when shot. Derived, not saved. */
@@ -156,12 +161,13 @@ export class World {
       this.map = mapFromSave(opts.from);
       restoreWorld(this, opts.from);
       for (let i = 0; i < this.map.crop.length; i++) if (this.map.crop[i] > 0) this.fields.add(i);
+      rebuildWorn(this);
       return;
     }
     const size = opts.size ?? MAP_SIZE;
     const starts = startPositions(size, opts.players ?? 1);
     this.map = generateMap(seed, size, starts);
-    for (const st of starts) this.addPlayer(st.x - 1, st.y - 1);
+    for (const st of starts) this.addPlayer(st.x - 1, st.y - 1, opts.start ?? 'medium');
     opts.teams?.forEach((team, k) => {
       if (this.players[k] && Number.isFinite(team)) this.players[k].team = team;
     });
@@ -173,20 +179,19 @@ export class World {
     return new World(0, { from: save });
   }
 
-  private addPlayer(x: number, y: number): Player {
+  private addPlayer(x: number, y: number, start: StartLevel): Player {
     const id = this.players.length + 1;
     if (!this.canPlace('castle', x, y, id)) throw new Error('castle placement failed');
     const castle = addBuilding(this, 'castle', x, y, id, true);
-    castle.output.plank = START_PLANKS;
-    castle.output.stone = START_STONE;
-    for (const [res, n] of Object.entries(START_TOOLS)) castle.output[res as keyof Stock] += n ?? 0;
-    const player = { id, castleId: castle.id };
+    const def = START_CONDITIONS[start];
+    for (const [res, n] of Object.entries(def.goods)) castle.output[res as keyof Stock] += n ?? 0;
+    const player: Player = { id, castleId: castle.id, economy: createEconomy(start) };
     this.players.push(player);
     recomputeTerritory(this);
-    for (let i = 0; i < START_CARRIERS; i++) spawnSettler(this, 'carrier', castle);
-    for (let i = 0; i < START_BUILDERS; i++) spawnSettler(this, 'builder', castle);
-    for (let i = 0; i < START_DIGGERS; i++) spawnSettler(this, 'digger', castle);
-    for (let i = 0; i < START_SOLDIERS; i++) enterGarrison(this, castle, spawnSettler(this, 'soldier', castle));
+    for (let i = 0; i < def.carriers; i++) spawnSettler(this, 'carrier', castle);
+    for (let i = 0; i < def.builders; i++) spawnSettler(this, 'builder', castle);
+    for (let i = 0; i < def.diggers; i++) spawnSettler(this, 'digger', castle);
+    for (let i = 0; i < def.soldiers; i++) enterGarrison(this, castle, spawnSettler(this, 'soldier', castle));
     return player;
   }
 
@@ -346,6 +351,26 @@ export class World {
     return this.players.find((q) => q.id === player)?.recruitLevel ?? 0;
   }
 
+  /** Player command: how many of an orderable profession (builders, diggers) to have in all. */
+  orderWorkers(kind: SettlerKind, count: number, player: PlayerId = LOCAL_PLAYER): boolean {
+    return orderWorkers(this, player, kind, count);
+  }
+
+  /** Player command: queue `count` more of a tool at the toolsmiths (`ENDLESS` = keep making, 0 = clear). */
+  orderTool(res: Resource, count: number, player: PlayerId = LOCAL_PLAYER): boolean {
+    return orderTool(this, player, res, count);
+  }
+
+  /** Player command: weight (0–100) of a consumer type in the distribution of a good. */
+  setDistribution(res: Resource, type: BuildingType, weight: number, player: PlayerId = LOCAL_PLAYER): boolean {
+    return setDistribution(this, player, res, type, weight);
+  }
+
+  /** Player command: whether a warehouse takes in a good. */
+  setAccepts(id: number, res: Resource, on: boolean, player: PlayerId = LOCAL_PLAYER): boolean {
+    return setAccepts(this, player, id, res, on);
+  }
+
   /** Player command: serve this building first (materials, inputs, builders). */
   setPriority(id: number, on: boolean, player: PlayerId = LOCAL_PLAYER): boolean {
     const b = this.buildings.get(id);
@@ -431,20 +456,36 @@ export class World {
       }
     }
     if (tiles.length === 0) return false;
+    // As in Settlers 4 he needs a hammer: fetched from the pile nearest the site, brought back after.
+    const tool = PROFESSIONS.geologist.tool;
+    let from: Building | undefined;
+    for (const b of this.buildings.values()) {
+      if (!tool || b.owner !== player || !b.done || b.output[tool] - b.outReserved[tool] <= 0) continue;
+      if (!from || Math.hypot(b.door.x - x, b.door.y - y) < Math.hypot(from.door.x - x, from.door.y - y)) from = b;
+    }
+    if (tool && !from) return false;
+    const near = from ? from.door : { x, y };
     let best: Settler | undefined;
     for (const s of this.settlers) {
       if (s.owner !== player || s.kind !== 'carrier' || s.tasks.length > 0) continue;
-      if (!best || Math.hypot(s.x - x, s.y - y) < Math.hypot(best.x - x, best.y - y)) best = s;
+      if (!best || Math.hypot(s.x - near.x, s.y - near.y) < Math.hypot(best.x - near.x, best.y - near.y)) best = s;
     }
     if (!best) return false;
     best.kind = 'geologist';
-    best.tasks = tiles
-      .sort((a, b) => a.d - b.d)
-      .slice(0, PROSPECT_TILES)
-      .flatMap((t): Task[] => [
-        { t: 'goto', x: t.x, y: t.y },
-        { t: 'prospect', x: t.x, y: t.y, n: PROSPECT_TICKS },
-      ]);
+    best.tasks = [];
+    if (from && tool) {
+      from.outReserved[tool]++;
+      best.tasks.push({ t: 'goto', x: from.door.x, y: from.door.y }, { t: 'pickup', b: from.id, res: tool });
+    }
+    best.tasks.push(
+      ...tiles
+        .sort((a, b) => a.d - b.d)
+        .slice(0, PROSPECT_TILES)
+        .flatMap((t): Task[] => [
+          { t: 'goto', x: t.x, y: t.y },
+          { t: 'prospect', x: t.x, y: t.y, n: PROSPECT_TICKS },
+        ]),
+    );
     return true;
   }
 
@@ -477,6 +518,7 @@ export class World {
     }
     updateNature(this);
     updateAnimals(this);
+    updatePaths(this);
     const assaults = assaultsByTarget(this);
     for (const b of this.buildings.values()) {
       updateBuilding(this, b);

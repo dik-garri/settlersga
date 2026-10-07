@@ -12,6 +12,7 @@ import { Hud } from './ui/hud';
 import { InputController } from './ui/input';
 import { Minimap } from './ui/minimap';
 import { createState } from './ui/state';
+import { readStartLevel, startMenu } from './ui/startMenu';
 import { hasSave, readSave, storeSave } from './ui/storage';
 
 const TICK_MS = 1000 / TICKS_PER_SECOND;
@@ -49,7 +50,7 @@ async function main() {
     ? World.load(save)
     : demo
       ? (await import('./dev/showcase')).buildShowcase()
-      : new World(seed, { size, players, ai, teams });
+      : new World(seed, { size, players, ai, teams, start: readStartLevel(params) });
   const state = createState();
   // ?art=3d: the pilot set of pre-rendered 3D sprites (art/blender) instead of some procedural ones.
   // The demo shows the 3D art and no fog unless asked otherwise (?art=classic, ?fog=on).
@@ -76,7 +77,7 @@ async function main() {
   window.addEventListener('keydown', unlock, true);
   renderer.onSound = (id, x, y) => audio.at(id, x, y);
   const hudEl = document.getElementById('hud')!;
-  hudEl.querySelector('.panel.speed')?.append(audioControls(audio));
+  hudEl.querySelector('.panel.speed')?.append(startMenu(hudEl, params), audioControls(audio));
   hudEl.addEventListener('click', (e) => {
     if (e.target instanceof Element && e.target.closest('button')) audio.ui('click');
   });

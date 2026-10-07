@@ -85,6 +85,7 @@ const STYLES: Partial<Record<SettlerKind, Partial<SettlerStyle>>> = {
   geologist: { tunic: '#7a5c3a', hat: '#3b2b1a', hatStyle: 'straw', work: 'hammer', holds: 'hammer' },
   waterman: { tunic: '#4a90c2', hat: '#e0d6c0', hatStyle: 'cap', work: 'draw', holds: 'bucket' },
   fisher: { tunic: '#2f6f8f', hat: '#c9b27a', hatStyle: 'straw', work: 'fish', holds: 'rod' },
+  hunter: { tunic: '#4f6a32', hat: '#6b4a2a', hatStyle: 'hood', work: 'shoot', holds: 'bow' },
   farmer: { tunic: '#c9a44a', hat: '#e3c76a', hatStyle: 'straw', work: 'reap', holds: 'scythe' },
   sawmiller: { tunic: '#8b5a2b', hat: '#d9c9a3', hatStyle: 'cap' },
   miller: { tunic: '#e8e4da', hat: '#9a8f80', hatStyle: 'cap' },

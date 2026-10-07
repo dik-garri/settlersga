@@ -1,5 +1,5 @@
 import { CanvasSource, Rectangle, Texture } from 'pixi.js';
-import { ORE_RESOURCES, oreOf, SOLDIER_LEVELS } from '../sim/config';
+import { ORE_RESOURCES, oreOf, PATHS, SOLDIER_LEVELS } from '../sim/config';
 import { RESOURCES, type BuildingType, type Resource, type SettlerKind } from '../sim/types';
 import {
   BUILDING_CANVAS,
@@ -9,6 +9,8 @@ import {
   paintDeposit,
   paintChevrons,
   paintField,
+  paintPath,
+  PATH_VARIANTS,
   paintSign,
   paintFlag,
   paintBanner,
@@ -197,6 +199,9 @@ export class SpriteAtlas {
     }
     for (let v = 1; v <= 4; v++) {
       a.add(`field:grain:${v}`, 66, 40, 33, 24, (ctx) => paintField(ctx, v));
+    }
+    for (let level = 1; level <= PATHS.levels.length; level++) {
+      for (let v = 0; v < PATH_VARIANTS; v++) a.add(`path:${level}:${v}`, 80, 44, 40, 22, (ctx) => paintPath(ctx, level, v));
     }
     for (let v = 0; v < 3; v++) a.add(`deposit:${v}`, 56, 44, 28, 34, (ctx) => paintDeposit(ctx, v));
     for (const [type, c] of Object.entries(BUILDING_CANVAS)) {

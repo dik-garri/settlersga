@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildShowcase } from '../src/dev/showcase';
 import { BUILDINGS } from '../src/sim/config';
+import { pathLevel } from '../src/sim/paths';
 import type { BuildingType } from '../src/sim/types';
 
 describe('dev showcase (?demo)', () => {
@@ -19,5 +20,8 @@ describe('dev showcase (?demo)', () => {
     // The infirmary is in use and the lookout tower stands.
     expect(w.settlers.some((s) => s.tasks.some((t) => t.t === 'heal'))).toBe(true);
     expect(all.some((b) => b.type === 'lookout' && b.done)).toBe(true);
+    // The hunter is at work and busy routes have worn into paths.
+    expect(all.some((b) => b.type === 'hunter' && b.workerId !== null)).toBe(true);
+    expect([...w.worn].some((i) => pathLevel(w.map.wear[i]) >= 1)).toBe(true);
   });
 });

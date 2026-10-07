@@ -559,6 +559,7 @@ export const BUILDING_CANVAS: Record<BuildingType | 'site2' | 'site3', BuildingC
   stonecutter: SMALL,
   waterworks: SMALL,
   fisher: SMALL,
+  hunter: SMALL,
   farm: LARGE,
   mill: { w: 150, h: 210, ax: 75, ay: 165 },
   bakery: SMALL,
@@ -932,7 +933,8 @@ type Deco =
   | 'furnace'
   | 'anvil'
   | 'crates'
-  | 'barrels';
+  | 'barrels'
+  | 'antlers';
 
 /** A gabled building described by data, so new building types rarely need a hand-written painter. */
 interface Style {
@@ -981,6 +983,30 @@ function paintDeco(ctx: Ctx, st: Style, deco: Deco): void {
       ctx.lineTo(x + 9, y - 19);
       ctx.closePath();
       ctx.fill();
+      return;
+    }
+    case 'antlers': {
+      // A pair of antlers over the door, a hide stretched on a frame beside the lodge.
+      const [x, y] = P(st.doorDx * 0.2, hh + 0.02, H * 0.85);
+      ctx.strokeStyle = '#efe2c4';
+      ctx.lineWidth = 1.4;
+      ctx.lineCap = 'round';
+      for (const sgn of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.quadraticCurveTo(x + sgn * 6, y - 3, x + sgn * 7, y - 9);
+        ctx.moveTo(x + sgn * 4, y - 3);
+        ctx.lineTo(x + sgn * 7, y - 4);
+        ctx.moveTo(x + sgn * 6, y - 6);
+        ctx.lineTo(x + sgn * 3, y - 8);
+        ctx.stroke();
+      }
+      const a = P(hw + 0.3, -hh * 0.4, 0);
+      ctx.strokeStyle = '#5e3b1f';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(a[0] - 5, a[1] - 15, 10, 13);
+      ctx.fillStyle = '#9a6a3c';
+      ctx.fillRect(a[0] - 4, a[1] - 14, 8, 11);
       return;
     }
     case 'nets': {
@@ -1225,6 +1251,7 @@ const STYLES: Partial<Record<BuildingType, Style>> = {
   },
   waterworks: { hw: 0.6, hh: 0.6, H: 20, wall: '#a8a294', roof: '#6e4a33', rise: 20, doorDx: 0.5, deco: ['well'] },
   fisher: { hw: 0.65, hh: 0.65, H: 20, wall: '#a07a50', roof: '#c4a35a', rise: 22, doorDx: 0.5, deco: ['nets'] },
+  hunter: { hw: 0.62, hh: 0.62, H: 20, wall: '#7a5634', roof: '#4f6a32', rise: 22, doorDx: 0.5, timber: true, deco: ['antlers'] },
   farm: {
     hw: 1.2,
     hh: 1.0,
@@ -1484,6 +1511,7 @@ export const BUILDING_PAINTERS: Record<BuildingType | 'site2' | 'site3', (ctx: C
   stonecutter: paintStonecutter,
   waterworks: styled('waterworks'),
   fisher: styled('fisher'),
+  hunter: styled('hunter'),
   farm: styled('farm'),
   mill: paintMill,
   bakery: styled('bakery'),
@@ -1510,6 +1538,43 @@ export const BUILDING_PAINTERS: Record<BuildingType | 'site2' | 'site3', (ctx: C
 
 // -------------------------------------------------------------------- fields
 
+
+/** Variants per path level (`PATHS`); tiles pick one by position so a path does not look stamped. */
+export const PATH_VARIANTS = 4;
+
+/**
+ * A worn path on one tile, 80×44 with the tile center at (40, 22): trodden earth that frays into the
+ * grass in soft blotches, reaching a little beyond the tile so neighbouring path tiles join up.
+ * Level 1 is a dusty path, level 2 a road with gravel.
+ */
+export function paintPath(ctx: Ctx, level: number, variant: number): void {
+  ctx.translate(40, 22);
+  const rng = createRng(911 + level * 31 + variant * 7);
+  const blots = level === 1 ? 70 : 120;
+  for (let k = 0; k < blots; k++) {
+    // Mostly near the centre, thinning out towards the edge of the reach.
+    const r = Math.sqrt(rng()) * 0.72;
+    const a = rng() * Math.PI * 2;
+    const [x, y] = P(Math.cos(a) * r, Math.sin(a) * r, 0);
+    const fade = 1 - r / 0.72;
+    const base = level === 1 ? [150, 112, 70] : [128, 104, 76];
+    const j = (rng() - 0.5) * 30;
+    ctx.fillStyle = `rgba(${base[0] + j},${base[1] + j},${base[2] + j},${(level === 1 ? 0.35 : 0.55) * (0.4 + fade)})`;
+    ctx.beginPath();
+    ctx.ellipse(x, y, 3 + rng() * 4, 1.6 + rng() * 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  if (level >= 2) {
+    // Gravel: small light and dark stones.
+    for (let k = 0; k < 26; k++) {
+      const r = Math.sqrt(rng()) * 0.5;
+      const a = rng() * Math.PI * 2;
+      const [x, y] = P(Math.cos(a) * r, Math.sin(a) * r, 0);
+      ctx.fillStyle = rng() < 0.5 ? 'rgba(200,190,170,0.8)' : 'rgba(90,76,60,0.7)';
+      ctx.fillRect(x, y, 1.5, 1);
+    }
+  }
+}
 
 /** Grain field on one tile, 66×40 with the tile center at (33, 24). Stage 1 sown … 4 ripe. */
 export function paintField(ctx: Ctx, stage: number): void {

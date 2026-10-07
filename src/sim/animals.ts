@@ -26,6 +26,8 @@ export interface Animal {
   /** Herd home: members roam within `roam` of it. */
   hx: number;
   hy: number;
+  /** Game: the hunter (settler id) stalking it (see `hunting.ts`). */
+  hunter?: number | null;
 }
 
 /** Tries per new leg before an animal just rests again. */
@@ -130,10 +132,46 @@ export function spawnAnimals(w: World, starts: { x: number; y: number }[]): void
   }
 }
 
+/** Initial number of animals of a kind on a map of this size (what game grows back to). */
+export function stockOf(map: GameMap, def: AnimalDef): number {
+  return Math.round(def.herds * ((map.w * map.h) / (64 * 64)) * ((def.herd[0] + def.herd[1]) / 2));
+}
+
+/**
+ * Hunted game comes back: every `respawnEvery` ticks (per 64×64 of map, so a bigger map is not a
+ * slower world) one animal is born at a living member's herd home while the kind is below its stock.
+ */
+function respawn(w: World): void {
+  const area = (w.map.w * w.map.h) / (64 * 64);
+  for (const kind of ANIMAL_KINDS) {
+    const def: AnimalDef = ANIMALS[kind];
+    if (!def.respawnEvery) continue;
+    const every = Math.max(1, Math.round(def.respawnEvery / area));
+    if (w.tick % every !== 0) continue;
+    const herd = w.animals.filter((a) => a.kind === kind);
+    if (herd.length === 0 || herd.length >= stockOf(w.map, def)) continue;
+    const mother = herd[randInt(w.animalRng, herd.length)];
+    w.animals.push({
+      id: w.nextAnimalId++,
+      kind,
+      x: mother.x,
+      y: mother.y,
+      px: mother.x,
+      py: mother.y,
+      tx: mother.x,
+      ty: mother.y,
+      rest: restTicks(w.animalRng, def),
+      hx: mother.hx,
+      hy: mother.hy,
+    });
+  }
+}
+
 /** One tick for every animal: O(1) each, plus a few habitat checks when a new leg is chosen. */
 export function updateAnimals(w: World): void {
   const { map } = w;
   const rng = w.animalRng;
+  respawn(w);
   for (const a of w.animals) {
     a.px = a.x;
     a.py = a.y;

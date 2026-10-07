@@ -58,6 +58,9 @@ export function buildShowcase(): World {
   for (let i = 0; i < 48; i++) enterGarrison(w, c, spawnSettler(w, 'soldier', c));
   for (let i = 0; i < 40; i++) spawnSettler(w, 'carrier', c);
   for (let i = 0; i < 4; i++) spawnSettler(w, 'digger', c);
+  // Builders and diggers come only as ordered (as in Settlers 4): order plenty.
+  w.orderWorkers('builder', 16);
+  w.orderWorkers('digger', 8);
 
   // Towers widen the land first.
   for (const [dx, dy] of [
@@ -120,6 +123,16 @@ export function buildShowcase(): World {
     kinds.slice(k * 4, k * 4 + 4).forEach((res: Resource, j) => {
       hut.output[res] = 1 + ((k * 4 + j) * 5) % 12;
     });
+  }
+  // Deer grazing by the hunter's lodge, so he has game to stalk.
+  const lodge = [...w.buildings.values()].find((b) => b.type === 'hunter' && b.done);
+  if (lodge) {
+    for (let k = 0; k < 4; k++) {
+      const x = lodge.door.x + 3 + (k % 2) * 2;
+      const y = lodge.door.y + 2 + Math.floor(k / 2) * 2;
+      if (!w.map.inBounds(x, y) || !w.map.isWalkable(x, y)) continue;
+      w.animals.push({ id: w.nextAnimalId++, kind: 'deer', x, y, px: x, py: y, tx: x, ty: y, rest: 200 + k * 150, hx: x, hy: y });
+    }
   }
   // A geologist prospecting the nearest mountain of ours.
   const m = w.map;
