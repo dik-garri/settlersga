@@ -2,7 +2,7 @@
 
     blender -b --factory-startup -P art/blender/build.py -- [names...]
 
-Names: settlers (all figures, see figures.py), piles, woodcutter, tree, deposit, log (default: all). Every sprite keeps the size and anchor
+Names: settlers (every figure, see figures.py), woodcutter, sawmill, stonecutter, tower, house_large, tree, deposit, piles (or piles:fish,coal), wares (default: all). Every sprite keeps the size and anchor
 of the procedural sprite it replaces (src/render/sprites.ts, settlerArt.ts), so the game can swap
 them in without other changes.
 """
@@ -17,7 +17,9 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 import figures  # noqa: E402
+import goods  # noqa: E402
 import lib  # noqa: E402
+import buildings  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 OUT = os.path.join(ROOT, 'public', 'art', '3d')
@@ -232,47 +234,6 @@ def build_woodcutter():
     lib.tag(4)
 
 
-# Goods lying at a door: one sprite per count, as many items as there really are.
-PILE_MAX = 8
-
-
-def build_pile(res, n):
-    import random
-
-    rnd = random.Random(n)
-    if res == 'log':
-        logs = wood('logs', light=False)
-        cut = cut_ends()
-        rows = []
-        left = n
-        width = 4
-        while left > 0:
-            rows.append(min(width, left))
-            left -= rows[-1]
-            width -= 1
-        for row, count in enumerate(rows):
-            for k in range(count):
-                y = (k - (count - 1) / 2) * 0.09
-                z = 0.04 + row * 0.075
-                x = rnd.uniform(-0.02, 0.02)
-                lib.cylinder((x, y, z), 0.04, 0.34, logs, rot=(0, math.pi / 2, 0), verts=10)
-                for sgn in (-1, 1):
-                    lib.cylinder((x + sgn * 0.17, y, z), 0.037, 0.005, cut, rot=(0, math.pi / 2, 0), verts=10)
-    elif res == 'plank':
-        board = lib.mat_grain('plank', (0.74, 0.54, 0.3), (0.86, 0.68, 0.42), scale=4, stretch=(1, 9, 1), bump=0.4)
-        for k in range(n):
-            layer, col = divmod(k, 2)
-            lib.box(((col - 0.5) * 0.1 + rnd.uniform(-0.01, 0.01), 0, 0.012 + layer * 0.026), (0.09, 0.36, 0.022), board,
-                    rot=(0, 0, rnd.uniform(-0.05, 0.05)), bevel=0.003)
-    elif res == 'stone':
-        stone = lib.mat_grain('block', (0.6, 0.6, 0.62), (0.8, 0.79, 0.78), scale=8, stretch=(1, 1, 1), bump=0.8)
-        spots = [(-0.07, -0.07, 0), (0.07, -0.07, 0), (-0.07, 0.07, 0), (0.07, 0.07, 0),
-                 (0, -0.07, 1), (0, 0.07, 1), (-0.035, 0, 2), (0.035, 0, 2)]
-        for k in range(n):
-            x, y, layer = spots[k]
-            lib.box((x, y, 0.04 + layer * 0.075), (0.12, 0.12, 0.075), stone, rot=(0, 0, rnd.uniform(-0.2, 0.2)), bevel=0.012)
-
-
 def build_tree():
     bark = lib.mat_grain('bark', (0.36, 0.2, 0.09), (0.62, 0.38, 0.18), scale=7, stretch=(1, 1, 5), bump=0.9)
     foliage = leaves()
@@ -321,14 +282,6 @@ def build_deposit(size):
                   noise=0.8, seed=k, subdiv=1, flat=True)
 
 
-def build_log():
-    logs = wood('log', light=True)
-    cut = cut_ends()
-    gx, gy = lib.ground_dir(0)
-    yaw = math.atan2(gy, gx)
-    lib.cylinder((0, 0, 0), 0.05, 0.3, logs, rot=(0, math.pi / 2, yaw), verts=12)
-    for sgn in (-1, 1):
-        lib.cylinder((sgn * 0.15 * gx, sgn * 0.15 * gy, 0), 0.047, 0.004, cut, rot=(0, math.pi / 2, yaw), verts=12)
 
 
 # ------------------------------------------------------------------------------------------ main
@@ -336,32 +289,23 @@ def build_log():
 SINGLE = {
     # name: (builder, logical w, h, anchor x, y) — sizes of the procedural sprites they replace.
     'woodcutter': (build_woodcutter, 150, 140, 75, 100),
+    'sawmill': (buildings.build_sawmill, 150, 140, 75, 100),
+    'stonecutter': (buildings.build_stonecutter, 150, 140, 75, 100),
+    'tower': (buildings.build_tower, 150, 210, 75, 170),
+    'house_large': (buildings.build_house_large, 220, 190, 110, 135),
     'tree': (build_tree, 84, 100, 34, 80),
     'deposit0': (lambda: build_deposit(0), 64, 72, 30, 58),
     'deposit1': (lambda: build_deposit(1), 64, 72, 30, 58),
     'deposit2': (lambda: build_deposit(2), 64, 72, 30, 58),
-    'log': (build_log, 16, 10, 8, 5),
 }
 
 
 #: Construction stages rendered before the finished building (0 stakes … 3 roof half on).
 STAGES = 4
-PILE = (44, 34, 22, 24)  # logical w, h, anchor of a goods pile at a door
-
-
-def render_piles():
-    w, h, ax, ay = PILE
-    for res in ('log', 'plank', 'stone'):
-        for n in range(1, PILE_MAX + 1):
-            scene = lib.reset_scene()
-            lib.setup_camera(scene, w, h, ax, ay)
-            build_pile(res, n)
-            lib.render_to(scene, os.path.join(OUT, f'pile-{res}-{n}.png'))
-
 
 def main():
     args = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
-    names = args or ['settlers', 'piles', *SINGLE]
+    names = args or ['settlers', 'piles', 'wares', *SINGLE]
     os.makedirs(OUT, exist_ok=True)
     os.makedirs(TMP, exist_ok=True)
     for name in names:
@@ -374,12 +318,14 @@ def main():
             if n == 'settlers':
                 figures.build_settlers(OUT, TMP)
                 continue
-            if n == 'piles':
-                render_piles()
+            if n == 'piles' or n.startswith('piles:'):
+                # `piles` renders every resource's piles, `piles:fish,coal` only those.
+                goods.render_piles(OUT, TMP, n.split(':', 1)[1].split(',') if ':' in n else None)
+                continue
+            if n == 'wares':
+                goods.render_wares(OUT, TMP)
                 continue
             build, w, h, ax, ay = SINGLE[n]
-            if n == 'log':
-                bpy.data.objects['ShadowCatcher'].hide_render = True
             lib.setup_camera(scene, w, h, ax, ay)
             build()
             staged = any('stage' in o for o in scene.objects)
