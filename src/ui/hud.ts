@@ -1,272 +1,201 @@
-import { buildingIcon, settlerIcon, wareIcon } from '../render/atlas';
-import {
-  OUTPUT_SHARES,
-  BUILDINGS,
-  CATEGORIES,
-  costOf,
-  gatheredBy,
-  INPUT_CAP,
-  OUTPUT_CAP,
-  PROFESSIONS,
-  RESOURCE_GROUPS,
-  RESOURCE_INFO,
-  TICKS_PER_SECOND,
-  type Category,
-  type ResourceGroup,
-} from '../sim/config';
-import { available, chooseOutput, oreLeft, residents } from '../sim/buildings';
-import { EconomyPanel, economyKey, economyRows, toolOrderControls, warehouseControls } from './economyPanel';
-import { isFighter, keepOf, wantsRecruit } from '../sim/military';
-import { hasGatherTargetNear } from '../sim/nature';
-import { RESOURCES, type Building, type BuildingType, type Resource, type Settler, type SettlerKind, type Stock } from '../sim/types';
+import { settlerIcon, wareIcon } from '../render/atlas';
+import { RESOURCE_INFO, TICKS_PER_SECOND } from '../sim/config';
+import { isFighter } from '../sim/military';
+import type { Resource } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
-import { barracksRows, garrisonSlotRows, recruitLevelControls, supportRows } from './armyPanel';
+import { ArmyView } from './armyPanel';
+import { BuildView } from './buildMenu';
+import { button, el, rowsTable, type View } from './dom';
+import { inStorage, GoodsView } from './goodsView';
+import { glyph, type GlyphName } from './icons';
+import { InfoView } from './infoPanel';
+import { OptionsView, SPEEDS } from './optionsView';
+import { SettlersView } from './settlersView';
 import type { GameState, Placeable } from './state';
+import { StatsView } from './statsView';
 
-/** Weapons a barracks trains with (tools of the fighting professions). */
-const BARRACKS_WEAPONS: readonly Resource[] = (Object.keys(PROFESSIONS) as SettlerKind[])
-  .filter((k) => PROFESSIONS[k].combat)
-  .map((k) => PROFESSIONS[k].tool!);
+/**
+ * The HUD, laid out like Settlers 4's: a framed panel down the left side of the screen — the minimap
+ * on top, a row of gem buttons for the main menus (build, goods, settlers, statistics, army,
+ * options), the open menu (or the selected building's window, which replaces it as in the original),
+ * and a readout of key goods, settlers, soldiers and army strength at the bottom. The game view
+ * starts right of the panel (`--side-w`). A small strip top right holds pause and speed, the message
+ * ticker runs along the bottom of the view. All drawing is ours (CSS and inline SVG).
+ */
 
-const SPEEDS = [1, 2, 4];
-/** Commands that, like buildings, are aimed at a tile from the build menu. */
-const COMMANDS: Record<Exclude<Placeable, BuildingType>, { name: string; category: Category; hint: string }> = {
-  geologist: { name: 'Геолог', category: 'mining', hint: 'разведка' },
-  pioneer: { name: 'Первопроходец', category: 'housing', hint: 'граница' },
-  thief: { name: 'Вор', category: 'military', hint: 'кража' },
-};
+type MenuId = 'build' | 'goods' | 'settlers' | 'stats' | 'army' | 'options';
 
-/** Player-buildable types, then commands, per build-menu tab. */
-const MENU = (Object.keys(CATEGORIES) as Category[]).map((category) => ({
-  category,
-  types: [
-    ...(Object.keys(BUILDINGS) as BuildingType[]).filter(
-      (t) => BUILDINGS[t].playerBuildable && BUILDINGS[t].category === category,
-    ),
-    ...(Object.keys(COMMANDS) as (keyof typeof COMMANDS)[]).filter((c) => COMMANDS[c].category === category),
-  ] as Placeable[],
-}));
+const MENUS: { id: MenuId; glyph: GlyphName; title: string }[] = [
+  { id: 'build', glyph: 'build', title: 'Строительство' },
+  { id: 'goods', glyph: 'goods', title: 'Товары' },
+  { id: 'settlers', glyph: 'settlers', title: 'Поселенцы' },
+  { id: 'stats', glyph: 'stats', title: 'Статистика' },
+  { id: 'army', glyph: 'army', title: 'Армия' },
+  { id: 'options', glyph: 'options', title: 'Настройки' },
+];
 
-const isBuilding = (p: Placeable): p is BuildingType => p in BUILDINGS;
+/** Goods always shown in the readout; everything else is in the goods menu. */
+const PINNED: readonly Resource[] = ['plank', 'stone', 'log', 'bread', 'fish', 'meat', 'coal', 'iron', 'gold'];
 
-/** Shown permanently in the top bar; everything else is in the stock panel (📦). */
-const PINNED: readonly Resource[] = ['plank', 'stone', 'bread', 'fish', 'meat', 'coal', 'iron', 'gold', 'sword'];
+/** How long a ticker message stays (ms). */
+const MESSAGE_MS = 6000;
 
-const nameOf = (r: Resource) => RESOURCE_INFO[r].name;
-
-const GATHER_PLACE: Partial<Record<BuildingType, string>> = {
-  woodcutter: 'в лесу',
-  stonecutter: 'в каменоломне',
-  waterworks: 'у воды',
-  fisher: 'на берегу',
-  farm: 'в поле',
-};
-
-function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (text !== undefined) e.textContent = text;
-  return e;
+export interface HudOptions {
+  params: URLSearchParams;
+  /** The minimap canvas, framed at the top of the panel. */
+  minimap: HTMLElement;
+  /** Sound controls for the options menu. */
+  sound: HTMLElement | null;
 }
 
-/** "мечник ×2 (★1 ×1), лучник ×1": fighters by profession, with how many hold each rank above 0. */
-function composition(fighters: Settler[]): string {
-  const byKind = new Map<SettlerKind, Settler[]>();
-  for (const s of fighters) byKind.set(s.kind, [...(byKind.get(s.kind) ?? []), s]);
-  return [...byKind]
-    .map(([kind, list]) => {
-      const ranks = new Map<number, number>();
-      for (const s of list) if (s.level > 0) ranks.set(s.level, (ranks.get(s.level) ?? 0) + 1);
-      const r = [...ranks].sort((a, b) => b[0] - a[0]).map(([l, n]) => `★${l} ×${n}`);
-      return `${PROFESSIONS[kind].name.toLowerCase()} ×${list.length}${r.length ? ` (${r.join(', ')})` : ''}`;
-    })
-    .join(', ');
-}
-
-/** "2 [plank] 1 [stone]" with drawn ware icons. */
-function costLabel(type: BuildingType): HTMLElement {
-  const cost = costOf(type);
-  const out = el('span', 'cost-items');
-  for (const r of RESOURCES) {
-    if (cost[r] > 0) out.append(String(cost[r]), wareIcon(r, 14), ' ');
-  }
-  return out;
-}
-
-/** Total of `res` in the local player's warehouses. */
-function inStorage(world: World, res: Resource): number {
-  let n = 0;
-  for (const b of world.buildings.values()) {
-    if (b.owner === LOCAL_PLAYER && BUILDINGS[b.type].storage) n += b.output[res];
-  }
-  return n;
-}
-
-/** HTML overlay: stock, population, speed, build menu and info about the selected building. */
 export class Hud {
-  private readonly stockEl = el('div', 'stock');
-  private readonly stockPanel = el('div', 'panel stock-panel');
-  private readonly statsPanel = el('div', 'panel stats-panel');
-  private readonly economy: EconomyPanel;
-  /** `stats.produced` sampled once per game minute, newest last (for "last 10 minutes"). */
-  private readonly history: Stock[] = [];
-  private lastSampleTick = -Infinity;
-  private lastStats = -Infinity;
-  /** Number elements per resource, in the top bar and the stock panel; built once, updated in place. */
-  private readonly stockValues: [Resource, HTMLElement][] = [];
-  private readonly popEl = el('div', 'pop');
+  private readonly views: Record<MenuId, View>;
+  private readonly build: BuildView;
+  private readonly stats: StatsView;
+  private readonly info: InfoView;
+  private menu: MenuId = 'build';
+  private readonly menuButtons = new Map<MenuId, HTMLButtonElement>();
+  private readonly title = el('h3', 'content-title');
+  private readonly body = el('div', 'content-body');
+  private shown: View | null = null;
+  private readonly readoutValues: [Resource, HTMLElement][] = [];
+  private readonly people = el('b', '', '0');
+  private readonly soldiers = el('b', '', '0');
+  private readonly strength = el('b', '', '0%');
   private readonly speedButtons = new Map<number | 'pause', HTMLButtonElement>();
-  private readonly buildButtons = new Map<Placeable, HTMLButtonElement>();
-  private readonly tabButtons: HTMLButtonElement[] = [];
-  private readonly tabRows: HTMLElement[] = [];
-  private tab = 0;
-  private readonly infoEl = el('div', 'panel info');
   private readonly hintEl = el('div', 'hint');
-  private readonly toastEl = el('div', 'toast');
+  private readonly ticker = el('div', 'ticker');
   private readonly endEl = el('div', 'panel end-screen');
   /** The end screen was shown (and possibly dismissed to keep watching). */
   private ended = false;
   private lastUpdate = 0;
-  /** Building whose demolition awaits a second click. */
-  private confirmDemolish: number | null = null;
-  /** Soldiers to send with the next attack (clamped to what is available). */
-  private attackCount = 1;
-  /** Re-render the info panel only when its content changes, so buttons in it stay clickable. */
-  private infoKey = '';
-  private toastTimer = 0;
 
   constructor(
     root: HTMLElement,
     private readonly world: World,
     private readonly state: GameState,
     actions: { onSave(): void; onLoad(): void },
+    opts: HudOptions,
   ) {
-    const top = el('div', 'panel top');
-    this.economy = new EconomyPanel(world, () => {
-      this.stockPanel.hidden = true;
-      this.statsPanel.hidden = true;
-    });
-    for (const r of PINNED) this.stockEl.append(this.stat(r));
-    const more = el('button', 'stock-toggle', '📦');
-    more.title = 'Весь склад';
-    more.onclick = () => {
-      this.stockPanel.hidden = !this.stockPanel.hidden;
-      this.statsPanel.hidden = true;
-      this.economy.hide();
-      more.blur();
+    const select = (type: Placeable | null) => this.selectBuildType(type);
+    this.build = new BuildView(world, state, select);
+    this.stats = new StatsView(world);
+    this.info = new InfoView(world, state, (text) => this.toast(text));
+    this.views = {
+      build: this.build,
+      goods: new GoodsView(world),
+      settlers: new SettlersView(world, state, select),
+      stats: this.stats,
+      army: new ArmyView(world),
+      options: new OptionsView(state, actions, opts.params, opts.sound),
     };
-    const stats = el('button', 'stock-toggle', '📊');
-    stats.title = 'Статистика';
-    stats.onclick = () => {
-      this.statsPanel.hidden = !this.statsPanel.hidden;
-      this.lastStats = -Infinity;
-      this.stockPanel.hidden = true;
-      this.economy.hide();
-      stats.blur();
-    };
-    this.stockEl.append(more, stats, this.economy.toggle);
-    this.statsPanel.hidden = true;
-    top.append(this.stockEl, this.popEl);
-    this.stockPanel.hidden = true;
-    for (const [group, title] of Object.entries(RESOURCE_GROUPS) as [ResourceGroup, string][]) {
-      this.stockPanel.append(el('h4', '', title));
-      const grid = el('div', 'stock-grid');
-      for (const r of RESOURCES) {
-        if (RESOURCE_INFO[r].group !== group) continue;
-        const value = el('b', '', '0');
-        const row = el('span', 'stock-row');
-        row.append(wareIcon(r), el('span', '', nameOf(r)), value);
-        grid.append(row);
-        this.stockValues.push([r, value]);
-      }
-      this.stockPanel.append(grid);
-    }
 
-    const speed = el('div', 'panel speed');
-    const pause = el('button', '', '⏸');
+    const side = el('aside', 'side');
+    const frame = el('div', 'side-frame');
+    const map = el('div', 'mm-frame');
+    map.append(opts.minimap);
+    const tabs = el('nav', 'main-tabs');
+    for (const m of MENUS) {
+      const b = el('button', 'gem');
+      b.title = m.title;
+      b.append(glyph(m.glyph));
+      b.onclick = () => {
+        this.state.selected = null;
+        this.showMenu(m.id);
+        b.blur();
+      };
+      tabs.append(b);
+      this.menuButtons.set(m.id, b);
+    }
+    const content = el('section', 'content');
+    content.append(this.title, this.body);
+    frame.append(map, tabs, content, this.readout());
+    side.append(frame);
+
+    const strip = el('div', 'strip');
+    const pause = el('button', 'gem small');
     pause.title = 'Пауза (пробел)';
+    pause.append(glyph('pause', 14));
     pause.onclick = () => {
       state.paused = !state.paused;
       pause.blur();
     };
-    speed.append(pause);
+    strip.append(pause);
     this.speedButtons.set('pause', pause);
     for (const s of SPEEDS) {
-      const b = el('button', '', `${s}×`);
-      b.onclick = () => {
+      const b = button(`${s}×`, `Скорость ${s}×`, () => {
         state.speed = s;
         state.paused = false;
-        b.blur();
-      };
-      speed.append(b);
+      }, 'speed-btn');
+      strip.append(b);
       this.speedButtons.set(s, b);
     }
-    const save = el('button', 'sep', '💾');
-    save.title = 'Сохранить игру';
-    save.onclick = () => {
-      actions.onSave();
-      save.blur();
-    };
-    const load = el('button', '', '📂');
-    load.title = 'Загрузить сохранение';
-    load.onclick = () => {
-      actions.onLoad();
-      load.blur();
-    };
-    speed.append(save, load);
 
-    const build = el('div', 'panel build');
-    const tabs = el('div', 'tabs');
-    MENU.forEach(({ category, types }, t) => {
-      const tab = el('button', 'tab', CATEGORIES[category]);
-      tab.title = 'Tab — следующая вкладка';
-      tab.onclick = () => {
-        this.showTab(t);
-        tab.blur();
-      };
-      tabs.append(tab);
-      this.tabButtons.push(tab);
-      const row = el('div', 'build-row');
-      types.forEach((type, i) => {
-        const b = el('button', 'build-btn');
-        if (isBuilding(type)) {
-          const cost = el('span', 'cost');
-          cost.append(costLabel(type), `· [${i + 1}]`);
-          b.append(buildingIcon(type), el('span', 'name', BUILDINGS[type].name), cost);
-        } else {
-          const cmd = COMMANDS[type];
-          b.append(settlerIcon(type), el('span', 'name', cmd.name), el('span', 'cost', `${cmd.hint} · [${i + 1}]`));
-        }
-        b.onclick = () => {
-          this.selectBuildType(state.placing === type ? null : type);
-          b.blur();
-        };
-        row.append(b);
-        this.buildButtons.set(type, b);
-      });
-      this.tabRows.push(row);
-    });
-    build.append(tabs, ...this.tabRows);
-    this.showTab(0);
-
-    this.infoEl.hidden = true;
     this.endEl.hidden = true;
-    root.append(top, this.stockPanel, this.statsPanel, this.economy.el, speed, build, this.infoEl, this.hintEl, this.toastEl, this.endEl);
+    root.append(side, strip, this.hintEl, this.ticker, this.endEl);
+    this.showMenu('build');
+  }
+
+  /** The always-visible stats block: key goods, settlers, soldiers and army strength (Settlers 4). */
+  private readout(): HTMLElement {
+    const box = el('div', 'readout');
+    const goods = el('div', 'readout-goods');
+    for (const r of PINNED) {
+      const s = el('span', 'stat');
+      s.title = RESOURCE_INFO[r].name;
+      const value = el('b', '', '0');
+      s.append(wareIcon(r, 20), value);
+      goods.append(s);
+      this.readoutValues.push([r, value]);
+    }
+    const army = el('div', 'readout-army');
+    const cell = (icon: HTMLElement, value: HTMLElement, title: string) => {
+      const s = el('span', 'stat');
+      s.title = title;
+      s.append(icon, value);
+      return s;
+    };
+    army.append(
+      cell(settlerIcon('carrier', 26), this.people, 'Поселенцы'),
+      cell(settlerIcon('soldier', 26), this.soldiers, 'Бойцы'),
+      cell(el('span', 'strength-ico', '⚔'), this.strength, 'Сила армии на чужой земле: растёт с ценностью поселения'),
+    );
+    box.append(goods, army);
+    return box;
+  }
+
+  private showMenu(id: MenuId): void {
+    this.menu = id;
+    for (const [m, b] of this.menuButtons) b.classList.toggle('active', m === id);
+    this.mount(this.views[id], MENUS.find((m) => m.id === id)!.title);
+  }
+
+  private mount(view: View, title: string): void {
+    this.title.textContent = title;
+    if (this.shown === view) return;
+    this.shown = view;
+    this.body.replaceChildren(view.el);
+    view.update(performance.now());
   }
 
   showTab(t: number): void {
-    this.tab = (t + MENU.length) % MENU.length;
-    this.tabRows.forEach((row, i) => (row.hidden = i !== this.tab));
-    this.tabButtons.forEach((b, i) => b.classList.toggle('active', i === this.tab));
+    this.showMenu('build');
+    this.build.showTab(t);
   }
 
   nextTab(): void {
-    this.showTab(this.tab + 1);
+    if (this.menu !== 'build' || this.state.selected !== null) {
+      this.state.selected = null;
+      this.showMenu('build');
+      return;
+    }
+    this.build.nextTab();
   }
 
-  /** Digit hotkey: the n-th building (1-based) of the open tab. */
+  /** Digit hotkey: the n-th building (1-based) of the open build category. */
   hotkey(n: number): void {
-    const type = MENU[this.tab].types[n - 1];
+    if (this.menu !== 'build') this.showMenu('build');
+    const type = this.build.typeAt(n);
     if (type) this.selectBuildType(this.state.placing === type ? null : type);
   }
 
@@ -275,11 +204,13 @@ export class Hud {
     if (type) this.state.selected = null;
   }
 
+  /** A message on the ticker at the bottom of the view; it fades after a few seconds. */
   toast(text: string): void {
-    this.toastEl.textContent = text;
-    this.toastEl.classList.add('show');
-    clearTimeout(this.toastTimer);
-    this.toastTimer = window.setTimeout(() => this.toastEl.classList.remove('show'), 1800);
+    const m = el('div', 'msg', text);
+    this.ticker.append(m);
+    while (this.ticker.children.length > 4) this.ticker.firstElementChild!.remove();
+    window.setTimeout(() => m.classList.add('gone'), MESSAGE_MS);
+    window.setTimeout(() => m.remove(), MESSAGE_MS + 600);
   }
 
   update(nowMs: number): void {
@@ -288,62 +219,46 @@ export class Hud {
     const { world, state } = this;
     const outcome = world.outcome(LOCAL_PLAYER);
     if (outcome !== 'playing' && !this.ended) this.showEnd(outcome);
-    for (const [r, value] of this.stockValues) value.textContent = String(inStorage(world, r));
-    if (world.tick - this.lastSampleTick >= TICKS_PER_SECOND * 60) {
-      this.lastSampleTick = world.tick;
-      this.history.push({ ...world.stats.produced });
-      if (this.history.length > 11) this.history.shift();
-    }
-    if (!this.statsPanel.hidden && nowMs - this.lastStats > 1000) {
-      this.lastStats = nowMs;
-      this.renderStats();
-    }
-    this.economy.update();
+    this.stats.sample();
 
-    const counts = new Map<SettlerKind, number>();
-    let busy = 0;
+    // The selected building's window replaces the open menu, as in Settlers 4.
+    if (state.selected !== null && world.buildings.has(state.selected)) {
+      this.mount(this.info, 'Здание');
+      for (const b of this.menuButtons.values()) b.classList.remove('active');
+    } else {
+      if (state.selected !== null) state.selected = null;
+      this.showMenu(this.menu);
+    }
+    this.shown?.update(nowMs);
+
+    for (const [r, value] of this.readoutValues) {
+      const text = String(inStorage(world, r));
+      if (value.textContent !== text) value.textContent = text;
+    }
     let people = 0;
+    let fighters = 0;
     for (const s of world.settlers) {
       if (s.owner !== LOCAL_PLAYER) continue;
       people++;
-      counts.set(s.kind, (counts.get(s.kind) ?? 0) + 1);
-      if (s.kind === 'carrier' && s.tasks.length > 0) busy++;
+      if (isFighter(s)) fighters++;
     }
-    const workers = [...counts]
-      .filter(([kind]) => kind !== 'carrier')
-      .map(([kind, n]) => `${PROFESSIONS[kind].name.toLowerCase()} ${n}`)
-      .join(' · ');
-    this.popEl.textContent =
-      `Поселенцы: ${people} · носильщики ${busy}/${counts.get('carrier') ?? 0} заняты` +
-      (workers ? ` · ${workers}` : '') +
-      ` · сила армии ${Math.round(world.strengthOf())}%`;
-    this.popEl.title = 'Сила армии на чужой земле (как в Settlers 4): растёт с ценностью поселения — материалами в постройках, украшения считаются втройне. На своей земле бойцы всегда сражаются в полную силу.';
+    this.people.textContent = String(people);
+    this.soldiers.textContent = String(fighters);
+    this.strength.textContent = `${Math.round(world.strengthOf())}%`;
 
     for (const [key, b] of this.speedButtons) {
       b.classList.toggle('active', key === 'pause' ? state.paused : !state.paused && state.speed === key);
     }
-    for (const [type, b] of this.buildButtons) b.classList.toggle('active', state.placing === type);
-
-    this.hintEl.textContent = state.placing === 'geologist'
-      ? 'ЛКМ по своей горе — отправить геолога · ПКМ / Esc — отмена'
-      : state.placing === 'pioneer'
-      ? 'ЛКМ у своей границы — первопроходец займёт ничейную землю (заказ — в ⚙) · ПКМ / Esc — отмена'
-      : state.placing === 'thief'
-      ? 'ЛКМ по разведанному чужому зданию с товарами — послать вора (заказ — в ⚙) · ПКМ / Esc — отмена'
-      : state.placing
-      ? 'ЛКМ — поставить (Shift — несколько) · ПКМ / Esc — отмена'
-      : 'Перетаскивание / WASD — камера · колесо — зум · клик по зданию — информация';
-
-    this.renderInfo();
-  }
-
-  private stat(r: Resource): HTMLElement {
-    const s = el('span', 'stat');
-    s.title = nameOf(r);
-    const value = el('b', '', '0');
-    s.append(wareIcon(r, 20), value);
-    this.stockValues.push([r, value]);
-    return s;
+    this.hintEl.textContent =
+      state.placing === 'geologist'
+        ? 'ЛКМ по своей горе — отправить геолога · ПКМ / Esc — отмена'
+        : state.placing === 'pioneer'
+          ? 'ЛКМ у своей границы — первопроходец займёт ничейную землю · ПКМ / Esc — отмена'
+          : state.placing === 'thief'
+            ? 'ЛКМ по разведанному чужому зданию с товарами — послать вора · ПКМ / Esc — отмена'
+            : state.placing
+              ? 'ЛКМ — поставить (Shift — несколько) · ПКМ / Esc — отмена'
+              : 'Перетаскивание / WASD — камера · колесо — зум · клик по зданию — окно здания';
   }
 
   /** Victory or defeat: time played, a few totals, and a way to start over or keep watching. */
@@ -368,10 +283,8 @@ export class Hud {
     this.endEl.append(
       el('h2', outcome === 'won' ? 'won' : 'lost', outcome === 'won' ? 'Победа!' : 'Поражение'),
       el('p', '', outcome === 'won' ? 'Все замки противников взяты.' : 'Ваш замок захвачен.'),
+      rowsTable(rows),
     );
-    const table = el('dl');
-    for (const [k, v] of rows) table.append(el('dt', '', k), el('dd', '', v));
-    this.endEl.append(table);
     const actions = el('div', 'info-actions');
     const again = el('button', 'active', 'Новая игра');
     again.onclick = () => {
@@ -385,277 +298,5 @@ export class Hud {
     actions.append(again, watch);
     this.endEl.append(actions);
     this.endEl.hidden = false;
-  }
-
-  private renderStats(): void {
-    const { world } = this;
-    const total = world.stats.produced;
-    const old = this.history[0] ?? total;
-    const minutes = Math.max(1, this.history.length - 1);
-    this.statsPanel.innerHTML = '';
-    this.statsPanel.append(el('h4', '', `Производство (за ${minutes} мин / всего)`));
-    const grid = el('div', 'stats-grid');
-    for (const r of RESOURCES) {
-      if (total[r] === 0) continue;
-      const row = el('span', 'stock-row');
-      row.append(wareIcon(r), el('span', '', nameOf(r)), el('b', '', `${total[r] - old[r]} / ${total[r]}`));
-      grid.append(row);
-    }
-    this.statsPanel.append(grid);
-
-    const kinds = new Map<SettlerKind, number>();
-    for (const s of world.settlers) if (s.owner === LOCAL_PLAYER) kinds.set(s.kind, (kinds.get(s.kind) ?? 0) + 1);
-    this.statsPanel.append(el('h4', '', 'Население'));
-    const people = el('div', 'stats-grid');
-    for (const [kind, n] of [...kinds].sort((a, b) => b[1] - a[1])) {
-      const row = el('span', 'stock-row');
-      row.append(el('span', '', PROFESSIONS[kind].name), el('b', '', String(n)));
-      people.append(row);
-    }
-    this.statsPanel.append(people);
-
-    const types = new Map<BuildingType, number>();
-    for (const b of world.buildings.values()) if (b.owner === LOCAL_PLAYER) types.set(b.type, (types.get(b.type) ?? 0) + 1);
-    this.statsPanel.append(el('h4', '', 'Здания'));
-    const houses = el('div', 'stats-grid');
-    for (const [type, n] of [...types].sort((a, b) => b[1] - a[1])) {
-      const row = el('span', 'stock-row');
-      row.append(el('span', '', BUILDINGS[type].name), el('b', '', String(n)));
-      houses.append(row);
-    }
-    this.statsPanel.append(houses);
-  }
-
-  private renderInfo(): void {
-    const b = this.state.selected !== null ? this.world.buildings.get(this.state.selected) : undefined;
-    this.infoEl.hidden = !b;
-    if (!b) {
-      this.confirmDemolish = null;
-      this.infoKey = '';
-      return;
-    }
-    if (this.confirmDemolish !== null && this.confirmDemolish !== b.id) this.confirmDemolish = null;
-    const def = BUILDINGS[b.type];
-    const rows: [string, string][] = [];
-    const enemy = b.owner !== LOCAL_PLAYER;
-    const canSend = enemy && def.garrison && b.done ? this.world.availableAttackers(b.id) : 0;
-    // Out of sight (fog of war) other players' buildings show only what is known from afar.
-    const sighted = !this.state.fog || this.world.isVisible(b.door.x, b.door.y);
-    if (enemy) {
-      rows.push(['Владелец', `игрок ${b.owner}${this.world.allied(b.owner, LOCAL_PLAYER) ? ' (союзник)' : ''}`]);
-      if (!sighted) rows.push(['Обзор', 'нет — подойдите ближе']);
-      if (def.garrison && b.done) {
-        rows.push(['Защитников', sighted ? String(b.garrison.length) : '?']);
-        if (def.garrison.defense && def.garrison.defense > 1) {
-          rows.push(['Бонус обороны', `+${Math.round((def.garrison.defense - 1) * 100)}%`]);
-        }
-        rows.push(['Можно послать', String(canSend)]);
-        this.attackCount = Math.max(1, Math.min(this.attackCount, canSend));
-        rows.push(['Отправить', String(this.attackCount)]);
-        if (canSend > 0) rows.push(['Пойдут', composition(this.world.attackerComposition(b.id, this.attackCount))]);
-      }
-    } else if (!b.done) {
-      rows.push(['Стройка', `${Math.floor(this.world.buildProgress(b) * 100)}%`]);
-      const cost = costOf(b.type);
-      for (const r of RESOURCES) {
-        if (cost[r] > 0) rows.push([nameOf(r), `${b.delivered[r]} / ${cost[r]} (в пути ${b.inbound[r]})`]);
-      }
-      if (!b.levelled) rows.push(['Выравнивание', b.diggerId !== null ? 'землекоп работает' : 'ждёт землекопа']);
-      rows.push(['Строитель', b.builderId !== null ? 'на месте или в пути' : 'ожидается']);
-    } else if (def.residence) {
-      rows.push(['Жители', `${b.spawned} / ${residents(this.world, b)}`]);
-      rows.push(['Статус', b.spawned < residents(this.world, b) ? 'заселяется' : 'заселён']);
-    } else if (def.garrison || def.storage) {
-      if (def.garrison) {
-        rows.push(['Гарнизон', `${b.garrison.length} / ${def.garrison.capacity}`]);
-        const members = b.garrison.map((id) => this.world.getSettler(id)).filter((s): s is Settler => !!s);
-        if (members.length > 0) rows.push(['Состав', composition(members)]);
-        rows.push(...garrisonSlotRows(this.world, b));
-        rows.push(['Не покидают', String(keepOf(b))]);
-        if (b.garrisonInbound > 0) rows.push(['Идут в гарнизон', String(b.garrisonInbound)]);
-      }
-      if (def.territory) rows.push(['Радиус земли', `${def.territory} клеток`]);
-      for (const r of RESOURCES) if (def.storage && b.output[r] > 0) rows.push([nameOf(r), String(b.output[r])]);
-    } else if (!def.worker) {
-      rows.push(...(supportRows(this.world, b) ?? []));
-    } else {
-      const worker = this.world.getSettler(b.workerId);
-      const tool = PROFESSIONS[def.worker!].tool;
-      const workerName = worker
-        ? PROFESSIONS[worker.kind].name
-        : b.workerRequested
-          ? 'идёт'
-          : tool && available(this.world, b.owner, tool) === 0
-            ? `нет инструмента: ${nameOf(tool).toLowerCase()}`
-            : def.barracks
-              ? '—'
-              : 'нет свободных носильщиков';
-      rows.push(['Работник', workerName]);
-      rows.push(['Статус', this.status(b)]);
-      const gather = gatheredBy(b.type);
-      if (def.barracks) {
-        for (const r of BARRACKS_WEAPONS) rows.push([`${nameOf(r)} (запас)`, `${b.input[r]} / ${INPUT_CAP}`]);
-        if (worker && worker.inside === b.id && BARRACKS_WEAPONS.some((r) => b.input[r] > 0)) {
-          rows.push(['Обучение', `${Math.floor((100 * Math.min(b.timer, def.barracks.ticks)) / def.barracks.ticks)}%`]);
-        }
-        rows.push(...barracksRows(this.world, b));
-      }
-      const shared = this.sharedChoices(b);
-      if (shared) {
-        const total = shared.reduce((n, r) => n + this.world.shareOf(r), 0) || 1;
-        rows.push(['Состав армии', shared.map((r) => `${nameOf(r).toLowerCase()} ${Math.round((100 * this.world.shareOf(r)) / total)}%`).join(' · ')]);
-      }
-      if (def.recipe) {
-        for (const r of RESOURCES) {
-          if (def.recipe.inputs[r]) rows.push([`${nameOf(r)} (вход)`, `${b.input[r]} / ${INPUT_CAP}`]);
-        }
-        const anyOf = def.recipe.inputsAnyOf;
-        if (anyOf) {
-          const held = anyOf.map((r) => `${nameOf(r).toLowerCase()} ${b.input[r]}`).join(', ');
-          rows.push(['Еда (вход)', `${held} / ${INPUT_CAP}`]);
-        }
-        if (def.mine) rows.push(['Руды в радиусе', String(oreLeft(this.world, b))]);
-        for (const r of RESOURCES) {
-          if (def.recipe.outputs[r]) rows.push([nameOf(r), `${b.output[r]} / ${OUTPUT_CAP}`]);
-        }
-        for (const r of def.recipe.outputChoice ?? []) {
-          if (b.output[r] > 0) rows.push([nameOf(r), `${b.output[r]} / ${OUTPUT_CAP}`]);
-        }
-      } else if (gather) {
-        rows.push([nameOf(gather.res), `${b.output[gather.res]} / ${OUTPUT_CAP}`]);
-      } else if (b.type === 'forester') {
-        rows.push(['Посажено всего', String(this.world.stats.treesPlanted)]);
-      }
-      if (def.territory) rows.push(['Радиус земли', `${def.territory} клеток`]);
-    }
-    if (!enemy && b.done) rows.push(...economyRows(b));
-    if (b.priority) rows.push(['Приоритет', 'да']);
-    const key = JSON.stringify([b.id, rows, this.confirmDemolish === b.id, economyKey(this.world, b)]);
-    if (key === this.infoKey) return;
-    this.infoKey = key;
-    this.infoEl.innerHTML = '';
-    this.infoEl.append(el('h3', '', def.name));
-    const table = el('dl');
-    for (const [k, v] of rows) table.append(el('dt', '', k), el('dd', '', v));
-    this.infoEl.append(table);
-    if (enemy) {
-      if (def.garrison && b.done) this.infoEl.append(this.attackControls(b, canSend));
-      return;
-    }
-    const warehouse = warehouseControls(this.world, b);
-    if (warehouse) this.infoEl.append(warehouse);
-    if (!def.playerBuildable) return;
-    const orders = b.done ? toolOrderControls(this.world, b) : null;
-    if (orders) this.infoEl.append(orders);
-    const shared = this.sharedChoices(b);
-    if (shared && shared.length === 2) this.infoEl.append(this.shareControls(shared[0], shared[1]));
-    if (def.barracks) this.infoEl.append(recruitLevelControls(this.world, () => (this.infoKey = '')));
-    const actions = el('div', 'info-actions');
-    if (!b.done || def.recipe || def.residence) {
-      const prio = el('button', b.priority ? 'active' : '', b.priority ? '⬆ Приоритет: да' : '⬆ Приоритет');
-      prio.title = 'Обслуживать в первую очередь: материалы, сырьё, строители';
-      prio.onclick = () => this.world.setPriority(b.id, !b.priority);
-      actions.append(prio);
-    }
-    const confirming = this.confirmDemolish === b.id;
-    const demolish = el('button', confirming ? 'danger' : '', confirming ? 'Точно снести?' : '🔨 Снести');
-    demolish.onclick = () => {
-      if (!confirming) {
-        this.confirmDemolish = b.id;
-        return;
-      }
-      this.confirmDemolish = null;
-      if (this.world.demolish(b.id)) this.state.selected = null;
-    };
-    actions.append(demolish);
-    this.infoEl.append(actions);
-  }
-
-  /** Weapons whose proportions this building follows (share-controlled outputs), if any. */
-  private sharedChoices(b: Building): readonly Resource[] | null {
-    const def = BUILDINGS[b.type];
-    const choices = def.barracks ? BARRACKS_WEAPONS : (def.recipe?.outputChoice ?? []);
-    return choices.length > 0 && choices.every((r) => OUTPUT_SHARES[r] !== undefined) ? choices : null;
-  }
-
-  /** «◀ more A · more B ▶» in steps of 10, keeping the two weights summing to 100. */
-  private shareControls(a: Resource, b: Resource): HTMLElement {
-    const row = el('div', 'info-actions');
-    const shift = (toB: number) => {
-      const total = this.world.shareOf(a) + this.world.shareOf(b) || 100;
-      const bw = Math.max(0, Math.min(100, Math.round((100 * this.world.shareOf(b)) / total) + toB));
-      this.world.setShare(b, bw);
-      this.world.setShare(a, 100 - bw);
-    };
-    const moreA = el('button', '', `◀ ${nameOf(a).toLowerCase()}`);
-    moreA.title = `Больше: ${nameOf(a).toLowerCase()}`;
-    moreA.onclick = () => shift(-10);
-    const moreB = el('button', '', `${nameOf(b).toLowerCase()} ▶`);
-    moreB.title = `Больше: ${nameOf(b).toLowerCase()}`;
-    moreB.onclick = () => shift(10);
-    row.append(moreA, moreB);
-    return row;
-  }
-
-  private attackControls(b: Building, available: number): HTMLElement {
-    const actions = el('div', 'info-actions');
-    const less = el('button', '', '−');
-    less.onclick = () => (this.attackCount = Math.max(1, this.attackCount - 1));
-    const more = el('button', '', '+');
-    more.onclick = () => (this.attackCount = Math.min(available, this.attackCount + 1));
-    const go = el('button', available > 0 ? 'danger' : '', `⚔ Атаковать (${Math.min(this.attackCount, available)})`);
-    go.disabled = available === 0;
-    go.title = available > 0 ? 'Солдаты из ваших военных зданий поблизости' : 'Рядом нет свободных солдат';
-    go.onclick = () => {
-      const sent = this.world.attack(b.id, this.attackCount);
-      this.toast(sent > 0 ? `В атаку: ${sent}` : 'Некого отправить');
-    };
-    actions.append(less, more, go);
-    return actions;
-  }
-
-  private status(b: Building): string {
-    const def = BUILDINGS[b.type];
-    if (def.barracks) {
-      if (!BARRACKS_WEAPONS.some((r) => b.input[r] > 0)) return 'нет оружия';
-      if (b.workerId === null) return wantsRecruit(this.world, b) ? 'ждёт новобранца' : 'гарнизоны полны';
-      return 'обучает';
-    }
-    if (b.workerId === null) return 'ждёт работника';
-    const behavior = PROFESSIONS[def.worker!].behavior;
-    const w = this.world.getSettler(b.workerId);
-    const outside = w !== undefined && w.inside === null;
-    switch (behavior) {
-      case 'workshop': {
-        const recipe = def.recipe!;
-        if (def.mine && oreLeft(this.world, b) === 0) return 'выработана';
-        if (recipe.outputChoice && !chooseOutput(this.world, b, recipe)) return 'запас полон, заказов нет';
-        if (RESOURCES.some((r) => b.output[r] + (recipe.outputs[r] ?? 0) > OUTPUT_CAP)) return 'склад полон';
-        const missing = RESOURCES.filter((r) => b.input[r] < (recipe.inputs[r] ?? 0)).map((r) =>
-          nameOf(r).toLowerCase(),
-        );
-        if (recipe.inputsAnyOf && !recipe.inputsAnyOf.some((r) => b.input[r] > 0)) missing.push('еды');
-        if (missing.length > 0) return `нет: ${missing.join(', ')}`;
-        return 'работает';
-      }
-      case 'plant':
-        return outside ? 'сажает деревья' : 'отдыхает';
-      case 'garrison':
-        return 'охраняет границу';
-      case 'hunt':
-        return outside ? 'на охоте' : b.output.meat >= OUTPUT_CAP ? 'склад полон' : 'отдыхает';
-      case 'gather':
-      case 'farm': {
-        const gather = gatheredBy(b.type)!;
-        if (b.output[gather.res] >= OUTPUT_CAP) return 'склад полон';
-        if (outside) return GATHER_PLACE[b.type] ?? 'работает';
-        if (behavior === 'gather' && !hasGatherTargetNear(this.world, b, gather)) {
-          return `нет поблизости: ${nameOf(gather.res).toLowerCase()}`;
-        }
-        return 'отдыхает';
-      }
-      default:
-        return 'работает';
-    }
   }
 }
