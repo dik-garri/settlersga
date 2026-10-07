@@ -14,7 +14,8 @@ import {
   type Category,
   type ResourceGroup,
 } from '../sim/config';
-import { available, chooseOutput, oreLeft } from '../sim/buildings';
+import { available, chooseOutput, oreLeft, residents } from '../sim/buildings';
+import { EconomyPanel, economyKey, economyRows, toolOrderControls, warehouseControls } from './economyPanel';
 import { isFighter, keepOf, wantsRecruit } from '../sim/military';
 import { hasGatherTargetNear } from '../sim/nature';
 import { RESOURCES, type Building, type BuildingType, type Resource, type Settler, type SettlerKind, type Stock } from '../sim/types';
@@ -103,6 +104,7 @@ export class Hud {
   private readonly stockEl = el('div', 'stock');
   private readonly stockPanel = el('div', 'panel stock-panel');
   private readonly statsPanel = el('div', 'panel stats-panel');
+  private readonly economy: EconomyPanel;
   /** `stats.produced` sampled once per game minute, newest last (for "last 10 minutes"). */
   private readonly history: Stock[] = [];
   private lastSampleTick = -Infinity;
@@ -137,12 +139,17 @@ export class Hud {
     actions: { onSave(): void; onLoad(): void },
   ) {
     const top = el('div', 'panel top');
+    this.economy = new EconomyPanel(world, () => {
+      this.stockPanel.hidden = true;
+      this.statsPanel.hidden = true;
+    });
     for (const r of PINNED) this.stockEl.append(this.stat(r));
     const more = el('button', 'stock-toggle', '📦');
     more.title = 'Весь склад';
     more.onclick = () => {
       this.stockPanel.hidden = !this.stockPanel.hidden;
       this.statsPanel.hidden = true;
+      this.economy.hide();
       more.blur();
     };
     const stats = el('button', 'stock-toggle', '📊');
@@ -151,9 +158,10 @@ export class Hud {
       this.statsPanel.hidden = !this.statsPanel.hidden;
       this.lastStats = -Infinity;
       this.stockPanel.hidden = true;
+      this.economy.hide();
       stats.blur();
     };
-    this.stockEl.append(more, stats);
+    this.stockEl.append(more, stats, this.economy.toggle);
     this.statsPanel.hidden = true;
     top.append(this.stockEl, this.popEl);
     this.stockPanel.hidden = true;
@@ -240,7 +248,7 @@ export class Hud {
 
     this.infoEl.hidden = true;
     this.endEl.hidden = true;
-    root.append(top, this.stockPanel, this.statsPanel, speed, build, this.infoEl, this.hintEl, this.toastEl, this.endEl);
+    root.append(top, this.stockPanel, this.statsPanel, this.economy.el, speed, build, this.infoEl, this.hintEl, this.toastEl, this.endEl);
   }
 
   showTab(t: number): void {
@@ -287,6 +295,7 @@ export class Hud {
       this.lastStats = nowMs;
       this.renderStats();
     }
+    this.economy.update();
 
     const counts = new Map<SettlerKind, number>();
     let busy = 0;
@@ -445,8 +454,8 @@ export class Hud {
       if (!b.levelled) rows.push(['Выравнивание', b.diggerId !== null ? 'землекоп работает' : 'ждёт землекопа']);
       rows.push(['Строитель', b.builderId !== null ? 'на месте или в пути' : 'ожидается']);
     } else if (def.residence) {
-      rows.push(['Жители', `${b.spawned} / ${def.residence.capacity}`]);
-      rows.push(['Статус', b.spawned < def.residence.capacity ? 'заселяется' : 'заселён']);
+      rows.push(['Жители', `${b.spawned} / ${residents(this.world, b)}`]);
+      rows.push(['Статус', b.spawned < residents(this.world, b) ? 'заселяется' : 'заселён']);
     } else if (def.garrison || def.storage) {
       if (def.garrison) {
         rows.push(['Гарнизон', `${b.garrison.length} / ${def.garrison.capacity}`]);
@@ -507,8 +516,9 @@ export class Hud {
       }
       if (def.territory) rows.push(['Радиус земли', `${def.territory} клеток`]);
     }
+    if (!enemy && b.done) rows.push(...economyRows(b));
     if (b.priority) rows.push(['Приоритет', 'да']);
-    const key = JSON.stringify([b.id, rows, this.confirmDemolish === b.id]);
+    const key = JSON.stringify([b.id, rows, this.confirmDemolish === b.id, economyKey(this.world, b)]);
     if (key === this.infoKey) return;
     this.infoKey = key;
     this.infoEl.innerHTML = '';
@@ -520,7 +530,11 @@ export class Hud {
       if (def.garrison && b.done) this.infoEl.append(this.attackControls(b, canSend));
       return;
     }
+    const warehouse = warehouseControls(this.world, b);
+    if (warehouse) this.infoEl.append(warehouse);
     if (!def.playerBuildable) return;
+    const orders = b.done ? toolOrderControls(this.world, b) : null;
+    if (orders) this.infoEl.append(orders);
     const shared = this.sharedChoices(b);
     if (shared && shared.length === 2) this.infoEl.append(this.shareControls(shared[0], shared[1]));
     const actions = el('div', 'info-actions');
@@ -615,6 +629,8 @@ export class Hud {
         return outside ? 'сажает деревья' : 'отдыхает';
       case 'garrison':
         return 'охраняет границу';
+      case 'hunt':
+        return outside ? 'на охоте' : b.output.meat >= OUTPUT_CAP ? 'склад полон' : 'отдыхает';
       case 'gather':
       case 'farm': {
         const gather = gatheredBy(b.type)!;

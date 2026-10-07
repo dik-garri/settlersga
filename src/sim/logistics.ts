@@ -1,6 +1,7 @@
 import { isReachable, nearestStorage } from './buildings';
 import { goldWanted, staffGarrisons, wantsRecruit, weaponsWanted } from './military';
-import { BUILDINGS, costOf, INPUT_CAP, PROFESSIONS, RESOURCE_INFO } from './config';
+import { BUILDINGS, costOf, INPUT_CAP, ORDERABLE, PROFESSIONS, RESOURCE_INFO } from './config';
+import { countDelivery, distributionKey, economyOf, recountWorkers, workerOrder, workersOf } from './economy';
 import { RESOURCES, type Building, type PlayerId, type Point, type Resource, type Settler } from './types';
 import type { World } from './world';
 
@@ -63,58 +64,40 @@ function dispatchFor(w: World, owner: PlayerId): void {
   staffGarrisons(w, own);
   if (idle.length === 0) return;
 
-  // More construction sites than builders: carriers pick up hammers and become builders.
-  const builderTool = PROFESSIONS.builder.tool!;
-  const sitesWaiting = own.filter((b) => !b.done && b.levelled && b.builderId === null && isReachable(w, b)).length;
-  const comingBuilders = w.settlers.filter(
-    (s) =>
-      s.owner === owner &&
-      ((s.kind === 'builder' && s.tasks.length === 0) || s.tasks.some((t) => t.t === 'retool' && t.kind === 'builder')),
-  ).length;
-  for (let k = sitesWaiting - comingBuilders; k > 0; k--) {
-    const from = nearestSupply(w, own, builderTool, null);
-    if (!from) break;
-    const s = take(from.door);
-    if (!s) return;
-    from.outReserved[builderTool]++;
-    s.tasks = [
-      { t: 'goto', x: from.door.x, y: from.door.y },
-      { t: 'pickup', b: from.id, res: builderTool },
-      { t: 'retool', kind: 'builder' },
-    ];
-  }
-
-  // Sloped sites waiting for levelling: carriers pick up shovels and become diggers. Plain clearing
-  // is left to the diggers there are (it is quick), so shovels stay for foresters.
-  const diggerTool = PROFESSIONS.digger.tool!;
-  const sitesToDig = own.filter(
-    (b) => !b.done && !b.levelled && b.levelTo >= 0 && b.diggerId === null && isReachable(w, b),
-  ).length;
-  const comingDiggers = w.settlers.filter(
-    (s) =>
-      s.owner === owner &&
-      ((s.kind === 'digger' && s.tasks.length === 0) || s.tasks.some((t) => t.t === 'retool' && t.kind === 'digger')),
-  ).length;
-  for (let k = sitesToDig - comingDiggers; k > 0; k--) {
-    const from = nearestSupply(w, own, diggerTool, null);
-    if (!from) break;
-    const s = take(from.door);
-    if (!s) return;
-    from.outReserved[diggerTool]++;
-    s.tasks = [
-      { t: 'goto', x: from.door.x, y: from.door.y },
-      { t: 'pickup', b: from.id, res: diggerTool },
-      { t: 'retool', kind: 'digger' },
-    ];
+  // Workers the player ordered (builders, diggers — as in Settlers 4, never more than ordered):
+  // carriers pick up the profession's tool and take it up.
+  for (const kind of ORDERABLE) {
+    const tool = PROFESSIONS[kind].tool;
+    for (let k = workerOrder(w, owner, kind) - workersOf(w, owner, kind); k > 0; k--) {
+      const from = tool ? nearestSupply(w, own, tool, null) : undefined;
+      if (tool && !from) break;
+      const s = take(from ? from.door : w.castleOf(owner).door);
+      if (!s) return;
+      s.tasks = [];
+      if (from && tool) {
+        from.outReserved[tool]++;
+        s.tasks.push({ t: 'goto', x: from.door.x, y: from.door.y }, { t: 'pickup', b: from.id, res: tool });
+      }
+      s.tasks.push({ t: 'retool', kind });
+      recountWorkers(w);
+    }
   }
 
   // Demands are served one unit per round, least-stocked consumer first, so a scarce resource is
-  // shared fairly instead of the oldest building taking it all.
+  // shared fairly instead of the oldest building taking it all; for a good the player distributes
+  // (`economy.ts`), the consumer type furthest behind its weight goes first, and weight 0 gets none.
+  const eco = economyOf(w, owner);
   for (const res of RESOURCES) {
-    const wanting = own.filter((b) => demand(w, b, res) > 0);
+    const distributed = eco.distribution[res] !== undefined;
+    const key = (b: Building) => (distributed ? distributionKey(eco, res, b) : 0);
+    const wanting = own.filter((b) => demand(w, b, res) > 0 && key(b) < Infinity);
     while (wanting.length > 0) {
       wanting.sort(
-        (a, b) => Number(b.priority) - Number(a.priority) || stocked(a, res) - stocked(b, res) || a.id - b.id,
+        (a, b) =>
+          Number(b.priority) - Number(a.priority) ||
+          key(a) - key(b) ||
+          stocked(a, res) - stocked(b, res) ||
+          a.id - b.id,
       );
       const b = wanting[0];
       const from = nearestSupply(w, own, res, b);
@@ -122,6 +105,7 @@ function dispatchFor(w: World, owner: PlayerId): void {
       const s = take(from.door);
       if (!s) return;
       assignDelivery(s, from, b, res);
+      countDelivery(eco, res, b);
       if (demand(w, b, res) <= 0) wanting.shift();
     }
   }
@@ -141,8 +125,8 @@ function dispatchFor(w: World, owner: PlayerId): void {
     for (const res of RESOURCES) {
       const limit = RESOURCE_INFO[res].storeLimit ?? Infinity;
       while (b.output[res] - b.outReserved[res] > 0 && storedOf(res) < limit) {
-        const store = nearestStorage(w, owner, b.door);
-        if (!store) return;
+        const store = nearestStorage(w, owner, b.door, res);
+        if (!store) break; // every warehouse refuses it: it waits at the producer
         const s = take(b.door);
         if (!s) return;
         assignDelivery(s, b, store, res);

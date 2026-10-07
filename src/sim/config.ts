@@ -72,6 +72,58 @@ export const START_PLANKS = 20;
 export const START_STONE = 10;
 /** Tools in the castle at the start, enough for the first workplaces. */
 export const START_TOOLS: Partial<Stock> = { axe: 3, saw: 2, pickaxe: 4, shovel: 2, scythe: 2, rod: 2, hammer: 2 };
+
+/**
+ * Start conditions, chosen before a free game as in Settlers 4 (low, medium or high start goods).
+ * `medium` is the classic start above. Amounts approximate the original's proportions: low leaves
+ * the bare minimum to found an economy, high adds food and metal so mines and smiths run at once.
+ */
+export type StartLevel = 'low' | 'medium' | 'high';
+export interface StartDef {
+  name: string;
+  goods: Partial<Stock>;
+  carriers: number;
+  builders: number;
+  diggers: number;
+  soldiers: number;
+}
+export const START_CONDITIONS: Record<StartLevel, StartDef> = {
+  low: {
+    name: 'Мало',
+    goods: { plank: 12, stone: 6, axe: 2, saw: 1, pickaxe: 2, shovel: 1, scythe: 1, rod: 1, hammer: 1 },
+    carriers: 8,
+    builders: 2,
+    diggers: 1,
+    soldiers: 3,
+  },
+  medium: {
+    name: 'Средне',
+    goods: { plank: START_PLANKS, stone: START_STONE, ...START_TOOLS },
+    carriers: START_CARRIERS,
+    builders: START_BUILDERS,
+    diggers: START_DIGGERS,
+    soldiers: START_SOLDIERS,
+  },
+  high: {
+    name: 'Много',
+    goods: {
+      plank: 45, stone: 30, log: 10,
+      bread: 10, fish: 10, meat: 10, coal: 12, ironore: 8, iron: 6, gold: 2,
+      axe: 5, saw: 3, pickaxe: 6, shovel: 4, scythe: 3, rod: 3, hammer: 4, sword: 4, bow: 2,
+    },
+    carriers: 24,
+    builders: 5,
+    diggers: 3,
+    soldiers: 10,
+  },
+};
+
+/**
+ * Workers the player orders (as in Settlers 4 builders and diggers are made from free settlers, with
+ * a tool, only as many as ordered); the defaults equal the start's, so nothing is recruited unasked.
+ * `World.orderWorkers` changes them.
+ */
+export const ORDERABLE: readonly SettlerKind[] = ['builder', 'digger'];
 /** Display names and stock-panel groups, kept with the data so new resources are one entry. */
 export type ResourceGroup = 'building' | 'food' | 'metal' | 'tools' | 'military';
 export const RESOURCE_GROUPS: Record<ResourceGroup, string> = {
@@ -304,6 +356,7 @@ export type Behavior =
   | 'garrison'
   | 'prospect'
   | 'soldier'
+  | 'hunt'
   | 'digger';
 
 export interface GatherDef {
@@ -311,6 +364,17 @@ export interface GatherDef {
   radius: number;
   workTicks: number;
   restTicks: number;
+}
+
+/** A hunter: stalks game (`AnimalDef.game`) within `radius` of the lodge, shoots it from `range`. */
+export interface HuntDef {
+  radius: number;
+  range: number;
+  /** Ticks aiming once in range. */
+  workTicks: number;
+  restTicks: number;
+  /** Times he closes in again on game that walked off before giving up. */
+  chases: number;
 }
 
 export interface PlantDef {
@@ -340,6 +404,7 @@ export interface ProfessionDef {
   tool?: Resource;
   gather?: GatherDef;
   plant?: PlantDef;
+  hunt?: HuntDef;
 }
 
 export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
@@ -356,7 +421,6 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
   forester: {
     name: 'Лесничий',
     behavior: 'plant',
-    tool: 'shovel',
     plant: { what: 'tree', radius: 6, workTicks: 30, restTicks: 60 },
   },
   waterman: { name: 'Водонос', behavior: 'gather', gather: { res: 'water', radius: 7, workTicks: 20, restTicks: 20 } },
@@ -368,15 +432,23 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
     gather: { res: 'grain', radius: 5, workTicks: 30, restTicks: 15 },
     plant: { what: 'grain', radius: 5, workTicks: 25, restTicks: 15, maxNearby: 10 },
   },
+  /** As in Settlers 4 the hunter uses a bow (forged by the weaponsmith). */
+  hunter: {
+    name: 'Охотник',
+    behavior: 'hunt',
+    tool: 'bow',
+    hunt: { radius: 12, range: 3.5, workTicks: 25, restTicks: 90, chases: 4 },
+  },
   sawmiller: { name: 'Пильщик', behavior: 'workshop', tool: 'saw' },
   miller: { name: 'Мельник', behavior: 'workshop' },
   baker: { name: 'Пекарь', behavior: 'workshop' },
   pigfarmer: { name: 'Свинопас', behavior: 'workshop' },
-  butcher: { name: 'Мясник', behavior: 'workshop' },
+  butcher: { name: 'Мясник', behavior: 'workshop', tool: 'axe' },
   miner: { name: 'Шахтёр', behavior: 'workshop', tool: 'pickaxe' },
   smelter: { name: 'Плавильщик', behavior: 'workshop' },
   toolsmith: { name: 'Инструментальщик', behavior: 'workshop' },
-  geologist: { name: 'Геолог', behavior: 'prospect' },
+  /** Carries a hammer on his errand and brings it back (see `World.sendGeologist`). */
+  geologist: { name: 'Геолог', behavior: 'prospect', tool: 'hammer' },
   weaponsmith: { name: 'Оружейник', behavior: 'workshop' },
   recruit: { name: 'Новобранец', behavior: 'workshop' },
   soldier: { name: 'Мечник', behavior: 'soldier', tool: 'sword', hp: 100, combat: { melee: 1 } },
@@ -403,6 +475,8 @@ export interface Recipe {
   outputChoice?: readonly Resource[];
   /** With `outputChoice`: keep at least this many of each in stock; beyond that, only make what is awaited. */
   keepInStock?: number;
+  /** With `outputChoice`: the player can queue outputs (`World.orderTool`); orders go first. */
+  orderable?: boolean;
   ticks: number;
 }
 
@@ -432,14 +506,18 @@ export interface BuildingDef {
   recipe?: Recipe;
   /** Territory radius (tiles from the building center); claimed once staffed, or when done if no worker. */
   territory?: number;
-  /** Residence: releases `capacity` new carriers, one every `everyTicks`, once built. */
-  residence?: { capacity: number; everyTicks: number };
+  /**
+   * Residence: releases its residents as carriers, one every `everyTicks`, once built: `capacity` on
+   * a 64×64 map, growing with the map towards `large` (Settlers 4's 10/20/50) from `HOUSE_SCALE`'s
+   * size up (see `residentsOf`).
+   */
+  residence?: { capacity: number; large: number; everyTicks: number };
   /** Military building (see `GarrisonDef`). */
   garrison?: GarrisonDef;
   /** Footprint terrain: ordinary buildings need grass, mines need mountain. */
   terrain?: 'mountain';
   /** Mine: each recipe cycle also takes one unit of ore of this resource from a tile within `radius`. */
-  mine?: { res: Resource; radius: number };
+  mine?: { res: Resource; radius: number; favourite: Resource };
   /**
    * Barracks: its worker is a recruit who, given a weapon from the building's pile, trains for
    * `ticks` and leaves as the fighter whose tool that weapon is. The only way to raise new fighters.
@@ -464,7 +542,14 @@ export interface GarrisonDef {
   trains?: boolean;
 }
 
-function mine(name: string, res: Resource): BuildingDef {
+/**
+ * Mining as in Settlers 4: a food unit buys digging attempts — `favourite` of the mine `attempts.favourite`,
+ * any other `attempts.other`. Each attempt picks an ore tile in range; it yields one unit for sure
+ * while the tile holds at least `sureAmount`, else with `chancePerUnit` × units left.
+ */
+export const MINING = { attempts: { favourite: 10, other: 2 }, sureAmount: 4, chancePerUnit: 0.25 };
+
+function mine(name: string, res: Resource, favourite: Resource): BuildingDef {
   return {
     name,
     w: 2,
@@ -474,7 +559,7 @@ function mine(name: string, res: Resource): BuildingDef {
     playerBuildable: true,
     category: 'mining',
     terrain: 'mountain',
-    mine: { res, radius: 3 },
+    mine: { res, radius: 3, favourite },
     recipe: { inputs: {}, inputsAnyOf: MINER_FOOD, outputs: { [res]: 1 }, ticks: 80 },
   };
 }
@@ -500,7 +585,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: null,
     playerBuildable: true,
     category: 'housing',
-    residence: { capacity: 4, everyTicks: 150 },
+    residence: { capacity: 4, large: 10, everyTicks: 150 },
   },
   house_medium: {
     name: 'Средний дом',
@@ -510,7 +595,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: null,
     playerBuildable: true,
     category: 'housing',
-    residence: { capacity: 8, everyTicks: 120 },
+    residence: { capacity: 8, large: 20, everyTicks: 120 },
   },
   house_large: {
     name: 'Большой дом',
@@ -520,7 +605,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: null,
     playerBuildable: true,
     category: 'housing',
-    residence: { capacity: 14, everyTicks: 100 },
+    residence: { capacity: 14, large: 50, everyTicks: 100 },
   },
 
   warehouse: {
@@ -582,6 +667,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     category: 'food',
   },
   fisher: { name: 'Рыбак', w: 2, h: 2, cost: { plank: 2 }, worker: 'fisher', playerBuildable: true, category: 'food' },
+  hunter: { name: 'Охотник', w: 2, h: 2, cost: { plank: 2 }, worker: 'hunter', playerBuildable: true, category: 'food' },
   farm: {
     name: 'Ферма',
     w: 3,
@@ -632,10 +718,11 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     recipe: { inputs: { pig: 1 }, outputs: { meat: 2 }, ticks: 60 },
   },
 
-  coalmine: mine('Угольная шахта', 'coal'),
-  ironmine: mine('Железный рудник', 'ironore'),
-  goldmine: mine('Золотой рудник', 'goldore'),
-  stonemine: mine('Каменоломня в горе', 'stone'),
+  // Favourite foods as in Settlers 4: coal and stone bread, iron (and sulfur) meat, gold fish.
+  coalmine: mine('Угольная шахта', 'coal', 'bread'),
+  ironmine: mine('Железный рудник', 'ironore', 'meat'),
+  goldmine: mine('Золотой рудник', 'goldore', 'fish'),
+  stonemine: mine('Каменоломня в горе', 'stone', 'bread'),
 
   ironsmelter: {
     name: 'Плавильня железа',
@@ -665,7 +752,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: 'toolsmith',
     playerBuildable: true,
     category: 'metal',
-    recipe: { inputs: { iron: 1, coal: 1 }, outputs: {}, outputChoice: TOOLS, keepInStock: 2, ticks: 80 },
+    recipe: { inputs: { iron: 1, coal: 1 }, outputs: {}, outputChoice: TOOLS, keepInStock: 2, orderable: true, ticks: 80 },
   },
 
   weaponsmith: {
@@ -784,7 +871,9 @@ export const AI_PLAN: readonly { type: BuildingType; count: number; after?: Buil
   { type: 'coalmine', count: 2, after: 'toolsmith' },
   { type: 'stonemine', count: 1, after: 'toolsmith' },
   { type: 'tower', count: 4 },
-  { type: 'forester', count: 2 },
+  // After the metal chain: without a tool to wait for, a second forester would otherwise grab the
+  // space the smelters need early on.
+  { type: 'forester', count: 2, after: 'toolsmith' },
   { type: 'woodcutter', count: 3 },
   { type: 'stonecutter', count: 2, after: 'toolsmith' },
   { type: 'house_large', count: 1 },
@@ -854,10 +943,24 @@ export interface AnimalDef {
   roam: number;
   /** Ticks resting (grazing) between legs, inclusive range. */
   rest: [number, number];
+  /** Game: what a hunter gets from it. */
+  game?: Resource;
+  /** Game comes back: one animal every this many ticks per 64×64 while below the map's initial count. */
+  respawnEvery?: number;
 }
 
 export const ANIMALS = {
-  deer: { name: 'Олень', habitat: 'forest', speed: 0.055, herd: [2, 4], herds: 2, roam: 6, rest: [30, 120] },
+  deer: {
+    name: 'Олень',
+    habitat: 'forest',
+    speed: 0.055,
+    herd: [2, 4],
+    herds: 2,
+    roam: 6,
+    rest: [30, 120],
+    game: 'meat',
+    respawnEvery: 1200,
+  },
   donkey: { name: 'Осёл', habitat: 'meadow', speed: 0.03, herd: [1, 3], herds: 1, roam: 5, rest: [60, 200] },
   duck: { name: 'Утка', habitat: 'shore', speed: 0.025, herd: [2, 5], herds: 2, roam: 4, rest: [20, 90] },
   chicken: { name: 'Курица', habitat: 'meadow', speed: 0.03, herd: [3, 6], herds: 1, roam: 3, rest: [10, 60] },
@@ -867,3 +970,32 @@ export type AnimalKind = keyof typeof ANIMALS;
 export const ANIMAL_KINDS = Object.keys(ANIMALS) as AnimalKind[];
 /** Herds keep at least this far (tiles) from every start position. */
 export const ANIMAL_START_CLEARANCE = 16;
+
+/** Map edge (tiles) from which houses hold their full Settlers 4 numbers (`residence.large`). */
+export const HOUSE_SCALE = { from: 64, to: 256 };
+
+/** Residents of a house on a map of this edge: `capacity` at 64, linearly up to `large` at 256. */
+export function residentsOf(def: BuildingDef, mapSize: number): number {
+  const r = def.residence;
+  if (!r) return 0;
+  const t = Math.max(0, Math.min(1, (mapSize - HOUSE_SCALE.from) / (HOUSE_SCALE.to - HOUSE_SCALE.from)));
+  return Math.round(r.capacity + (r.large - r.capacity) * t);
+}
+
+// ------------------------------------------------------------------- paths
+
+/**
+ * Paths as in Settlers 4: every step onto a tile of a `terrains` kind adds `perStep` wear (max 255);
+ * from `levels[k].wear` it shows as a dusty path, then a road, and settlers walk it `levels[k].speed`
+ * times faster. Unused tiles lose `decay` wear every `decayEvery` ticks.
+ */
+export const PATHS = {
+  terrains: [Terrain.Grass, Terrain.Desert, Terrain.Sand] as readonly Terrain[],
+  perStep: 4,
+  decay: 1,
+  decayEvery: 300,
+  levels: [
+    { wear: 60, speed: 1.15, name: 'тропа' },
+    { wear: 170, speed: 1.35, name: 'дорога' },
+  ],
+};

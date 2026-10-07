@@ -63,6 +63,7 @@ export type BuildingType =
   | 'stonecutter'
   | 'waterworks'
   | 'fisher'
+  | 'hunter'
   | 'farm'
   | 'mill'
   | 'bakery'
@@ -104,6 +105,7 @@ export type SettlerKind =
   | 'soldier'
   | 'archer'
   | 'recruit'
+  | 'hunter'
   | 'digger';
 
 /** Player ids start at 1; 0 means "nobody" in per-tile ownership. */
@@ -157,6 +159,10 @@ export interface Building {
   levelTo: number;
   /** Spade strokes spent clearing the site; it is cleared at `clearStrokes(b)`. */
   dug: number;
+  /** Mine: digging attempts left from the food eaten (see `runMine`). */
+  attempts?: number;
+  /** Warehouse: goods it does not take in (player setting, `World.setAccepts`). */
+  refuse?: Resource[];
 }
 
 export type Task =
@@ -184,7 +190,12 @@ export type Task =
   /** `archer`: which garrison role the slot was reserved for (see `garrisonArchersInbound`). */
   | { t: 'join'; b: number; archer?: boolean }
   /** Soldier attacks an enemy military building: duel its defenders at the door, take it when empty. */
-  | { t: 'assault'; b: number; n: number };
+  | { t: 'assault'; b: number; n: number }
+  /**
+   * Hunter shoots a wild animal (`World.animals` id `a`, reserved via `Animal.hunter`): closes in
+   * (`chase` approaches so far), aims for `n` ticks once in range, then carries `res`.
+   */
+  | { t: 'hunt'; a: number; n: number; chase: number; res: Resource };
 
 export interface Settler {
   id: number;
