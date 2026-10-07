@@ -34,6 +34,8 @@ export class GameMap {
   readonly prospected: Uint8Array;
   /** Bit (player − 1) set once that player has seen the tile (fog of war; see fog.ts). */
   readonly explored: Uint8Array;
+  /** Path wear from settlers' steps (`paths.ts`, `PATHS`): dusty path, then road. */
+  readonly wear: Uint8Array;
   /** Player id owning the tile's territory, 0 if nobody. */
   readonly owner: Uint8Array;
   /** Building id occupying the tile, 0 if none. */
@@ -73,6 +75,7 @@ export class GameMap {
     this.oreAmount = new Uint8Array(n);
     this.prospected = new Uint8Array(n);
     this.explored = new Uint8Array(n);
+    this.wear = new Uint8Array(n);
     this.owner = new Uint8Array(n);
     this.building = new Int32Array(n);
     this.door = new Int32Array(n);

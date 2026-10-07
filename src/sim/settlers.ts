@@ -18,6 +18,8 @@ import { clearStrokes, levelStep } from './digging';
 import { assaultTick, joinTick, releaseJoin, soldierIdle } from './military';
 import { canPlant, findGatherTarget, findPlotFor, harvest, isGatherTarget, plant, type Target } from './nature';
 import { findPath } from './pathfinding';
+import { pathSpeed, wearTile } from './paths';
+import { findGame, huntTick, releaseHunt } from './hunting';
 import { RESOURCES, Terrain, type Building, type Point, type Settler, type Task } from './types';
 import type { World } from './world';
 
@@ -128,6 +130,8 @@ export function updateSettler(w: World, s: Settler): void {
       return;
     case 'join':
       return joinTick(w, s, task);
+    case 'hunt':
+      return huntTick(w, s, task);
     case 'assault':
       return assaultTick(w, s, task);
     case 'prospect': {
@@ -218,7 +222,9 @@ function move(w: World, s: Settler, task: GotoTarget): void {
     const dx = t.x - s.x;
     const dy = t.y - s.y;
     const d = Math.hypot(dx, dy);
-    const speed = TERRAIN[w.map.terrain[w.map.idx(t.x, t.y)] as Terrain].speed;
+    const ti = w.map.idx(t.x, t.y);
+    // Worn paths and roads (`paths.ts`) speed walking up.
+    const speed = TERRAIN[w.map.terrain[ti] as Terrain].speed * pathSpeed(w.map, ti);
     const reach = left * speed;
     if (d > reach) {
       s.x += (dx / d) * reach;
@@ -229,6 +235,7 @@ function move(w: World, s: Settler, task: GotoTarget): void {
     s.y = t.y;
     left -= d / speed;
     s.path.shift();
+    wearTile(w, ti);
     const next = s.path[0];
     if (next && !w.map.isWalkable(next.x, next.y)) {
       // Something grew or was built in the way — find a new route.
@@ -303,13 +310,16 @@ export function abort(w: World, s: Settler): void {
       case 'join':
         if (b) releaseJoin(b, task);
         break;
+      case 'hunt':
+        releaseHunt(w, task);
+        break;
     }
   }
   s.tasks = [];
   s.path = [];
   const res = s.carrying;
   if (!res) return;
-  const store = returning ? undefined : nearestStorage(w, s.owner, s);
+  const store = returning ? undefined : (nearestStorage(w, s.owner, s, res) ?? nearestStorage(w, s.owner, s));
   if (store) {
     store.inbound[res]++;
     s.tasks = [
@@ -444,10 +454,45 @@ function idle(w: World, s: Settler): void {
       if (home && s.inside !== home.id) goHome(s, home);
       return;
 
-    case 'prospect':
-      // Errand finished (or aborted): back to carrying.
+    case 'prospect': {
+      // Errand finished (or aborted): back to carrying; the tool goes back to a warehouse.
       s.kind = 'carrier';
+      const tool = s.carrying;
+      const store = tool ? nearestStorage(w, s.owner, s) : undefined;
+      if (tool && store) {
+        store.inbound[tool]++;
+        s.tasks = [
+          { t: 'goto', x: store.door.x, y: store.door.y },
+          { t: 'drop', b: store.id, res: tool, back: true },
+        ];
+      } else if (tool) {
+        w.stats.lost[tool]++;
+        s.carrying = null;
+      }
       return;
+    }
+
+    case 'hunt': {
+      if (!home) return;
+      if (s.inside !== home.id) return goHome(s, home);
+      const def = prof.hunt!;
+      const prey = findGame(w, s, home, def.radius);
+      if (!prey) {
+        s.tasks = [{ t: 'wait', n: 40 }];
+        return;
+      }
+      prey.animal.hunter = s.id;
+      s.path = prey.path;
+      s.tasks = [
+        { t: 'goto', x: prey.x, y: prey.y, adj: true },
+        { t: 'hunt', a: prey.animal.id, n: def.workTicks, chase: 0, res: prey.res },
+        { t: 'goto', x: home.door.x, y: home.door.y },
+        { t: 'store', b: home.id, res: prey.res },
+        { t: 'enter', b: home.id },
+        { t: 'wait', n: def.restTicks },
+      ];
+      return;
+    }
 
     case 'soldier':
       soldierIdle(w, s);

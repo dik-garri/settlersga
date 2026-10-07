@@ -1,4 +1,15 @@
-import { BUILDINGS, OUTPUT_CAP, oreOf, PROFESSIONS, type BuildingDef, type Recipe } from './config';
+import {
+  BUILDINGS,
+  MINING,
+  ORDERABLE,
+  OUTPUT_CAP,
+  oreOf,
+  PROFESSIONS,
+  residentsOf,
+  type BuildingDef,
+  type Recipe,
+} from './config';
+import { orderedOutput, toolMade, workerOrder, workersOf } from './economy';
 import { fightersWith, mostBehindShare } from './military';
 import {
   emptyStock,
@@ -109,12 +120,13 @@ export function isReachable(w: World, b: Building): boolean {
   return b.unreachableUntil <= w.tick;
 }
 
-/** Nearest finished, reachable warehouse of the player. */
-export function nearestStorage(w: World, owner: PlayerId, near: Point): Building | undefined {
+/** Nearest finished, reachable warehouse of the player (that takes `res` in, when given). */
+export function nearestStorage(w: World, owner: PlayerId, near: Point, res?: Resource): Building | undefined {
   let best: Building | undefined;
   let bestD = Infinity;
   for (const b of w.buildings.values()) {
     if (b.owner !== owner || !b.done || !BUILDINGS[b.type].storage || !isReachable(w, b)) continue;
+    if (res && b.refuse?.includes(res)) continue;
     const d = Math.hypot(b.door.x - near.x, b.door.y - near.y);
     if (d < bestD) {
       best = b;
@@ -140,15 +152,17 @@ export function available(w: World, owner: PlayerId, res: Resource): number {
   return n;
 }
 
-/** Workplaces (and, for hammers, construction sites) currently waiting for someone with this tool. */
+/** Workplaces, ordered workers not yet there (builders, diggers) and garrison slots waiting for this tool. */
 export function waitingFor(w: World, owner: PlayerId, tool: Resource): number {
   let n = 0;
   for (const b of w.buildings.values()) {
     if (b.owner !== owner) continue;
     const worker = BUILDINGS[b.type].worker;
     if (worker && b.done && b.workerId === null && !b.workerRequested && PROFESSIONS[worker].tool === tool) n++;
-    if (tool === PROFESSIONS.builder.tool && !b.done && b.builderId === null) n++;
     n += garrisonSlotsFor(w, b, tool);
+  }
+  for (const kind of ORDERABLE) {
+    if (PROFESSIONS[kind].tool === tool) n += Math.max(0, workerOrder(w, owner, kind) - workersOf(w, owner, kind));
   }
   return n;
 }
@@ -175,6 +189,11 @@ function garrisonSlotsFor(w: World, b: Building, tool: Resource): number {
  */
 export function chooseOutput(w: World, b: Building, recipe: Recipe): Resource | null {
   const choices = recipe.outputChoice ?? [];
+  // The player's orders go first (toolsmith queue, as in Settlers 4); then it works by need.
+  if (recipe.orderable) {
+    const ordered = orderedOutput(w, b, choices, (r) => b.output[r] < OUTPUT_CAP);
+    if (ordered) return ordered;
+  }
   const awaited = choices.filter(
     (r) => b.output[r] < OUTPUT_CAP && waitingFor(w, b.owner, r) + (recipe.keepInStock ?? 0) - available(w, b.owner, r) > 0,
   );
@@ -216,23 +235,53 @@ export function oreLeft(w: World, b: Building): number {
   return n;
 }
 
-/** Tile with ore of the mine's kind within its radius, nearest first; -1 if worked out. */
-export function findOreTile(w: World, b: Building, def: BuildingDef): number {
+/** Ore tiles of the mine's kind within its radius, in scan order. */
+function oreTiles(w: World, b: Building, def: BuildingDef): number[] {
   const { res, radius } = def.mine!;
   const c = centerOf(b);
-  let best = -1;
-  let bestD = Infinity;
+  const out: number[] = [];
   for (let y = Math.floor(c.y - radius); y <= Math.ceil(c.y + radius); y++) {
     for (let x = Math.floor(c.x - radius); x <= Math.ceil(c.x + radius); x++) {
-      if (!w.map.inBounds(x, y)) continue;
-      const d = Math.hypot(x - c.x, y - c.y);
+      if (!w.map.inBounds(x, y) || Math.hypot(x - c.x, y - c.y) > radius) continue;
       const i = w.map.idx(x, y);
-      if (d > radius || d >= bestD || w.map.oreAmount[i] === 0 || oreOf(w.map.ore[i]) !== res) continue;
-      best = i;
-      bestD = d;
+      if (w.map.oreAmount[i] > 0 && oreOf(w.map.ore[i]) === res) out.push(i);
     }
   }
-  return best;
+  return out;
+}
+
+/**
+ * A mine as in Settlers 4: one food buys digging attempts (more for the mine's favourite food, see
+ * `MINING`); each attempt, every `recipe.ticks`, picks an ore tile in range at random and yields one
+ * unit — surely while the tile is rich, by chance once it runs low.
+ */
+function runMine(w: World, b: Building, def: BuildingDef, recipe: Recipe): void {
+  const { res, favourite } = def.mine!;
+  const foods = recipe.inputsAnyOf ?? [];
+  if (b.output[res] >= OUTPUT_CAP) return;
+  if (!b.attempts && !foods.some((r) => b.input[r] > 0)) return;
+  if (++b.timer < recipe.ticks) return;
+  b.timer = 0;
+  const tiles = oreTiles(w, b, def);
+  if (tiles.length === 0) return; // worked out
+  if (!b.attempts) {
+    // The favourite if there is any, else whichever food is most plentiful.
+    const pick = b.input[favourite] > 0 ? favourite : foods.reduce((a, r) => (b.input[r] > b.input[a] ? r : a));
+    b.input[pick]--;
+    b.attempts = pick === favourite ? MINING.attempts.favourite : MINING.attempts.other;
+  }
+  b.attempts--;
+  const i = tiles[Math.floor(w.rng() * tiles.length)];
+  const amount = w.map.oreAmount[i];
+  if (amount < MINING.sureAmount && w.rng() >= MINING.chancePerUnit * amount) return; // nothing this time
+  if (--w.map.oreAmount[i] === 0) w.map.touch(i);
+  b.output[res]++;
+  w.stats.produced[res]++;
+}
+
+/** Residents a house of this type releases on this map (grows with the map size, `residentsOf`). */
+export function residents(w: World, b: Building): number {
+  return residentsOf(BUILDINGS[b.type], w.map.w);
 }
 
 /**
@@ -241,7 +290,7 @@ export function findOreTile(w: World, b: Building, def: BuildingDef): number {
  */
 export function updateBuilding(w: World, b: Building): void {
   const home = BUILDINGS[b.type].residence;
-  if (home && b.done && b.spawned < home.capacity && ++b.timer >= home.everyTicks) {
+  if (home && b.done && b.spawned < residents(w, b) && ++b.timer >= home.everyTicks) {
     b.timer = 0;
     b.spawned++;
     spawnSettler(w, 'carrier', b);
@@ -251,9 +300,9 @@ export function updateBuilding(w: World, b: Building): void {
   const recipe = def.recipe;
   if (!recipe || !b.done) return;
   const worker = w.getSettler(b.workerId);
-  if (!worker || worker.inside !== b.id || !canRunRecipe(b, recipe)) return;
-  const oreTile = def.mine ? findOreTile(w, b, def) : -1;
-  if (def.mine && oreTile < 0) return; // worked out
+  if (!worker || worker.inside !== b.id) return;
+  if (def.mine) return runMine(w, b, def, recipe);
+  if (!canRunRecipe(b, recipe)) return;
   if (recipe.outputChoice && !chooseOutput(w, b, recipe)) return; // nothing worth making
   if (++b.timer < recipe.ticks) return;
   b.timer = 0;
@@ -262,7 +311,6 @@ export function updateBuilding(w: World, b: Building): void {
     const pick = recipe.inputsAnyOf.reduce((a, r) => (b.input[r] > b.input[a] ? r : a));
     b.input[pick]--;
   }
-  if (oreTile >= 0 && --w.map.oreAmount[oreTile] === 0) w.map.touch(oreTile);
   for (const r of RESOURCES) {
     const made = recipe.outputs[r] ?? 0;
     b.input[r] -= recipe.inputs[r] ?? 0;
@@ -273,6 +321,7 @@ export function updateBuilding(w: World, b: Building): void {
   if (chosen) {
     b.output[chosen]++;
     w.stats.produced[chosen]++;
+    if (recipe.orderable) toolMade(w, b.owner, chosen);
   }
 }
 

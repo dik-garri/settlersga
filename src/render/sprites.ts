@@ -559,6 +559,7 @@ export const BUILDING_CANVAS: Record<BuildingType | 'site2' | 'site3', BuildingC
   stonecutter: SMALL,
   waterworks: SMALL,
   fisher: SMALL,
+  hunter: SMALL,
   farm: LARGE,
   mill: { w: 150, h: 210, ax: 75, ay: 165 },
   bakery: SMALL,
@@ -902,7 +903,8 @@ type Deco =
   | 'furnace'
   | 'anvil'
   | 'crates'
-  | 'barrels';
+  | 'barrels'
+  | 'antlers';
 
 /** A gabled building described by data, so new building types rarely need a hand-written painter. */
 interface Style {
@@ -951,6 +953,30 @@ function paintDeco(ctx: Ctx, st: Style, deco: Deco): void {
       ctx.lineTo(x + 9, y - 19);
       ctx.closePath();
       ctx.fill();
+      return;
+    }
+    case 'antlers': {
+      // A pair of antlers over the door, a hide stretched on a frame beside the lodge.
+      const [x, y] = P(st.doorDx * 0.2, hh + 0.02, H * 0.85);
+      ctx.strokeStyle = '#efe2c4';
+      ctx.lineWidth = 1.4;
+      ctx.lineCap = 'round';
+      for (const sgn of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.quadraticCurveTo(x + sgn * 6, y - 3, x + sgn * 7, y - 9);
+        ctx.moveTo(x + sgn * 4, y - 3);
+        ctx.lineTo(x + sgn * 7, y - 4);
+        ctx.moveTo(x + sgn * 6, y - 6);
+        ctx.lineTo(x + sgn * 3, y - 8);
+        ctx.stroke();
+      }
+      const a = P(hw + 0.3, -hh * 0.4, 0);
+      ctx.strokeStyle = '#5e3b1f';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(a[0] - 5, a[1] - 15, 10, 13);
+      ctx.fillStyle = '#9a6a3c';
+      ctx.fillRect(a[0] - 4, a[1] - 14, 8, 11);
       return;
     }
     case 'nets': {
@@ -1195,6 +1221,7 @@ const STYLES: Partial<Record<BuildingType, Style>> = {
   },
   waterworks: { hw: 0.6, hh: 0.6, H: 20, wall: '#a8a294', roof: '#6e4a33', rise: 20, doorDx: 0.5, deco: ['well'] },
   fisher: { hw: 0.65, hh: 0.65, H: 20, wall: '#a07a50', roof: '#c4a35a', rise: 22, doorDx: 0.5, deco: ['nets'] },
+  hunter: { hw: 0.62, hh: 0.62, H: 20, wall: '#7a5634', roof: '#4f6a32', rise: 22, doorDx: 0.5, timber: true, deco: ['antlers'] },
   farm: {
     hw: 1.2,
     hh: 1.0,
@@ -1441,6 +1468,7 @@ export const BUILDING_PAINTERS: Record<BuildingType | 'site2' | 'site3', (ctx: C
   stonecutter: paintStonecutter,
   waterworks: styled('waterworks'),
   fisher: styled('fisher'),
+  hunter: styled('hunter'),
   farm: styled('farm'),
   mill: paintMill,
   bakery: styled('bakery'),

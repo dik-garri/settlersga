@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BUILDINGS, oreOf } from '../src/sim/config';
+import { BUILDINGS, MINING, oreOf } from '../src/sim/config';
 import { saveWorld } from '../src/sim/save';
 import { Terrain } from '../src/sim/types';
 import { World } from '../src/sim/world';
@@ -50,21 +50,59 @@ describe('mountains', () => {
 });
 
 describe('mines', () => {
-  it('turn food into ore taken from the mountain, and idle without food', () => {
+  it('turn food into digging attempts, the favourite food giving the most, and idle without food', () => {
     const w = richWorld();
     const [spot] = ownedOre(w, 'coal');
     const mine = placeNear(w, 'coalmine', spot.x, spot.y, 4)!;
     run(w, 3000);
     expect(mine.done).toBe(true);
     expect(w.stats.produced.coal).toBe(0); // no food yet
+    expect(BUILDINGS.coalmine.mine!.favourite).toBe('bread');
 
+    // One bread (coal's favourite) buys MINING.attempts.favourite attempts.
     const before = oreLeft(w, 'coal');
-    w.castle.output.bread = 3;
-    w.castle.output.fish = 3;
+    w.castle.output.bread = 1;
     run(w, 3000);
-    expect(w.stats.produced.coal).toBe(6); // one unit of any food per unit of coal
-    expect(oreLeft(w, 'coal')).toBe(before - 6);
-    expect(w.castle.output.bread + w.castle.output.fish).toBe(0);
+    expect(w.castle.output.bread).toBe(0);
+    expect(mine.attempts ?? 0).toBe(0);
+    const fromBread = w.stats.produced.coal;
+    expect(fromBread).toBeGreaterThan(0);
+    expect(fromBread).toBeLessThanOrEqual(MINING.attempts.favourite);
+    expect(oreLeft(w, 'coal')).toBe(before - fromBread);
+
+    // One fish (not its favourite) buys only MINING.attempts.other.
+    w.castle.output.fish = 1;
+    run(w, 3000);
+    expect(w.castle.output.fish).toBe(0);
+    const fromFish = w.stats.produced.coal - fromBread;
+    expect(fromFish).toBeGreaterThan(0);
+    expect(fromFish).toBeLessThanOrEqual(MINING.attempts.other);
+  });
+
+  it('rich tiles always yield, poor ones by chance', () => {
+    // A rich deposit gives exactly one unit per attempt.
+    const w = richWorld();
+    const [spot] = ownedOre(w, 'coal');
+    const mine = placeNear(w, 'coalmine', spot.x, spot.y, 4)!;
+    run(w, 3000);
+    expect(mine.done).toBe(true);
+    for (let i = 0; i < w.map.oreAmount.length; i++) if (oreOf(w.map.ore[i]) === 'coal') w.map.oreAmount[i] = MINING.sureAmount + 20;
+    w.castle.output.bread = 1;
+    run(w, 3000);
+    expect(w.stats.produced.coal).toBe(MINING.attempts.favourite);
+
+    // A poor one (a single unit per tile) yields far less per attempt.
+    const v = richWorld();
+    const [spot2] = ownedOre(v, 'coal');
+    const mine2 = placeNear(v, 'coalmine', spot2.x, spot2.y, 4)!;
+    run(v, 3000);
+    expect(mine2.done).toBe(true);
+    for (let i = 0; i < v.map.oreAmount.length; i++) if (oreOf(v.map.ore[i]) === 'coal') v.map.oreAmount[i] = 1;
+    v.castle.output.bread = 4;
+    run(v, 9000);
+    expect(v.castle.output.bread).toBe(0);
+    expect(v.stats.produced.coal).toBeGreaterThan(0);
+    expect(v.stats.produced.coal).toBeLessThan(4 * MINING.attempts.favourite * 0.6);
   });
 
   it('stop when the ore within reach runs out', () => {
@@ -80,8 +118,8 @@ describe('mines', () => {
       const y = Math.floor(i / w.map.w);
       if (oreOf(w.map.ore[i]) === 'ironore' && Math.hypot(x - cx, y - cy) <= r) reachable += w.map.oreAmount[i];
     }
-    w.castle.output.bread = reachable + 10;
-    run(w, 1500 + reachable * 120);
+    w.castle.output.meat = reachable + 20;
+    run(w, 1500 + reachable * 400);
     expect(w.stats.produced.ironore).toBe(reachable);
   });
 });
