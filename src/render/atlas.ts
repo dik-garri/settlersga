@@ -9,7 +9,6 @@ import {
   paintDeposit,
   paintChevrons,
   paintField,
-  paintVines,
   paintSign,
   paintFlag,
   paintGround,
@@ -169,7 +168,6 @@ export class SpriteAtlas {
     }
     for (let v = 1; v <= 4; v++) {
       a.add(`field:grain:${v}`, 66, 40, 33, 24, (ctx) => paintField(ctx, v));
-      a.add(`field:vine:${v}`, 66, 40, 33, 24, (ctx) => paintVines(ctx, v));
     }
     for (let v = 0; v < 3; v++) a.add(`deposit:${v}`, 56, 44, 28, 34, (ctx) => paintDeposit(ctx, v));
     for (const [type, c] of Object.entries(BUILDING_CANVAS)) {

@@ -60,15 +60,6 @@ describe('seasons', () => {
     expect(stages(w, fields).some((s) => s > 1)).toBe(true);
   });
 
-  it('vines bear fruit only in fruiting seasons', () => {
-    const w = new World(42);
-    const vines = sow(w, 'vine', 20);
-    run(w, SEASON_TICKS - 1); // a whole spring
-    expect(Math.max(...stages(w, vines))).toBe(CROP_RIPE - 1);
-    run(w, SEASON_TICKS); // summer
-    expect(Math.max(...stages(w, vines))).toBe(CROP_RIPE);
-  });
-
   it('are deterministic and survive a save made mid-winter', () => {
     const make = () => {
       const w = new World(7);

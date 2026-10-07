@@ -67,14 +67,6 @@ const GATHER_RULES: Partial<Record<Resource, GatherRule>> = {
       w.fields.delete(i);
     },
   },
-  grapes: {
-    isTarget: (m, i) => m.crop[i] === CROP_RIPE && m.cropKind[i] === CROP_KINDS.indexOf('vine'),
-    // Vines are perennial: after the harvest they grow fruit again instead of being replanted.
-    take: (w, i) => {
-      w.map.crop[i] = 2;
-      w.map.touch(i);
-    },
-  },
 };
 
 function field(kind: PlantKind): PlantRule {
@@ -112,7 +104,6 @@ const PLANT_RULES: Record<PlantKind, PlantRule> = {
     },
   },
   grain: field('grain'),
-  vine: field('vine'),
 };
 
 const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -274,11 +265,8 @@ export function updateNature(w: World): void {
 
   if (w.tick % CROP_GROW_EVERY === 0 && w.fields.size > 0) {
     // Sorted so the RNG is consumed in the same order after a save/load.
-    const vine = CROP_KINDS.indexOf('vine');
     for (const i of [...w.fields].sort((a, b) => a - b)) {
-      // Vines leaf out all year but set fruit (the last stage) only in fruiting seasons.
-      const cap = m.cropKind[i] === vine && !season.fruit ? CROP_RIPE - 1 : CROP_RIPE;
-      if (m.crop[i] < CROP_RIPE && w.rng() < CROP_GROW_CHANCE * season.crop && m.crop[i] < cap) {
+      if (m.crop[i] < CROP_RIPE && w.rng() < CROP_GROW_CHANCE * season.crop) {
         m.crop[i]++;
         m.touch(i);
       }

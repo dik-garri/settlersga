@@ -569,8 +569,6 @@ export const BUILDING_CANVAS: Record<BuildingType | 'site2' | 'site3', BuildingC
   goldmine: SMALL,
   stonemine: SMALL,
   warehouse: SMALL,
-  vineyard: SMALL,
-  winery: SMALL,
   ironsmelter: SMALL,
   goldsmelter: SMALL,
   toolsmith: SMALL,
@@ -1220,27 +1218,6 @@ const STYLES: Partial<Record<BuildingType, Style>> = {
   },
   pigfarm: { hw: 0.6, hh: 0.6, H: 20, wall: '#a07a50', roof: '#c4a35a', rise: 20, doorDx: 0.5, deco: ['pen'] },
   slaughterhouse: { hw: 0.7, hh: 0.7, H: 24, wall: '#c9c0ae', roof: '#7a2e24', rise: 22, doorDx: 0.5, deco: ['meat'] },
-  vineyard: {
-    hw: 0.6,
-    hh: 0.6,
-    H: 20,
-    wall: '#e8dcc0',
-    roof: '#a8502f',
-    rise: 18,
-    doorDx: 0.5,
-    deco: ['barrels'],
-  },
-  winery: {
-    hw: 0.7,
-    hh: 0.7,
-    H: 24,
-    wall: '#cbb79a',
-    roof: '#6a2f3a',
-    rise: 22,
-    doorDx: 0.5,
-    timber: true,
-    deco: ['barrels', 'chimney'],
-  },
   warehouse: {
     hw: 0.65,
     hh: 0.8,
@@ -1479,8 +1456,6 @@ export const BUILDING_PAINTERS: Record<BuildingType | 'site2' | 'site3', (ctx: C
   weaponsmith: styled('weaponsmith'),
   barracks: styled('barracks'),
   warehouse: styled('warehouse'),
-  vineyard: styled('vineyard'),
-  winery: styled('winery'),
   tower: paintTower,
   bigtower: paintBigTower,
   fortress: paintFortress,
@@ -1490,54 +1465,6 @@ export const BUILDING_PAINTERS: Record<BuildingType | 'site2' | 'site3', (ctx: C
 
 // -------------------------------------------------------------------- fields
 
-/** Vine row on one tile, same canvas as a field. Stage 1 cutting … 4 with grapes. */
-export function paintVines(ctx: Ctx, stage: number): void {
-  ctx.translate(33, 24);
-  ctx.beginPath();
-  ctx.moveTo(0, -15);
-  ctx.lineTo(30, 0);
-  ctx.lineTo(0, 15);
-  ctx.lineTo(-30, 0);
-  ctx.closePath();
-  ctx.fillStyle = '#8a6a42';
-  ctx.fill();
-  // Two trellis rows along the tile's x axis.
-  for (const row of [-0.22, 0.22]) {
-    const [x0, y0] = P(-0.4, row, 0);
-    const [x1, y1] = P(0.4, row, 0);
-    ctx.strokeStyle = '#5e3b1f';
-    ctx.lineWidth = 1;
-    for (const t of [0, 0.5, 1]) {
-      const x = x0 + (x1 - x0) * t;
-      const y = y0 + (y1 - y0) * t;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x, y - 10);
-      ctx.stroke();
-    }
-    ctx.beginPath();
-    ctx.moveTo(x0, y0 - 8);
-    ctx.lineTo(x1, y1 - 8);
-    ctx.stroke();
-    if (stage === 1) continue;
-    const leaves = stage === 2 ? 3 : 7;
-    for (let k = 0; k < leaves; k++) {
-      const t = (k + 0.5) / leaves;
-      const x = x0 + (x1 - x0) * t;
-      const y = y0 + (y1 - y0) * t - 8;
-      ctx.fillStyle = stage >= 3 ? '#4f8a3a' : '#7fb04f';
-      ctx.beginPath();
-      ctx.arc(x, y, stage === 2 ? 1.6 : 2.6, 0, Math.PI * 2);
-      ctx.fill();
-      if (stage === 4 && k % 2 === 0) {
-        ctx.fillStyle = '#6a2c6e';
-        ctx.beginPath();
-        ctx.arc(x + 1, y + 3, 1.8, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-  }
-}
 
 /** Grain field on one tile, 66×40 with the tile center at (33, 24). Stage 1 sown … 4 ripe. */
 export function paintField(ctx: Ctx, stage: number): void {
@@ -1694,28 +1621,6 @@ function paintFood(ctx: Ctx, res: Resource): void {
         blob(ctx, x, y, r, r * 0.85, ORE_COLORS[res], shade(ORE_COLORS[res], 0.6));
         blob(ctx, x - r * 0.35, y - r * 0.35, r * 0.3, r * 0.25, 'rgba(255,255,255,0.35)');
       }
-      return;
-    case 'grapes':
-      for (const [x, y] of [
-        [-2, -2],
-        [1, -2],
-        [-0.5, 0.5],
-        [2.5, 0.5],
-        [1, 3],
-      ]) {
-        blob(ctx, x, y, 1.9, 1.9, '#6a2c6e', '#3f1840');
-      }
-      ctx.fillStyle = '#4f8a3a';
-      ctx.fillRect(-1, -5, 3, 1.5);
-      return;
-    case 'wine':
-      ctx.fillStyle = '#5a1e2a';
-      ctx.beginPath();
-      ctx.ellipse(0, 1, 3.5, 3.5, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillRect(-1.2, -5, 2.4, 4);
-      ctx.fillStyle = '#d9c39a';
-      ctx.fillRect(-1.4, -6, 2.8, 1.5);
       return;
     case 'iron':
     case 'gold': {

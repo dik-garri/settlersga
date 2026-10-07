@@ -86,7 +86,6 @@ const STYLES: Partial<Record<SettlerKind, Partial<SettlerStyle>>> = {
   waterman: { tunic: '#4a90c2', hat: '#e0d6c0', hatStyle: 'cap', work: 'draw', holds: 'bucket' },
   fisher: { tunic: '#2f6f8f', hat: '#c9b27a', hatStyle: 'straw', work: 'fish', holds: 'rod' },
   farmer: { tunic: '#c9a44a', hat: '#e3c76a', hatStyle: 'straw', work: 'reap', holds: 'scythe' },
-  vinegrower: { tunic: '#7a4a6e', hat: '#e3c76a', hatStyle: 'straw', work: 'dig', holds: 'shovel' },
   sawmiller: { tunic: '#8b5a2b', hat: '#d9c9a3', hatStyle: 'cap' },
   miller: { tunic: '#e8e4da', hat: '#9a8f80', hatStyle: 'cap' },
   baker: { tunic: '#f0ece2', hat: '#ffffff', hatStyle: 'chef' },
@@ -95,20 +94,18 @@ const STYLES: Partial<Record<SettlerKind, Partial<SettlerStyle>>> = {
   smelter: { tunic: '#6e4a33', hat: '#3b2b1a', hatStyle: 'hood' },
   toolsmith: { tunic: '#5a5048', hat: '#8c4a3a', hatStyle: 'cap', work: 'hammer', holds: 'hammer' },
   weaponsmith: { tunic: '#4a4f55', hat: '#8c4a3a', hatStyle: 'cap', work: 'hammer', holds: 'hammer' },
-  winemaker: { tunic: '#6a2f3a', hat: '#e8e4da', hatStyle: 'cap' },
   soldier: { hat: '#9aa0a6', hatStyle: 'helmet', work: 'sword', holds: 'sword', fighter: true },
   archer: { hat: '#4f6b3a', hatStyle: 'hood', work: 'shoot', holds: 'bow', fighter: true },
 };
 
 /** Work done on a planting or gathering task overrides the profession's default `work`. */
-export const PLANT_ACTION: Record<PlantKind, ActionId> = { tree: 'dig', grain: 'sow', vine: 'dig' };
+export const PLANT_ACTION: Record<PlantKind, ActionId> = { tree: 'dig', grain: 'sow' };
 export const GATHER_ACTION: Partial<Record<Resource, ActionId>> = {
   log: 'chop',
   stone: 'mine',
   water: 'draw',
   fish: 'fish',
   grain: 'reap',
-  grapes: 'reap',
 };
 
 const resolved = new Map<string, SettlerStyle>();
@@ -146,7 +143,6 @@ export const BUILDING_FX: Partial<Record<BuildingType, BuildingFx>> = {
   weaponsmith: { smoke: 'working', sound: 'hammer' },
   ironsmelter: { smoke: 'working', glow: true, sound: 'hiss' },
   goldsmelter: { smoke: 'working', glow: true, sound: 'hiss' },
-  winery: { smoke: 'working' },
   sawmill: { sound: 'saw' },
   mill: { sails: true },
 };
