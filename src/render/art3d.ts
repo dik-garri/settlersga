@@ -74,6 +74,13 @@ export const ART3D_BUILDINGS: Record<string, { w: number; h: number; ax: number;
   bakery: { w: 150, h: 140, ax: 75, ay: 100 },
   waterworks: { w: 150, h: 140, ax: 75, ay: 100 },
   warehouse: { w: 150, h: 140, ax: 75, ay: 100 },
+  castle: { w: 220, h: 250, ax: 110, ay: 190 },
+  fortress: { w: 230, h: 260, ax: 115, ay: 195 },
+  bigtower: { w: 170, h: 240, ax: 85, ay: 190 },
+  lookout: { w: 150, h: 210, ax: 75, ay: 170 },
+  infirmary: { w: 150, h: 140, ax: 75, ay: 100 },
+  hunter: { w: 150, h: 140, ax: 75, ay: 100 },
+  slaughterhouse: { w: 150, h: 140, ax: 75, ay: 100 },
 };
 /** Buildings rendered with their construction stages. */
 export const ART3D_STAGED = Object.keys(ART3D_BUILDINGS);
@@ -83,6 +90,9 @@ export const ART3D_STAGED = Object.keys(ART3D_BUILDINGS);
  */
 export const ART3D_BANNERS: Record<string, { x: number; y: number }> = {
   tower: { x: 3.2, y: -73.3 },
+  castle: { x: 1.6, y: -101.7 },
+  fortress: { x: 12.8, y: -67.9 },
+  bigtower: { x: 4.2, y: -89.3 },
 };
 /**
  * Live-effect anchors of 3D buildings, from the sprite anchor (printed by buildings.py's `note_fx`
