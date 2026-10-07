@@ -4,7 +4,6 @@ import { TERRAIN } from '../sim/config';
 import { Terrain } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 
-const WIDTH = 220;
 /** Terrain and trees are re-rasterised about this often (ms), a slice of rows per frame; buildings and the view frame every frame. */
 const BASE_EVERY = 2000;
 
@@ -32,18 +31,20 @@ export class Minimap {
     private readonly camera: Camera,
     /** Respect the local player's fog of war. */
     private readonly fogOn = true,
+    /** CSS width of the minimap (it is framed at the top of the side panel). */
+    width = 220,
   ) {
     const { w, h } = world.map;
-    this.sx = (WIDTH - 2 * this.pad) / (w + h);
+    this.sx = (width - 2 * this.pad) / (w + h);
     this.sy = this.sx / 2;
     this.cx = this.pad + h * this.sx;
     const height = Math.ceil((w + h) * this.sy + 2 * this.pad);
     const dpr = window.devicePixelRatio || 1;
     this.el = document.createElement('canvas');
-    this.el.className = 'panel minimap';
-    this.el.width = WIDTH * dpr;
+    this.el.className = 'minimap';
+    this.el.width = Math.round(width * dpr);
     this.el.height = height * dpr;
-    this.el.style.width = `${WIDTH}px`;
+    this.el.style.width = `${width}px`;
     this.el.style.height = `${height}px`;
     this.el.title = 'Клик — перейти';
     this.ctx = this.el.getContext('2d')!;

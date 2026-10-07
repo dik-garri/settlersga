@@ -12,7 +12,7 @@ import { Hud } from './ui/hud';
 import { InputController } from './ui/input';
 import { Minimap } from './ui/minimap';
 import { createState, isCommand } from './ui/state';
-import { readStartLevel, startMenu } from './ui/startMenu';
+import { readStartLevel } from './ui/startMenu';
 import { hasSave, readSave, storeSave } from './ui/storage';
 
 const TICK_MS = 1000 / TICKS_PER_SECOND;
@@ -21,7 +21,8 @@ const MAX_TICKS_PER_FRAME = 20;
 async function main() {
   const app = new Application();
   await app.init({
-    resizeTo: window,
+    // The game view starts right of the side panel (#game is sized by CSS).
+    resizeTo: document.getElementById('game')!,
     background: '#1d2b3a',
     antialias: true,
     autoDensity: true,
@@ -63,27 +64,33 @@ async function main() {
   const home = toScreen(c.x + 1, c.y + 1);
   camera.centerOn(home.x, home.y);
 
-  const hud = new Hud(document.getElementById('hud')!, world, state, {
-    onSave: () => hud.toast(storeSave(world) ? 'Игра сохранена' : 'Не удалось сохранить'),
-    onLoad: () => {
-      if (!hasSave()) return hud.toast('Сохранений нет');
-      location.search = '?load=1';
-    },
-  });
-  // Sound: starts on the first gesture; controls join the speed panel (top right).
+  // Sound: starts on the first gesture; its controls live in the options menu.
   const audio = new AudioEngine();
   const unlock = () => audio.unlock();
   window.addEventListener('pointerdown', unlock, true);
   window.addEventListener('keydown', unlock, true);
   renderer.onSound = (id, x, y) => audio.at(id, x, y);
+
+  // The minimap is framed at the top of the side panel, as wide as the panel's inside (--mm-w).
   const hudEl = document.getElementById('hud')!;
-  hudEl.querySelector('.panel.speed')?.append(startMenu(hudEl, params), audioControls(audio));
+  const mmWidth = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--mm-w')) || 252;
+  const minimap = new Minimap(world, camera, state.fog, mmWidth);
+  const hud = new Hud(
+    hudEl,
+    world,
+    state,
+    {
+      onSave: () => hud.toast(storeSave(world) ? 'Игра сохранена' : 'Не удалось сохранить'),
+      onLoad: () => {
+        if (!hasSave()) return hud.toast('Сохранений нет');
+        location.search = '?load=1';
+      },
+    },
+    { params, minimap: minimap.el, sound: audioControls(audio) },
+  );
   hudEl.addEventListener('click', (e) => {
     if (e.target instanceof Element && e.target.closest('button')) audio.ui('click');
   });
-
-  const minimap = new Minimap(world, camera, state.fog);
-  document.getElementById('hud')!.append(minimap.el);
   const input = new InputController(app.canvas, camera, renderer, world, state, {
     onSelectBuildType: (type) => hud.selectBuildType(type),
     onHotkey: (n) => hud.hotkey(n),

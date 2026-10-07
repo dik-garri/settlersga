@@ -1,7 +1,7 @@
 import { START_CONDITIONS, type StartLevel } from '../sim/config';
 
 /**
- * «New game» options as in Settlers 4's free game: start goods (low / medium / high), map size and
+ * «New game» options as in Settlers 4's free game (in the options menu of the side panel): start goods (low / medium / high), map size and
  * the number of computer opponents. The game is set up from URL parameters, so starting one reloads
  * the page with `?start=…&size=…&players=…` and a fresh seed.
  */
@@ -30,11 +30,9 @@ function select(label: string, options: [string, string][], value: string): [HTM
   return [row, s];
 }
 
-/** A ⟳ button for the speed panel and its options panel (appended to `root`). */
-export function startMenu(root: HTMLElement, params: URLSearchParams): HTMLButtonElement {
-  const panel = el('div', 'panel start-menu');
-  panel.hidden = true;
-  panel.append(el('h4', '', 'Новая игра'));
+/** The «Новая игра» form (start level, map size, opponents), shown in the options menu. */
+export function newGameForm(params: URLSearchParams): HTMLElement {
+  const panel = el('div', 'new-game');
   const [startRow, start] = select(
     'Запас на старте',
     (Object.keys(START_CONDITIONS) as StartLevel[]).map((k) => [k, START_CONDITIONS[k].name]),
@@ -50,7 +48,7 @@ export function startMenu(root: HTMLElement, params: URLSearchParams): HTMLButto
     [1, 2, 3, 4].map((n) => [String(n), n === 1 ? 'нет' : String(n - 1)]),
     params.get('players') ?? '2',
   );
-  const go = el('button', '', 'Начать');
+  const go = el('button', 'wide', 'Начать новую игру');
   go.onclick = () => {
     const p = new URLSearchParams();
     p.set('start', start.value);
@@ -62,12 +60,5 @@ export function startMenu(root: HTMLElement, params: URLSearchParams): HTMLButto
   const actions = el('div', 'info-actions');
   actions.append(go);
   panel.append(startRow, sizeRow, playersRow, actions);
-  root.append(panel);
-  const toggle = el('button', 'sep', '⟳');
-  toggle.title = 'Новая игра';
-  toggle.onclick = () => {
-    panel.hidden = !panel.hidden;
-    toggle.blur();
-  };
-  return toggle;
+  return panel;
 }

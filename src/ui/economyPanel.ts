@@ -11,75 +11,34 @@ import {
 } from '../sim/economy';
 import { RESOURCES, type Building, type Resource } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
+import { button, el, type View } from './dom';
 
 /**
- * Economy settings as in Settlers 4 (`sim/economy.ts`): a panel (⚙ in the top bar) for worker orders
- * and goods distribution, plus controls inside building windows — the toolsmith's order queue and a
- * warehouse's accepted goods.
+ * Economy settings as in Settlers 4 (`sim/economy.ts`): the settlers menu's worker orders and the goods
+ * menu's distribution (views of the side panel), plus controls inside building windows — the
+ * toolsmith's order queue and a warehouse's accepted goods.
  */
-
-function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (text !== undefined) e.textContent = text;
-  return e;
-}
 
 const nameOf = (r: Resource) => RESOURCE_INFO[r].name;
 
-function button(text: string, title: string, onclick: () => void, cls = ''): HTMLButtonElement {
-  const b = el('button', cls, text);
-  b.title = title;
-  b.onclick = () => {
-    onclick();
-    b.blur();
-  };
-  return b;
-}
-
-export class EconomyPanel {
-  readonly toggle: HTMLButtonElement;
-  readonly el = el('div', 'panel economy-panel');
+/** Settlers menu: builders, diggers and specialists ordered from free carriers (Settlers 4). */
+export class WorkersView implements View {
+  readonly el = el('div', 'view workers-view');
   private key = '';
 
-  constructor(
-    private readonly world: World,
-    /** Called when the panel opens, so the other top-bar panels can close. */
-    onOpen: () => void,
-  ) {
-    this.el.hidden = true;
-    this.toggle = button('⚙', 'Экономика: рабочие и распределение товаров', () => {
-      this.el.hidden = !this.el.hidden;
-      if (!this.el.hidden) {
-        onOpen();
-        this.key = '';
-        this.update();
-      }
-    }, 'stock-toggle');
-  }
+  constructor(private readonly world: World) {}
 
-  hide(): void {
-    this.el.hidden = true;
-  }
-
-  /** Re-renders when the numbers changed (cheap to call every HUD update). */
   update(): void {
-    if (this.el.hidden) return;
     const w = this.world;
-    const eco = economyOf(w, LOCAL_PLAYER);
     const workers = ORDERABLE.map((k) => [workersOf(w, LOCAL_PLAYER, k), workerOrder(w, LOCAL_PLAYER, k)]);
-    const key = JSON.stringify([workers, eco.distribution]);
+    const key = JSON.stringify(workers);
     if (key === this.key) return;
     this.key = key;
     this.el.innerHTML = '';
-
-    this.el.append(el('h4', '', 'Рабочие'));
-    const hint = el(
-      'p',
-      'muted',
-      'Как в Settlers 4: строители, землекопы и специалисты (первопроходцы, воры) набираются из свободных носильщиков с инструментом, только сколько заказано. Первопроходца и вора посылают из меню строительства.',
+    this.el.append(el('h4', '', 'Заказ рабочих'));
+    this.el.append(
+      el('p', 'muted', 'Строители, землекопы и специалисты набираются из свободных носильщиков с инструментом — сколько заказано.'),
     );
-    this.el.append(hint);
     ORDERABLE.forEach((kind, i) => {
       const [have, ordered] = workers[i];
       const row = el('div', 'eco-row');
@@ -99,7 +58,22 @@ export class EconomyPanel {
       );
       this.el.append(row);
     });
+  }
+}
 
+/** Goods menu, distribution part: which share of a good each kind of consumer gets (Settlers 4). */
+export class DistributionView implements View {
+  readonly el = el('div', 'view distribution-view');
+  private key = '';
+
+  constructor(private readonly world: World) {}
+
+  update(): void {
+    const w = this.world;
+    const key = JSON.stringify(economyOf(w, LOCAL_PLAYER).distribution);
+    if (key === this.key) return;
+    this.key = key;
+    this.el.innerHTML = '';
     this.el.append(el('h4', '', 'Распределение товаров'));
     this.el.append(el('p', 'muted', 'Какую долю товара получает каждый вид зданий. Без настройки делится поровну.'));
     for (const res of distributableGoods()) {

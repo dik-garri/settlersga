@@ -2,10 +2,14 @@
  * Army parts of the building info panel (Settlers 4 style): garrison slots by kind, the barracks'
  * recruit level order, the lookout tower and the infirmary. Plain DOM helpers used by `Hud`.
  */
-import { BUILDINGS, LEVEL_RES, RESOURCE_INFO, SOLDIER_LEVELS } from '../sim/config';
-import { isArcher, slotsFree } from '../sim/military';
-import type { Building, Settler } from '../sim/types';
-import type { World } from '../sim/world';
+import { BUILDINGS, LEVEL_RES, OUTPUT_SHARES, PROFESSIONS, RESOURCE_INFO, SOLDIER_LEVELS } from '../sim/config';
+import { isArcher, isFighter, slotsFree } from '../sim/military';
+import { RESOURCES, type Building, type Settler } from '../sim/types';
+import { LOCAL_PLAYER, type World } from '../sim/world';
+import { button, el, type View } from './dom';
+
+/** Weapons whose shares the player sets (share-controlled outputs). */
+const OUTPUT_WEAPONS = RESOURCES.filter((r) => OUTPUT_SHARES[r] !== undefined);
 
 export type Rows = [string, string][];
 
@@ -66,4 +70,73 @@ export function supportRows(w: World, b: Building): Rows | null {
     ];
   }
   return null;
+}
+
+/**
+ * The army menu of the side panel (Settlers 4's military overview): fighting strength, the fighters
+ * by kind and level, where they are, and the orders that apply to the whole army — the recruit level
+ * and the shares of swords and bows.
+ */
+export class ArmyView implements View {
+  readonly el = el('div', 'view army-view');
+  private key = '';
+
+  constructor(private readonly world: World) {}
+
+  update(): void {
+    const w = this.world;
+    const fighters = w.settlers.filter((s) => s.owner === LOCAL_PLAYER && isFighter(s));
+    const garrisoned = fighters.filter((s) => s.inside !== null && w.buildings.get(s.inside)?.garrison.includes(s.id)).length;
+    const byKey = new Map<string, number>();
+    for (const s of fighters) {
+      const k = `${PROFESSIONS[s.kind].name}|${s.level + 1}`;
+      byKey.set(k, (byKey.get(k) ?? 0) + 1);
+    }
+    const shares = OUTPUT_WEAPONS.map((r) => w.shareOf(r));
+    const key = JSON.stringify([Math.round(w.strengthOf()), fighters.length, garrisoned, [...byKey], shares, w.recruitLevel()]);
+    if (key === this.key) return;
+    this.key = key;
+    this.el.innerHTML = '';
+    this.el.append(el('h4', '', 'Сила армии'));
+    const meter = el('div', 'strength');
+    const pct = Math.round(w.strengthOf());
+    const bar = el('span', 'strength-bar');
+    bar.style.setProperty('--p', `${Math.min(100, (pct / 150) * 100)}%`);
+    meter.append(bar, el('b', '', `${pct}%`));
+    meter.title = 'Сила атаки на чужой земле растёт с ценностью поселения (материалы в постройках, украшения — втройне). На своей земле бойцы сражаются в полную силу.';
+    this.el.append(meter);
+    this.el.append(el('h4', '', 'Бойцы'));
+    const grid = el('div', 'stats-grid');
+    const line = (label: string, value: string) => {
+      const row = el('span', 'stock-row');
+      row.append(el('span', 'stock-name', label), el('b', '', value));
+      grid.append(row);
+    };
+    line('Всего', String(fighters.length));
+    line('В гарнизонах', String(garrisoned));
+    for (const [k, n] of [...byKey].sort()) {
+      const [name, level] = k.split('|');
+      line(`${name}, ур. ${level}`, String(n));
+    }
+    this.el.append(grid);
+    this.el.append(el('h4', '', 'Уровень новобранцев'), recruitLevelControls(w, () => (this.key = '')));
+    if (OUTPUT_WEAPONS.length === 2) {
+      const [a, b] = OUTPUT_WEAPONS;
+      const total = shares[0] + shares[1] || 1;
+      this.el.append(el('h4', '', `Оружие: ${RESOURCE_INFO[a].name.toLowerCase()} ${Math.round((100 * shares[0]) / total)}% · ${RESOURCE_INFO[b].name.toLowerCase()} ${Math.round((100 * shares[1]) / total)}%`));
+      const row = el('div', 'info-actions');
+      const shift = (toB: number) => {
+        const t = w.shareOf(a) + w.shareOf(b) || 100;
+        const bw = Math.max(0, Math.min(100, Math.round((100 * w.shareOf(b)) / t) + toB));
+        w.setShare(b, bw);
+        w.setShare(a, 100 - bw);
+        this.update();
+      };
+      row.append(
+        button(`◀ ${RESOURCE_INFO[a].name.toLowerCase()}`, `Больше: ${RESOURCE_INFO[a].name.toLowerCase()}`, () => shift(-10)),
+        button(`${RESOURCE_INFO[b].name.toLowerCase()} ▶`, `Больше: ${RESOURCE_INFO[b].name.toLowerCase()}`, () => shift(10)),
+      );
+      this.el.append(row);
+    }
+  }
 }
