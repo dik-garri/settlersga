@@ -51,9 +51,10 @@ const TERRAIN_KIND: Record<Terrain, GroundKind> = {
 const TREE_SCALE = [0, 0.35, 0.55, 0.78, 1];
 
 /** Chunk unloading (`unloadHiddenChunks`): built chunks kept regardless, hidden time before a chunk goes, and per call. */
-const KEEP_CHUNKS = 256;
-const UNLOAD_AFTER_MS = 20_000;
-const UNLOADS_PER_CALL = 32;
+const KEEP_CHUNKS = 128;
+const UNLOAD_AFTER_MS = 10_000;
+const UNLOADS_PER_CALL = 256;
+const MAX_READY_CHUNKS = 600;
 
 /** First-time chunk builds allowed per frame (see `syncVisibleChunks`). */
 const CHUNK_BUILDS_PER_FRAME = 6;
@@ -518,7 +519,7 @@ export class GameRenderer {
       shade,
     );
     // The ground layer stays below the chunk's field decals.
-    this.groundLayers[c]?.destroy({ children: true });
+    disposeLayer(this.groundLayers[c]);
     this.groundLayers[c] = layer;
     this.groundChunks[c].addChildAt(layer, 0);
   }
@@ -540,7 +541,7 @@ export class GameRenderer {
       this.buildChunkGround(c);
       this.drawTerritoryChunk(c);
       // The fog mesh follows the new heights (its texture is kept).
-      this.fogMesh[c]?.destroy();
+      disposeMesh(this.fogMesh[c]);
       this.fogMesh[c] = null;
       for (const obj of this.chunkObjects[c]) {
         const at = this.staticAt.get(obj);
@@ -803,14 +804,18 @@ export class GameRenderer {
    * unload). Called about once a second.
    */
   private unloadHiddenChunks(timeMs: number): void {
-    if (timeMs - this.lastUnload < 1000) return;
+    if (timeMs - this.lastUnload < 500) return;
     this.lastUnload = timeMs;
     let ready = 0;
     for (let c = 0; c < this.chunkReady.length; c++) ready += this.chunkReady[c];
     if (ready <= KEEP_CHUNKS) return;
+    // Hidden for a while — or, beyond `MAX_READY_CHUNKS` built (a fast flight across a big map), any
+    // hidden chunk, the longest hidden first.
+    const crowded = ready > MAX_READY_CHUNKS;
     const stale: number[] = [];
     for (let c = 0; c < this.chunkReady.length; c++) {
-      if (this.chunkReady[c] && !this.chunkVisible[c] && timeMs - this.chunkHiddenAt[c] > UNLOAD_AFTER_MS) stale.push(c);
+      if (!this.chunkReady[c] || this.chunkVisible[c]) continue;
+      if (crowded || timeMs - this.chunkHiddenAt[c] > UNLOAD_AFTER_MS) stale.push(c);
     }
     stale.sort((a, b) => this.chunkHiddenAt[a] - this.chunkHiddenAt[b] || a - b);
     for (const c of stale.slice(0, Math.min(UNLOADS_PER_CALL, ready - KEEP_CHUNKS))) this.unloadChunk(c);
@@ -819,7 +824,7 @@ export class GameRenderer {
   private unloadChunk(c: number): void {
     const { map } = this.sim;
     this.chunkReady[c] = 0;
-    this.groundLayers[c]?.destroy({ children: true });
+    disposeLayer(this.groundLayers[c]);
     this.groundLayers[c] = null;
     for (const rock of this.boulders[c]) this.removeStatic(rock, 0, 0, c);
     this.boulders[c] = [];
@@ -846,10 +851,17 @@ export class GameRenderer {
     }
     // Tiles re-sync on the next view; territory is redrawn by `ensureChunk`.
     this.chunkSeen[c] = -1;
-    this.territoryChunks[c].clear();
+    // A cleared Graphics keeps its GPU geometry: replace it with a fresh one.
+    const old = this.territoryChunks[c];
+    const fresh = new Graphics();
+    fresh.visible = false;
+    this.territory.addChildAt(fresh, this.territory.getChildIndex(old));
+    this.territoryChunks[c] = fresh;
+    old.destroy({ context: true });
     this.territoryPending[c] = 1;
-    this.fogMesh[c]?.destroy();
+    disposeMesh(this.fogMesh[c]);
     this.fogMesh[c] = null;
+    this.effects.unloadChunk(c);
     this.fogTex[c]?.destroy(true);
     this.fogTex[c] = null;
     this.fogCanvas[c] = null;
@@ -971,11 +983,27 @@ export class GameRenderer {
     const x1 = Math.min(map.w, x0 + CHUNK);
     const y1 = Math.min(map.h, y0 + CHUNK);
     const ownerAt = (x: number, y: number) => (map.inBounds(x, y) ? map.owner[map.idx(x, y)] : 0);
+    // Dimming in strips: one polygon per run of foreign tiles along a row (following the corner
+    // heights), not one per tile — far fewer drawing instructions on big maps.
     let dim = false;
     for (let y = y0; y < y1; y++) {
-      for (let x = x0; x < x1; x++) {
-        if (ownerAt(x, y) === LOCAL_PLAYER) continue;
-        g.poly(this.diamond(x, y));
+      for (let x = x0; x < x1; ) {
+        if (ownerAt(x, y) === LOCAL_PLAYER) {
+          x++;
+          continue;
+        }
+        const a = x;
+        while (x < x1 && ownerAt(x, y) !== LOCAL_PLAYER) x++;
+        const pts: number[] = [];
+        for (let vx = a; vx <= x; vx++) {
+          const p = this.corner(vx, y);
+          pts.push(p.x, p.y);
+        }
+        for (let vx = x; vx >= a; vx--) {
+          const p = this.corner(vx, y + 1);
+          pts.push(p.x, p.y);
+        }
+        g.poly(pts);
         dim = true;
       }
     }
@@ -1628,4 +1656,29 @@ function shadeColor(color: number | string, k: number): number {
   const c = typeof color === 'string' ? parseInt(color.replace('#', ''), 16) : color;
   const ch = (v: number) => Math.min(255, Math.round(v * k));
   return (ch((c >> 16) & 255) << 16) | (ch((c >> 8) & 255) << 8) | ch(c & 255);
+}
+
+/**
+ * Frees a mesh with its geometry (Pixi keeps a mesh's geometry — and its GPU buffers — alive after
+ * `destroy()` unless told otherwise; textures are shared and stay).
+ */
+function disposeMesh(mesh: MeshSimple | null | undefined): void {
+  if (!mesh) return;
+  const geometry = mesh.geometry;
+  mesh.destroy();
+  geometry.destroy(true);
+}
+
+/**
+ * Frees a chunk's ground layer: its mesh with geometry, its shading `Graphics` with the drawing
+ * context (`destroy({ children: true })` keeps a Graphics' context and a mesh's geometry alive).
+ */
+function disposeLayer(layer: Container | null | undefined): void {
+  if (!layer) return;
+  for (const child of [...layer.children]) {
+    if (child instanceof MeshSimple) disposeMesh(child);
+    else if (child instanceof Graphics) child.destroy({ context: true });
+    else child.destroy();
+  }
+  layer.destroy();
 }
