@@ -1081,27 +1081,38 @@ export class GameRenderer {
     v.pileKey = key;
     // Keep the flag (child 0), drop the old pile.
     while (v.front.children.length > 1) v.front.children[1].destroy();
-    const stack = (res: Resource, count: number, ox: number) => {
-      if (count <= 0) return;
+    // Each kind of goods gets its own spot: output to the right of the door (down the +x edge),
+    // inputs and site materials to the left along the front wall; a fifth kind starts a second row
+    // nearer the camera.
+    const spot = (side: 1 | -1, k: number): [number, number] => {
+      const col = k % 4;
+      const row = Math.floor(k / 4);
+      return side === 1
+        ? [20 + col * 17 - row * 16, -4 + col * 8.5 + row * 8]
+        : [-22 - col * 17 - row * 16, -4 - col * 8.5 + row * 8];
+    };
+    const stack = (res: Resource, count: number, side: 1 | -1, k: number) => {
+      const [x, y] = spot(side, k);
       // A pre-rendered pile of exactly this many (`?art=3d`), else single wares stacked up.
       const pile = `pile:${res}:${Math.min(count, PILE_MAX)}`;
       if (this.atlas.has(pile)) {
         const s = new Sprite(this.atlas.get(pile));
-        // Half a tile from the door towards the building: on the trodden earth beside the entrance.
-        s.position.set(ox + 12, -4);
+        s.position.set(x, y);
         v.front.addChild(s);
         return;
       }
       for (let i = 0; i < count; i++) {
         const s = new Sprite(this.atlas.get(`ware:${res}`));
-        s.position.set(ox + (i % 2) * 7, 8 - Math.floor(i / 2) * 4);
+        s.position.set(x - 12 + (i % 2) * 7, y + 12 - Math.floor(i / 2) * 4);
         v.front.addChild(s);
       }
     };
-    for (const r of RESOURCES) stack(r, b.output[r], 8);
-    for (const r of RESOURCES) stack(r, b.input[r], -34);
-    stack('plank', waitingPlank, -34);
-    stack('stone', waitingStone, -50);
+    const outs = RESOURCES.filter((r) => b.output[r] > 0);
+    outs.forEach((r, k) => stack(r, b.output[r], 1, k));
+    const ins: [Resource, number][] = RESOURCES.filter((r) => b.input[r] > 0).map((r) => [r, b.input[r]]);
+    if (waitingPlank > 0) ins.push(['plank', waitingPlank]);
+    if (waitingStone > 0) ins.push(['stone', waitingStone]);
+    ins.forEach(([r, n], k) => stack(r, n, -1, k));
   }
 
   private syncSettlers(alpha: number, timeMs: number): void {
