@@ -1494,6 +1494,43 @@ export const BUILDING_PAINTERS: Record<BuildingType | 'site2' | 'site3', (ctx: C
 // -------------------------------------------------------------------- fields
 
 
+/** Variants per path level (`PATHS`); tiles pick one by position so a path does not look stamped. */
+export const PATH_VARIANTS = 4;
+
+/**
+ * A worn path on one tile, 80×44 with the tile center at (40, 22): trodden earth that frays into the
+ * grass in soft blotches, reaching a little beyond the tile so neighbouring path tiles join up.
+ * Level 1 is a dusty path, level 2 a road with gravel.
+ */
+export function paintPath(ctx: Ctx, level: number, variant: number): void {
+  ctx.translate(40, 22);
+  const rng = createRng(911 + level * 31 + variant * 7);
+  const blots = level === 1 ? 70 : 120;
+  for (let k = 0; k < blots; k++) {
+    // Mostly near the centre, thinning out towards the edge of the reach.
+    const r = Math.sqrt(rng()) * 0.72;
+    const a = rng() * Math.PI * 2;
+    const [x, y] = P(Math.cos(a) * r, Math.sin(a) * r, 0);
+    const fade = 1 - r / 0.72;
+    const base = level === 1 ? [150, 112, 70] : [128, 104, 76];
+    const j = (rng() - 0.5) * 30;
+    ctx.fillStyle = `rgba(${base[0] + j},${base[1] + j},${base[2] + j},${(level === 1 ? 0.35 : 0.55) * (0.4 + fade)})`;
+    ctx.beginPath();
+    ctx.ellipse(x, y, 3 + rng() * 4, 1.6 + rng() * 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  if (level >= 2) {
+    // Gravel: small light and dark stones.
+    for (let k = 0; k < 26; k++) {
+      const r = Math.sqrt(rng()) * 0.5;
+      const a = rng() * Math.PI * 2;
+      const [x, y] = P(Math.cos(a) * r, Math.sin(a) * r, 0);
+      ctx.fillStyle = rng() < 0.5 ? 'rgba(200,190,170,0.8)' : 'rgba(90,76,60,0.7)';
+      ctx.fillRect(x, y, 1.5, 1);
+    }
+  }
+}
+
 /** Grain field on one tile, 66×40 with the tile center at (33, 24). Stage 1 sown … 4 ripe. */
 export function paintField(ctx: Ctx, stage: number): void {
   ctx.translate(33, 24);

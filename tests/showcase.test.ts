@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildShowcase } from '../src/dev/showcase';
 import { BUILDINGS } from '../src/sim/config';
+import { pathLevel } from '../src/sim/paths';
 import type { BuildingType } from '../src/sim/types';
 
 describe('dev showcase (?demo)', () => {
@@ -16,5 +17,8 @@ describe('dev showcase (?demo)', () => {
     const piles = all.filter((b) => b.done && frozen(b));
     expect(piles.length).toBeGreaterThanOrEqual(6);
     expect(piles.some((b) => Object.values(b.output).some((n) => n > 8))).toBe(true);
+    // The hunter is at work and busy routes have worn into paths.
+    expect(all.some((b) => b.type === 'hunter' && b.workerId !== null)).toBe(true);
+    expect([...w.worn].some((i) => pathLevel(w.map.wear[i]) >= 1)).toBe(true);
   });
 });
