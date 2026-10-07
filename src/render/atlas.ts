@@ -23,7 +23,7 @@ import {
   type GroundKind,
 } from './sprites';
 import { DIRS, WALK_FRAMES, WORK_FRAMES } from './anim';
-import { ART3D_BUILDINGS, ART3D_PILES, ART3D_STAGED, ART3D_STAGES, ART3D_SPRITES, PILE_MAX, type Art3d } from './art3d';
+import { ART3D_BUILDINGS, ART3D_PILES, ART3D_STAGED, ART3D_STAGES, ART3D_SPRITES, PILE, PILE_MAX, type Art3d } from './art3d';
 import { ACTION_IDS, ACTIONS, HAT_STYLES, styleOf, TOOLS, type ActionId, type HatStyle, type ToolShape } from './animConfig';
 import { paintFlash, paintGlint, paintGlow, paintPuff, paintSpark } from './fxArt';
 import {
@@ -368,8 +368,13 @@ function imageIcon(img: HTMLImageElement, size: number, className: string, frame
 }
 
 export function wareIcon(res: Resource, size = 18): HTMLCanvasElement {
-  const img3d = iconArt?.images.get(res === 'log' ? 'log' : '');
-  if (img3d) return imageIcon(img3d, size, 'ware-icon');
+  const wares = iconArt?.images.get('wares');
+  const k = iconArt ? iconArt.wares.order.indexOf(res) : -1;
+  if (wares && iconArt && k >= 0) {
+    const [w, h] = iconArt.wares.frame;
+    const r = wares.height / h;
+    return imageIcon(wares, size, 'ware-icon', [k * w * r, 0, w * r, h * r]);
+  }
   const canvas = document.createElement('canvas');
   const dpr = window.devicePixelRatio || 1;
   canvas.width = size * dpr;
@@ -449,12 +454,18 @@ function addArt3d(a: AtlasBuilder, art: Art3d): void {
     for (let k = 0; k < ART3D_STAGES; k++) one(`stage:${type}:${k}`, `${type}-s${k}`);
   }
   for (const res of ART3D_PILES) {
-    for (let n = 1; n <= PILE_MAX; n++) one(`pile:${res}:${n}`, `pile-${res}-${n}`);
+    const strip = art.images.get(`piles-${res}`)!;
+    for (let n = 1; n <= PILE_MAX; n++) {
+      a.add(`pile:${res}:${n}`, PILE.w, PILE.h, PILE.ax, PILE.ay, (ctx) => drawFrame(ctx, strip, n - 1, PILE.w, PILE.h));
+    }
   }
+  // Carried wares (and the pile fallback): one frame per resource.
+  const wares = art.images.get('wares')!;
+  const [ww, wh, wax, way] = art.wares.frame;
+  art.wares.order.forEach((res, k) => a.add(`ware:${res}`, ww, wh, wax, way, (ctx) => drawFrame(ctx, wares, k, ww, wh)));
   one('tree:0', 'tree');
   for (let v = 1; v < 4; v++) a.alias(`tree:${v}`, 'tree:0');
   for (let v = 0; v < 3; v++) one(`deposit:${v}`, `deposit${v}`);
-  one('ware:log', 'log');
   const { cell, anchor, columns } = art.carrier;
   const sheet = art.images.get('carrier')!;
   const [w, h] = cell;
