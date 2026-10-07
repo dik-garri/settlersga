@@ -250,66 +250,149 @@ def build_sawmill():
 
 # ------------------------------------------------------------------------------------- stonecutter
 
+def gable_blocks(cx, y, L, H, rh, mats, rnd, block=0.2, depth=0.06):
+    """Rugged blocks over a gable triangle on the −Y face (ridge along Y), rows narrowing to the apex."""
+    rows = max(1, round(rh / (block * 0.7)))
+    h = rh / rows
+    for r in range(rows):
+        z = H + (r + 0.5) * h
+        half = (L / 2) * (1 - (r + 0.5) / rows)
+        x = cx - half - (r % 2) * block / 3
+        while x < cx + half:
+            w = min(block * rnd.uniform(0.7, 1.3), cx + half - x)
+            if w > 0.05:
+                d = depth * rnd.uniform(0.6, 1.4)
+                lib.box((x + w / 2, y - d / 2, z), (w - 0.022, d, h * rnd.uniform(0.78, 0.92)),
+                        mats[rnd.randrange(len(mats))],
+                        rot=(rnd.uniform(-0.06, 0.06), rnd.uniform(-0.08, 0.08), rnd.uniform(-0.05, 0.05)), bevel=0.02)
+            x += w
+
+
+def coping(cx, y, L, H, rh, mats, rnd, size=0.15):
+    """Big stones along both raking edges of a gable (ridge along Y), standing proud of the roof like a
+    row of teeth, as on Settlers 4 stone huts."""
+    half = L / 2 + 0.06
+    run = math.hypot(half, rh)
+    n = max(2, round(run / (size * 0.95)))
+    ang = math.atan2(rh, half)
+    for side in (-1, 1):
+        for k in range(n):
+            t = (k + 0.5) / n
+            x = cx + side * half * (1 - t)
+            z = H - 0.02 + rh * t + 0.05
+            s = size * rnd.uniform(0.85, 1.15)
+            lib.box((x, y + rnd.uniform(-0.01, 0.01), z), (s, s * 1.1, s * 0.75), mats[rnd.randrange(len(mats))],
+                    rot=(rnd.uniform(-0.1, 0.1), side * ang + rnd.uniform(-0.12, 0.12), rnd.uniform(-0.1, 0.1)),
+                    bevel=0.025)
+
+
+def board_roof_along(cx, y0, y1, H, rh, half, boards, rnd, width=0.13, side=1, eave=0.06):
+    """One slope of a roof whose wide boards lie parallel to the ridge (ridge along Y at x = cx),
+    between the gable walls at y0 and y1: uneven tones and lie, dark gaps between the boards."""
+    run = half + eave
+    drop = eave * rh / half
+    rise = rh + drop
+    ang = math.atan2(rise, run)
+    slope = math.hypot(run, rise)
+    n = max(2, int(slope / width))
+    made = []
+    for k in range(n):
+        t = (k + 0.5) / n  # 0 at the ridge, 1 at the eave
+        x = cx + side * run * t
+        z = H + rh - rise * t + 0.03
+        length = (y1 - y0) * rnd.uniform(0.93, 1.0)
+        ym = (y0 + y1) / 2 + rnd.uniform(-0.02, 0.02)
+        b = lib.box((x, ym, z + rnd.uniform(-0.006, 0.006)), (slope / n * 0.8, length, 0.035),
+                    boards[rnd.randrange(len(boards))],
+                    rot=(rnd.uniform(-0.03, 0.03), side * ang, rnd.uniform(-0.03, 0.03)), bevel=0.005)
+        made.append((b, t))
+    return made
+
+
 def build_stonecutter():
-    """Squat hut of rough stone blocks with an arched doorway and a plank roof, a wooden lean-to on
-    the side."""
-    B = _b()
+    """After the Settlers 4 stonecutter: a squat hut of big rough stone blocks, its stone gables
+    standing proud of a roof of wide boards laid along the ridge and edged with a row of coping
+    stones, a big round arch in the front gable, a plank shed on the side."""
     rnd = random.Random(11)
     walls = stone_walls()
     blocks = block_mats()
-    beam, boards = beam_mat(), boards_mats()
-    dark = lib.mat_flat('dark', (0.06, 0.05, 0.04))
+    beam = beam_mat()
+    # Warm, weathered red-brown boards, as on the original's roof.
+    boards = [lib.mat_grain(f'sboard{k}', a, b, scale=4, stretch=(1, 9, 1), bump=0.8) for k, (a, b) in enumerate((
+        ((0.42, 0.22, 0.08), (0.7, 0.44, 0.18)),
+        ((0.34, 0.18, 0.07), (0.58, 0.34, 0.14)),
+        ((0.5, 0.3, 0.11), (0.78, 0.54, 0.24)),
+    ))]
+    dark = lib.mat_flat('dark', (0.05, 0.04, 0.03))
     earth_pad((0.05, -0.2, 0), 1.0, 1.12, seed=12)
     lib.tag(0)
 
-    cx, cy, L, W, H, rh = -0.25, 0.15, 0.95, 0.9, 0.58, 0.34
+    # Ridge along Y: the arched gable faces the camera's lower left (−Y, where the door tile is),
+    # the visible roof slope faces +X, towards the shed.
+    cx, cy, L, W, H, rh = -0.2, 0.12, 0.86, 1.0, 0.6, 0.44
     x0, x1, y0, y1 = cx - L / 2, cx + L / 2, cy - W / 2, cy + W / 2
-    corner_stakes(x0, x1 + 0.4, y0, y1)
+    corner_stakes(x0, x1 + 0.45, y0, y1)
     lib.tag(0, until=0)
 
-    # Foundation course, and a scaffold of poles that stands until the roof goes on.
-    lib.box((cx, cy, 0.05), (L + 0.06, W + 0.06, 0.1), blocks[1], bevel=0.02)
+    lib.box((cx, cy, 0.05), (L + 0.08, W + 0.08, 0.1), blocks[1], bevel=0.02)
     lib.tag(1)
-    for x in (x0 - 0.06, x1 + 0.06):
-        for y in (y0 - 0.06, y1 + 0.06):
-            lib.cylinder((x, y, 0.4), 0.025, 0.8, beam, verts=8)
+    for x in (x0 - 0.07, x1 + 0.07):
+        for y in (y0 - 0.07, y1 + 0.07):
+            lib.cylinder((x, y, 0.45), 0.025, 0.9, beam, verts=8)
     lib.tag(1, until=3)
 
-    # Walls in two halves, each a core with rugged blocks on the visible faces.
     half = H / 2
     lib.box((cx, cy, 0.1 + (half - 0.1) / 2), (L, W, half - 0.1), walls)
-    stone_course(x0, x1, y0, y1, 0.1, half, blocks, rnd)
+    stone_course(x0, x1, y0, y1, 0.1, half, blocks, rnd, block=0.21, depth=0.07)
     lib.tag(2)
     lib.box((cx, cy, half + half / 2), (L, W, half), walls)
-    stone_course(x0, x1, y0, y1, half, H, blocks, rnd)
-    lib.gable((cx, cy, H), W - 0.02, rh - 0.02, x0 + 0.01, blocks[0], along='x')
-    lib.gable((cx, cy, H), W - 0.02, rh - 0.02, x1 - 0.01, blocks[0], along='x')
-    lib.tag(3)
-    # Arched doorway: dark opening, voussoir blocks round the arch.
-    ax = cx + 0.12
-    lib.box((ax, y0 - 0.06, 0.17), (0.26, 0.04, 0.34), dark)
-    lib.cylinder((ax, y0 - 0.06, 0.34), 0.13, 0.04, dark, rot=(math.pi / 2, 0, 0), verts=20)
-    for k in range(9):
-        a = math.pi * k / 8
-        lib.box((ax + math.cos(a) * 0.17, y0 - 0.1, 0.34 + math.sin(a) * 0.17), (0.08, 0.07, 0.1), blocks[2],
-                rot=(0, -a + math.pi / 2, 0), bevel=0.012)
-    for z in (0.05, 0.16, 0.27):
+    stone_course(x0, x1, y0, y1, half, H, blocks, rnd, block=0.21, depth=0.07)
+    # Stone gables, front and back, the front one dressed in blocks.
+    lib.gable((cx, cy, H), L, rh, y0 + 0.01, walls, along='y')
+    lib.gable((cx, cy, H), L, rh, y1 - 0.01, walls, along='y')
+    gable_blocks(cx, y0, L, H, rh, blocks, rnd)
+    # The big round arch in the front gable wall: a deep dark opening framed by chunky voussoirs.
+    ax, ar, az = cx - 0.02, 0.2, 0.3
+    lib.box((ax, y0 - 0.06, az / 2 + 0.03), (ar * 2, 0.06, az), dark)
+    lib.cylinder((ax, y0 - 0.06, az), ar, 0.06, dark, rot=(math.pi / 2, 0, 0), verts=24)
+    for k in range(11):
+        a = math.pi * k / 10
+        lib.box((ax + math.cos(a) * (ar + 0.05), y0 - 0.11, az + math.sin(a) * (ar + 0.05)), (0.1, 0.09, 0.12),
+                blocks[(k % 2) * 2], rot=(0, -a + math.pi / 2, 0), bevel=0.02)
+    for z in (0.07, 0.2):
         for sgn in (-1, 1):
-            lib.box((ax + sgn * 0.17, y0 - 0.1, z), (0.09, 0.07, 0.11), blocks[2], bevel=0.012)
+            lib.box((ax + sgn * (ar + 0.05), y0 - 0.11, z), (0.11, 0.09, 0.13), blocks[2], bevel=0.02)
     lib.tag(3)
 
-    B.plank_roof(cx, cy, L, W, H, rh, boards, axis='x', seed=13)
-    lib.tag(None, split=lambda o: 3 if o.location.y < cy - 0.05 else 4)
-    # Lean-to of planks on the +X side.
-    sx0, sx1 = x1 + 0.02, x1 + 0.42
-    for y in (y0 + 0.08, y1 - 0.08):
-        lib.box((sx1, y, 0.22), (0.05, 0.05, 0.44), beam)
-    tilt = math.atan2(0.2, sx1 - sx0)
-    for k in range(7):
-        y = y0 + 0.05 + k * (W - 0.1) / 6
-        lib.box(((sx0 + sx1) / 2 + 0.03, y, 0.53), (sx1 - sx0 + 0.16, 0.11, 0.025), boards[k % 4],
-                rot=(0, tilt, rnd.uniform(-0.05, 0.05)), bevel=0.004)
-    lib.box((sx1, cy, 0.44), (0.06, W - 0.1, 0.05), beam)
+    # Roof of wide boards along the ridge, sitting between the gables; coping stones on the gables.
+    inner0, inner1 = y0 + 0.04, y1 - 0.04
+    made = board_roof_along(cx, inner0, inner1, H, rh, L / 2, boards, rnd, side=1)
+    made += board_roof_along(cx, inner0, inner1, H, rh, L / 2, boards, rnd, side=-1)
+    lib.tag(None, split=lambda o: next((3 if t > 0.5 else 4 for b, t in made if b == o), 4))
+    coping(cx, y0 + 0.02, L, H, rh, blocks, rnd)
+    coping(cx, y1 - 0.02, L, H, rh, blocks, rnd)
+    lib.tag(3)
+
+    # Plank shed on the +X side: board walls, a roof of boards running down the slope.
+    sx0, sx1, sy0, sy1 = x1 + 0.02, x1 + 0.4, y0 + 0.18, y1 - 0.04
+    sh_hi, sh_lo = H - 0.04, 0.42
+    for x, y in ((sx1, sy0), (sx1, sy1)):
+        lib.box((x, y, sh_lo / 2), (0.05, 0.05, sh_lo), beam)
+    n = 5
+    for k in range(n):  # front wall boards (−Y face of the shed), upright
+        x = sx0 + (k + 0.5) * (sx1 - sx0) / n
+        hgt = sh_hi + (sh_lo - sh_hi) * (k + 0.5) / n
+        lib.box((x, sy0, hgt / 2), ((sx1 - sx0) / n * 0.9, 0.03, hgt), boards[k % len(boards)],
+                rot=(0, rnd.uniform(-0.02, 0.02), 0), bevel=0.004)
+    for k in range(6):  # side wall boards (+X face), upright
+        y = sy0 + (k + 0.5) * (sy1 - sy0) / 6
+        lib.box((sx1, y, sh_lo / 2), (0.03, (sy1 - sy0) / 6 * 0.9, sh_lo), boards[(k + 1) % len(boards)], bevel=0.004)
+    tilt = math.atan2(sh_hi - sh_lo, sx1 - sx0)
+    for k in range(7):  # roof boards running down the slope
+        y = sy0 - 0.04 + (k + 0.5) * (sy1 - sy0 + 0.08) / 7
+        lib.box(((sx0 + sx1) / 2 + 0.03, y, (sh_hi + sh_lo) / 2 + 0.03),
+                (math.hypot(sx1 - sx0, sh_hi - sh_lo) + 0.12, (sy1 - sy0 + 0.08) / 7 * 0.88, 0.03), boards[k % len(boards)],
+                rot=(rnd.uniform(-0.03, 0.03), tilt, rnd.uniform(-0.04, 0.04)), bevel=0.005)
     lib.tag(4)
 
 
