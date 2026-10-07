@@ -80,7 +80,9 @@ export type BuildingType =
   | 'tower'
   | 'bigtower'
   | 'fortress'
-  | 'barracks';
+  | 'barracks'
+  | 'lookout'
+  | 'infirmary';
 
 export type SettlerKind =
   | 'carrier'
@@ -184,7 +186,9 @@ export type Task =
   /** `archer`: which garrison role the slot was reserved for (see `garrisonArchersInbound`). */
   | { t: 'join'; b: number; archer?: boolean }
   /** Soldier attacks an enemy military building: duel its defenders at the door, take it when empty. */
-  | { t: 'assault'; b: number; n: number };
+  | { t: 'assault'; b: number; n: number }
+  /** Wounded fighter lies in an infirmary until healed (`n` counts ticks to the next hit point). */
+  | { t: 'heal'; b: number; n: number };
 
 export interface Settler {
   id: number;

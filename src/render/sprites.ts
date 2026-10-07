@@ -577,6 +577,8 @@ export const BUILDING_CANVAS: Record<BuildingType | 'site2' | 'site3', BuildingC
   tower: { w: 150, h: 210, ax: 75, ay: 170 },
   bigtower: { w: 170, h: 240, ax: 85, ay: 190 },
   fortress: { w: 230, h: 260, ax: 115, ay: 195 },
+  lookout: { w: 150, h: 210, ax: 75, ay: 170 },
+  infirmary: SMALL,
   site2: { w: 150, h: 90, ax: 75, ay: 50 },
   site3: { w: 220, h: 120, ax: 110, ay: 65 },
 };
@@ -773,6 +775,34 @@ function paintTower(ctx: Ctx): void {
   }
   pyramidRoof(ctx, a + 0.2, H + 10, 34, '#9e3328');
   // The banner on the roof tip is a separate per-owner sprite (`BANNERS`).
+}
+
+/** Lookout tower: a tall timber frame on four posts, braced, with a platform and a little roof. */
+function paintLookout(ctx: Ctx): void {
+  const a = 0.36;
+  const H = 76;
+  shadow(ctx, 0.5, 0.5, 0.55);
+  const posts: [number, number][] = [
+    [-a, -a],
+    [a, -a],
+    [-a, a],
+    [a, a],
+  ];
+  for (const [x, y] of posts) box(ctx, x, y, 0.05, 0.05, 0, H, '#7a4e2a');
+  // Cross braces on the two faces towards the camera.
+  for (let z = 6; z < H - 8; z += 18) {
+    line(ctx, [-a, a, z], [a, a, z + 16], '#5e3b1f', 2);
+    line(ctx, [a, a, z], [-a, a, z + 16], '#5e3b1f', 2);
+    line(ctx, [a, -a, z], [a, a, z + 16], '#4a2e18', 2);
+    line(ctx, [a, a, z], [a, -a, z + 16], '#4a2e18', 2);
+  }
+  // Platform, railing posts and a small pointed roof.
+  const p = a + 0.14;
+  box(ctx, 0, 0, p, p, H, 4, '#8a5a32');
+  for (const [x, y] of posts) box(ctx, x * (p / a), y * (p / a), 0.035, 0.035, H + 4, 14, '#6b4325');
+  line(ctx, [-p, p, H + 11], [p, p, H + 11], '#5e3b1f', 2);
+  line(ctx, [p, -p, H + 11], [p, p, H + 11], '#4a2e18', 2);
+  pyramidRoof(ctx, p + 0.06, H + 18, 20, '#6e4a2a');
 }
 
 /** Big tower: a broader, taller stone tower with a crenellated platform and a high roof. */
@@ -1231,6 +1261,19 @@ const STYLES: Partial<Record<BuildingType, Style>> = {
   },
   ironsmelter: { hw: 0.7, hh: 0.7, H: 22, wall: '#8f7f6e', roof: '#4a4f55', rise: 18, doorDx: 0.5, deco: ['furnace'] },
   goldsmelter: { hw: 0.7, hh: 0.7, H: 22, wall: '#a89c80', roof: '#7a5a20', rise: 18, doorDx: 0.5, deco: ['furnace'] },
+  // White-washed healers' house with a blue roof.
+  infirmary: {
+    hw: 0.68,
+    hh: 0.6,
+    H: 24,
+    wall: '#ebe5d6',
+    roof: '#4f6f8e',
+    rise: 18,
+    doorDx: 0.5,
+    timber: true,
+    floors: 1,
+    deco: ['chimney'],
+  },
   // Long stone drill hall with a red roof; weapons racked by the wall.
   barracks: {
     hw: 0.8,
@@ -1455,6 +1498,8 @@ export const BUILDING_PAINTERS: Record<BuildingType | 'site2' | 'site3', (ctx: C
   toolsmith: styled('toolsmith'),
   weaponsmith: styled('weaponsmith'),
   barracks: styled('barracks'),
+  lookout: paintLookout,
+  infirmary: styled('infirmary'),
   warehouse: styled('warehouse'),
   tower: paintTower,
   bigtower: paintBigTower,

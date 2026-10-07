@@ -86,6 +86,7 @@ function think(w: World, ai: AiState): void {
   const own = [...w.buildings.values()].filter((b) => b.owner === me);
   if (!ai.sharesSet) {
     for (const [res, weight] of Object.entries(AI.weaponShares) as [Resource, number][]) w.setShare(res, weight, me);
+    w.setRecruitLevel(AI.recruitLevel, me);
     ai.sharesSet = true;
   }
 
@@ -223,7 +224,7 @@ function prospect(ctx: Context, ai: AiState): void {
 export function knownEnemies(w: World, me: PlayerId): { b: Building; defenders: number }[] {
   const out: { b: Building; defenders: number }[] = [];
   for (const b of w.buildings.values()) {
-    if (b.owner === me || w.isDefeated(b.owner) || !w.isExplored(b.door.x, b.door.y, me)) continue;
+    if (w.allied(b.owner, me) || w.isDefeated(b.owner) || !w.isExplored(b.door.x, b.door.y, me)) continue;
     const g = BUILDINGS[b.type].garrison;
     const seen = inBuildingSight(w, w.map.idx(b.door.x, b.door.y), me);
     out.push({ b, defenders: !g ? 0 : seen ? b.garrison.length : Math.ceil(g.capacity * AI.unseenGarrison) });
@@ -248,6 +249,8 @@ function attackIfStrong(w: World, ai: AiState): boolean {
     // Own fighters' strength (ranks and professions known) against what it can see of the target:
     // the defenders it counts and the kind of building (its defense bonus).
     const ready = w.attackerComposition(b.id, Infinity, me);
+    // Only swordsmen take a building: a party without one could only kill, never conquer.
+    if (!ready.some((s) => PROFESSIONS[s.kind].combat?.captures)) continue;
     const power = ready.reduce((n, s) => n + SOLDIER_LEVELS[s.level].damage * (PROFESSIONS[s.kind].combat?.melee ?? 1), 0);
     const defense = defenders * (BUILDINGS[b.type].garrison!.defense ?? 1);
     if (ready.length < AI.minAttackers || power < AI.attackRatio * defense + 1) continue;
@@ -307,7 +310,7 @@ class Context {
           if (!m.inBounds(x, y)) continue;
           const i = m.idx(x, y);
           const o = m.owner[i];
-          if (o !== 0 && o !== me && !w.isDefeated(o) && inBuildingSight(w, i, me)) seen.add(i);
+          if (o !== 0 && !w.allied(o, me) && !w.isDefeated(o) && inBuildingSight(w, i, me)) seen.add(i);
         }
       }
     }

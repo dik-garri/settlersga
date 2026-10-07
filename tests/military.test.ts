@@ -38,8 +38,11 @@ function expectConsistent(w: World) {
   }
 }
 
-/** Two players with a tower each, built towards the other; player 2 may be left without spare soldiers. */
-function frontier(opts: { enemySoldiers?: number; swords?: number } = {}) {
+/**
+ * Two players with a tower each, built towards the other; player 2 may be left without spare soldiers.
+ * `spares`: extra swordsmen put straight into our tower (a small tower keeps its one swordsman).
+ */
+function frontier(opts: { enemySoldiers?: number; swords?: number; spares?: number } = {}) {
   const w = rich(new World(42, { players: 2 }));
   const [a, b] = [w.castleOf(1), w.castleOf(2)];
   if (opts.enemySoldiers !== undefined) {
@@ -61,6 +64,7 @@ function frontier(opts: { enemySoldiers?: number; swords?: number } = {}) {
   expect(ours && theirs).toBeTruthy();
   run(w, 2500);
   expect(ours.done && theirs.done).toBe(true);
+  for (let k = 0; k < (opts.spares ?? 0); k++) enterGarrison(w, ours, spawnSettler(w, 'soldier', ours));
   return { w, ours, theirs };
 }
 
@@ -110,11 +114,14 @@ describe('military economy', () => {
     run(w, 1500);
     expect(barracks.done).toBe(true);
     const carriers = w.settlers.filter((s) => s.kind === 'carrier').length;
-    c.output.sword = 2;
+    // The castle has one free swordsman's slot and five archers' slots.
+    c.output.sword = 1;
+    c.output.bow = 1;
     run(w, 900);
-    expect(soldiersOf(w, 1).length).toBe(START_SOLDIERS + 2);
+    expect(soldiersOf(w, 1).length).toBe(START_SOLDIERS + 1);
+    expect(w.settlers.filter((s) => s.kind === 'archer')).toHaveLength(1);
     expect(c.garrison.length).toBe(START_SOLDIERS + 2);
-    expect(c.output.sword + barracks.input.sword).toBe(0);
+    expect(c.output.sword + barracks.input.sword + c.output.bow + barracks.input.bow).toBe(0);
     expect(w.stats.trained).toBe(2);
     expect(w.settlers.filter((s) => s.kind === 'carrier').length).toBe(carriers - 2);
     expectConsistent(w);
@@ -161,13 +168,15 @@ describe('barracks', () => {
 
   it('trains nobody while every garrison is full, and resumes when room frees up', () => {
     const { w, c, barracks } = withBarracks();
-    while (c.garrison.length < 12) enterGarrison(w, c, spawnSettler(w, 'soldier', c));
+    // Every slot taken: 7 swordsmen and 5 archers.
+    while (c.garrison.length < 7) enterGarrison(w, c, spawnSettler(w, 'soldier', c));
+    while (c.garrison.length < 12) enterGarrison(w, c, spawnSettler(w, 'archer', c));
     c.output.sword = 2;
     run(w, 900);
     expect(w.stats.trained).toBe(0);
     expect(barracks.workerId).toBeNull();
     expect(c.output.sword + barracks.input.sword).toBe(2);
-    killSettler(w, w.getSettler(c.garrison[0])!);
+    killSettler(w, soldiersOf(w, 1)[0]);
     run(w, 900);
     expect(w.stats.trained).toBe(1);
     expect(c.garrison.length).toBe(12);
@@ -190,7 +199,8 @@ describe('barracks', () => {
 
   it('training continues identically after save and load', () => {
     const { w, c, barracks } = withBarracks();
-    c.output.sword = 2;
+    c.output.sword = 1;
+    c.output.bow = 1;
     for (let i = 0; i < 1500 && !(barracks.timer > 0); i++) w.step();
     expect(barracks.timer).toBeGreaterThan(0);
     const l = World.load(JSON.parse(JSON.stringify(saveWorld(w))));
@@ -203,7 +213,7 @@ describe('barracks', () => {
 
 describe('combat', () => {
   it('an undefended enemy tower is taken: ownership and land change hands, enemy civil buildings there burn', () => {
-    const { w, ours, theirs } = frontier({ enemySoldiers: 1 });
+    const { w, ours, theirs } = frontier({ enemySoldiers: 1, spares: 1 });
     expect(theirs.garrison.length).toBe(0); // nobody to spare from their castle
     // An enemy hut on land that only their tower would hold.
     const lumber = placeNear(w, 'woodcutter', theirs.x, theirs.y, 6, 2);
@@ -230,8 +240,8 @@ describe('combat', () => {
   });
 
   it('defenders fight back; the dead are removed with no dangling references', () => {
-    const { w, theirs } = frontier({ swords: 6 });
-    run(w, 600); // recruits fill our castle
+    const { w, theirs } = frontier({ swords: 6, spares: 4 });
+    run(w, 600);
     expect(theirs.garrison.length).toBeGreaterThan(0);
     const before = soldiersOf(w, 1).length + soldiersOf(w, 2).length;
     const sent = w.attack(theirs.id, 4);
@@ -251,7 +261,7 @@ describe('combat', () => {
   });
 
   it('a battle continues identically after save and load', () => {
-    const { w, theirs } = frontier({ swords: 6 });
+    const { w, theirs } = frontier({ swords: 6, spares: 4 });
     run(w, 600);
     w.attack(theirs.id, 4);
     for (let i = 0; i < 1500 && !w.settlers.some((s) => s.opponent !== null); i++) w.step();

@@ -148,6 +148,8 @@ describe('victory and defeat', () => {
       run(w, 3000);
       expect(tower.done && tower.garrison.length).toBeTruthy();
     }
+    // A small tower holds one swordsman and keeps him: put a spare one in (test setup).
+    enterGarrison(w, tower!, spawnSettler(w, 'soldier', tower!));
     expect(w.availableAttackers(b.id)).toBeGreaterThan(0);
     return { w, castle: b };
   }

@@ -8,9 +8,11 @@
  * fighters it never gives away. An attack sends spare fighters to an enemy military building; at its door each
  * attacker duels one defender at a time (defenders are stronger by the building's `defense`).
  * Archers inside a garrison shoot attackers approaching it; attacking archers shoot defenders who are
- * busy duelling their comrades. When no defender is left, the attacker takes the building over:
- * ownership and territory change, and enemy civil buildings left on foreign land are destroyed.
- * Fighters inside a garrison heal, and gold delivered to a building that `trains` promotes them.
+ * busy duelling their comrades. When no defender is left, a swordsman (`combat.captures`) takes the
+ * building over: ownership and territory change, and enemy civil buildings left on foreign land are
+ * destroyed. As in Settlers 4, garrison slots have a kind (swordsmen or archers), a fighter's level is
+ * bought with gold at the barracks and never changes, and wounded fighters heal only in an infirmary.
+ * Allied players (`World.allied`) never attack each other.
  *
  * Removing a settler must go through `killSettler`, which clears every reference to it; the settler
  * itself leaves `World.settlers` at the end of the tick (`removeDead`).
@@ -25,13 +27,12 @@ import {
   DAMAGE,
   FIGHT_EVERY,
   GARRISON_KEEP,
-  HEAL_EVERY,
+  LEVEL_RES,
   PROFESSIONS,
-  PROMOTE_COST,
-  PROMOTE_RES,
-  PROMOTE_TICKS,
   SHOT_TICKS,
   SOLDIER_LEVELS,
+  WOUNDED_AT,
+  WOUNDED_CHECK_EVERY,
   type GarrisonDef,
 } from './config';
 import { randInt } from './rng';
@@ -88,9 +89,19 @@ function members(w: World, b: Building): Settler[] {
   return b.garrison.map((id) => alive(w, id)).filter((s): s is Settler => !!s);
 }
 
-/** Archer slots still to fill (counting archers already on their way). */
-function archersWanted(w: World, b: Building): number {
-  return Math.max(0, (garrisonOf(b).archers ?? 0) - members(w, b).filter(isArcher).length - b.garrisonArchersInbound);
+/** Garrison slots of one kind: `archers` of them for ranged fighters, the rest for melee ones. */
+function slotsOf(b: Building, archer: boolean): number {
+  const g = garrisonOf(b);
+  const ranged = Math.min(g.capacity, g.archers ?? 0);
+  return archer ? ranged : g.capacity - ranged;
+}
+
+/** Free slots of a kind, not yet promised to a fighter on his way in (0 for non-military buildings). */
+export function slotsFree(w: World, b: Building, archer: boolean): number {
+  if (!isMilitary(b) || !b.done) return 0;
+  const inside = members(w, b).filter((s) => isArcher(s) === archer).length;
+  const inbound = archer ? b.garrisonArchersInbound : b.garrisonInbound - b.garrisonArchersInbound;
+  return slotsOf(b, archer) - inside - inbound;
 }
 
 export function enterGarrison(w: World, b: Building, s: Settler): void {
@@ -149,8 +160,13 @@ export function staffGarrisons(w: World, own: Building[]): void {
   for (const b of [...empty, ...outposts, ...reserves]) {
     const firstPass = empty.includes(b) && b.garrison.length + b.garrisonInbound === 0;
     let room = firstPass ? 1 : Infinity;
-    while (room-- > 0 && garrisonSpace(b) > 0 && b.unreachableUntil <= w.tick) {
-      const wantArcher = RANGED_KIND !== undefined && archersWanted(w, b) > 0;
+    while (room-- > 0 && b.unreachableUntil <= w.tick) {
+      // Slot kinds still open: the first fighter of an empty outpost is a swordsman if possible (he
+      // can hold it against a capture), then archer slots before melee ones.
+      const kinds = (firstPass ? [false, true] : [true, false]).filter(
+        (archer) => (!archer || RANGED_KIND !== undefined) && slotsFree(w, b, archer) > 0,
+      );
+      if (kinds.length === 0) break;
       // Donors: the reserve (castle) for any outpost; an empty outpost also takes from the nearest
       // other outpost with spares, and any outpost from outposts further from the enemy — fighters
       // move from the rear to the front, never back, so this cannot cycle.
@@ -163,11 +179,19 @@ export function staffGarrisons(w: World, own: Building[]): void {
               .filter((o) => o !== b && (firstPass || (frontDistance.get(o.id) ?? Infinity) > front + 1))
               .sort((p, q) => distance(p, b) - distance(q, b) || p.id - q.id),
           ];
-      const reserve = donors.map((r) => ({ r, spare: spareSoldiers(w, r, wantArcher) })).find((x) => x.spare.length > 0);
-      if (!reserve) break;
-      const s = reserve.spare[0];
-      leaveGarrison(w, reserve.r, s);
-      sendToJoin(s, b);
+      let moved = false;
+      for (const archer of kinds) {
+        const reserve = donors
+          .map((r) => ({ r, spare: spareSoldiers(w, r, archer).filter((x) => isArcher(x) === archer) }))
+          .find((x) => x.spare.length > 0);
+        if (!reserve) continue;
+        const s = reserve.spare[0];
+        leaveGarrison(w, reserve.r, s);
+        sendToJoin(s, b);
+        moved = true;
+        break;
+      }
+      if (!moved) break;
     }
   }
 }
@@ -228,41 +252,75 @@ export function mostBehindShare(
 }
 
 /**
- * Whether a barracks should call in a recruit now: it has a weapon, the player keeps
- * `BARRACKS_MIN_IDLE` idle carriers, and there is more free garrison room than fighters already
- * looking for one (homeless or in training).
+ * The player's army room: free garrison slots of each kind (archer / melee) minus fighters of that
+ * kind already looking for one, recruits in training (or on their way to a barracks) and idle carriers.
  */
-export function wantsRecruit(w: World, b: Building): boolean {
-  if (!WEAPONS.some((r) => b.input[r] > 0)) return false;
-  let idle = 0;
-  let looking = 0;
-  for (const s of w.settlers) {
-    if (s.owner !== b.owner || w.dying.has(s.id)) continue;
-    if (s.kind === 'carrier' && s.tasks.length === 0) idle++;
-    else if (s.kind === 'recruit' || (isFighter(s) && s.home === null)) looking++;
-    else if (s.tasks.some((t) => t.t === 'become' && t.kind === 'recruit')) looking++;
+function armyRoom(w: World, owner: PlayerId): { archer: number; melee: number; training: number; idle: number } {
+  const out = { archer: 0, melee: 0, training: 0, idle: 0 };
+  for (const o of w.buildings.values()) {
+    if (o.owner !== owner || !o.done || !isMilitary(o)) continue;
+    out.archer += slotsFree(w, o, true);
+    out.melee += slotsFree(w, o, false);
   }
-  if (idle < BARRACKS_MIN_IDLE) return false;
-  let room = 0;
-  for (const o of w.buildings.values()) if (o.owner === b.owner && o.done && isMilitary(o)) room += garrisonSpace(o);
-  return room > looking;
+  for (const s of w.settlers) {
+    if (s.owner !== owner || w.dying.has(s.id)) continue;
+    if (s.kind === 'carrier' && s.tasks.length === 0) out.idle++;
+    else if (s.kind === 'recruit' || s.tasks.some((t) => t.t === 'become' && t.kind === 'recruit')) out.training++;
+    else if (isFighter(s) && s.home === null && !s.tasks.some((t) => t.t === 'join' || t.t === 'heal')) {
+      if (isArcher(s)) out.archer--;
+      else out.melee--;
+    }
+  }
+  return out;
+}
+
+/** Weapons on the barracks pile whose fighters still find a free garrison slot of their kind. */
+function trainable(w: World, b: Building, room = armyRoom(w, b.owner)): Resource[] {
+  return WEAPONS.filter((r) => b.input[r] > 0 && (PROFESSIONS[fighterFor(r)].combat!.ranged ? room.archer : room.melee) > 0);
 }
 
 /**
- * Per tick for a finished barracks: its recruit trains with the weapon the player's army is shortest
- * of (by `OUTPUT_SHARES`) and leaves as that fighter, homeless, to find a garrison.
+ * Whether a barracks should call in a recruit now: it has a weapon whose fighters find a free slot of
+ * their kind, the player keeps `BARRACKS_MIN_IDLE` idle carriers, and there is more free garrison
+ * room than recruits already in training.
+ */
+export function wantsRecruit(w: World, b: Building): boolean {
+  if (!WEAPONS.some((r) => b.input[r] > 0)) return false;
+  const room = armyRoom(w, b.owner);
+  if (room.idle < BARRACKS_MIN_IDLE) return false;
+  return trainable(w, b, room).length > 0 && Math.max(0, room.archer) + Math.max(0, room.melee) > room.training;
+}
+
+/** The level a recruit leaves at: the ordered one, or the highest the gold on the pile pays for. */
+function recruitLevelAt(w: World, b: Building): number {
+  let level = Math.min(w.recruitLevel(b.owner), SOLDIER_LEVELS.length - 1);
+  while (level > 0 && SOLDIER_LEVELS[level].cost > b.input[LEVEL_RES]) level--;
+  return level;
+}
+
+/**
+ * Per tick for a finished barracks: its recruit trains for `ticks`, then takes the weapon (among those
+ * whose fighters find a free slot of their kind) the player's army is shortest of by `OUTPUT_SHARES`,
+ * pays the gold of the level the player ordered (`setRecruitLevel`, falling back to what the pile
+ * pays for) and leaves as that fighter, homeless, to find a garrison. With no slot for any weapon the
+ * trained recruit waits.
  */
 export function updateBarracks(w: World, b: Building): void {
   const s = w.getSettler(b.workerId);
   if (!s || s.inside !== b.id || w.dying.has(s.id)) return;
-  const ready = WEAPONS.filter((r) => b.input[r] > 0);
+  if (!WEAPONS.some((r) => b.input[r] > 0)) return;
+  const ticks = BUILDINGS[b.type].barracks!.ticks;
+  if (b.timer < ticks) b.timer++;
+  if (b.timer < ticks) return;
+  const ready = trainable(w, b);
   if (ready.length === 0) return;
-  if (++b.timer < BUILDINGS[b.type].barracks!.ticks) return;
   b.timer = 0;
   const weapon = mostBehindShare(w, b.owner, ready, WEAPONS, (r) => fightersWith(w, b.owner, r)) ?? ready[0];
+  const level = recruitLevelAt(w, b);
   b.input[weapon]--;
+  b.input[LEVEL_RES] -= SOLDIER_LEVELS[level].cost;
   s.kind = fighterFor(weapon);
-  s.level = 0;
+  s.level = level;
   s.hp = maxHp(s);
   s.home = null;
   s.inside = null;
@@ -279,7 +337,7 @@ function distancesToEnemy(w: World, own: Building[]): Map<number, number> {
   const out = new Map<number, number>();
   if (own.length === 0) return out;
   const owner = own[0].owner;
-  const enemies = [...w.buildings.values()].filter((e) => e.owner !== owner && e.done && isMilitary(e));
+  const enemies = [...w.buildings.values()].filter((e) => !w.allied(e.owner, owner) && e.done && isMilitary(e));
   if (enemies.length === 0) return out;
   for (const b of own) out.set(b.id, Math.min(...enemies.map((e) => distance(b, e))));
   return out;
@@ -304,8 +362,8 @@ export function releaseJoin(b: Building, task: Extract<Task, { t: 'join' }>): vo
 /** `join` task: move into the garrison if it is still ours and has room; otherwise give up. */
 export function joinTick(w: World, s: Settler, task: Extract<Task, { t: 'join' }>): void {
   const b = w.buildings.get(task.b);
-  const def = b ? BUILDINGS[b.type].garrison : undefined;
-  if (!b || !def || !b.done || b.owner !== s.owner || b.garrison.length >= def.capacity) return abort(w, s);
+  // Its own reservation is still counted in the free slots, hence `< 0`.
+  if (!b || !isMilitary(b) || !b.done || b.owner !== s.owner || slotsFree(w, b, isArcher(s)) < 0) return abort(w, s);
   releaseJoin(b, task);
   s.tasks.shift();
   enterGarrison(w, b, s);
@@ -325,8 +383,9 @@ export function soldierIdle(w: World, s: Settler): void {
   }
   s.home = null;
   let best: Building | undefined;
+  const archer = isArcher(s);
   for (const b of w.buildings.values()) {
-    if (b.owner !== s.owner || !b.done || garrisonSpace(b) <= 0) continue;
+    if (b.owner !== s.owner || !b.done || slotsFree(w, b, archer) <= 0) continue;
     if (!best || Math.hypot(b.door.x - s.x, b.door.y - s.y) < Math.hypot(best.door.x - s.x, best.door.y - s.y)) best = b;
   }
   if (best) sendToJoin(s, best);
@@ -344,25 +403,25 @@ function attackers(w: World, target: Building, player: PlayerId): Settler[] {
   return sources.flatMap((x) => spareSoldiers(w, x.b));
 }
 
-function attackable(target: Building | undefined, player: PlayerId): target is Building {
-  return !!target && target.done && isMilitary(target) && target.owner !== player;
+function attackable(w: World, target: Building | undefined, player: PlayerId): target is Building {
+  return !!target && target.done && isMilitary(target) && !w.allied(target.owner, player);
 }
 
 export function availableAttackers(w: World, targetId: number, player: PlayerId): number {
   const target = w.buildings.get(targetId);
-  return attackable(target, player) ? attackers(w, target, player).length : 0;
+  return attackable(w, target, player) ? attackers(w, target, player).length : 0;
 }
 
 /** What an attack would send right now, by profession and level (for the attack dialog). */
 export function attackerComposition(w: World, targetId: number, count: number, player: PlayerId): Settler[] {
   const target = w.buildings.get(targetId);
-  return attackable(target, player) ? attackers(w, target, player).slice(0, Math.max(0, count)) : [];
+  return attackable(w, target, player) ? attackers(w, target, player).slice(0, Math.max(0, count)) : [];
 }
 
 /** Player command: send up to `count` fighters against an enemy military building. Returns how many went. */
 export function attack(w: World, targetId: number, count: number, player: PlayerId): number {
   const target = w.buildings.get(targetId);
-  if (!attackable(target, player)) return 0;
+  if (!attackable(w, target, player)) return 0;
   const sent = attackers(w, target, player).slice(0, Math.max(0, count));
   for (const s of sent) {
     const from = w.buildings.get(s.home!)!;
@@ -451,6 +510,11 @@ export function assaultTick(w: World, s: Settler, task: Extract<Task, { t: 'assa
   }
   // Defenders still out fighting other attackers: wait for the outcome.
   if (b.garrison.length > 0) return;
+  // Only swordsmen take buildings; an archer's job ends here, he looks for a garrison of his own.
+  if (!PROFESSIONS[s.kind].combat?.captures) {
+    s.tasks.shift();
+    return;
+  }
   conquer(w, b, s);
 }
 
@@ -475,49 +539,104 @@ export function assaultsByTarget(w: World): Map<number, Settler[]> {
 }
 
 /**
- * Per tick for a finished military building: archers inside shoot assailants in range, fighters
- * inside heal, and gold promotes the weakest fighter inside if the building `trains`.
+ * Per tick for a finished military building: archers inside shoot assailants in range; every
+ * `WOUNDED_CHECK_EVERY` ticks, while it is not under attack, its wounded go to an infirmary.
  */
 export function updateGarrison(w: World, b: Building, assaults: Map<number, Settler[]>): void {
   const inside = members(w, b).filter((s) => s.inside === b.id && s.opponent === null);
   if (inside.length === 0) return;
   for (const s of inside) {
     const ranged = PROFESSIONS[s.kind].combat?.ranged;
-    if (ranged) {
-      if (s.reload > 0) s.reload--;
-      if (s.reload <= 0) {
-        const target = assailantsNear(w, b, ranged.range, assaults).sort(
-          (p, q) => Math.hypot(p.x - b.door.x, p.y - b.door.y) - Math.hypot(q.x - b.door.x, q.y - b.door.y) || p.id - q.id,
-        )[0];
-        if (target) shoot(w, s, target, b.door);
+    if (!ranged) continue;
+    if (s.reload > 0) s.reload--;
+    if (s.reload <= 0) {
+      const target = assailantsNear(w, b, ranged.range, assaults).sort(
+        (p, q) => Math.hypot(p.x - b.door.x, p.y - b.door.y) - Math.hypot(q.x - b.door.x, q.y - b.door.y) || p.id - q.id,
+      )[0];
+      if (target) shoot(w, s, target, b.door);
+    }
+  }
+  if ((w.tick + b.id) % WOUNDED_CHECK_EVERY === 0 && !assaults.get(b.id)?.length) sendWounded(w, b, inside);
+}
+
+// ---------------------------------------------------------------- infirmary
+
+/** Patients per infirmary (in bed or on the way), derived from tasks once per tick and world. */
+const patientCache = new WeakMap<World, { tick: number; count: Map<number, number> }>();
+
+function patients(w: World): Map<number, number> {
+  const cached = patientCache.get(w);
+  if (cached && cached.tick === w.tick) return cached.count;
+  const count = new Map<number, number>();
+  for (const s of w.settlers) {
+    if (w.dying.has(s.id)) continue;
+    for (const t of s.tasks) if (t.t === 'heal') count.set(t.b, (count.get(t.b) ?? 0) + 1);
+  }
+  patientCache.set(w, { tick: w.tick, count });
+  return count;
+}
+
+/**
+ * Wounded fighters (below `WOUNDED_AT` of their hit points) leave the garrison for the nearest own
+ * infirmary in range with a free bed; the building keeps at least one fighter (its land) and its
+ * `keep`. Without an infirmary nobody heals, as in Settlers 4.
+ */
+function sendWounded(w: World, b: Building, inside: Settler[]): void {
+  const wounded = inside.filter((s) => s.hp < maxHp(s) * WOUNDED_AT).sort((p, q) => p.hp - q.hp || p.id - q.id);
+  if (wounded.length === 0) return;
+  const c = centerOf(b);
+  const beds = patients(w);
+  for (const s of wounded) {
+    if (b.garrison.length <= Math.max(1, keepOf(b))) return;
+    let best: Building | undefined;
+    let bestD = Infinity;
+    for (const o of w.buildings.values()) {
+      const inf = BUILDINGS[o.type].infirmary;
+      if (!inf || o.owner !== b.owner || !o.done || (beds.get(o.id) ?? 0) >= inf.beds) continue;
+      const oc = centerOf(o);
+      const d = Math.hypot(oc.x - c.x, oc.y - c.y);
+      if (d <= inf.range && d < bestD) {
+        best = o;
+        bestD = d;
       }
     }
-    if (w.tick % HEAL_EVERY === 0 && s.hp < maxHp(s)) s.hp++;
+    if (!best) return;
+    beds.set(best.id, (beds.get(best.id) ?? 0) + 1);
+    leaveGarrison(w, b, s);
+    s.tasks = [
+      { t: 'goto', x: best.door.x, y: best.door.y },
+      { t: 'heal', b: best.id, n: 0 },
+    ];
   }
-  if (!garrisonOf(b).trains) return;
-  const pupil = promotable(w, b);
-  if (!pupil) return;
-  const pile = BUILDINGS[b.type].storage ? b.output : b.input;
-  if (pile[PROMOTE_RES] - (BUILDINGS[b.type].storage ? b.outReserved[PROMOTE_RES] : 0) < PROMOTE_COST) return;
-  if (++b.timer < PROMOTE_TICKS) return;
-  b.timer = 0;
-  pile[PROMOTE_RES] -= PROMOTE_COST;
-  pupil.level++;
-  pupil.hp = maxHp(pupil);
 }
 
-/** The lowest-ranked fighter inside who can still be promoted, or undefined. */
-function promotable(w: World, b: Building): Settler | undefined {
-  return members(w, b)
-    .filter((s) => s.inside === b.id && s.opponent === null && s.level < SOLDIER_LEVELS.length - 1)
-    .sort((p, q) => p.level - q.level || p.id - q.id)[0];
+/** `heal` task: lie in the infirmary, one hit point every `healEvery` ticks, then find a garrison. */
+export function healTick(w: World, s: Settler, task: Extract<Task, { t: 'heal' }>): void {
+  const b = w.buildings.get(task.b);
+  const inf = b ? BUILDINGS[b.type].infirmary : undefined;
+  if (!b || !inf || !b.done || b.owner !== s.owner) {
+    if (s.inside === task.b) s.inside = null;
+    s.tasks.shift();
+    return;
+  }
+  s.inside = b.id;
+  if (++task.n < inf.healEvery) return;
+  task.n = 0;
+  s.hp = Math.min(maxHp(s), s.hp + 1);
+  if (s.hp < maxHp(s)) return;
+  s.inside = null;
+  s.tasks.shift();
 }
 
-/** Gold a training building still wants delivered (its input pile; warehouses train from their stock). */
+/**
+ * Gold a barracks wants on its pile for the level its owner orders recruits at (two recruits' worth,
+ * up to `cap`); nothing for level 0 or other buildings.
+ */
 export function goldWanted(w: World, b: Building, res: Resource, cap: number): number {
-  const def = BUILDINGS[b.type];
-  if (res !== PROMOTE_RES || !def.garrison?.trains || def.storage || !b.done || !promotable(w, b)) return 0;
-  return cap - b.input[res] - b.inbound[res];
+  if (res !== LEVEL_RES || !BUILDINGS[b.type].barracks || !b.done) return 0;
+  const cost = SOLDIER_LEVELS[Math.min(w.recruitLevel(b.owner), SOLDIER_LEVELS.length - 1)].cost;
+  if (cost === 0) return 0;
+  return Math.min(cap, cost * 2) - b.input[res] - b.inbound[res];
 }
 
 /** End of tick: forget arrows that have landed (they are only drawn, never simulated). */
@@ -552,7 +671,7 @@ function onForeignLand(w: World, b: Building): boolean {
   for (let dy = 0; dy < b.h; dy++) {
     for (let dx = 0; dx < b.w; dx++) {
       const owner = m.owner[m.idx(b.x + dx, b.y + dy)];
-      if (owner !== 0 && owner !== b.owner) return true;
+      if (owner !== 0 && !w.allied(owner, b.owner)) return true;
     }
   }
   return false;
