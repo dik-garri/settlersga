@@ -1,5 +1,6 @@
 import { Application } from 'pixi.js';
 import { AudioEngine } from './audio/audio';
+import { loadArt3d } from './render/art3d';
 import { SpriteAtlas } from './render/atlas';
 import { Camera } from './render/camera';
 import { toScreen } from './render/iso';
@@ -42,7 +43,8 @@ async function main() {
   const ai = params.get('ai') === 'off' ? [] : Array.from({ length: players - 1 }, (_, k) => k + 2);
   const world = save ? World.load(save) : new World(seed, { size, players, ai });
   const state = createState();
-  const atlas = new SpriteAtlas();
+  // ?art=3d: the pilot set of pre-rendered 3D sprites (art/blender) instead of some procedural ones.
+  const atlas = new SpriteAtlas(params.get('art') === '3d' ? await loadArt3d() : null);
   state.fog = params.get('fog') !== 'off';
   const renderer = new GameRenderer(app, world, atlas, state.fog);
   const camera = new Camera(renderer.world, renderer.bounds);

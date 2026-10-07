@@ -1,0 +1,315 @@
+"""Scene, camera, light, material and mesh helpers for rendering game sprites in Blender.
+
+The camera reproduces the game's 2:1 isometric projection (see src/render/iso.ts): tile x+1 moves
+32 px right and 16 px down, tile y+1 moves 32 px left and 16 px down. World X is tile x, world Y is
+minus tile y, world Z is up; one world unit is one tile. Sprites are rendered at the atlas
+resolution (2× the game's logical pixels).
+"""
+
+import math
+
+import bpy
+from bpy_extras.object_utils import world_to_camera_view
+from mathutils import Vector
+
+RESOLUTION = 2
+#: Logical pixels per world unit along the screen x axis: one tile step is 32 px right = cos 45° units.
+PX_PER_UNIT = 32 / math.cos(math.radians(45))
+CAM_TILT = math.radians(60)  # 30° elevation gives the 2:1 ratio
+CAM_YAW = math.radians(45)
+
+
+def reset_scene(samples=48):
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    scene = bpy.context.scene
+    scene.render.engine = 'CYCLES'
+    prefs = bpy.context.preferences.addons['cycles'].preferences
+    try:
+        prefs.compute_device_type = 'METAL'
+        prefs.get_devices()
+        for d in prefs.devices:
+            d.use = True
+        scene.cycles.device = 'GPU'
+    except Exception:
+        scene.cycles.device = 'CPU'
+    scene.cycles.samples = samples
+    scene.cycles.use_denoising = True
+    scene.cycles.max_bounces = 4
+    scene.render.film_transparent = True
+    scene.render.image_settings.file_format = 'PNG'
+    scene.render.image_settings.color_mode = 'RGBA'
+    scene.view_settings.view_transform = 'Standard'
+    scene.view_settings.look = 'None'
+    scene.view_settings.exposure = 0.0
+    scene.render.filter_size = 1.2
+
+    world = bpy.data.worlds.new('World')
+    scene.world = world
+    world.use_nodes = True
+    bg = world.node_tree.nodes['Background']
+    bg.inputs['Color'].default_value = (0.62, 0.72, 0.85, 1)
+    bg.inputs['Strength'].default_value = 0.55
+
+    # Sun from the screen's upper left, like the procedural art's lighting.
+    sun_data = bpy.data.lights.new('Sun', 'SUN')
+    sun_data.energy = 2.4
+    sun_data.angle = math.radians(8)
+    sun_data.color = (1.0, 0.96, 0.88)
+    sun = bpy.data.objects.new('Sun', sun_data)
+    scene.collection.objects.link(sun)
+    toward = Vector((0.95, -0.32, -1.7)).normalized()  # travels from the screen's upper left
+    sun.rotation_euler = toward.to_track_quat('-Z', 'Y').to_euler()
+
+    # Ground that only receives shadows (stays transparent).
+    bpy.ops.mesh.primitive_plane_add(size=40, location=(0, 0, 0))
+    ground = bpy.context.active_object
+    ground.name = 'ShadowCatcher'
+    ground.is_shadow_catcher = True
+    return scene
+
+
+def setup_camera(scene, w, h, ax, ay, target=(0.0, 0.0, 0.0)):
+    """Orthographic camera so that `target` lands at logical pixel (ax, ay) of a w×h sprite."""
+    cam_data = bpy.data.cameras.new('Camera')
+    cam_data.type = 'ORTHO'
+    cam = bpy.data.objects.new('Camera', cam_data)
+    scene.collection.objects.link(cam)
+    scene.camera = cam
+    cam.rotation_euler = (CAM_TILT, 0, CAM_YAW)
+    back = Vector((math.sin(CAM_YAW) * math.sin(CAM_TILT), -math.cos(CAM_YAW) * math.sin(CAM_TILT), math.cos(CAM_TILT)))
+    cam.location = Vector(target) + back * 40
+    cam_data.clip_start = 1
+    cam_data.clip_end = 100
+    big = max(w, h)
+    cam_data.ortho_scale = big / PX_PER_UNIT
+    cam_data.shift_x = -(ax - w / 2) / big
+    cam_data.shift_y = (ay - h / 2) / big
+    scene.render.resolution_x = w * RESOLUTION
+    scene.render.resolution_y = h * RESOLUTION
+    scene.render.resolution_percentage = 100
+    return cam
+
+
+def screen_point(scene, point):
+    """Logical sprite pixel (x, y) of a world point (for anchoring things drawn by the game)."""
+    co = world_to_camera_view(scene, scene.camera, Vector(point))
+    return (co.x * scene.render.resolution_x / RESOLUTION, (1 - co.y) * scene.render.resolution_y / RESOLUTION)
+
+
+def camera_depth(scene, point):
+    """Distance of a world point from the camera plane (larger = further away)."""
+    return world_to_camera_view(scene, scene.camera, Vector(point)).z
+
+
+def ground_dir(screen_angle):
+    """World ground direction (x, y) that the camera shows at a screen angle (radians, y down)."""
+    c, s = math.cos(screen_angle), math.sin(screen_angle)
+    gx = c / math.sqrt(2) + s * math.sqrt(2)
+    gy = c / math.sqrt(2) - s * math.sqrt(2)
+    n = math.hypot(gx, gy)
+    return gx / n, gy / n
+
+
+def render_to(scene, path):
+    scene.render.filepath = path
+    bpy.ops.render.render(write_still=True)
+    clean_alpha(path)
+
+
+def clean_alpha(path, floor=0.05):
+    """The shadow catcher leaves a faint veil over the whole frame; drop alpha below `floor`."""
+    import numpy as np
+
+    img = bpy.data.images.load(path)
+    px = np.empty(len(img.pixels), dtype=np.float32)
+    img.pixels.foreach_get(px)
+    rgba = px.reshape(-1, 4)
+    rgba[rgba[:, 3] < floor] = 0
+    img.pixels.foreach_set(px)
+    img.save()
+    bpy.data.images.remove(img)
+
+
+# ---------------------------------------------------------------------------------------- materials
+
+def lin(c):
+    """Palette colours are written as on screen (sRGB); Blender wants linear values."""
+    return tuple(((v + 0.055) / 1.055) ** 2.4 if v > 0.04045 else v / 12.92 for v in c)
+
+
+def _principled(name):
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    bsdf = nodes['Principled BSDF']
+    return mat, nodes, mat.node_tree.links, bsdf
+
+
+def mat_flat(name, color, rough=0.75):
+    mat, _, _, bsdf = _principled(name)
+    bsdf.inputs['Base Color'].default_value = (*lin(color), 1)
+    bsdf.inputs['Roughness'].default_value = rough
+    return mat
+
+
+def mat_noisy(name, a, b, scale=6.0, rough=0.8, detail=4.0, stretch=None):
+    """Two colours mixed by noise: wood, foliage, earth, rock."""
+    mat, nodes, links, bsdf = _principled(name)
+    bsdf.inputs['Roughness'].default_value = rough
+    noise = nodes.new('ShaderNodeTexNoise')
+    noise.inputs['Scale'].default_value = scale
+    noise.inputs['Detail'].default_value = detail
+    if stretch:
+        coord = nodes.new('ShaderNodeTexCoord')
+        mapping = nodes.new('ShaderNodeMapping')
+        mapping.inputs['Scale'].default_value = stretch
+        links.new(coord.outputs['Object'], mapping.inputs['Vector'])
+        links.new(mapping.outputs['Vector'], noise.inputs['Vector'])
+    ramp = nodes.new('ShaderNodeValToRGB')
+    ramp.color_ramp.elements[0].position = 0.35
+    ramp.color_ramp.elements[0].color = (*lin(a), 1)
+    ramp.color_ramp.elements[1].position = 0.65
+    ramp.color_ramp.elements[1].color = (*lin(b), 1)
+    links.new(noise.outputs['Fac'], ramp.inputs['Fac'])
+    links.new(ramp.outputs['Color'], bsdf.inputs['Base Color'])
+    return mat
+
+
+def mat_brick(name, c1, c2, mortar, scale=8.0, row=0.25, width=0.5, mortar_size=0.02, rough=0.85, roof=None):
+    """Brick pattern: stone walls (rows by height, running round the corners) or roof tiles (`roof`
+    names the ridge axis, 'x' or 'y': columns along the ridge, rows by height)."""
+    mat, nodes, links, bsdf = _principled(name)
+    bsdf.inputs['Roughness'].default_value = rough
+    coord = nodes.new('ShaderNodeTexCoord')
+    sep = nodes.new('ShaderNodeSeparateXYZ')
+    links.new(coord.outputs['Object'], sep.inputs['Vector'])
+    comb = nodes.new('ShaderNodeCombineXYZ')
+    if roof:
+        links.new(sep.outputs[roof.upper()], comb.inputs['X'])
+    else:
+        add = nodes.new('ShaderNodeMath')
+        add.operation = 'ADD'
+        links.new(sep.outputs['X'], add.inputs[0])
+        links.new(sep.outputs['Y'], add.inputs[1])
+        links.new(add.outputs['Value'], comb.inputs['X'])
+    links.new(sep.outputs['Z'], comb.inputs['Y'])
+    brick = nodes.new('ShaderNodeTexBrick')
+    brick.inputs['Color1'].default_value = (*lin(c1), 1)
+    brick.inputs['Color2'].default_value = (*lin(c2), 1)
+    brick.inputs['Mortar'].default_value = (*lin(mortar), 1)
+    brick.inputs['Scale'].default_value = scale
+    brick.inputs['Mortar Size'].default_value = mortar_size
+    brick.inputs['Brick Width'].default_value = width
+    brick.inputs['Row Height'].default_value = row
+    brick.offset = 0.5
+    links.new(comb.outputs['Vector'], brick.inputs['Vector'])
+    links.new(brick.outputs['Color'], bsdf.inputs['Base Color'])
+    return mat
+
+
+# -------------------------------------------------------------------------------------------- meshes
+
+def _finish(obj, mat, bevel=0.0, smooth=False):
+    if mat is not None:
+        obj.data.materials.append(mat)
+    if bevel > 0:
+        mod = obj.modifiers.new('Bevel', 'BEVEL')
+        mod.width = bevel
+        mod.segments = 2
+    if smooth:
+        bpy.ops.object.shade_smooth()
+    return obj
+
+
+def box(loc, size, mat, rot=(0, 0, 0), bevel=0.0):
+    bpy.ops.mesh.primitive_cube_add(size=1, location=loc, rotation=rot)
+    obj = bpy.context.active_object
+    obj.scale = size
+    bpy.ops.object.transform_apply(scale=True)
+    return _finish(obj, mat, bevel)
+
+
+def cylinder(loc, radius, depth, mat, rot=(0, 0, 0), verts=16, radius2=None, bevel=0.0):
+    if radius2 is None:
+        bpy.ops.mesh.primitive_cylinder_add(vertices=verts, radius=radius, depth=depth, location=loc, rotation=rot)
+    else:
+        bpy.ops.mesh.primitive_cone_add(vertices=verts, radius1=radius, radius2=radius2, depth=depth, location=loc, rotation=rot)
+    obj = bpy.context.active_object
+    return _finish(obj, mat, bevel, smooth=True)
+
+
+def sphere(loc, radius, mat, scale=(1, 1, 1), subdiv=3):
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=subdiv, radius=radius, location=loc)
+    obj = bpy.context.active_object
+    obj.scale = scale
+    bpy.ops.object.transform_apply(scale=True)
+    return _finish(obj, mat, smooth=True)
+
+
+def lumpy(loc, radius, mat, scale=(1, 1, 1), strength=0.25, noise=1.6, seed=0, subdiv=3, flat=False):
+    """A displaced sphere: foliage clumps, rocks (`flat`: faceted)."""
+    obj = sphere(loc, radius, mat, scale, subdiv)
+    if flat:
+        bpy.ops.object.shade_flat()
+    tex = bpy.data.textures.new(f'lump{seed}', 'CLOUDS')
+    tex.noise_scale = radius * noise
+    mod = obj.modifiers.new('Displace', 'DISPLACE')
+    mod.texture = tex
+    mod.strength = radius * strength
+    mod.mid_level = 0.5
+    obj.modifiers['Displace'].texture_coords = 'GLOBAL'
+    return obj
+
+
+def prism_roof(center, length, width, height, mat, overhang=0.12, thickness=0.06, along='x'):
+    """Gable roof with the ridge along world X (or Y): ridge at `center` z + height, `length` along
+    the ridge, `width` across it, eaves overhanging the walls."""
+    cx, cy, cz = center
+    drop = overhang * height / (width / 2)
+    x0, x1 = cx - length / 2 - overhang, cx + length / 2 + overhang
+    ye = width / 2 + overhang
+    verts = [
+        (x0, cy - ye, cz - drop), (x1, cy - ye, cz - drop),
+        (x1, cy, cz + height), (x0, cy, cz + height),
+        (x0, cy + ye, cz - drop), (x1, cy + ye, cz - drop),
+    ]
+    if along == 'y':
+        verts = [(cx + (y - cy), cy + (x - cx), z) for x, y, z in verts]
+    mesh = bpy.data.meshes.new('roof')
+    faces = [(0, 1, 2, 3), (3, 2, 5, 4)] if along == 'x' else [(3, 2, 1, 0), (4, 5, 2, 3)]
+    mesh.from_pydata(verts, [], faces)
+    obj = bpy.data.objects.new('roof', mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    mod = obj.modifiers.new('Solid', 'SOLIDIFY')
+    mod.thickness = thickness
+    obj.data.materials.append(mat)
+    return obj
+
+
+def gable(center, width, height, at, mat, along='x'):
+    """Triangular gable wall closing a roof whose ridge runs along `along`, standing at that
+    coordinate `at`."""
+    cx, cy, cz = center
+    mesh = bpy.data.meshes.new('gable')
+    if along == 'x':
+        verts = [(at, cy - width / 2, cz), (at, cy + width / 2, cz), (at, cy, cz + height)]
+    else:
+        verts = [(cx - width / 2, at, cz), (cx + width / 2, at, cz), (cx, at, cz + height)]
+    mesh.from_pydata(verts, [], [(0, 1, 2)])
+    obj = bpy.data.objects.new('gable', mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    mod = obj.modifiers.new('Solid', 'SOLIDIFY')
+    mod.thickness = 0.04
+    obj.data.materials.append(mat)
+    return obj
+
+
+def join(objs, name):
+    bpy.ops.object.select_all(action='DESELECT')
+    for o in objs:
+        o.select_set(True)
+    bpy.context.view_layer.objects.active = objs[0]
+    bpy.ops.object.join()
+    obj = bpy.context.active_object
+    obj.name = name
+    return obj

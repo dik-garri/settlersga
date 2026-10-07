@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "sim:probe": "tsx tools/probe.ts",
     "sim:bench": "tsx tools/bench.ts",
-    "sim:ai": "tsx tools/aivsai.ts"
+    "sim:ai": "tsx tools/aivsai.ts",
+    "art:render": "blender -b --factory-startup -P art/blender/build.py --"
   },
   "dependencies": {
     "pixi.js": "^8.22.0"

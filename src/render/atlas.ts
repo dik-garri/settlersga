@@ -20,7 +20,8 @@ import {
   paintWare,
   PLAYER_COLORS,
 } from './sprites';
-import { WALK_FRAMES, WORK_FRAMES } from './anim';
+import { DIRS, WALK_FRAMES, WORK_FRAMES } from './anim';
+import { ART3D_SPRITES, type Art3d } from './art3d';
 import { ACTION_IDS, ACTIONS, HAT_STYLES, styleOf, TOOLS, type ActionId, type HatStyle, type ToolShape } from './animConfig';
 import { paintFlash, paintGlint, paintGlow, paintPuff, paintSpark } from './fxArt';
 import {
@@ -148,7 +149,11 @@ export class SpriteAtlas {
   private readonly textures: Map<string, Texture>;
   private readonly cropped = new Map<string, Texture>();
 
-  constructor() {
+  /** Pre-rendered 3D sprites replacing some procedural ones (`?art=3d`, see `art3d.ts`). */
+  readonly art3d: Art3d | null;
+
+  constructor(art3d: Art3d | null = null) {
+    this.art3d = art3d;
     const a = new AtlasBuilder();
     for (const kind of GROUND_PRIORITY) {
       for (let v = 0; v < groundVariants(kind); v++) {
@@ -218,7 +223,15 @@ export class SpriteAtlas {
     for (let level = 1; level < SOLDIER_LEVELS.length; level++) {
       a.add(`chevrons:${level}`, 12, 10, 6, 5, (ctx) => paintChevrons(ctx, level));
     }
+    if (art3d) addArt3d(a, art3d);
     this.textures = a.build();
+  }
+
+  /** [dir][column] of the 3D carrier sheet (`?art=3d`), or null. */
+  carrier3d(): Texture[][] | null {
+    const art = this.art3d;
+    if (!art) return null;
+    return DIRS.map((_, d) => Array.from({ length: art.carrier.columns }, (_, c) => this.get(`c3d:${d}:${c}`)));
   }
 
   /** Settler layer lookups, resolved once. */
@@ -325,4 +338,29 @@ export function buildingIcon(type: BuildingType, size = 56): HTMLCanvasElement {
   ctx.scale(scale, scale);
   BUILDING_PAINTERS[type](ctx);
   return canvas;
+}
+
+/** Registers the 3D sprites under the keys of the procedural ones they replace (later wins). */
+function addArt3d(a: AtlasBuilder, art: Art3d): void {
+  const one = (key: string, name: string) => {
+    const s = ART3D_SPRITES[name];
+    const img = art.images.get(name)!;
+    a.add(key, s.w, s.h, s.ax, s.ay, (ctx) => ctx.drawImage(img, 0, 0, s.w, s.h));
+  };
+  one('building:woodcutter', 'woodcutter');
+  one('tree:0', 'tree');
+  for (let v = 1; v < 4; v++) a.alias(`tree:${v}`, 'tree:0');
+  for (let v = 0; v < 3; v++) one(`deposit:${v}`, `deposit${v}`);
+  one('ware:log', 'log');
+  const { cell, anchor, columns } = art.carrier;
+  const sheet = art.images.get('carrier')!;
+  const [w, h] = cell;
+  const r = sheet.width / (w * columns); // the sheet's resolution
+  for (let d = 0; d < DIRS.length; d++) {
+    for (let c = 0; c < columns; c++) {
+      a.add(`c3d:${d}:${c}`, w, h, anchor[0], anchor[1], (ctx) =>
+        ctx.drawImage(sheet, c * w * r, d * h * r, w * r, h * r, 0, 0, w, h),
+      );
+    }
+  }
 }

@@ -206,6 +206,8 @@ export class GameRenderer {
   private readonly settlerViews = new Map<number, SettlerView>();
 
   private readonly settlerTex: SettlerTextures;
+  /** [dir][column] of the pre-rendered carrier (`?art=3d`), replacing the layered figure. */
+  private readonly carrier3d: Texture[][] | null;
   private readonly wareTex = {} as Record<Resource, Texture>;
   private readonly playerTint = PLAYER_COLORS.map(toTint);
   private readonly tints = new Map<string, number>();
@@ -239,6 +241,7 @@ export class GameRenderer {
   ) {
     this.world.addChild(this.ground, this.territory, this.marks, this.objects, this.shots, this.fog, this.ghostLayer);
     this.settlerTex = atlas.settlerTextures();
+    this.carrier3d = atlas.carrier3d();
     for (const r of RESOURCES) this.wareTex[r] = atlas.get(`ware:${r}`);
     this.effects = new Effects(atlas, sim, (x, y) => this.surface(x, y), this.sound);
     // Glints sit right on the ground; smoke and sparks above the objects but under the fog.
@@ -1101,6 +1104,22 @@ export class GameRenderer {
       if (s.carrying) {
         v.ware.texture = this.wareTex[s.carrying];
         v.ware.position.set(CARRY_AT[pd][0], CARRY_AT[pd][1]);
+      }
+      const c3d = this.carrier3d && s.kind === 'carrier' && !working ? this.carrier3d : null;
+      v.tunic.visible = v.head.visible = v.hat.visible = v.arm.visible = c3d === null;
+      if (c3d) {
+        // One pre-rendered sprite per direction and frame; goods go where the hands are.
+        const meta = this.atlas.art3d!.carrier;
+        const f = moving ? walkFrame(v.walked) : meta.walk;
+        v.body.texture = c3d[shown][(s.carrying !== null ? meta.carryColumn : 0) + f];
+        v.root.scale.x = 1;
+        const away = meta.carryBehind[shown];
+        if (away !== v.armBehind) {
+          v.armBehind = away;
+          v.root.setChildIndex(v.arm, away ? 0 : 4);
+          v.root.setChildIndex(v.ware, away ? 0 : 5);
+        }
+        if (s.carrying !== null) v.ware.position.set(meta.carryAt[shown][f][0], meta.carryAt[shown][f][1]);
       }
     }
   }
