@@ -275,28 +275,6 @@ export const MINER_FOOD: readonly Resource[] = ['bread', 'fish', 'meat'];
 export const FISH_MAX = 3;
 export const FISH_RESTOCK = 2;
 
-/**
- * Seasons: the year cycles spring → summer → autumn → winter, `SEASON_TICKS` each, starting in
- * spring at tick 0 (so the season is derived from the tick and needs no saved state). Each season
- * scales nature as data: `crop` (field growth), `tree` (sapling growth), `spread` (natural seeding),
- * `fish` (restocking).
- */
-export interface SeasonDef {
-  key: 'spring' | 'summer' | 'autumn' | 'winter';
-  name: string;
-  crop: number;
-  tree: number;
-  spread: number;
-  fish: number;
-}
-export const SEASON_TICKS = 4 * 60 * TICKS_PER_SECOND;
-export const SEASONS: readonly SeasonDef[] = [
-  { key: 'spring', name: 'Весна', crop: 1.4, tree: 1.9, spread: 1.8, fish: 1.3 },
-  { key: 'summer', name: 'Лето', crop: 1.4, tree: 1.3, spread: 1.2, fish: 1.0 },
-  { key: 'autumn', name: 'Осень', crop: 0.9, tree: 0.7, spread: 0.6, fish: 0.9 },
-  { key: 'winter', name: 'Зима', crop: 0, tree: 0.15, spread: 0, fish: 0.4 },
-];
-
 // ------------------------------------------------------------- professions
 
 /**

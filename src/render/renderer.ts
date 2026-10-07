@@ -1,5 +1,5 @@
 import { Container, Graphics, MeshSimple, Sprite, Texture, type Application } from 'pixi.js';
-import { TERRAIN, BUILD_TICKS_PER_UNIT, BUILDINGS, CROP_KINDS, SHOT_TICKS, TREE_MATURE } from '../sim/config';
+import { BUILD_TICKS_PER_UNIT, BUILDINGS, CROP_KINDS, SHOT_TICKS, TREE_MATURE } from '../sim/config';
 import { RESOURCES, Terrain, type Building, type BuildingType, type Resource, type Settler } from '../sim/types';
 import { CHUNK } from '../sim/map';
 import { LOCAL_PLAYER, type World } from '../sim/world';
@@ -44,34 +44,8 @@ const TERRAIN_KIND: Record<Terrain, GroundKind> = {
 
 const TREE_SCALE = [0, 0.35, 0.55, 0.78, 1];
 
-/**
- * How a season looks, as multiplicative tints (r, g, b in 0..1) plus how much the snow sheet covers.
- * Tree variants 0–1 are conifers, 2–3 broadleaf (see `paintTree`).
- */
-interface SeasonLook {
-  snow: number;
-  ground: readonly [number, number, number];
-  conifer: readonly [number, number, number];
-  broadleaf: readonly [number, number, number];
-}
-
-const SEASON_LOOKS: readonly SeasonLook[] = [
-  /* spring */ { snow: 0, ground: [0.97, 1, 0.94], conifer: [1, 1, 1], broadleaf: [0.9, 1, 0.82] },
-  /* summer */ { snow: 0, ground: [1, 1, 1], conifer: [1, 1, 1], broadleaf: [1, 1, 1] },
-  /* autumn */ { snow: 0, ground: [1, 0.94, 0.84], conifer: [0.96, 0.95, 0.88], broadleaf: [1, 0.6, 0.3] },
-  /* winter */ { snow: 0.8, ground: [0.9, 0.94, 1], conifer: [0.5, 0.66, 0.72], broadleaf: [0.6, 0.52, 0.46] },
-];
-
 /** First-time chunk builds allowed per frame (see `syncVisibleChunks`). */
 const CHUNK_BUILDS_PER_FRAME = 6;
-
-/** The last part of each season blends towards the next one. */
-const SEASON_BLEND_FROM = 0.8;
-const SEASON_BLEND_STEPS = 8;
-
-function tintOf(rgb: readonly [number, number, number]): number {
-  return (Math.round(rgb[0] * 255) << 16) | (Math.round(rgb[1] * 255) << 8) | Math.round(rgb[2] * 255);
-}
 
 /** Cheap deterministic per-tile hash for picking sprite variants. */
 function hash(i: number): number {
@@ -187,12 +161,6 @@ export class GameRenderer {
    */
   private readonly chunkReady: Uint8Array;
   private readonly territoryPending: Uint8Array;
-  /** Seasons: per-chunk snow sheet (alpha driven globally) and the season look last applied per chunk. */
-  private readonly snow = new Container();
-  private readonly snowChunks: (Graphics | null)[] = [];
-  private readonly seasonApplied: Int32Array;
-  private seasonKey = -1;
-  private seasonLook: SeasonLook = SEASON_LOOKS[0];
   private lastHeightSync = 0;
   /** Where each static object stands (tile coordinates) and its offset from that surface point. */
   private readonly staticAt = new WeakMap<Container, { x: number; y: number; ox: number; oy: number }>();
@@ -269,7 +237,7 @@ export class GameRenderer {
     /** Draw the fog of war (`?fog=off` disables it for debugging). */
     private readonly fogOn = true,
   ) {
-    this.world.addChild(this.ground, this.snow, this.territory, this.marks, this.objects, this.shots, this.fog, this.ghostLayer);
+    this.world.addChild(this.ground, this.territory, this.marks, this.objects, this.shots, this.fog, this.ghostLayer);
     this.settlerTex = atlas.settlerTextures();
     for (const r of RESOURCES) this.wareTex[r] = atlas.get(`ware:${r}`);
     this.effects = new Effects(atlas, sim, (x, y) => this.surface(x, y), this.sound);
@@ -309,8 +277,6 @@ export class GameRenderer {
     this.heightSeen = new Uint32Array(chunks);
     this.chunkReady = new Uint8Array(chunks);
     this.territoryPending = new Uint8Array(chunks);
-    this.seasonApplied = new Int32Array(chunks).fill(-1);
-    for (let c = 0; c < chunks; c++) this.snowChunks.push(null);
     this.chunkBounds = new Float32Array(chunks * 4);
     this.groundSheet = new Texture({ source: this.atlas.get('ground:grass:0').source });
     for (let c = 0; c < chunks; c++) {
@@ -390,89 +356,16 @@ export class GameRenderer {
     for (let c = 0; c < this.groundChunks.length; c++) this.heightSeen[c] = map.heightVersion[c];
   }
 
-  /** First time a chunk comes into view: build its ground, boulders, snow sheet and pending overlays. */
+  /** First time a chunk comes into view: build its ground, boulders and pending overlays. */
   private ensureChunk(c: number): void {
     if (this.chunkReady[c]) return;
     this.chunkReady[c] = 1;
     this.buildChunkGround(c);
-    this.buildChunkSnow(c);
     this.placeBoulders(c);
     if (this.territoryPending[c]) {
       this.territoryPending[c] = 0;
       this.drawTerritoryChunk(c);
     }
-  }
-
-  /** Snow sheet of a chunk: land tiles on the surface, faded in and out by the season (`syncSeason`). */
-  private buildChunkSnow(c: number): void {
-    const { map } = this.sim;
-    this.snowChunks[c]?.destroy();
-    const g = new Graphics();
-    const x0 = (c % map.chunksX) * CHUNK;
-    const y0 = Math.floor(c / map.chunksX) * CHUNK;
-    for (let y = y0; y < Math.min(map.h, y0 + CHUNK); y++) {
-      for (let x = x0; x < Math.min(map.w, x0 + CHUNK); x++) {
-        if (TERRAIN[map.terrain[map.idx(x, y)] as Terrain].water) continue;
-        const q = [this.corner(x, y), this.corner(x + 1, y), this.corner(x + 1, y + 1), this.corner(x, y + 1)];
-        g.poly(q.flatMap((p) => [p.x, p.y]));
-      }
-    }
-    g.fill({ color: 0xf3f7fc });
-    g.visible = this.chunkVisible[c] === 1;
-    this.snowChunks[c] = g;
-    this.snow.addChild(g);
-  }
-
-  /**
-   * Seasons are a global look: the snow sheet's alpha and per-chunk tints of the ground mesh and the
-   * trees. Recomputed only when the (quantised) blend changes, and only for chunks in view; chunks out
-   * of view catch up when they are shown.
-   */
-  private syncSeason(): void {
-    const season = this.sim.season();
-    const t = Math.max(0, (season.progress - SEASON_BLEND_FROM) / (1 - SEASON_BLEND_FROM));
-    const step = Math.round(t * t * (3 - 2 * t) * SEASON_BLEND_STEPS);
-    const key = season.index * (SEASON_BLEND_STEPS + 1) + step;
-    if (key !== this.seasonKey) {
-      this.seasonKey = key;
-      const a = SEASON_LOOKS[season.index];
-      const b = SEASON_LOOKS[(season.index + 1) % SEASON_LOOKS.length];
-      const k = step / SEASON_BLEND_STEPS;
-      const mix = (u: readonly number[], v: readonly number[]) =>
-        [0, 1, 2].map((j) => u[j] + (v[j] - u[j]) * k) as [number, number, number];
-      this.seasonLook = {
-        snow: a.snow + (b.snow - a.snow) * k,
-        ground: mix(a.ground, b.ground),
-        conifer: mix(a.conifer, b.conifer),
-        broadleaf: mix(a.broadleaf, b.broadleaf),
-      };
-      this.snow.alpha = this.seasonLook.snow;
-      this.snow.visible = this.seasonLook.snow > 0.01;
-    }
-    for (let c = 0; c < this.seasonApplied.length; c++) {
-      if (!this.chunkVisible[c] || this.seasonApplied[c] === key) continue;
-      this.seasonApplied[c] = key;
-      this.applySeasonToChunk(c);
-    }
-  }
-
-  private applySeasonToChunk(c: number): void {
-    const { map } = this.sim;
-    const mesh = this.groundLayers[c]?.children[0];
-    if (mesh) mesh.tint = tintOf(this.seasonLook.ground);
-    const x0 = (c % map.chunksX) * CHUNK;
-    const y0 = Math.floor(c / map.chunksX) * CHUNK;
-    for (let y = y0; y < Math.min(map.h, y0 + CHUNK); y++) {
-      for (let x = x0; x < Math.min(map.w, x0 + CHUNK); x++) {
-        const i = map.idx(x, y);
-        const tree = this.treeSprites[i];
-        if (tree) tree.tint = this.treeTint(i);
-      }
-    }
-  }
-
-  private treeTint(i: number): number {
-    return tintOf(hash(i) % 4 >= 2 ? this.seasonLook.broadleaf : this.seasonLook.conifer);
   }
 
   /** Cliffs are covered in boulders; walkable slopes only get the odd small stone. */
@@ -591,8 +484,6 @@ export class GameRenderer {
       this.computeChunkBounds(c);
       if (!this.chunkReady[c]) continue; // built from the new heights when it comes into view
       this.buildChunkGround(c);
-      this.buildChunkSnow(c);
-      this.seasonApplied[c] = -1;
       this.drawTerritoryChunk(c);
       for (const obj of this.chunkObjects[c]) {
         const at = this.staticAt.get(obj);
@@ -665,7 +556,6 @@ export class GameRenderer {
     this.syncHeights(timeMs);
     this.syncTerritory();
     this.syncVisibleChunks();
-    this.syncSeason();
     this.syncChangedTiles();
     this.syncBuildings();
     this.syncSettlers(alpha, timeMs);
@@ -770,8 +660,6 @@ export class GameRenderer {
       this.chunkVisible[c] = visible;
       if (visible) this.ensureChunk(c);
       this.groundChunks[c].visible = visible === 1;
-      const snow = this.snowChunks[c];
-      if (snow) snow.visible = visible === 1;
       this.territoryChunks[c].visible = visible === 1;
       this.fogChunks[c].visible = visible === 1 && this.fogOn;
       for (const obj of this.chunkObjects[c]) {
@@ -828,7 +716,6 @@ export class GameRenderer {
       const h = hash(i);
       s = new Sprite(this.atlas.get(`tree:${h % 4}`));
       s.label = 'tree';
-      s.tint = this.treeTint(i);
       const p = this.surface(x, y);
       s.position.set(p.x + ((h >> 6) % 9) - 4, p.y + ((h >> 10) % 5) - 2);
       s.zIndex = depthOf(x, y);

@@ -371,19 +371,3 @@ button.danger {
   cursor: pointer;
 }
 
-.season {
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--muted);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.season-bar {
-  display: inline-block;
-  width: 80px;
-  height: 4px;
-  border-radius: 2px;
-  background: linear-gradient(to right, var(--accent) var(--p, 0%), rgba(255, 255, 255, 0.12) var(--p, 0%));
-}
