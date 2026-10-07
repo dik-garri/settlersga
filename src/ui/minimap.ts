@@ -109,8 +109,9 @@ export class Minimap {
     this.nextRow = y1 >= h ? 0 : y1;
     const { ctx } = this;
     ctx.save();
-    ctx.clearRect(0, 0, WIDTH, this.el.height);
+    // Clear in device pixels: the context is scaled by the pixel ratio, which may be below 1.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.el.width, this.el.height);
     const dpr = window.devicePixelRatio || 1;
     // Image pixel (x, y) is tile (x, y): map it through the isometric transform.
     ctx.setTransform(this.sx * dpr, this.sy * dpr, -this.sx * dpr, this.sy * dpr, this.cx * dpr, this.pad * dpr);
