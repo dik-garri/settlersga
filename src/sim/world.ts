@@ -7,6 +7,7 @@ import {
   DISPATCH_EVERY,
   MAP_SIZE,
   OUTPUT_SHARES,
+  SOLDIER_LEVELS,
   PROFESSIONS,
   PROSPECT_RADIUS,
   PROSPECT_TICKS,
@@ -81,6 +82,10 @@ export interface Player {
   castleId: number;
   /** The player's weights for share-controlled outputs (weapons); missing ones use `OUTPUT_SHARES`. */
   shares?: Partial<Record<Resource, number>>;
+  /** Level (index into `SOLDIER_LEVELS`) its barracks train recruits at; default 0. */
+  recruitLevel?: number;
+  /** Alliance: players with the same team never fight and win together; none = on its own. */
+  team?: number;
   /** Worker orders, toolsmith queue, goods distribution (`economy.ts`). */
   economy?: EconomyState;
 }
@@ -92,6 +97,8 @@ export interface WorldOptions {
   players?: number;
   /** Players controlled by the computer (see `ai.ts`). */
   ai?: PlayerId[];
+  /** Team of each player, by player index (e.g. [1, 1, 2, 2]): allies never fight and win together. */
+  teams?: number[];
   /** Restore this snapshot instead of generating a new world (see `World.load`). */
   from?: SaveData;
   /** Start goods and workers, as in Settlers 4 (default `medium`). */
@@ -164,6 +171,9 @@ export class World {
     const starts = startPositions(size, opts.players ?? 1);
     this.map = generateMap(seed, size, starts);
     for (const st of starts) this.addPlayer(st.x - 1, st.y - 1, opts.start ?? 'medium');
+    opts.teams?.forEach((team, k) => {
+      if (this.players[k] && Number.isFinite(team)) this.players[k].team = team;
+    });
     for (const p of opts.ai ?? []) if (this.players.some((pl) => pl.id === p)) this.ai.push(createAi(p));
     spawnAnimals(this, starts);
   }
@@ -266,11 +276,21 @@ export class World {
     return this.defeated.includes(player);
   }
 
-  /** 'won' once every other player is defeated, 'lost' once this one is, else 'playing'. */
+  /** Same player, or players on the same team: they never fight each other and win together. */
+  allied(a: PlayerId, b: PlayerId): boolean {
+    if (a === b) return true;
+    const ta = this.players[a - 1]?.team;
+    return ta !== undefined && ta === this.players[b - 1]?.team;
+  }
+
+  /**
+   * 'won' once every player not allied with this one is defeated (allies win together), 'lost' once
+   * this one is, else 'playing'.
+   */
   outcome(player: PlayerId = LOCAL_PLAYER): 'playing' | 'won' | 'lost' {
     if (this.isDefeated(player)) return 'lost';
-    const others = this.players.filter((p) => p.id !== player);
-    return others.length > 0 && others.every((p) => this.isDefeated(p.id)) ? 'won' : 'playing';
+    const foes = this.players.filter((p) => !this.allied(p.id, player));
+    return foes.length > 0 && foes.every((p) => this.isDefeated(p.id)) ? 'won' : 'playing';
   }
 
   /**
@@ -316,6 +336,22 @@ export class World {
   shareOf(res: Resource, player: PlayerId = LOCAL_PLAYER): number {
     const p = this.players.find((q) => q.id === player);
     return p?.shares?.[res] ?? OUTPUT_SHARES[res] ?? 0;
+  }
+
+  /**
+   * Player command: the level (index into `SOLDIER_LEVELS`) its barracks train recruits at. A level
+   * costs `SOLDIER_LEVELS[k].cost` gold per recruit; short of gold, a barracks trains at the highest
+   * level the gold on its pile pays for.
+   */
+  setRecruitLevel(level: number, player: PlayerId = LOCAL_PLAYER): boolean {
+    const p = this.players.find((q) => q.id === player);
+    if (!p || !Number.isInteger(level) || level < 0 || level >= SOLDIER_LEVELS.length) return false;
+    p.recruitLevel = level;
+    return true;
+  }
+
+  recruitLevel(player: PlayerId = LOCAL_PLAYER): number {
+    return this.players.find((q) => q.id === player)?.recruitLevel ?? 0;
   }
 
   /** Player command: how many of an orderable profession (builders, diggers) to have in all. */

@@ -81,7 +81,9 @@ export type BuildingType =
   | 'tower'
   | 'bigtower'
   | 'fortress'
-  | 'barracks';
+  | 'barracks'
+  | 'lookout'
+  | 'infirmary';
 
 export type SettlerKind =
   | 'carrier'
@@ -195,7 +197,9 @@ export type Task =
    * Hunter shoots a wild animal (`World.animals` id `a`, reserved via `Animal.hunter`): closes in
    * (`chase` approaches so far), aims for `n` ticks once in range, then carries `res`.
    */
-  | { t: 'hunt'; a: number; n: number; chase: number; res: Resource };
+  | { t: 'hunt'; a: number; n: number; chase: number; res: Resource }
+  /** Wounded fighter lies in an infirmary until healed (`n` counts ticks to the next hit point). */
+  | { t: 'heal'; b: number; n: number };
 
 export interface Settler {
   id: number;

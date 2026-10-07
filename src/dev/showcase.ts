@@ -152,6 +152,11 @@ export function buildShowcase(): World {
     spawnSettler(w, 'carrier', c); // an idle carrier to become the geologist
     w.sendGeologist(best % m.w, Math.floor(best / m.w));
   }
-  run(w, 30);
+  // A few wounded in the castle: they walk to the infirmary and lie there while the demo opens.
+  for (const id of c.garrison.slice(0, 3)) {
+    const s = w.getSettler(id);
+    if (s) s.hp = 8;
+  }
+  run(w, 200);
   return w;
 }

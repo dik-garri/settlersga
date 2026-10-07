@@ -14,7 +14,7 @@ import {
   TERRAIN,
 } from './config';
 import { clearStrokes, levelStep } from './digging';
-import { assaultTick, joinTick, releaseJoin, soldierIdle } from './military';
+import { assaultTick, healTick, joinTick, releaseJoin, soldierIdle } from './military';
 import { canPlant, findGatherTarget, findPlotFor, harvest, isGatherTarget, plant, type Target } from './nature';
 import { findPath } from './pathfinding';
 import { pathSpeed, wearTile } from './paths';
@@ -140,6 +140,8 @@ export function updateSettler(w: World, s: Settler): void {
       return huntTick(w, s, task);
     case 'assault':
       return assaultTick(w, s, task);
+    case 'heal':
+      return healTick(w, s, task);
     case 'prospect': {
       s.working = true;
       if (--task.n > 0) return;

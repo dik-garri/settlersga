@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { centerOf, spawnSettler } from '../src/sim/buildings';
-import { BUILDINGS, PROMOTE_TICKS, SOLDIER_LEVELS, START_SOLDIERS } from '../src/sim/config';
+import { BUILDINGS, SOLDIER_LEVELS, START_SOLDIERS } from '../src/sim/config';
 import { enterGarrison, isFighter, keepOf, killSettler, maxHp } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
 import type { Building, Settler } from '../src/sim/types';
@@ -96,33 +96,16 @@ describe('defence', () => {
   });
 });
 
-describe('promotion', () => {
-  it('gold in the castle promotes the weakest fighters inside, one level at a time', () => {
+describe('no promotion', () => {
+  it('gold in the castle no longer raises the fighters inside: a level is bought at the barracks', () => {
     const w = rich(new World(42));
     const c = w.castle;
-    c.output.gold = 2;
-    run(w, PROMOTE_TICKS * 2 + 20);
-    const ranks = fighters(w, c).map((s) => s.level);
-    expect(ranks.filter((l) => l === 1)).toHaveLength(2);
-    expect(c.output.gold).toBe(0);
-    for (const s of fighters(w, c)) expect(s.hp).toBeLessThanOrEqual(maxHp(s));
-    const promoted = fighters(w, c).find((s) => s.level === 1)!;
-    expect(maxHp(promoted)).toBe(Math.round(100 * SOLDIER_LEVELS[1].hp));
-  });
-
-  it('a training tower gets gold delivered and promotes its garrison', () => {
-    const w = rich(new World(42));
-    const c = w.castle;
-    const big = placeNear(w, 'bigtower', c.x + 6, c.y - 3, 5)!;
-    run(w, 3000);
-    expect(big.done).toBe(true);
-    expect(big.garrison.length).toBeGreaterThan(0);
-    // Promote every castle fighter first so the castle stops using the gold itself.
-    for (const s of fighters(w, c)) s.level = SOLDIER_LEVELS.length - 1;
-    c.output.gold = 2;
+    c.output.gold = 4;
     run(w, 1500);
-    expect(fighters(w, big).some((s) => s.level > 0)).toBe(true);
-    expect(c.output.gold + big.input.gold).toBeLessThan(2);
+    expect(fighters(w, c).every((s) => s.level === 0)).toBe(true);
+    expect(c.output.gold).toBe(4);
+    for (const s of fighters(w, c)) expect(s.hp).toBe(maxHp(s));
+    expect(maxHp({ ...fighters(w, c)[0], level: 1 })).toBe(Math.round(100 * SOLDIER_LEVELS[1].hp));
   });
 });
 
@@ -196,7 +179,6 @@ describe('determinism', () => {
     const { w, ours, theirs } = frontLine('bigtower');
     station(w, theirs, 'archer');
     while (ours.garrison.length < 6) station(w, ours, ours.garrison.length % 3 ? 'soldier' : 'archer');
-    w.castle.output.gold = 3;
     w.attack(theirs.id, 4);
     return w;
   }
@@ -214,6 +196,6 @@ describe('determinism', () => {
     run(a, 1200);
     run(l, 1200);
     expect(saveWorld(l)).toEqual(saveWorld(a));
-    expect(a.settlers.filter(isFighter).some((s) => s.level > 0)).toBe(true);
+    expect(a.settlers.filter(isFighter).length).toBeGreaterThan(0);
   });
 });

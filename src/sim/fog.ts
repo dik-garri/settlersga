@@ -17,11 +17,12 @@ export interface FogState {
   vision: Uint8Array;
   seenUntil: Uint32Array[];
   /** `buildingsVersion` / `territoryVersion` the vision was built for. */
-  builtFor: [number, number];
+  /** `buildingsVersion`, `territoryVersion` and `lookouts(w)` the vision was built for. */
+  builtFor: [number, number, number];
 }
 
 export function createFog(): FogState {
-  return { vision: new Uint8Array(0), seenUntil: [], builtFor: [-1, -1] };
+  return { vision: new Uint8Array(0), seenUntil: [], builtFor: [-1, -1, -1] };
 }
 
 /** Tile offsets within a radius, cached per radius. */
@@ -53,7 +54,9 @@ function stamp(w: World, cx: number, cy: number, r: number, visit: (i: number) =
 
 /** How far a building sees: its territory radius plus a margin, or a small default. */
 export function visionRadius(type: keyof typeof BUILDINGS): number {
-  const t = BUILDINGS[type].territory;
+  const def = BUILDINGS[type];
+  if (def.vision) return def.vision;
+  const t = def.territory;
   return t ? t + FOG.territoryMargin : FOG.buildingRadius;
 }
 
@@ -71,12 +74,32 @@ function rebuildVision(w: World): void {
       m.explored[i] |= bit;
     });
   }
-  f.builtFor = [w.buildingsVersion, w.territoryVersion];
+  f.builtFor = [w.buildingsVersion, w.territoryVersion, lookouts(w)];
+}
+
+/** Building types with a sight of their own (`def.vision`, e.g. the lookout tower). */
+const SIGHTED = (Object.keys(BUILDINGS) as (keyof typeof BUILDINGS)[]).filter((t) => BUILDINGS[t].vision);
+
+/**
+ * Finished buildings with a sight of their own: finishing one widens its sight without touching the
+ * territory, so it must also make the vision stale. Cheap: a pass over the buildings only when such
+ * types exist.
+ */
+function lookouts(w: World): number {
+  if (SIGHTED.length === 0) return 0;
+  let n = 0;
+  for (const b of w.buildings.values()) if (b.done && BUILDINGS[b.type].vision) n++;
+  return n;
+}
+
+function stale(w: World): boolean {
+  const f = w.fog;
+  return f.builtFor[0] !== w.buildingsVersion || f.builtFor[1] !== w.territoryVersion || f.builtFor[2] !== lookouts(w);
 }
 
 /** Rebuilds the building vision if it is stale (e.g. right after a load); cheap otherwise. */
 export function ensureVision(w: World): void {
-  if (w.fog.vision.length !== w.map.w * w.map.h || w.fog.builtFor[0] !== w.buildingsVersion || w.fog.builtFor[1] !== w.territoryVersion) {
+  if (w.fog.vision.length !== w.map.w * w.map.h || stale(w)) {
     rebuildVision(w);
   }
 }
@@ -92,7 +115,7 @@ export function updateFog(w: World): void {
   const f = w.fog;
   const m = w.map;
   while (f.seenUntil.length < w.players.length) f.seenUntil.push(new Uint32Array(m.w * m.h));
-  if (f.builtFor[0] !== w.buildingsVersion || f.builtFor[1] !== w.territoryVersion) rebuildVision(w);
+  if (stale(w)) rebuildVision(w);
   if (w.tick % FOG.settlerEvery !== 0) return;
   const until = w.tick + FOG.settlerEvery;
   for (const s of w.settlers) {

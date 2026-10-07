@@ -20,6 +20,7 @@ import { isFighter, keepOf, wantsRecruit } from '../sim/military';
 import { hasGatherTargetNear } from '../sim/nature';
 import { RESOURCES, type Building, type BuildingType, type Resource, type Settler, type SettlerKind, type Stock } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
+import { barracksRows, garrisonSlotRows, recruitLevelControls, supportRows } from './armyPanel';
 import type { GameState, Placeable } from './state';
 
 /** Weapons a barracks trains with (tools of the fighting professions). */
@@ -433,7 +434,7 @@ export class Hud {
     // Out of sight (fog of war) other players' buildings show only what is known from afar.
     const sighted = !this.state.fog || this.world.isVisible(b.door.x, b.door.y);
     if (enemy) {
-      rows.push(['Владелец', `игрок ${b.owner}`]);
+      rows.push(['Владелец', `игрок ${b.owner}${this.world.allied(b.owner, LOCAL_PLAYER) ? ' (союзник)' : ''}`]);
       if (!sighted) rows.push(['Обзор', 'нет — подойдите ближе']);
       if (def.garrison && b.done) {
         rows.push(['Защитников', sighted ? String(b.garrison.length) : '?']);
@@ -461,12 +462,14 @@ export class Hud {
         rows.push(['Гарнизон', `${b.garrison.length} / ${def.garrison.capacity}`]);
         const members = b.garrison.map((id) => this.world.getSettler(id)).filter((s): s is Settler => !!s);
         if (members.length > 0) rows.push(['Состав', composition(members)]);
+        rows.push(...garrisonSlotRows(this.world, b));
         rows.push(['Не покидают', String(keepOf(b))]);
-        if (def.garrison.trains) rows.push(['Обучение', `золото: ${def.storage ? b.output.gold : b.input.gold}`]);
         if (b.garrisonInbound > 0) rows.push(['Идут в гарнизон', String(b.garrisonInbound)]);
       }
       if (def.territory) rows.push(['Радиус земли', `${def.territory} клеток`]);
       for (const r of RESOURCES) if (def.storage && b.output[r] > 0) rows.push([nameOf(r), String(b.output[r])]);
+    } else if (!def.worker) {
+      rows.push(...(supportRows(this.world, b) ?? []));
     } else {
       const worker = this.world.getSettler(b.workerId);
       const tool = PROFESSIONS[def.worker!].tool;
@@ -485,8 +488,9 @@ export class Hud {
       if (def.barracks) {
         for (const r of BARRACKS_WEAPONS) rows.push([`${nameOf(r)} (запас)`, `${b.input[r]} / ${INPUT_CAP}`]);
         if (worker && worker.inside === b.id && BARRACKS_WEAPONS.some((r) => b.input[r] > 0)) {
-          rows.push(['Обучение', `${Math.floor((100 * b.timer) / def.barracks.ticks)}%`]);
+          rows.push(['Обучение', `${Math.floor((100 * Math.min(b.timer, def.barracks.ticks)) / def.barracks.ticks)}%`]);
         }
+        rows.push(...barracksRows(this.world, b));
       }
       const shared = this.sharedChoices(b);
       if (shared) {
@@ -537,6 +541,7 @@ export class Hud {
     if (orders) this.infoEl.append(orders);
     const shared = this.sharedChoices(b);
     if (shared && shared.length === 2) this.infoEl.append(this.shareControls(shared[0], shared[1]));
+    if (def.barracks) this.infoEl.append(recruitLevelControls(this.world, () => (this.infoKey = '')));
     const actions = el('div', 'info-actions');
     if (!b.done || def.recipe || def.residence) {
       const prio = el('button', b.priority ? 'active' : '', b.priority ? '⬆ Приоритет: да' : '⬆ Приоритет');

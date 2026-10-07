@@ -62,19 +62,20 @@ export const ATTACK_RANGE = 30;
 export const FIGHT_EVERY = 6;
 export const DAMAGE: [number, number] = [12, 24];
 /**
- * Ranks soldiers and archers reach with gold: hit points and damage relative to level 0. Each step
- * costs `PROMOTE_COST` of `PROMOTE_RES`, delivered to a military building that `trains`.
+ * Fighter levels, as in Settlers 4: chosen when the barracks trains a recruit and fixed for life.
+ * Hit points and damage are relative to level 0; `cost` units of `LEVEL_RES` are paid at recruitment
+ * on top of the weapon (level 1 is the weapon alone).
  */
-export const SOLDIER_LEVELS: readonly { hp: number; damage: number }[] = [
-  { hp: 1, damage: 1 },
-  { hp: 1.3, damage: 1.3 },
-  { hp: 1.6, damage: 1.6 },
+export const SOLDIER_LEVELS: readonly { hp: number; damage: number; cost: number }[] = [
+  { hp: 1, damage: 1, cost: 0 },
+  { hp: 1.3, damage: 1.3, cost: 1 },
+  { hp: 1.6, damage: 1.6, cost: 2 },
 ];
-export const PROMOTE_RES: Resource = 'gold';
-export const PROMOTE_COST = 1;
-export const PROMOTE_TICKS = 100;
-/** Garrisoned (inside) soldiers regain one hit point every HEAL_EVERY ticks. */
-export const HEAL_EVERY = 10;
+export const LEVEL_RES: Resource = 'gold';
+/** A fighter below this share of his hit points, idle in a garrison, goes to an infirmary if one has a bed. */
+export const WOUNDED_AT = 0.6;
+/** Garrisons look for wounded to send to an infirmary this often (ticks). */
+export const WOUNDED_CHECK_EVERY = 20;
 /** Visual only: ticks an arrow is drawn in flight. */
 export const SHOT_TICKS = 5;
 /**
@@ -413,6 +414,8 @@ export interface CombatDef {
   melee: number;
   /** Ranged attack: shoots enemies within `range` tiles every `every` ticks for `damage` (× level). */
   ranged?: { range: number; every: number; damage: [number, number] };
+  /** Can take an empty enemy building (in Settlers 4 only swordsmen do; archers support). */
+  captures?: boolean;
 }
 
 export interface ProfessionDef {
@@ -472,7 +475,7 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
   geologist: { name: 'Геолог', behavior: 'prospect', tool: 'hammer' },
   weaponsmith: { name: 'Оружейник', behavior: 'workshop' },
   recruit: { name: 'Новобранец', behavior: 'workshop' },
-  soldier: { name: 'Мечник', behavior: 'soldier', tool: 'sword', hp: 100, combat: { melee: 1 } },
+  soldier: { name: 'Мечник', behavior: 'soldier', tool: 'sword', hp: 100, combat: { melee: 1, captures: true } },
   archer: {
     name: 'Лучник',
     behavior: 'soldier',
@@ -541,26 +544,33 @@ export interface BuildingDef {
   mine?: { res: Resource; radius: number; favourite: Resource };
   /**
    * Barracks: its worker is a recruit who, given a weapon from the building's pile, trains for
-   * `ticks` and leaves as the fighter whose tool that weapon is. The only way to raise new fighters.
+   * `ticks` and leaves as the fighter whose tool that weapon is, at the level the player ordered
+   * (`SOLDIER_LEVELS[k].cost` gold from the pile). The only way to raise new fighters.
    */
   barracks?: { ticks: number };
+  /** Sees this far (tiles from the center) once built, instead of its territory (lookout tower). */
+  vision?: number;
+  /**
+   * Infirmary: wounded fighters (below `WOUNDED_AT` of their hit points) walk here from garrisons
+   * within `range`, take one of `beds`, regain a hit point every `healEvery` ticks and go back.
+   */
+  infirmary?: { beds: number; healEvery: number; range: number };
 }
 
 /**
  * Military building: holds up to `capacity` soldiers and claims `territory` while at least one is
- * inside, or always if `claimsWhenEmpty` (the castle).
+ * inside, or always if `claimsWhenEmpty` (the castle). Slots have a kind, as in Settlers 4:
+ * `archers` of them are for ranged fighters, the rest for melee ones.
  */
 export interface GarrisonDef {
   capacity: number;
   claimsWhenEmpty?: boolean;
   /** Soldiers it never gives away to man other buildings or to attack (default `GARRISON_KEEP`). */
   keep?: number;
-  /** Slots meant for archers; recruiting and transfers fill them with archers first. */
+  /** Slots for archers; the other `capacity − archers` slots are for swordsmen. */
   archers?: number;
   /** Defenders fighting at its door are this much stronger. */
   defense?: number;
-  /** Gold delivered here promotes the soldiers inside. */
-  trains?: boolean;
 }
 
 /**
@@ -595,7 +605,8 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     playerBuildable: false,
     storage: true,
     territory: 10,
-    garrison: { capacity: 12, claimsWhenEmpty: true, keep: 4, archers: 4, defense: 1.5, trains: true },
+    // The headquarters: the army's reserve (S4 has no such building; 7 swordsmen + 5 archers).
+    garrison: { capacity: 12, claimsWhenEmpty: true, keep: 4, archers: 5, defense: 1.5 },
   },
 
   house_small: {
@@ -796,7 +807,8 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     playerBuildable: true,
     category: 'military',
     territory: 8,
-    garrison: { capacity: 3, keep: 1, archers: 1, defense: 1.2 },
+    // As in Settlers 4: 1 swordsman + 2 archers.
+    garrison: { capacity: 3, keep: 1, archers: 2, defense: 1.2 },
   },
   bigtower: {
     name: 'Большая башня',
@@ -807,7 +819,8 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     playerBuildable: true,
     category: 'military',
     territory: 11,
-    garrison: { capacity: 6, keep: 2, archers: 2, defense: 1.35, trains: true },
+    // 3 swordsmen + 3 archers.
+    garrison: { capacity: 6, keep: 2, archers: 3, defense: 1.35 },
   },
   barracks: {
     name: 'Казарма',
@@ -828,7 +841,28 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     playerBuildable: true,
     category: 'military',
     territory: 14,
-    garrison: { capacity: 12, keep: 3, archers: 4, defense: 1.5, trains: true },
+    // The Settlers 4 castle: 4 swordsmen + 5 archers.
+    garrison: { capacity: 9, keep: 3, archers: 5, defense: 1.5 },
+  },
+  lookout: {
+    name: 'Смотровая башня',
+    w: 2,
+    h: 2,
+    cost: { plank: 2, stone: 1 },
+    worker: null,
+    playerBuildable: true,
+    category: 'military',
+    vision: 16,
+  },
+  infirmary: {
+    name: 'Лазарет',
+    w: 2,
+    h: 2,
+    cost: { plank: 3, stone: 2 },
+    worker: null,
+    playerBuildable: true,
+    category: 'military',
+    infirmary: { beds: 4, healEvery: 3, range: 30 },
   },
 };
 
@@ -883,6 +917,7 @@ export const AI_PLAN: readonly { type: BuildingType; count: number; after?: Buil
   { type: 'toolsmith', count: 1, after: 'ironsmelter' },
   { type: 'weaponsmith', count: 1, after: 'ironsmelter' },
   { type: 'barracks', count: 1, after: 'weaponsmith' },
+  { type: 'infirmary', count: 1, after: 'barracks' },
   { type: 'goldmine', count: 1, after: 'toolsmith' },
   { type: 'goldsmelter', count: 1, after: 'goldmine' },
   { type: 'pigfarm', count: 1 },
@@ -927,6 +962,11 @@ export const AI = {
   attackCooldown: 600,
   /** With at least this many soldiers and no enemy in reach, build military buildings towards the enemy… */
   frontierSoldiers: 8,
+  /**
+   * While it knows no enemy building but sees foreign land, it puts up to this many lookout towers
+   * (`def.vision`) at the border facing it: towers stop at the other's border, too far to see a castle.
+   */
+  maxLookouts: 2,
   /** …up to this many military buildings in total. */
   maxMilitary: 30,
   /** While it knows no enemy, how strongly towers lean towards the map center (per tile). */
@@ -939,8 +979,22 @@ export const AI = {
   placeTries: 40,
   /** The last this-many units of a tool are kept for the first building of a type that needs it. */
   keepTools: 1,
-  /** Its army make-up (weights for `World.setShare`): mostly swordsmen, archers for the towers. */
-  weaponShares: { sword: 65, bow: 35 } as Partial<Record<Resource, number>>,
+  /**
+   * Its army make-up (weights for `World.setShare`). S4 garrisons have more archer slots than before,
+   * and archers in a tower let its swordsman go on an attack (a tower keeps one fighter), so more bows
+   * than it used to make; swordsmen still lead, as only they capture.
+   */
+  weaponShares: { sword: 55, bow: 45 } as Partial<Record<Resource, number>>,
+  /** The level it orders recruits at (the barracks falls back to what the gold on hand pays for). */
+  recruitLevel: 2,
+  /**
+   * Materials it keeps back while nothing of its own still produces them (its stone deposits are
+   * worked out): only producers of that material may use the reserve; border-pushing military
+   * buildings may use it down to `reserveFloor`, so it can still reach new deposits and always keeps
+   * enough to open a mine of it.
+   */
+  reserve: { stone: 4 } as Partial<Record<Resource, number>>,
+  reserveFloor: { stone: 1 } as Partial<Record<Resource, number>>,
 };
 
 // ---------------------------------------------------------------- wild animals

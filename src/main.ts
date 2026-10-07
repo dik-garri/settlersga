@@ -42,13 +42,15 @@ async function main() {
   // opponents passive.
   const players = params.has('players') ? Number(params.get('players')) : 2;
   const ai = params.get('ai') === 'off' ? [] : Array.from({ length: players - 1 }, (_, k) => k + 2);
+  // ?teams=1,1,2,2: team per player (allies never fight and win together).
+  const teams = params.get('teams')?.split(',').map(Number);
   // ?demo: a development showcase that builds itself up to show everything at once (src/dev).
   const demo = params.has('demo');
   const world = save
     ? World.load(save)
     : demo
       ? (await import('./dev/showcase')).buildShowcase()
-      : new World(seed, { size, players, ai, start: readStartLevel(params) });
+      : new World(seed, { size, players, ai, teams, start: readStartLevel(params) });
   const state = createState();
   // ?art=3d: the pilot set of pre-rendered 3D sprites (art/blender) instead of some procedural ones.
   // The demo shows the 3D art and no fog unless asked otherwise (?art=classic, ?fog=on).
