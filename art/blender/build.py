@@ -20,6 +20,7 @@ import figures  # noqa: E402
 import goods  # noqa: E402
 import lib  # noqa: E402
 import buildings  # noqa: E402
+import nature  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 OUT = os.path.join(ROOT, 'public', 'art', '3d')
@@ -234,32 +235,6 @@ def build_woodcutter():
     lib.tag(4)
 
 
-def build_tree():
-    bark = lib.mat_grain('bark', (0.36, 0.2, 0.09), (0.62, 0.38, 0.18), scale=7, stretch=(1, 1, 5), bump=0.9)
-    foliage = leaves()
-    # A slightly crooked trunk flaring at the base, with a few limbs into the crown.
-    lib.cylinder((0, 0, 0.06), 0.11, 0.12, bark, radius2=0.075, verts=12)
-    lib.cylinder((0.01, 0, 0.32), 0.075, 0.44, bark, radius2=0.05, verts=12, rot=(0.06, 0.05, 0))
-    for a, z, l in ((0.5, 0.5, 0.32), (2.4, 0.56, 0.3), (4.2, 0.52, 0.3), (5.6, 0.62, 0.26)):
-        lib.cylinder((math.cos(a) * 0.09, math.sin(a) * 0.09, z + 0.08), 0.03, l, bark, radius2=0.015,
-                     rot=(math.sin(a) * -0.8, math.cos(a) * 0.8, 0), verts=8)
-    # Crown: many small leaf clumps over an ellipsoid, so light catches individual clusters.
-    import random
-
-    rnd = random.Random(7)
-    for k in range(150):
-        u = rnd.uniform(0, math.tau)
-        v = rnd.uniform(-0.55, 1.0)
-        rr = math.sqrt(max(0.0, 1 - v * v)) * rnd.uniform(0.8, 1.08)
-        x = math.cos(u) * rr * 0.37
-        y = math.sin(u) * rr * 0.37
-        z = 0.98 + v * 0.31
-        leaf = lib.lumpy((x, y, z), rnd.uniform(0.045, 0.075), foliage, scale=(1, 1, 0.7), strength=0.5, noise=0.3,
-                         seed=k, subdiv=1, flat=True)
-        leaf.rotation_euler = (rnd.uniform(0, 3), rnd.uniform(0, 3), rnd.uniform(0, 3))
-    lib.lumpy((0, 0, 0.98), 0.32, foliage, scale=(1, 1, 0.9), strength=0.3, noise=0.5, seed=99)
-
-
 def build_deposit(size):
     """Quarry stone as in Settlers 4: a cluster of tall, jagged, pale rock spires with dark cracks.
     Size 0 is the full deposit; 1 and 2 are what is left as it is quarried."""
@@ -317,11 +292,12 @@ SINGLE = {
     'bakery': (buildings.build_bakery, 150, 140, 75, 100),
     'waterworks': (buildings.build_waterworks, 150, 140, 75, 100),
     'warehouse': (buildings.build_warehouse, 150, 140, 75, 100),
-    'tree': (build_tree, 84, 100, 34, 80),
     'deposit0': (lambda: build_deposit(0), 64, 72, 30, 58),
     'deposit1': (lambda: build_deposit(1), 64, 72, 30, 58),
     'deposit2': (lambda: build_deposit(2), 64, 72, 30, 58),
 }
+# Tree variants and ground props (`-- trees`, `-- props`).
+SINGLE.update(nature.SINGLE)
 
 
 #: Construction stages rendered before the finished building (0 stakes … 3 roof half on).
@@ -335,6 +311,8 @@ def main():
     for name in names:
         if name == 'deposit':
             todo = ['deposit0', 'deposit1', 'deposit2']
+        elif name in ('trees', 'props'):
+            todo = list(nature.TREES if name == 'trees' else nature.PROPS)
         else:
             todo = [name]
         for n in todo:

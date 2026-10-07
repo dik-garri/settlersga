@@ -54,6 +54,8 @@ const TERRAIN_KIND: Record<Terrain, GroundKind> = {
 };
 
 const TREE_SCALE = [0, 0.35, 0.55, 0.78, 1];
+/** About one grass tile in this many gets a decorative prop (3D art). */
+const PROP_EVERY = 9;
 
 /** Chunk unloading (`unloadHiddenChunks`): built chunks kept regardless, hidden time before a chunk goes, and per call. */
 const KEEP_CHUNKS = 128;
@@ -523,10 +525,40 @@ export class GameRenderer {
       }),
       shade,
     );
+    this.scatterProps(layer, x0, y0, x1, y1);
     // The ground layer stays below the chunk's field decals.
     disposeLayer(this.groundLayers[c]);
     this.groundLayers[c] = layer;
     this.groundChunks[c].addChildAt(layer, 0);
+  }
+
+  /**
+   * Decorative props on the grass of a chunk (3D art): tufts of tall grass, flowers, mushrooms,
+   * small stones on about one tile in `PROP_EVERY`, picked and placed by tile hash, so they are the
+   * same every time the chunk is (re)built. They are render-only and part of the ground layer, so
+   * they never block anything, sit under everything standing, and go with the layer when the chunk
+   * unloads. Tiles with something on them when the chunk is built are skipped; what is placed later
+   * (buildings, fields, paths) is drawn over them.
+   */
+  private scatterProps(layer: Container, x0: number, y0: number, x1: number, y1: number): void {
+    const n = this.atlas.props;
+    if (n === 0) return;
+    const { map } = this.sim;
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const i = map.idx(x, y);
+        const h = hash(i * 31 + 17);
+        if (h % PROP_EVERY !== 0 || map.terrain[i] !== Terrain.Grass) continue;
+        if (map.tree[i] || map.stone[i] || map.building[i] || map.door[i] || map.crop[i]) continue;
+        const s = new Sprite(this.atlas.get(`prop:${(h >>> 8) % n}`));
+        const ox = (((h >>> 12) % 100) / 100 - 0.5) * 0.6;
+        const oy = (((h >>> 19) % 100) / 100 - 0.5) * 0.6;
+        const p = this.surface(x + ox, y + oy);
+        s.position.set(p.x, p.y);
+        if ((h >>> 5) & 1) s.scale.x = -1;
+        layer.addChild(s);
+      }
+    }
   }
 
   /**
@@ -942,7 +974,7 @@ export class GameRenderer {
     }
     if (!s) {
       const h = hash(i);
-      s = new Sprite(this.atlas.get(`tree:${h % 4}`));
+      s = new Sprite(this.atlas.get(`tree:${h % this.atlas.treeVariants}`));
       s.label = 'tree';
       const p = this.surface(x, y);
       s.position.set(p.x + ((h >> 6) % 9) - 4, p.y + ((h >> 10) % 5) - 2);

@@ -1,1 +1,1 @@
-{"period": 8, "frame": [66, 34], "kinds": ["grass"]}
+{"frame": [66, 34], "kinds": {"grass": 8, "sand": 4, "desert": 4, "water": 4, "ford": 4, "mountain": 4, "rock": 4, "swamp": 4}, "fields": {"grain": 4}, "paths": {"levels": 2, "variants": 4}}

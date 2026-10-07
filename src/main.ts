@@ -52,9 +52,9 @@ async function main() {
       ? (await import('./dev/showcase')).buildShowcase()
       : new World(seed, { size, players, ai, teams, start: readStartLevel(params) });
   const state = createState();
-  // ?art=3d: the pilot set of pre-rendered 3D sprites (art/blender) instead of some procedural ones.
-  // The demo shows the 3D art and no fog unless asked otherwise (?art=classic, ?fog=on).
-  const art3d = params.get('art') === '3d' || (demo && params.get('art') !== 'classic');
+  // The pre-rendered 3D art (art/blender, art/textures) is the default; ?art=classic keeps the
+  // procedural painters. The demo shows no fog unless asked (?fog=on).
+  const art3d = params.get('art') !== 'classic';
   const atlas = new SpriteAtlas(art3d ? await loadArt3d() : null);
   state.fog = demo ? params.get('fog') === 'on' : params.get('fog') !== 'off';
   const renderer = new GameRenderer(app, world, atlas, state.fog);

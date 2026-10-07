@@ -25,7 +25,21 @@ import {
   type GroundKind,
 } from './sprites';
 import { WALK_FRAMES, WORK_FRAMES } from './anim';
-import { MILL_SAIL_FRAMES, ART3D_BUILDINGS, ART3D_PILES, ART3D_STAGED, ART3D_STAGES, ART3D_SPRITES, PILE, PILE_MAX, type Art3d } from './art3d';
+import {
+  ART3D_BUILDINGS,
+  ART3D_PILES,
+  ART3D_PROPS,
+  ART3D_SPRITES,
+  ART3D_STAGED,
+  ART3D_STAGES,
+  ART3D_TREES,
+  FIELD_FRAME,
+  MILL_SAIL_FRAMES,
+  PATH_FRAME,
+  PILE,
+  PILE_MAX,
+  type Art3d,
+} from './art3d';
 import { addAnimalSprites } from './animals';
 import { ACTION_IDS, ACTIONS, HAT_STYLES, styleOf, TOOLS, type ActionId, type HatStyle, type ToolShape } from './animConfig';
 import { paintFlash, paintGlint, paintGlow, paintPuff, paintSpark } from './fxArt';
@@ -158,17 +172,23 @@ export class SpriteAtlas {
   readonly art3d: Art3d | null;
   /** Ground kinds drawn from a seamless texture: tile (x, y) uses variant (x mod p) + p·(y mod p). */
   readonly groundPeriod: Partial<Record<GroundKind, number>> = {};
+  /** Tree sprite variants `tree:0..n-1` the renderer picks from by tile hash. */
+  readonly treeVariants: number;
+  /** Decorative ground props `prop:0..n-1` (3D art only; none in the procedural art). */
+  readonly props: number;
 
   constructor(art3d: Art3d | null = null) {
     this.art3d = art3d;
+    this.treeVariants = art3d ? ART3D_TREES : 4;
+    this.props = art3d ? ART3D_PROPS.length : 0;
     iconArt = art3d;
     const a = new AtlasBuilder();
     // Textured ground (`?art=3d`): seamless diamonds cut from one periodic texture per kind.
-    const textured = (kind: GroundKind) => (art3d?.ground.kinds.includes(kind) ? art3d.images.get(`ground-${kind}`)! : null);
+    const textured = (kind: GroundKind) => (art3d?.ground.kinds[kind] ? art3d.images.get(`ground-${kind}`)! : null);
     for (const kind of GROUND_PRIORITY) {
       const sheet = textured(kind);
       if (sheet) {
-        const p = art3d!.ground.period;
+        const p = art3d!.ground.kinds[kind];
         this.groundPeriod[kind] = p;
         for (let v = 0; v < p * p; v++) a.add(`ground:${kind}:${v}`, 66, 34, 33, 17, (ctx) => drawFrame(ctx, sheet, v, 66, 34));
         continue;
@@ -509,7 +529,21 @@ function addArt3d(a: AtlasBuilder, art: Art3d): void {
   const wares = art.images.get('wares')!;
   const [ww, wh, wax, way] = art.wares.frame;
   art.wares.order.forEach((res, k) => a.add(`ware:${res}`, ww, wh, wax, way, (ctx) => drawFrame(ctx, wares, k, ww, wh)));
-  one('tree:0', 'tree');
-  for (let v = 1; v < 4; v++) a.alias(`tree:${v}`, 'tree:0');
+  // Trees: real variants (conifers and broadleaf trees); the renderer picks one by tile hash.
+  for (let v = 0; v < ART3D_TREES; v++) one(`tree:${v}`, `tree${v}`);
+  // Decorative ground props, scattered by the renderer over grass.
+  ART3D_PROPS.forEach((name, k) => one(`prop:${k}`, name));
+  // Field decals per growth stage, and worn paths per level and variant.
+  for (const [kind, stages] of Object.entries(art.ground.fields ?? {})) {
+    const strip = art.images.get(`fields-${kind}`)!;
+    const f = FIELD_FRAME;
+    for (let s = 1; s <= stages; s++) a.add(`field:${kind}:${s}`, f.w, f.h, f.ax, f.ay, (ctx) => drawFrame(ctx, strip, s - 1, f.w, f.h));
+  }
+  const paths = art.ground.paths;
+  for (let level = 1; level <= (paths?.levels ?? 0); level++) {
+    const strip = art.images.get(`path-${level}`)!;
+    const f = PATH_FRAME;
+    for (let v = 0; v < paths!.variants; v++) a.add(`path:${level}:${v}`, f.w, f.h, f.ax, f.ay, (ctx) => drawFrame(ctx, strip, v, f.w, f.h));
+  }
   for (let v = 0; v < 3; v++) one(`deposit:${v}`, `deposit${v}`);
 }

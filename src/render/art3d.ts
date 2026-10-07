@@ -12,11 +12,17 @@ import { buildSettler3d, type Settler3d, type SettlersMeta } from './settler3d';
 
 /** `ground.json` written by `art/textures/ground.py`. */
 export interface GroundMeta {
-  /** Tile (x, y) uses variant (x mod period) + period·(y mod period); textures are seamless. */
-  period: number;
   /** Logical size of one diamond frame (as the procedural ground sprites). */
   frame: [number, number];
-  kinds: string[];
+  /**
+   * Textured ground kinds and their period: tile (x, y) uses variant (x mod p) + p·(y mod p) of
+   * `ground-<kind>.png`; textures are seamless.
+   */
+  kinds: Record<string, number>;
+  /** Field decals per crop kind: `fields-<kind>.png`, a strip of that many growth stages (1…n). */
+  fields?: Record<string, number>;
+  /** Worn-path decals: `path-<level>.png` for levels 1…levels, each a strip of `variants` frames. */
+  paths?: { levels: number; variants: number };
 }
 
 /** `wares.json` written by `art/blender/goods.py`: the strip of single carried wares. */
@@ -108,6 +114,24 @@ export const ART3D_PILES: readonly Resource[] = RESOURCES;
 export const PILE_MAX = 8;
 export const PILE = { w: 44, h: 34, ax: 22, ay: 24 };
 
+/** Tree variants (`TREES` in art/blender/nature.py): 0–2 conifers, 3–5 broadleaf trees. */
+export const ART3D_TREES = 6;
+const TREE = { w: 84, h: 104, ax: 34, ay: 84 };
+/** Decorative ground props scattered on grass (`PROPS` in nature.py), render-only. */
+export const ART3D_PROPS = [
+  'prop-tuft0',
+  'prop-tuft1',
+  'prop-flowers0',
+  'prop-flowers1',
+  'prop-flowers2',
+  'prop-mushrooms',
+  'prop-stones',
+] as const;
+const PROP = { w: 32, h: 28, ax: 16, ay: 20 };
+/** Field decal and worn-path decal frames (`fields`, `paths` in art/textures/ground.py). */
+export const FIELD_FRAME = { w: 66, h: 40, ax: 33, ay: 24 };
+export const PATH_FRAME = { w: 80, h: 44, ax: 40, ay: 22 };
+
 /** Logical size and anchor of the single-image sprites, matching `build.py`'s `SINGLE` table. */
 export const ART3D_SPRITES: Record<string, { w: number; h: number; ax: number; ay: number }> = {
   ...ART3D_BUILDINGS,
@@ -116,7 +140,8 @@ export const ART3D_SPRITES: Record<string, { w: number; h: number; ax: number; a
       Array.from({ length: ART3D_STAGES }, (_, k) => [`${type}-s${k}`, c]),
     ),
   ),
-  tree: { w: 84, h: 100, ax: 34, ay: 80 },
+  ...Object.fromEntries(Array.from({ length: ART3D_TREES }, (_, k) => [`tree${k}`, TREE])),
+  ...Object.fromEntries(ART3D_PROPS.map((name) => [name, PROP])),
   deposit0: { w: 64, h: 72, ax: 30, ay: 58 },
   deposit1: { w: 64, h: 72, ax: 30, ay: 58 },
   deposit2: { w: 64, h: 72, ax: 30, ay: 58 },
@@ -140,7 +165,12 @@ export async function loadArt3d(): Promise<Art3d> {
   const settlerPages = await Promise.all(settlersMeta.pages.map((p) => loadImage(`${base}${p}`)));
   const settlers = buildSettler3d(settlersMeta, settlerPages);
   const ground = (await (await fetch(`${base}ground.json`)).json()) as GroundMeta;
-  await Promise.all(ground.kinds.map(async (k) => images.set(`ground-${k}`, await loadImage(`${base}ground-${k}.png`))));
+  const groundStrips = [
+    ...Object.keys(ground.kinds).map((k) => `ground-${k}`),
+    ...Object.keys(ground.fields ?? {}).map((k) => `fields-${k}`),
+    ...Array.from({ length: ground.paths?.levels ?? 0 }, (_, k) => `path-${k + 1}`),
+  ];
+  await Promise.all(groundStrips.map(async (n) => images.set(n, await loadImage(`${base}${n}.png`))));
   const wares = (await (await fetch(`${base}wares.json`)).json()) as WaresMeta;
   const strips = [...ART3D_PILES.map((r) => `piles-${r}`), 'wares', 'millsails'];
   await Promise.all(strips.map(async (n) => images.set(n, await loadImage(`${base}${n}.png`))));
