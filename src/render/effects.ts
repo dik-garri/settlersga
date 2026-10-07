@@ -352,6 +352,12 @@ export class Effects {
 
   // ------------------------------------------------------------------ water
 
+  /** Drops a chunk's glints (the renderer unloads chunks long out of view); rebuilt when seen again. */
+  unloadChunk(c: number): void {
+    this.waterChunks[c]?.destroy({ children: true });
+    this.waterChunks[c] = null;
+  }
+
   /** Lazily builds one glint per few water tiles of a chunk the first time it is seen. */
   private waterChunk(c: number): Container | null {
     let ct = this.waterChunks[c];

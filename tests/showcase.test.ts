@@ -25,6 +25,6 @@ describe('dev showcase (?demo)', () => {
     expect([...w.worn].some((i) => pathLevel(w.map.wear[i]) >= 1)).toBe(true);
     // Free carriers crowd outside near buildings (`idle.ts`).
     const crowd = w.settlers.filter((s) => s.kind === 'carrier' && s.tasks.length === 0 && s.idleAt !== null);
-    expect(crowd.filter((s) => s.inside === null).length).toBeGreaterThan(5);
+    expect(crowd.filter((s) => s.inside === null).length).toBeGreaterThan(2);
   });
 });

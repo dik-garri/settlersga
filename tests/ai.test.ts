@@ -102,9 +102,8 @@ describe('fog of war', () => {
   });
 
   it('prospects for gold, mines and smelts it, and promotes its soldiers', { timeout: LONG }, () => {
-    // 64×64 maps have no gold; this 96×96 one has some on player 2's side (and stone enough to get
-    // there: on many maps the AI still runs out of stone first, see the roadmap).
-    const w = new World(21, { size: 96, players: 2, ai: [2] });
+    // Every start has a guaranteed gold lobe just beyond its castle's land (`START_GUARANTEES`).
+    const w = new World(42, { size: 96, players: 2, ai: [2] });
     let ranked = 0;
     for (let i = 0; i < 30 * MINUTE && ranked === 0; i++) {
       w.step();
@@ -128,13 +127,15 @@ describe('fog of war', () => {
   it('puts a lookout tower at a border with foreign land and so finds the enemy castle', { timeout: LONG }, () => {
     const w = new World(42, { players: 2, ai: [2] });
     let found = -1;
-    for (let t = 0; t < 40 * MINUTE && found < 0; t++) {
+    for (let t = 0; t < 50 * MINUTE && found < 0; t++) {
       w.step();
       if (t % 100 === 0 && knownEnemies(w, 2).some((e) => e.b === w.castleOf(1))) found = t;
     }
     expect(ownBuildings(w, 2).some((b) => b.type === 'lookout')).toBe(true);
     expect(found).toBeGreaterThan(0);
-    expect(found).toBeLessThan(36 * MINUTE);
+    // Without lookouts it never finds it on this map (its towers stop ~25 tiles short). Since 2.5
+    // the guaranteed far mountains draw its first towers elsewhere: ~41 minutes (31 before).
+    expect(found).toBeLessThan(44 * MINUTE);
   });
 });
 

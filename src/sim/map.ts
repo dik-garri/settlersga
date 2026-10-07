@@ -179,11 +179,7 @@ export class GameMap {
   private isFree(x: number, y: number): boolean {
     const i = this.idx(x, y);
     return (
-      this.tree[i] === 0 &&
-      this.stone[i] === 0 &&
-      this.crop[i] === 0 &&
-      this.building[i] === 0 &&
-      this.door[i] === 0
+      this.tree[i] === 0 && this.stone[i] === 0 && this.crop[i] === 0 && this.building[i] === 0 && this.door[i] === 0
     );
   }
 
@@ -307,19 +303,65 @@ function fractalNoise(rng: Rng, w: number, h: number): Float32Array {
   return out;
 }
 
-/** The guaranteed coal/iron mountain, relative to each start; `elevate` gives it a summit. */
 /**
- * The guaranteed start mountain, relative to each start: two touching lobes, coal and iron, each
- * big enough for its own mine whatever the other mine's position. `elevate` gives each lobe a summit.
+ * Resources every start is guaranteed, the same for each player (fair starts) and at the same
+ * offsets from the castle centre. Mountains are lobes of ore, each big enough for its own mine;
+ * `elevate` gives every lobe a summit. Quarries are fields of stone boulders. The near mountain (coal
+ * and iron) lies inside the castle's land; the far one (stone, gold and more coal — the most used
+ * ore) just beyond it — not taking
+ * building land from the start — so it takes a tower to reach, as gold usually does in Settlers 4. Lobe radii grow a little with the map
+ * (`guaranteeScale`), so bigger maps get more.
  */
-const START_MOUNTAIN = {
-  dx: -2,
-  dy: -8,
-  lobes: [
-    { dx: -1.8, r: 2.1, ore: 'coal' as const },
-    { dx: 1.8, r: 2.1, ore: 'ironore' as const },
+export const START_GUARANTEES = {
+  mountains: [
+    {
+      dx: -2,
+      dy: -8,
+      lobes: [
+        { dx: -1.8, dy: 0, r: 2.1, ore: 'coal' as const },
+        { dx: 1.8, dy: 0, r: 2.1, ore: 'ironore' as const },
+      ],
+    },
+    {
+      dx: 10,
+      dy: 10,
+      lobes: [
+        { dx: -1.8, dy: 0, r: 2.1, ore: 'stone' as const },
+        { dx: 1.8, dy: 0, r: 2.1, ore: 'goldore' as const },
+        { dx: 0, dy: -3.4, r: 2.1, ore: 'coal' as const },
+      ],
+    },
+  ],
+  /** Ore units per tile of a guaranteed lobe, on 64×64 and on 256×256 and larger (natural ore: 6–14). */
+  oreAmount: [32, 48] as const,
+  quarries: [
+    { dx: -7, dy: 3, r: 2.3, chance: 0.85 },
+    { dx: 4, dy: -12, r: 1.8, chance: 0.8 },
   ],
 };
+
+/** Guaranteed lobes grow from their base radius on 64×64 by up to +0.8 tile on 256×256 and larger. */
+function guaranteeScale(size: number): number {
+  return 0.8 * Math.min(1, Math.max(0, (size - 64) / 192));
+}
+
+/** Every guaranteed ore lobe around these starts, in map coordinates. */
+export function guaranteedLobes(starts: readonly Point[], size: number) {
+  const grow = guaranteeScale(size);
+  const [lo, hi] = START_GUARANTEES.oreAmount;
+  const amount = Math.round(lo + ((hi - lo) * grow) / 0.8);
+  return starts.flatMap((st) =>
+    START_GUARANTEES.mountains.flatMap((m) =>
+      m.lobes.map((l) => ({
+        x: st.x + m.dx + l.dx,
+        y: st.y + m.dy + l.dy,
+        r: l.r + grow,
+        ore: l.ore,
+        amount,
+      })),
+    ),
+  );
+}
 
 /**
  * Generates terrain, forests and ore. Around every start position (castle center) a meadow is
@@ -372,15 +414,15 @@ export function generateMap(seed: number, size: number, starts: readonly Point[]
   carveRivers(map, height, starts, createRng(seed ^ 0x51ed2704));
   addBiomes(map, height, starts, createRng(seed ^ 0x6b43a9b5));
 
-  const depositAt = (cx0: number, cy0: number, radius: number, chance: number) => {
+  const depositAt = (cx0: number, cy0: number, radius: number, chance: number, r: Rng = rng) => {
     for (let y = Math.floor(cy0 - radius); y <= cy0 + radius; y++) {
       for (let x = Math.floor(cx0 - radius); x <= cx0 + radius; x++) {
-        if (!map.inBounds(x, y) || Math.hypot(x - cx0, y - cy0) > radius || rng() > chance) continue;
+        if (!map.inBounds(x, y) || Math.hypot(x - cx0, y - cy0) > radius || r() > chance) continue;
         const i = map.idx(x, y);
         if (map.terrain[i] !== Terrain.Grass) continue;
         map.tree[i] = 0;
         map.fish[i] = 0;
-        map.stone[i] = DEPOSIT_STONE[0] + randInt(rng, DEPOSIT_STONE[1] - DEPOSIT_STONE[0] + 1);
+        map.stone[i] = DEPOSIT_STONE[0] + randInt(r, DEPOSIT_STONE[1] - DEPOSIT_STONE[0] + 1);
       }
     }
   };
@@ -422,23 +464,22 @@ export function generateMap(seed: number, size: number, starts: readonly Point[]
       }
     }
 
-    // Guarantee a quarry on the other side.
-    depositAt(cx - 7, cy + 3, 2.3, 0.85);
+    // Guaranteed quarries: the first from the main stream (as it always was), the others from their
+    // own stream so adding one never shifts the rest of the generation.
+    START_GUARANTEES.quarries.forEach((q, k) => depositAt(cx + q.dx, cy + q.dy, q.r, q.chance, k === 0 ? rng : extra));
 
-    // Guarantee a small mountain with coal and iron inside the starting territory.
-    const my = cy + START_MOUNTAIN.dy;
-    for (const lobe of START_MOUNTAIN.lobes) {
-      const lx = cx + START_MOUNTAIN.dx + lobe.dx;
-      for (let y = Math.floor(my - lobe.r); y <= my + lobe.r; y++) {
-        for (let x = Math.floor(lx - lobe.r); x <= lx + lobe.r; x++) {
-          if (!map.inBounds(x, y) || Math.hypot(x - lx, y - my) > lobe.r) continue;
+    // Guaranteed mountains: coal and iron inside the starting territory, stone and gold beyond it.
+    for (const lobe of guaranteedLobes([{ x: cx, y: cy }], size)) {
+      for (let y = Math.floor(lobe.y - lobe.r); y <= lobe.y + lobe.r; y++) {
+        for (let x = Math.floor(lobe.x - lobe.r); x <= lobe.x + lobe.r; x++) {
+          if (!map.inBounds(x, y) || Math.hypot(x - lobe.x, y - lobe.y) > lobe.r) continue;
           const i = map.idx(x, y);
           map.terrain[i] = Terrain.Mountain;
           map.tree[i] = 0;
           map.stone[i] = 0;
           map.fish[i] = 0;
           map.ore[i] = ORE_RESOURCES.indexOf(lobe.ore) + 1;
-          map.oreAmount[i] = ORE_AMOUNT[1];
+          map.oreAmount[i] = lobe.amount;
         }
       }
     }
@@ -464,17 +505,154 @@ export function generateMap(seed: number, size: number, starts: readonly Point[]
       }
     }
   };
+  const extra = createRng(seed ^ 0x3a7f19c5);
   for (const st of starts) prepareStart(st.x, st.y);
+  // Swamps, forests and boulders must not cut land apart.
+  connectLand(map, starts);
 
   elevate(
     map,
     height,
     starts.map((st) => ({ cx: st.x, cy: st.y, r: 6 })),
-    starts.flatMap((st) =>
-      START_MOUNTAIN.lobes.map((l) => ({ x: st.x + START_MOUNTAIN.dx + l.dx, y: st.y + START_MOUNTAIN.dy, r: l.r })),
-    ),
+    guaranteedLobes(starts, size),
   );
   return map;
+}
+
+/** Stretches of land smaller than this are not worth a passage of their own. */
+const POCKET = 6;
+
+/**
+ * Keeps the land in one piece. Swamps are impassable (as in Settlers 4), and generated forests
+ * block walking too, so they could cut land apart — even one castle from the others. Two passes:
+ * first across swamps (by terrain alone: no land a swamp encloses is lost; tiny pockets drown in
+ * it), then across forests (no clearing a forest encloses is unreachable; tracks are felled).
+ */
+function connectLand(map: GameMap, starts: readonly Point[]): void {
+  if (starts.length === 0) return;
+  const terrainOk = (i: number) => TERRAIN[map.terrain[i] as Terrain].walkable;
+  bridge(
+    map,
+    map.idx(starts[0].x, starts[0].y),
+    terrainOk,
+    (i) => map.terrain[i] === Terrain.Swamp,
+    (i) => {
+      map.terrain[i] = Terrain.Grass;
+    },
+    (k) => {
+      map.terrain[k] = Terrain.Swamp;
+      map.tree[k] = 0;
+      map.stone[k] = 0;
+      map.ore[k] = 0;
+      map.oreAmount[k] = 0;
+    },
+  );
+  bridge(
+    map,
+    map.idx(starts[0].x, starts[0].y),
+    (i) => terrainOk(i) && map.tree[i] === 0 && map.stone[i] === 0,
+    (i) => terrainOk(i) && map.tree[i] !== 0,
+    (i) => {
+      map.tree[i] = 0;
+    },
+    null,
+  );
+}
+
+/**
+ * Connects every sizeable component of `land` (4-connected) that `barrier` tiles separate from the
+ * component holding `from`: a breadth-first search crosses only barrier tiles, and whenever it
+ * reaches another such component, the barrier tiles on the way back are opened (a 4-connected
+ * track, so no corner cutting is needed) and that component joins the search. Components smaller
+ * than POCKET get no track: those enclosed by barrier alone are `drown`ed (when given), others are
+ * crossed as they are. Land cut off by anything else (water) stays as it was — rivers have fords.
+ * Deterministic, no RNG, O(map).
+ */
+function bridge(
+  map: GameMap,
+  from: number,
+  land: (i: number) => boolean,
+  barrier: (i: number) => boolean,
+  open: (i: number) => void,
+  drown: ((i: number) => void) | null,
+): void {
+  const { w, h } = map;
+  const n = w * h;
+  const near = (i: number, f: (j: number) => void) => {
+    const x = i % w;
+    if (x > 0) f(i - 1);
+    if (x < w - 1) f(i + 1);
+    if (i >= w) f(i - w);
+    if (i < n - w) f(i + w);
+  };
+  const comp = new Int32Array(n).fill(-1);
+  const members: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    if (comp[i] >= 0 || !land(i)) continue;
+    const id = members.length;
+    const list = [i];
+    comp[i] = id;
+    for (let q = 0; q < list.length; q++) {
+      near(list[q], (j) => {
+        if (comp[j] < 0 && land(j)) {
+          comp[j] = id;
+          list.push(j);
+        }
+      });
+    }
+    members.push(list);
+  }
+  if (comp[from] < 0) return;
+  const linked = new Uint8Array(members.length);
+  const parent = new Int32Array(n).fill(-1);
+  const seen = new Uint8Array(n);
+  const queue: number[] = [];
+  const join = (id: number) => {
+    linked[id] = 1;
+    for (const i of members[id]) {
+      seen[i] = 1;
+      parent[i] = -1;
+      queue.push(i);
+    }
+  };
+  join(comp[from]);
+  for (let q = 0; q < queue.length; q++) {
+    const i = queue[q];
+    near(i, (j) => {
+      if (seen[j]) return;
+      if (barrier(j)) {
+        seen[j] = 1;
+        parent[j] = i;
+        queue.push(j);
+        return;
+      }
+      const id = comp[j];
+      if (id < 0 || linked[id]) return;
+      linked[id] = 1;
+      if (members[id].length < POCKET) {
+        // No track of its own: drowned when barrier alone encloses it, else crossed as it is.
+        const enclosed =
+          drown !== null &&
+          members[id].every((k) => {
+            let ok = true;
+            near(k, (o) => {
+              if (comp[o] !== id && !barrier(o) && land(o)) ok = false;
+            });
+            return ok;
+          });
+        for (const k of members[id]) {
+          if (enclosed) drown!(k);
+          seen[k] = 1;
+          parent[k] = k === j ? i : j;
+          queue.push(k);
+        }
+        return;
+      }
+      // Open the barrier from here back to linked land (pockets on the way are crossed as they are).
+      for (let k = i; k >= 0 && parent[k] !== -1; k = parent[k]) if (barrier(k)) open(k);
+      join(id);
+    });
+  }
 }
 
 /** Ridge weight grows from nothing on 64×64 to full strength on 192×192 and larger. */
@@ -591,7 +769,9 @@ function carveRivers(map: GameMap, height: Float32Array, starts: readonly Point[
     const straight = (p: number) => {
       const a = path[p - 1];
       const b = path[p + 1];
-      return a !== undefined && b !== undefined && (a % size === b % size || Math.floor(a / size) === Math.floor(b / size));
+      return (
+        a !== undefined && b !== undefined && (a % size === b % size || Math.floor(a / size) === Math.floor(b / size))
+      );
     };
     for (let p = Math.floor(FORD_EVERY / 2); p < path.length - 1; p += FORD_EVERY) {
       let q = p;

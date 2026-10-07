@@ -287,10 +287,11 @@ export const TERRAIN: Record<Terrain, TerrainDef> = {
   },
   [Terrain.Swamp]: {
     name: 'Болото',
-    walkable: true,
+    // Impassable, as in Settlers 4; generation keeps land connected across it (`connectAcrossSwamps`).
+    walkable: false,
     build: null,
     plantable: false,
-    speed: 0.45,
+    speed: 1,
     water: false,
     rgb: [74, 92, 58],
   },

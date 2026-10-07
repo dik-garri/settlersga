@@ -87,7 +87,8 @@ describe('defence', () => {
     const defender = w.getSettler(attacker.opponent!)!;
     expect(defender.owner).toBe(2);
     attacker.hp = defender.hp = 1e9;
-    run(w, 6000);
+    // Long enough for the ratio to settle (blows are random).
+    run(w, 15000);
     const takenByAttacker = 1e9 - attacker.hp;
     const takenByDefender = 1e9 - defender.hp;
     // Tower defense 1.2: the defender should land about 1.2× as many blows.

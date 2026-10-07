@@ -37,7 +37,13 @@ describe('wild animals', () => {
     for (let t = 0; t < 3000; t++) {
       w.step();
       if (t % 10 !== 0) continue;
-      for (const a of w.animals) if (!habitable(w.map, ANIMALS[a.kind], Math.round(a.x), Math.round(a.y))) bad++;
+      for (const a of w.animals) {
+        const x = Math.round(a.x);
+        const y = Math.round(a.y);
+        // A sapling may sprout where an animal stands; it then walks out (see animals.ts).
+        if (w.map.tree[w.map.idx(x, y)] > 0) continue;
+        if (!habitable(w.map, ANIMALS[a.kind], x, y)) bad++;
+      }
     }
     expect(bad).toBe(0);
     const moved = w.animals.filter((a, i) => Math.hypot(a.x - start[i][0], a.y - start[i][1]) > 0.5).length;
