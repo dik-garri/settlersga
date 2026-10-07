@@ -307,19 +307,53 @@ function fractalNoise(rng: Rng, w: number, h: number): Float32Array {
   return out;
 }
 
-/** The guaranteed coal/iron mountain, relative to each start; `elevate` gives it a summit. */
 /**
- * The guaranteed start mountain, relative to each start: two touching lobes, coal and iron, each
- * big enough for its own mine whatever the other mine's position. `elevate` gives each lobe a summit.
+ * Resources every start is guaranteed, the same for each player (fair starts) and at the same
+ * offsets from the castle centre. Mountains are lobes of ore, each big enough for its own mine;
+ * `elevate` gives every lobe a summit. Quarries are fields of stone boulders. The near mountain (coal
+ * and iron) lies inside the castle's land; the far one (stone and gold) just beyond it, so it takes
+ * a tower to reach, as gold usually does in Settlers 4. Lobe radii grow a little with the map
+ * (`guaranteeScale`), so bigger maps get more.
  */
-const START_MOUNTAIN = {
-  dx: -2,
-  dy: -8,
-  lobes: [
-    { dx: -1.8, r: 2.1, ore: 'coal' as const },
-    { dx: 1.8, r: 2.1, ore: 'ironore' as const },
+export const START_GUARANTEES = {
+  mountains: [
+    {
+      dx: -2,
+      dy: -8,
+      lobes: [
+        { dx: -1.8, dy: 0, r: 2.1, ore: 'coal' as const },
+        { dx: 1.8, dy: 0, r: 2.1, ore: 'ironore' as const },
+      ],
+    },
+    {
+      dx: 9,
+      dy: 8,
+      lobes: [
+        { dx: -1.8, dy: 0, r: 2.1, ore: 'stone' as const },
+        { dx: 1.8, dy: 0, r: 2.1, ore: 'goldore' as const },
+      ],
+    },
+  ],
+  quarries: [
+    { dx: -7, dy: 3, r: 2.3, chance: 0.85 },
+    { dx: 4, dy: -12, r: 1.8, chance: 0.8 },
   ],
 };
+
+/** Guaranteed lobes grow from their base radius on 64×64 by up to +0.8 tile on 256×256 and larger. */
+function guaranteeScale(size: number): number {
+  return 0.8 * Math.min(1, Math.max(0, (size - 64) / 192));
+}
+
+/** Every guaranteed ore lobe around these starts, in map coordinates. */
+export function guaranteedLobes(starts: readonly Point[], size: number) {
+  const grow = guaranteeScale(size);
+  return starts.flatMap((st) =>
+    START_GUARANTEES.mountains.flatMap((m) =>
+      m.lobes.map((l) => ({ x: st.x + m.dx + l.dx, y: st.y + m.dy + l.dy, r: l.r + grow, ore: l.ore })),
+    ),
+  );
+}
 
 /**
  * Generates terrain, forests and ore. Around every start position (castle center) a meadow is
@@ -372,15 +406,15 @@ export function generateMap(seed: number, size: number, starts: readonly Point[]
   carveRivers(map, height, starts, createRng(seed ^ 0x51ed2704));
   addBiomes(map, height, starts, createRng(seed ^ 0x6b43a9b5));
 
-  const depositAt = (cx0: number, cy0: number, radius: number, chance: number) => {
+  const depositAt = (cx0: number, cy0: number, radius: number, chance: number, r: Rng = rng) => {
     for (let y = Math.floor(cy0 - radius); y <= cy0 + radius; y++) {
       for (let x = Math.floor(cx0 - radius); x <= cx0 + radius; x++) {
-        if (!map.inBounds(x, y) || Math.hypot(x - cx0, y - cy0) > radius || rng() > chance) continue;
+        if (!map.inBounds(x, y) || Math.hypot(x - cx0, y - cy0) > radius || r() > chance) continue;
         const i = map.idx(x, y);
         if (map.terrain[i] !== Terrain.Grass) continue;
         map.tree[i] = 0;
         map.fish[i] = 0;
-        map.stone[i] = DEPOSIT_STONE[0] + randInt(rng, DEPOSIT_STONE[1] - DEPOSIT_STONE[0] + 1);
+        map.stone[i] = DEPOSIT_STONE[0] + randInt(r, DEPOSIT_STONE[1] - DEPOSIT_STONE[0] + 1);
       }
     }
   };
@@ -422,16 +456,17 @@ export function generateMap(seed: number, size: number, starts: readonly Point[]
       }
     }
 
-    // Guarantee a quarry on the other side.
-    depositAt(cx - 7, cy + 3, 2.3, 0.85);
+    // Guaranteed quarries: the first from the main stream (as it always was), the others from their
+    // own stream so adding one never shifts the rest of the generation.
+    START_GUARANTEES.quarries.forEach((q, k) =>
+      depositAt(cx + q.dx, cy + q.dy, q.r, q.chance, k === 0 ? rng : extra),
+    );
 
-    // Guarantee a small mountain with coal and iron inside the starting territory.
-    const my = cy + START_MOUNTAIN.dy;
-    for (const lobe of START_MOUNTAIN.lobes) {
-      const lx = cx + START_MOUNTAIN.dx + lobe.dx;
-      for (let y = Math.floor(my - lobe.r); y <= my + lobe.r; y++) {
-        for (let x = Math.floor(lx - lobe.r); x <= lx + lobe.r; x++) {
-          if (!map.inBounds(x, y) || Math.hypot(x - lx, y - my) > lobe.r) continue;
+    // Guaranteed mountains: coal and iron inside the starting territory, stone and gold beyond it.
+    for (const lobe of guaranteedLobes([{ x: cx, y: cy }], size)) {
+      for (let y = Math.floor(lobe.y - lobe.r); y <= lobe.y + lobe.r; y++) {
+        for (let x = Math.floor(lobe.x - lobe.r); x <= lobe.x + lobe.r; x++) {
+          if (!map.inBounds(x, y) || Math.hypot(x - lobe.x, y - lobe.y) > lobe.r) continue;
           const i = map.idx(x, y);
           map.terrain[i] = Terrain.Mountain;
           map.tree[i] = 0;
@@ -464,15 +499,14 @@ export function generateMap(seed: number, size: number, starts: readonly Point[]
       }
     }
   };
+  const extra = createRng(seed ^ 0x3a7f19c5);
   for (const st of starts) prepareStart(st.x, st.y);
 
   elevate(
     map,
     height,
     starts.map((st) => ({ cx: st.x, cy: st.y, r: 6 })),
-    starts.flatMap((st) =>
-      START_MOUNTAIN.lobes.map((l) => ({ x: st.x + START_MOUNTAIN.dx + l.dx, y: st.y + START_MOUNTAIN.dy, r: l.r })),
-    ),
+    guaranteedLobes(starts, size),
   );
   return map;
 }
