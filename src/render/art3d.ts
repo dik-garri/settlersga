@@ -1,28 +1,13 @@
 /**
  * Pre-rendered 3D sprites (the Blender pipeline in `art/blender`, output in `public/art/3d`). A pilot:
  * with `?art=3d` they replace the procedural woodcutter, sawmill, stonecutter, tower and large house
- * (with construction stages), tree, stone deposit, wares, door piles and the carrier.
+ * (with construction stages), tree, stone deposit, wares, door piles and every settler.
  * Every sprite keeps the anchor convention of the sprite it replaces, so the renderer is unchanged
- * except for the carrier, whose 8-direction sheet replaces the layered figure.
+ * except for settlers, whose pre-rendered frames (`settler3d.ts`) replace the layered figure.
  */
 
 import { RESOURCES, type Resource } from '../sim/types';
-
-/** `carrier.json` written by `art/blender/build.py`. */
-export interface CarrierSheetMeta {
-  /** Logical cell size and anchor (the sheet itself is at the atlas resolution, 2×). */
-  cell: [number, number];
-  anchor: [number, number];
-  columns: number;
-  /** Walk frames; column `walk` is standing. */
-  walk: number;
-  /** First column of the carrying poses (same layout). */
-  carryColumn: number;
-  /** [dir][frame]: where goods in hand go, relative to the anchor. */
-  carryAt: [number, number][][];
-  /** [dir]: goods in hand are hidden behind the figure. */
-  carryBehind: boolean[];
-}
+import { buildSettler3d, type Settler3d, type SettlersMeta } from './settler3d';
 
 /** `ground.json` written by `art/textures/ground.py`. */
 export interface GroundMeta {
@@ -43,7 +28,8 @@ export interface WaresMeta {
 
 export interface Art3d {
   images: Map<string, HTMLImageElement>;
-  carrier: CarrierSheetMeta;
+  /** Settler and soldier figures (`settlers.json` + pages). */
+  settlers: Settler3d;
   ground: GroundMeta;
   wares: WaresMeta;
 }
@@ -103,14 +89,16 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 
 export async function loadArt3d(): Promise<Art3d> {
   const base = `${import.meta.env.BASE_URL}art/3d/`;
-  const names = [...Object.keys(ART3D_SPRITES), 'carrier'];
+  const names = Object.keys(ART3D_SPRITES);
   const images = new Map<string, HTMLImageElement>();
   await Promise.all(names.map(async (n) => images.set(n, await loadImage(`${base}${n}.png`))));
-  const carrier = (await (await fetch(`${base}carrier.json`)).json()) as CarrierSheetMeta;
+  const settlersMeta = (await (await fetch(`${base}settlers.json`)).json()) as SettlersMeta;
+  const settlerPages = await Promise.all(settlersMeta.pages.map((p) => loadImage(`${base}${p}`)));
+  const settlers = buildSettler3d(settlersMeta, settlerPages);
   const ground = (await (await fetch(`${base}ground.json`)).json()) as GroundMeta;
   await Promise.all(ground.kinds.map(async (k) => images.set(`ground-${k}`, await loadImage(`${base}ground-${k}.png`))));
   const wares = (await (await fetch(`${base}wares.json`)).json()) as WaresMeta;
   const strips = [...ART3D_PILES.map((r) => `piles-${r}`), 'wares'];
   await Promise.all(strips.map(async (n) => images.set(n, await loadImage(`${base}${n}.png`))));
-  return { images, carrier, ground, wares };
+  return { images, settlers, ground, wares };
 }
