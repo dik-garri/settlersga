@@ -55,9 +55,9 @@ export const ART3D_SPRITES: Record<string, { w: number; h: number; ax: number; a
     ART3D_PILES.flatMap((res) => Array.from({ length: PILE_MAX }, (_, k) => [`pile-${res}-${k + 1}`, PILE])),
   ),
   tree: { w: 84, h: 100, ax: 34, ay: 80 },
-  deposit0: { w: 56, h: 44, ax: 28, ay: 34 },
-  deposit1: { w: 56, h: 44, ax: 28, ay: 34 },
-  deposit2: { w: 56, h: 44, ax: 28, ay: 34 },
+  deposit0: { w: 64, h: 72, ax: 30, ay: 58 },
+  deposit1: { w: 64, h: 72, ax: 30, ay: 58 },
+  deposit2: { w: 64, h: 72, ax: 30, ay: 58 },
   log: { w: 16, h: 10, ax: 8, ay: 5 },
 };
 

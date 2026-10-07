@@ -157,6 +157,7 @@ export class SpriteAtlas {
 
   constructor(art3d: Art3d | null = null) {
     this.art3d = art3d;
+    iconArt = art3d;
     const a = new AtlasBuilder();
     // Textured ground (`?art=3d`): seamless diamonds cut from one periodic texture per kind.
     const textured = (kind: GroundKind) => (art3d?.ground.kinds.includes(kind) ? art3d.images.get(`ground-${kind}`)! : null);
@@ -312,7 +313,61 @@ export class SpriteAtlas {
 }
 
 /** Standalone ware icon for HTML UI, drawn by the same painter as goods on the map. */
+/** The 3D art the HTML icons use too (`?art=3d`), set by the `SpriteAtlas`. */
+let iconArt: Art3d | null = null;
+/** Opaque bounds of each 3D image, so icons are cropped to what is drawn. */
+const opaqueBounds = new Map<HTMLImageElement, { x: number; y: number; w: number; h: number }>();
+
+function boundsOf(img: HTMLImageElement, sx = 0, sy = 0, sw = img.width, sh = img.height) {
+  const key = img;
+  const cached = sx === 0 && sy === 0 && sw === img.width ? opaqueBounds.get(key) : undefined;
+  if (cached) return cached;
+  const c = document.createElement('canvas');
+  c.width = sw;
+  c.height = sh;
+  const ctx = c.getContext('2d', { willReadFrequently: true })!;
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+  const data = ctx.getImageData(0, 0, sw, sh).data;
+  let x0 = sw;
+  let y0 = sh;
+  let x1 = -1;
+  let y1 = -1;
+  for (let y = 0; y < sh; y++) {
+    for (let x = 0; x < sw; x++) {
+      if (data[(y * sw + x) * 4 + 3] < 40) continue;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+  }
+  const b = x1 < 0 ? { x: sx, y: sy, w: sw, h: sh } : { x: sx + x0, y: sy + y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+  if (sx === 0 && sy === 0 && sw === img.width) opaqueBounds.set(key, b);
+  return b;
+}
+
+/** A square HTML icon canvas showing (part of) an image, cropped to its opaque pixels and centred. */
+function imageIcon(img: HTMLImageElement, size: number, className: string, frame?: [number, number, number, number]) {
+  const canvas = document.createElement('canvas');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = size * dpr;
+  canvas.height = size * dpr;
+  canvas.style.width = `${size}px`;
+  canvas.style.height = `${size}px`;
+  if (className) canvas.className = className;
+  const b = frame ? boundsOf(img, ...frame) : boundsOf(img);
+  const k = (size * dpr) / Math.max(b.w, b.h);
+  const w = b.w * k;
+  const h = b.h * k;
+  const ctx = canvas.getContext('2d')!;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, b.x, b.y, b.w, b.h, (size * dpr - w) / 2, (size * dpr - h) / 2, w, h);
+  return canvas;
+}
+
 export function wareIcon(res: Resource, size = 18): HTMLCanvasElement {
+  const img3d = iconArt?.images.get(res === 'log' ? 'log' : '');
+  if (img3d) return imageIcon(img3d, size, 'ware-icon');
   const canvas = document.createElement('canvas');
   const dpr = window.devicePixelRatio || 1;
   canvas.width = size * dpr;
@@ -330,6 +385,13 @@ export function wareIcon(res: Resource, size = 18): HTMLCanvasElement {
 
 /** Standalone settler portrait for HTML UI. */
 export function settlerIcon(kind: SettlerKind, size = 56): HTMLCanvasElement {
+  const sheet = kind === 'carrier' ? iconArt?.images.get('carrier') : undefined;
+  if (sheet && iconArt) {
+    // Standing, facing south-east (row 1 of the sheet).
+    const { cell, columns, walk } = iconArt.carrier;
+    const r = sheet.width / (cell[0] * columns);
+    return imageIcon(sheet, size, '', [walk * cell[0] * r, 1 * cell[1] * r, cell[0] * r, cell[1] * r]);
+  }
   const canvas = document.createElement('canvas');
   const dpr = window.devicePixelRatio || 1;
   canvas.width = size * dpr;
@@ -348,6 +410,8 @@ export function settlerIcon(kind: SettlerKind, size = 56): HTMLCanvasElement {
 
 /** Standalone icon canvas for HTML UI. */
 export function buildingIcon(type: BuildingType, size = 56): HTMLCanvasElement {
+  const img3d = iconArt?.images.get(type);
+  if (img3d) return imageIcon(img3d, size, '');
   const c = BUILDING_CANVAS[type];
   const canvas = document.createElement('canvas');
   const dpr = window.devicePixelRatio || 1;

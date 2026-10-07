@@ -6,3 +6,6 @@ dist
 art/.tmp/
 __pycache__/
 .DS_Store
+
+# Reference screenshots of the original game (copyrighted, never published)
+examples/

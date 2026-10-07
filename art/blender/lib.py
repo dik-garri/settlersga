@@ -376,6 +376,66 @@ def mat_tiles(name, c1, c2, mortar, scale=7.0, along='y'):
     return mat
 
 
+def mat_crystal(name, light, dark, crack, scale=7.0):
+    """Pale quarry rock: faceted light stone with dark cracks (Voronoi edges) and grimy noise."""
+    mat, nodes, links, bsdf = _principled(name)
+    bsdf.inputs['Roughness'].default_value = 0.6
+    coord = nodes.new('ShaderNodeTexCoord')
+    noise = nodes.new('ShaderNodeTexNoise')
+    noise.inputs['Scale'].default_value = scale
+    noise.inputs['Detail'].default_value = 8
+    links.new(coord.outputs['Object'], noise.inputs['Vector'])
+    stone = _ramp(nodes, [(0.3, dark), (0.65, light)])
+    links.new(noise.outputs['Fac'], stone.inputs['Fac'])
+    vor = nodes.new('ShaderNodeTexVoronoi')
+    vor.feature = 'DISTANCE_TO_EDGE'
+    vor.inputs['Scale'].default_value = scale * 1.6
+    links.new(coord.outputs['Object'], vor.inputs['Vector'])
+    cr = nodes.new('ShaderNodeMapRange')
+    cr.inputs['From Min'].default_value = 0.0
+    cr.inputs['From Max'].default_value = 0.05
+    links.new(vor.outputs['Distance'], cr.inputs['Value'])
+    mix = nodes.new('ShaderNodeMix')
+    mix.data_type = 'RGBA'
+    mix.inputs['A'].default_value = (*lin(crack), 1)
+    links.new(cr.outputs['Result'], mix.inputs['Factor'])
+    links.new(stone.outputs['Color'], mix.inputs['B'])
+    links.new(mix.outputs['Result'], bsdf.inputs['Base Color'])
+    _bump(nodes, links, bsdf, cr.outputs['Result'], strength=0.8)
+    return mat
+
+
+def spire(loc, radius, height, mat, seed=0, sides=6, tilt=0.12):
+    """A jagged rock column: a tapered prism, its vertices jittered, top cut at a slant, faceted."""
+    import random
+
+    rnd = random.Random(seed)
+    cx, cy, cz = loc
+    verts, faces = [], []
+    rings = 4
+    for r in range(rings + 1):
+        t = r / rings
+        z = cz + height * t
+        rad = radius * (1 - 0.55 * t) * rnd.uniform(0.85, 1.1)
+        lean_x, lean_y = tilt * height * t * math.cos(seed), tilt * height * t * math.sin(seed)
+        for k in range(sides):
+            a = k / sides * math.tau + rnd.uniform(-0.25, 0.25)
+            rr = rad * rnd.uniform(0.75, 1.15)
+            top_cut = (rnd.uniform(-0.18, 0.05) * height) if r == rings else 0
+            verts.append((cx + lean_x + math.cos(a) * rr, cy + lean_y + math.sin(a) * rr, z + top_cut))
+    for r in range(rings):
+        for k in range(sides):
+            a, b = r * sides + k, r * sides + (k + 1) % sides
+            faces.append((a, b, b + sides, a + sides))
+    faces.append(tuple(rings * sides + k for k in range(sides)))
+    mesh = bpy.data.meshes.new('spire')
+    mesh.from_pydata(verts, [], faces)
+    obj = bpy.data.objects.new('spire', mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.data.materials.append(mat)
+    return obj
+
+
 def mat_grain(name, a, b, scale=5.0, stretch=(1, 1, 10), bump=0.5, detail=8.0):
     """Wood, thatch, bark: stretched noise colour with matching bump."""
     mat, nodes, links, bsdf = _principled(name)

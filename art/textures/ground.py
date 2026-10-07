@@ -18,20 +18,25 @@ import numpy as np
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 OUT = os.path.join(ROOT, 'public', 'art', '3d')
-PERIOD = 4
-TEX = 160  # texture pixels per tile
+PERIOD = 8
+TEX = 128  # texture pixels per tile
 SCALE = 2  # atlas resolution
 FRAME_W, FRAME_H = 66, 34
 
 
-def periodic_noise(rng, n, beta):
-    """Noise with a 1/f^beta spectrum on an n×n torus, normalised to 0..1."""
+def periodic_noise(rng, n, beta, band=None):
+    """Noise with a 1/f^beta spectrum on an n×n torus, normalised to 0..1. `band` (lo, hi) keeps only
+    those frequencies, in cycles per texture: broad swells without one blob per period."""
     white = rng.standard_normal((n, n))
     fy = np.fft.fftfreq(n)[:, None]
     fx = np.fft.fftfreq(n)[None, :]
     f = np.sqrt(fx * fx + fy * fy)
     f[0, 0] = 1
-    field = np.real(np.fft.ifft2(np.fft.fft2(white) / f ** beta))
+    spectrum = np.fft.fft2(white) / f ** beta
+    if band:
+        cycles = f * n
+        spectrum[(cycles < band[0]) | (cycles > band[1])] = 0
+    field = np.real(np.fft.ifft2(spectrum))
     field -= field.min()
     return field / field.max()
 
@@ -59,37 +64,66 @@ def line(img, x, y, dx, dy, length, col):
         stamp(img, x + dx * t, y + dy * t, col, r=0.3)
 
 
-def grass(rng, n):
-    big = periodic_noise(rng, n, 2.6)
-    mid = periodic_noise(rng, n, 1.6)
-    fine = periodic_noise(rng, n, 0.4)
-    v = 0.5 * big + 0.3 * mid + 0.2 * fine
-    v = (v - v.min()) / (v.max() - v.min())
-    rgb = ramp(v, [
-        (0.0, (24, 70, 12)),
-        (0.35, (52, 112, 20)),
-        (0.6, (84, 146, 30)),
-        (0.85, (128, 172, 44)),
-        (1.0, (170, 190, 70)),
-    ])
+def strokes(img, rng, count, length, width_px, angle_field, color_fn, jitter=0.35):
+    """Draws `count` tapered strokes at once (numpy): each starts at a random point, runs along the
+    local `angle_field` direction (±jitter), and is painted with `color_fn(k)` (k strokes × 3).
+    Wraps around the torus, so the texture stays periodic."""
+    n = img.shape[0]
+    x0 = rng.uniform(0, n, count)
+    y0 = rng.uniform(0, n, count)
+    ang = angle_field[y0.astype(int) % n, x0.astype(int) % n] + rng.uniform(-jitter, jitter, count)
+    ln = rng.uniform(*length, count)
+    cols = color_fn(count)
+    steps = int(np.ceil(length[1] * 1.5))
+    dx, dy = np.cos(ang), np.sin(ang)
+    for t in np.linspace(0, 1, steps):
+        xs = x0 + dx * ln * t
+        ys = y0 + dy * ln * t
+        w = width_px * (1 - 0.7 * t)  # tapers towards the tip
+        for ox, oy in ((0, 0), (1, 0), (0, 1)) if width_px > 1 else ((0, 0),):
+            keep = (ox == 0 and oy == 0) | (w > 1.2)
+            xi = (xs[keep] + ox).astype(int) % n
+            yi = (ys[keep] + oy).astype(int) % n
+            img[yi, xi] = cols[keep]
 
-    # Short grass blades, leaning "up" on screen (−u −v in tile space), light and dark.
-    for _ in range(int(n * n / 18)):
-        x, y = rng.uniform(0, n, 2)
-        length = rng.uniform(3, 8)
-        lean = rng.uniform(-0.5, 0.5)
-        col = (150, 196, 64) if rng.random() < 0.55 else (22, 64, 12)
-        if rng.random() < 0.15:
-            col = (190, 200, 96)
-        line(rgb, x, y, -0.7 + lean, -0.7 - lean, length, col)
-    # Sparse little flowers.
-    for _ in range(int(n * n / 2600)):
+
+def grass(rng, n):
+    """Settlers 4 grass: combed, flowing blades (each a dark stroke with a light one beside it) over
+    deep green, under broad soft swells of light and shade."""
+    big = periodic_noise(rng, n, 2.0, band=(2, 5))
+    mid = periodic_noise(rng, n, 2.0)
+    fine = periodic_noise(rng, n, 0.6)
+    base = ramp(0.65 * mid + 0.35 * fine, [
+        (0.0, (26, 74, 10)),
+        (0.5, (48, 112, 18)),
+        (1.0, (78, 146, 26)),
+    ])
+    # Blades lean "up" on screen (−u −v in tile space, angle −3π/4) and sway with a slow field.
+    sway = periodic_noise(rng, n, 2.6)
+    angle = -3 * np.pi / 4 + (sway - 0.5) * 1.6
+
+    def shade(lo, hi):
+        def f(k):
+            t = rng.uniform(0, 1, (k, 1))
+            return np.array(lo) * (1 - t) + np.array(hi) * t
+        return f
+
+    img = base.copy()
+    area = n * n
+    strokes(img, rng, area // 9, (5, 11), 1, angle, shade((12, 44, 6), (30, 80, 12)))      # dark under-blades
+    strokes(img, rng, area // 10, (5, 12), 1, angle, shade((70, 140, 24), (120, 180, 40)))  # mid blades
+    strokes(img, rng, area // 26, (4, 10), 1, angle, shade((150, 196, 52), (200, 214, 90)))  # sunlit tips
+    # Broad swells of light and shade (like cloud shadows and hollows), strong as in the original.
+    light = 0.62 + 0.62 * big
+    img = img * light[..., None]
+    # Sparse flowers.
+    for _ in range(int(area / 5200)):
         x, y = rng.uniform(0, n, 2)
         col = [(250, 250, 240), (250, 220, 60), (200, 120, 220), (240, 90, 90)][rng.integers(0, 4)]
-        for _ in range(rng.integers(2, 6)):
-            ox, oy = rng.normal(0, 3, 2)
-            stamp(rgb, x + ox, y + oy, col, r=1.2)
-    return rgb
+        for _ in range(rng.integers(2, 5)):
+            ox, oy = rng.normal(0, 2.5, 2)
+            stamp(img, x + ox, y + oy, col, r=1.0)
+    return np.clip(img, 0, 255)
 
 
 def slice_diamonds(tex):

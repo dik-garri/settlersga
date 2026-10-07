@@ -831,6 +831,10 @@ export class GameRenderer {
     for (const player of owners) this.drawBorder(g, player, x0, y0, x1, y1, ownerAt);
   }
 
+  /**
+   * A player's border as in Settlers 4: a row of little posts topped with a cube in the player's
+   * colour, one on every border edge (between an owned tile and one that is not).
+   */
   private drawBorder(
     g: Graphics,
     player: number,
@@ -841,30 +845,49 @@ export class GameRenderer {
     ownerAt: (x: number, y: number) => number,
   ): void {
     const owned = (x: number, y: number) => ownerAt(x, y) === player;
-    let border = false;
+    const color = PLAYER_COLORS[(player - 1) % PLAYER_COLORS.length];
+    const posts: [number, number][] = [];
     for (let y = y0; y < y1; y++) {
       for (let x = x0; x < x1; x++) {
         if (!owned(x, y)) continue;
-        const xy = (p: { x: number; y: number }) => [p.x, p.y] as const;
-        const top = xy(this.corner(x, y));
-        const right = xy(this.corner(x + 1, y));
-        const bottom = xy(this.corner(x + 1, y + 1));
-        const left = xy(this.corner(x, y + 1));
-        const edges: [readonly [number, number], readonly [number, number], boolean][] = [
-          [right, bottom, !owned(x + 1, y)],
-          [left, top, !owned(x - 1, y)],
-          [bottom, left, !owned(x, y + 1)],
-          [top, right, !owned(x, y - 1)],
+        // Edges as [corner a, corner b, outside]; a post sits at the edge's midpoint.
+        const edges: [number, number, number, number, boolean][] = [
+          [x + 1, y, x + 1, y + 1, !owned(x + 1, y)],
+          [x, y + 1, x, y, !owned(x - 1, y)],
+          [x + 1, y + 1, x, y + 1, !owned(x, y + 1)],
+          [x, y, x + 1, y, !owned(x, y - 1)],
         ];
-        for (const [a, b, edge] of edges) {
+        for (const [ax, ay, bx, by, edge] of edges) {
+          // Every other edge along the border, by a parity that neighbouring tiles agree on.
           if (!edge) continue;
-          g.moveTo(a[0], a[1]);
-          g.lineTo(b[0], b[1]);
-          border = true;
+          const a = this.corner(ax, ay);
+          const b = this.corner(bx, by);
+          posts.push([(a.x + b.x) / 2, (a.y + b.y) / 2]);
         }
       }
     }
-    if (border) g.stroke({ width: 3, color: PLAYER_COLORS[(player - 1) % PLAYER_COLORS.length], alpha: 0.85 });
+    if (posts.length === 0) return;
+    // Shadows, then posts, then the cubes (three faces each: lit top, left side, darker right side).
+    for (const [px, py] of posts) g.ellipse(px + 3, py + 1, 5, 2.2);
+    g.fill({ color: 0x000000, alpha: 0.35 });
+    for (const [px, py] of posts) g.rect(px - 1.5, py - 9, 3, 9);
+    g.fill({ color: 0x2a2620 });
+    const s = 4.2;
+    for (const [px, py] of posts) {
+      const top = py - 12;
+      g.poly([px, top - s * 0.5, px + s, top, px, top + s * 0.5, px - s, top]);
+    }
+    g.fill({ color: shadeColor(color, 1.25) });
+    for (const [px, py] of posts) {
+      const top = py - 12;
+      g.poly([px - s, top, px, top + s * 0.5, px, top + s * 0.5 + s, px - s, top + s]);
+    }
+    g.fill({ color });
+    for (const [px, py] of posts) {
+      const top = py - 12;
+      g.poly([px, top + s * 0.5, px + s, top, px + s, top + s, px, top + s * 0.5 + s]);
+    }
+    g.fill({ color: shadeColor(color, 0.65) });
   }
 
   /** Fields are flat, so they live in the ground layer of their chunk rather than among sorted objects. */
@@ -1378,4 +1401,11 @@ export class GameRenderer {
       this.ghostSprite.visible = true;
     }
   }
+}
+
+/** A colour (0xRRGGBB, or a CSS hex string) scaled in brightness, clamped. */
+function shadeColor(color: number | string, k: number): number {
+  const c = typeof color === 'string' ? parseInt(color.replace('#', ''), 16) : color;
+  const ch = (v: number) => Math.min(255, Math.round(v * k));
+  return (ch((c >> 16) & 255) << 16) | (ch((c >> 8) & 255) << 8) | ch(c & 255);
 }

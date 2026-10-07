@@ -304,19 +304,25 @@ def build_tree():
 
 
 def build_deposit(size):
-    rock = lib.mat_grain('rock', (0.38, 0.39, 0.42), (0.66, 0.66, 0.66), scale=6, stretch=(1, 1, 1), bump=1.0)
-    rocks = [
-        ((0.0, 0.0, 0.13), 0.22, (1.1, 1.0, 0.85)),
-        ((0.23, -0.13, 0.08), 0.15, (1.2, 0.9, 0.75)),
-        ((-0.22, 0.1, 0.09), 0.16, (1.0, 1.1, 0.8)),
-        ((0.13, 0.22, 0.07), 0.14, (1.0, 1.2, 0.75)),
-        ((-0.12, -0.23, 0.06), 0.13, (1.2, 1.0, 0.75)),
-        ((0.32, 0.12, 0.05), 0.11, (1.0, 1.0, 0.75)),
-        ((-0.32, -0.05, 0.05), 0.11, (1.1, 1.0, 0.75)),
+    """Quarry stone as in Settlers 4: a cluster of tall, jagged, pale rock spires with dark cracks.
+    Size 0 is the full deposit; 1 and 2 are what is left as it is quarried."""
+    rock = lib.mat_crystal('rock', (0.93, 0.93, 0.9), (0.62, 0.64, 0.66), (0.12, 0.13, 0.14), scale=6)
+    spires = [
+        ((0.0, 0.02, 0), 0.17, 0.78),
+        ((0.17, -0.1, 0), 0.13, 0.55),
+        ((-0.16, 0.12, 0), 0.13, 0.6),
+        ((0.1, 0.2, 0), 0.11, 0.42),
+        ((-0.08, -0.17, 0), 0.11, 0.36),
+        ((0.26, 0.12, 0), 0.08, 0.28),
     ]
-    keep = (7, 5, 3)[size]
-    for k, (loc, r, sc) in enumerate(rocks[:keep]):
-        lib.lumpy(loc, r, rock, scale=sc, strength=0.5, noise=0.9, seed=k, subdiv=2, flat=True)
+    keep = (6, 4, 2)[size]
+    for k, (loc, r, h) in enumerate(spires[:keep]):
+        lib.spire(loc, r, h * (1.0, 0.85, 0.7)[size], rock, seed=k + 1)
+    # Chips at the foot.
+    for k in range(5 - size * 2):
+        a = k * 1.9
+        lib.lumpy((math.cos(a) * 0.3, math.sin(a) * 0.3, 0.02), 0.04, rock, scale=(1.2, 1, 0.7), strength=0.4,
+                  noise=0.8, seed=k, subdiv=1, flat=True)
 
 
 def build_log():
@@ -476,9 +482,9 @@ SINGLE = {
     # name: (builder, logical w, h, anchor x, y) — sizes of the procedural sprites they replace.
     'woodcutter': (build_woodcutter, 150, 140, 75, 100),
     'tree': (build_tree, 84, 100, 34, 80),
-    'deposit0': (lambda: build_deposit(0), 56, 44, 28, 34),
-    'deposit1': (lambda: build_deposit(1), 56, 44, 28, 34),
-    'deposit2': (lambda: build_deposit(2), 56, 44, 28, 34),
+    'deposit0': (lambda: build_deposit(0), 64, 72, 30, 58),
+    'deposit1': (lambda: build_deposit(1), 64, 72, 30, 58),
+    'deposit2': (lambda: build_deposit(2), 64, 72, 30, 58),
     'log': (build_log, 16, 10, 8, 5),
 }
 
