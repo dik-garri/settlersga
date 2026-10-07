@@ -281,6 +281,43 @@ export class SpriteAtlas {
     };
   }
 
+  private readonly tops = new Map<string, { x: number; y: number }>();
+
+  /**
+   * The highest drawn point of a sprite, relative to its anchor (logical pixels): where a flag goes on
+   * a building's roof. Scans the middle half of the sprite's columns, so a chimney at a gable end or
+   * a lean-to does not win over the ridge. Cached.
+   */
+  topOf(name: string): { x: number; y: number } {
+    const cached = this.tops.get(name);
+    if (cached) return cached;
+    const t = this.get(name);
+    const f = t.frame;
+    const res = t.source.resolution;
+    const canvas = t.source.resource as HTMLCanvasElement;
+    const sx = Math.round(f.x * res);
+    const sy = Math.round(f.y * res);
+    const sw = Math.round(f.width * res);
+    const sh = Math.round(f.height * res);
+    // Read through a small scratch canvas, so the atlas page itself is never read back.
+    const scratch = document.createElement('canvas');
+    scratch.width = sw;
+    scratch.height = sh;
+    const sctx = scratch.getContext('2d', { willReadFrequently: true })!;
+    sctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+    const data = sctx.getImageData(0, 0, sw, sh).data;
+    let top = { x: 0, y: -f.height * t.defaultAnchor!.y };
+    found: for (let y = 0; y < sh; y++) {
+      for (let x = Math.floor(sw * 0.25); x < Math.ceil(sw * 0.75); x++) {
+        if (data[(y * sw + x) * 4 + 3] < 128) continue;
+        top = { x: x / res - f.width * t.defaultAnchor!.x, y: y / res - f.height * t.defaultAnchor!.y };
+        break found;
+      }
+    }
+    this.tops.set(name, top);
+    return top;
+  }
+
   has(name: string): boolean {
     return this.textures.has(name);
   }

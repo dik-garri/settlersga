@@ -70,6 +70,8 @@ interface BuildingView {
   /** Owner the flag was last drawn for (buildings change hands when conquered). */
   owner: number;
   flag: Sprite;
+  /** Whether the flag sits on the finished building's roof yet. */
+  flagPlaced: boolean;
   /** Owner banner on the roof (castle, towers), shown once the building stands. */
   banner: Sprite | null;
   /** Tiles the body and the door pile are registered under (see `addStatic`). */
@@ -895,7 +897,7 @@ export class GameRenderer {
 
   /**
    * A player's border as in Settlers 4: a row of little posts topped with a cube in the player's
-   * colour, one on every border edge (between an owned tile and one that is not).
+   * colour, two on every border edge (between an owned tile and one that is not).
    */
   private drawBorder(
     g: Graphics,
@@ -920,33 +922,33 @@ export class GameRenderer {
           [x, y, x + 1, y, !owned(x, y - 1)],
         ];
         for (const [ax, ay, bx, by, edge] of edges) {
-          // Every other edge along the border, by a parity that neighbouring tiles agree on.
           if (!edge) continue;
+          // Two posts per edge, at a quarter and three quarters of its length.
           const a = this.corner(ax, ay);
           const b = this.corner(bx, by);
-          posts.push([(a.x + b.x) / 2, (a.y + b.y) / 2]);
+          for (const t of [0.25, 0.75]) posts.push([a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t]);
         }
       }
     }
     if (posts.length === 0) return;
     // Shadows, then posts, then the cubes (three faces each: lit top, left side, darker right side).
-    for (const [px, py] of posts) g.ellipse(px + 3, py + 1, 5, 2.2);
+    for (const [px, py] of posts) g.ellipse(px + 2, py + 0.8, 3, 1.4);
     g.fill({ color: 0x000000, alpha: 0.35 });
-    for (const [px, py] of posts) g.rect(px - 1.5, py - 9, 3, 9);
+    for (const [px, py] of posts) g.rect(px - 0.9, py - 6, 1.8, 6);
     g.fill({ color: 0x2a2620 });
-    const s = 4.2;
+    const s = 2.6;
     for (const [px, py] of posts) {
-      const top = py - 12;
+      const top = py - 7.5;
       g.poly([px, top - s * 0.5, px + s, top, px, top + s * 0.5, px - s, top]);
     }
     g.fill({ color: shadeColor(color, 1.25) });
     for (const [px, py] of posts) {
-      const top = py - 12;
+      const top = py - 7.5;
       g.poly([px - s, top, px, top + s * 0.5, px, top + s * 0.5 + s, px - s, top + s]);
     }
     g.fill({ color });
     for (const [px, py] of posts) {
-      const top = py - 12;
+      const top = py - 7.5;
       g.poly([px, top + s * 0.5, px + s, top, px + s, top + s, px, top + s * 0.5 + s]);
     }
     g.fill({ color: shadeColor(color, 0.65) });
@@ -1045,7 +1047,12 @@ export class GameRenderer {
         if (v.banner) v.banner.texture = this.atlas.get(`banner:${b.owner}`);
       }
       if (v.banner) v.banner.visible = b.done;
-      v.flag.visible = this.occupied(b);
+      v.flag.visible = !v.banner && this.occupied(b);
+      if (v.flag.visible && !v.flagPlaced) {
+        const top = this.atlas.topOf(`building:${b.type}`);
+        v.flag.position.set(top.x, top.y + 2);
+        v.flagPlaced = true;
+      }
       const progress = this.sim.buildProgress(b);
       const staged = this.atlas.has(`stage:${b.type}:0`);
       v.site.visible = !b.done && !staged;
@@ -1106,9 +1113,11 @@ export class GameRenderer {
     const d = this.surface(b.door.x, b.door.y);
     front.position.set(d.x, d.y);
     front.zIndex = depthOf(b.door.x, b.door.y) - 0.05;
+    // The flag stands on top of the building (placed when the finished texture is shown); military
+    // buildings show their banner instead.
     const flag = new Sprite(this.atlas.get(`flag:${b.owner}`));
-    flag.position.set(-16, 3);
-    front.addChild(flag);
+    flag.visible = false;
+    body.addChild(flag);
     this.effects.attachBuilding(b, body);
 
     this.addStatic(body, cx, cy);
@@ -1116,6 +1125,7 @@ export class GameRenderer {
     const v: BuildingView = {
       owner: b.owner,
       flag,
+      flagPlaced: false,
       banner,
       at: { x: cx, y: cy },
       doorAt: { ...b.door },
@@ -1142,8 +1152,8 @@ export class GameRenderer {
     const key = `${out},${inp},${waitingPlank},${waitingStone}`;
     if (key === v.pileKey) return;
     v.pileKey = key;
-    // Keep the flag (child 0), drop the old pile.
-    while (v.front.children.length > 1) v.front.children[1].destroy();
+    // Drop the old pile.
+    while (v.front.children.length > 0) v.front.children[0].destroy();
     // Each kind of goods gets its own spot: output to the right of the door (down the +x edge),
     // inputs and site materials to the left along the front wall; a fifth kind starts a second row
     // nearer the camera.
@@ -1154,28 +1164,31 @@ export class GameRenderer {
         ? [20 + col * 17 - row * 16, -4 + col * 8.5 + row * 8]
         : [-22 - col * 17 - row * 16, -4 - col * 8.5 + row * 8];
     };
-    const stack = (res: Resource, count: number, side: 1 | -1, k: number) => {
-      const [x, y] = spot(side, k);
-      // A pre-rendered pile of exactly this many (`?art=3d`), else single wares stacked up.
-      const pile = `pile:${res}:${Math.min(count, PILE_MAX)}`;
-      if (this.atlas.has(pile)) {
-        const s = new Sprite(this.atlas.get(pile));
-        s.position.set(x, y);
-        v.front.addChild(s);
-        return;
-      }
-      for (let i = 0; i < count; i++) {
-        const s = new Sprite(this.atlas.get(`ware:${res}`));
-        s.position.set(x - 12 + (i % 2) * 7, y + 12 - Math.floor(i / 2) * 4);
-        v.front.addChild(s);
+    // Next free spot per side; goods beyond PILE_MAX start another pile on the next spot.
+    const next = { [1]: 0, [-1]: 0 };
+    const stack = (res: Resource, count: number, side: 1 | -1) => {
+      for (let left = count; left > 0; left -= PILE_MAX) {
+        const n = Math.min(left, PILE_MAX);
+        const [x, y] = spot(side, next[side]++);
+        // A pre-rendered pile of exactly this many (`?art=3d`), else single wares stacked up.
+        const pile = `pile:${res}:${n}`;
+        if (this.atlas.has(pile)) {
+          const s = new Sprite(this.atlas.get(pile));
+          s.position.set(x, y);
+          v.front.addChild(s);
+          continue;
+        }
+        for (let i = 0; i < n; i++) {
+          const s = new Sprite(this.atlas.get(`ware:${res}`));
+          s.position.set(x - 12 + (i % 2) * 7, y + 12 - Math.floor(i / 2) * 4);
+          v.front.addChild(s);
+        }
       }
     };
-    const outs = RESOURCES.filter((r) => b.output[r] > 0);
-    outs.forEach((r, k) => stack(r, b.output[r], 1, k));
-    const ins: [Resource, number][] = RESOURCES.filter((r) => b.input[r] > 0).map((r) => [r, b.input[r]]);
-    if (waitingPlank > 0) ins.push(['plank', waitingPlank]);
-    if (waitingStone > 0) ins.push(['stone', waitingStone]);
-    ins.forEach(([r, n], k) => stack(r, n, -1, k));
+    for (const r of RESOURCES) if (b.output[r] > 0) stack(r, b.output[r], 1);
+    for (const r of RESOURCES) if (b.input[r] > 0) stack(r, b.input[r], -1);
+    if (waitingPlank > 0) stack('plank', waitingPlank, -1);
+    if (waitingStone > 0) stack('stone', waitingStone, -1);
   }
 
   private syncSettlers(alpha: number, timeMs: number): void {
