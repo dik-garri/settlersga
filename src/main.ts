@@ -41,11 +41,19 @@ async function main() {
   // opponents passive.
   const players = params.has('players') ? Number(params.get('players')) : 2;
   const ai = params.get('ai') === 'off' ? [] : Array.from({ length: players - 1 }, (_, k) => k + 2);
-  const world = save ? World.load(save) : new World(seed, { size, players, ai });
+  // ?demo: a development showcase that builds itself up to show everything at once (src/dev).
+  const demo = params.has('demo');
+  const world = save
+    ? World.load(save)
+    : demo
+      ? (await import('./dev/showcase')).buildShowcase()
+      : new World(seed, { size, players, ai });
   const state = createState();
   // ?art=3d: the pilot set of pre-rendered 3D sprites (art/blender) instead of some procedural ones.
-  const atlas = new SpriteAtlas(params.get('art') === '3d' ? await loadArt3d() : null);
-  state.fog = params.get('fog') !== 'off';
+  // The demo shows the 3D art and no fog unless asked otherwise (?art=classic, ?fog=on).
+  const art3d = params.get('art') === '3d' || (demo && params.get('art') !== 'classic');
+  const atlas = new SpriteAtlas(art3d ? await loadArt3d() : null);
+  state.fog = demo ? params.get('fog') === 'on' : params.get('fog') !== 'off';
   const renderer = new GameRenderer(app, world, atlas, state.fog);
   const camera = new Camera(renderer.world, renderer.bounds);
   const c = world.castle;
