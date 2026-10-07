@@ -5,3 +5,4 @@ dist
 # Blender render scratch files
 art/.tmp/
 __pycache__/
+.DS_Store
