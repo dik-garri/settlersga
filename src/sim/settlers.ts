@@ -5,7 +5,6 @@ import {
   DIG_EVERY,
   BUILDINGS,
   HANDLE_TICKS,
-  IDLE_GO_HOME_TICKS,
   OUTPUT_CAP,
   PATH_FAIL_BACKOFF,
   PROFESSIONS,
@@ -19,6 +18,7 @@ import { assaultTick, healTick, joinTick, releaseJoin, soldierIdle } from './mil
 import { canPlant, findGatherTarget, findPlotFor, harvest, isGatherTarget, plant, type Target } from './nature';
 import { findPath } from './pathfinding';
 import { pathSpeed, wearTile } from './paths';
+import { restIdle } from './idle';
 import { findGame, huntTick, releaseHunt } from './hunting';
 import { RESOURCES, Terrain, type Building, type Point, type Settler, type Task } from './types';
 import type { World } from './world';
@@ -41,6 +41,12 @@ export function updateSettler(w: World, s: Settler): void {
     return;
   }
   s.idleTicks = 0;
+  if (s.stroll !== null) {
+    // A job arrived mid-stroll (`idle.ts`): the path was the stroll's.
+    s.stroll = null;
+    s.path = [];
+  }
+  s.chatWith = null;
 
   switch (task.t) {
     case 'goto': {
@@ -215,7 +221,8 @@ function atGoal(s: Settler, task: GotoTarget): boolean {
   return task.adj ? Math.max(dx, dy) === 1 : dx === 0 && dy === 0;
 }
 
-function move(w: World, s: Settler, task: GotoTarget): void {
+/** Walks along `s.path` for one tick; `onBlocked` runs when no new route around an obstacle exists. */
+export function move(w: World, s: Settler, task: GotoTarget, onBlocked?: () => void): void {
   // `left` is this tick's walking budget in tiles of normal ground; a step into slower terrain
   // (`TERRAIN[t].speed`, as charged by A*) uses it up faster.
   let left = SETTLER_SPEED;
@@ -242,7 +249,7 @@ function move(w: World, s: Settler, task: GotoTarget): void {
     if (next && !w.map.isWalkable(next.x, next.y)) {
       // Something grew or was built in the way — find a new route.
       const p = findPath(w.map, s.x, s.y, task.x, task.y, task.adj);
-      if (!p) return routeFailed(w, s);
+      if (!p) return onBlocked ? onBlocked() : routeFailed(w, s);
       s.path = p;
     }
   }
@@ -341,13 +348,6 @@ function goHome(s: Settler, b: Building): void {
   ];
 }
 
-/** Settlers without a workplace rest in the nearest warehouse. */
-function goToStorage(w: World, s: Settler): void {
-  if (s.inside !== null || s.idleTicks <= IDLE_GO_HOME_TICKS) return;
-  const store = nearestStorage(w, s.owner, s);
-  if (store) goHome(s, store);
-}
-
 function startGathering(w: World, s: Settler, home: Building): boolean {
   const def = PROFESSIONS[s.kind].gather!;
   if (home.output[def.res] >= OUTPUT_CAP) return false;
@@ -387,8 +387,8 @@ function idle(w: World, s: Settler): void {
 
   switch (prof.behavior) {
     case 'carrier':
-      // Work comes from the logistics dispatcher.
-      goToStorage(w, s);
+      // Work comes from the logistics dispatcher; meanwhile hang about with the others outside.
+      restIdle(w, s);
       return;
 
     case 'builder': {
@@ -410,7 +410,7 @@ function idle(w: World, s: Settler): void {
           { t: 'build', b: best.id, stall: 0 },
         ];
       } else {
-        goToStorage(w, s);
+        restIdle(w, s);
       }
       return;
     }
@@ -434,7 +434,7 @@ function idle(w: World, s: Settler): void {
           { t: 'dig', b: best.id, n: 0 },
         ];
       } else {
-        goToStorage(w, s);
+        restIdle(w, s);
       }
       return;
     }

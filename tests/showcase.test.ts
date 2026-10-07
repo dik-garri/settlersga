@@ -23,5 +23,8 @@ describe('dev showcase (?demo)', () => {
     // The hunter is at work and busy routes have worn into paths.
     expect(all.some((b) => b.type === 'hunter' && b.workerId !== null)).toBe(true);
     expect([...w.worn].some((i) => pathLevel(w.map.wear[i]) >= 1)).toBe(true);
+    // Free carriers crowd outside near buildings (`idle.ts`).
+    const crowd = w.settlers.filter((s) => s.kind === 'carrier' && s.tasks.length === 0 && s.idleAt !== null);
+    expect(crowd.filter((s) => s.inside === null).length).toBeGreaterThan(5);
   });
 });

@@ -153,10 +153,13 @@ export class World {
   readonly animals: Animal[] = [];
   nextAnimalId = 1;
   readonly animalRng: Rng;
+  /** Random stream of the idle crowds (`idle.ts`), so they never shift the economy's own RNG. */
+  readonly idleRng: Rng;
 
   constructor(seed = 1, opts: WorldOptions = {}) {
     this.rng = createRng(seed ^ 0x9e3779b9);
     this.animalRng = createRng(seed ^ 0x2545f491);
+    this.idleRng = createRng(seed ^ 0x6a09e667);
     if (opts.from) {
       this.map = mapFromSave(opts.from);
       restoreWorld(this, opts.from);

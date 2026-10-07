@@ -23,7 +23,28 @@ export const OUTPUT_CAP = 4;
 export const INPUT_CAP = 4;
 
 export const DISPATCH_EVERY = 5;
+/** A free settler stands where its last job ended this long before it walks off to an idle crowd. */
 export const IDLE_GO_HOME_TICKS = 30;
+
+/**
+ * Idle crowds (`idle.ts`): as in Settlers 4, free carriers (and builders and diggers without a site)
+ * do not disappear into a warehouse but stand about outside in small groups — near warehouses, the
+ * castle and houses — strolling a little and chatting in pairs, always ready for the dispatcher.
+ */
+export const IDLE = {
+  /** How far from the gathering building's door (tiles) idle settlers stand. */
+  radius: 3,
+  /** At most this many idle settlers gather at one building before the next one is chosen. */
+  groupSize: 5,
+  /** Ticks between strolls: a random value in [min, max]. */
+  strollEvery: [60, 180] as [number, number],
+  /** Chance that a stroll goes to stand next to another idle settler of the group, to chat. */
+  chatChance: 0.45,
+  /** Random spots tried per stroll before giving up until the next one. */
+  tries: 6,
+  /** Building kinds idle settlers gather at (as BuildingDef flags). */
+  gatherAt: ['storage', 'residence'] as ('storage' | 'residence')[],
+};
 /** After a failed route search: how long the settler waits and how long the target building is skipped. */
 export const PATH_FAIL_BACKOFF = 10;
 export const UNREACHABLE_TICKS = 100;
