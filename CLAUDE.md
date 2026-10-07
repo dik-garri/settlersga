@@ -15,6 +15,10 @@ The target is Settlers 4 scale, so every change must scale along three axes:
 - **Players:** everything that belongs to someone carries an `owner` (`PlayerId`); logic filters by owner and never assumes a single player. `LOCAL_PLAYER` is only a default for UI-facing calls.
 - **Size:** no hard-coded map dimensions or population assumptions; per-tick work must stay roughly proportional to active entities, not to map area or to entities squared. Measure with the hour-long probe before and after.
 
+## Deployment
+
+Every push to `main` builds the game and publishes it to GitHub Pages (`.github/workflows/pages.yml`: `npm ci`, `npm run build`, deploy `dist/`) at https://dik-garri.github.io/settlersga/. `vite.config.ts` uses a relative `base` so the build works under the repo sub-path. Tests do not gate the deployment, so run them before pushing as described above.
+
 ## Commands
 
 ```bash

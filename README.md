@@ -4,6 +4,8 @@
 
 ![Скриншот](docs/screenshot.jpg)
 
+**Играть в браузере:** https://dik-garri.github.io/settlersga/ (собирается и публикуется автоматически при каждом пуше в `main`).
+
 ## Запуск
 
 Нужен Node.js 20.19+.
