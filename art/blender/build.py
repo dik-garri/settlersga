@@ -17,6 +17,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 import lib  # noqa: E402
+import buildings  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 OUT = os.path.join(ROOT, 'public', 'art', '3d')
@@ -481,6 +482,10 @@ def save_sheet(pixels, path):
 SINGLE = {
     # name: (builder, logical w, h, anchor x, y) — sizes of the procedural sprites they replace.
     'woodcutter': (build_woodcutter, 150, 140, 75, 100),
+    'sawmill': (buildings.build_sawmill, 150, 140, 75, 100),
+    'stonecutter': (buildings.build_stonecutter, 150, 140, 75, 100),
+    'tower': (buildings.build_tower, 150, 210, 75, 170),
+    'house_large': (buildings.build_house_large, 220, 190, 110, 135),
     'tree': (build_tree, 84, 100, 34, 80),
     'deposit0': (lambda: build_deposit(0), 64, 72, 30, 58),
     'deposit1': (lambda: build_deposit(1), 64, 72, 30, 58),
