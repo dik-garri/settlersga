@@ -2,7 +2,7 @@
 
     blender -b --factory-startup -P art/blender/build.py -- [names...]
 
-Names: carrier, woodcutter, tree, deposit, log (default: all). Every sprite keeps the size and anchor
+Names: settlers (every figure, see figures.py), woodcutter, sawmill, stonecutter, tower, house_large, tree, deposit, piles (or piles:fish,coal), wares (default: all). Every sprite keeps the size and anchor
 of the procedural sprite it replaces (src/render/sprites.ts, settlerArt.ts), so the game can swap
 them in without other changes.
 """
@@ -16,7 +16,10 @@ import bpy
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
+import figures  # noqa: E402
+import goods  # noqa: E402
 import lib  # noqa: E402
+import buildings  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 OUT = os.path.join(ROOT, 'public', 'art', '3d')
@@ -25,11 +28,6 @@ TMP = os.path.join(ROOT, 'art', '.tmp')
 # ------------------------------------------------------------------------------------------ palette
 # Colours as on screen (sRGB), after Settlers 4: saturated, warm earth, blue-grey Roman stone.
 
-SKIN = (0.93, 0.66, 0.48)
-HAIR = (0.17, 0.11, 0.07)
-TUNIC = (0.95, 0.93, 0.88)
-TEAM = (0.16, 0.32, 0.86)  # player colour trim (blue, like the local player)
-SANDALS = (0.45, 0.27, 0.13)
 
 EARTH = ((0.42, 0.28, 0.17), (0.6, 0.42, 0.26))
 WOOD_DARK = ((0.28, 0.17, 0.09), (0.46, 0.3, 0.16))
@@ -236,47 +234,6 @@ def build_woodcutter():
     lib.tag(4)
 
 
-# Goods lying at a door: one sprite per count, as many items as there really are.
-PILE_MAX = 8
-
-
-def build_pile(res, n):
-    import random
-
-    rnd = random.Random(n)
-    if res == 'log':
-        logs = wood('logs', light=False)
-        cut = cut_ends()
-        rows = []
-        left = n
-        width = 4
-        while left > 0:
-            rows.append(min(width, left))
-            left -= rows[-1]
-            width -= 1
-        for row, count in enumerate(rows):
-            for k in range(count):
-                y = (k - (count - 1) / 2) * 0.09
-                z = 0.04 + row * 0.075
-                x = rnd.uniform(-0.02, 0.02)
-                lib.cylinder((x, y, z), 0.04, 0.34, logs, rot=(0, math.pi / 2, 0), verts=10)
-                for sgn in (-1, 1):
-                    lib.cylinder((x + sgn * 0.17, y, z), 0.037, 0.005, cut, rot=(0, math.pi / 2, 0), verts=10)
-    elif res == 'plank':
-        board = lib.mat_grain('plank', (0.74, 0.54, 0.3), (0.86, 0.68, 0.42), scale=4, stretch=(1, 9, 1), bump=0.4)
-        for k in range(n):
-            layer, col = divmod(k, 2)
-            lib.box(((col - 0.5) * 0.1 + rnd.uniform(-0.01, 0.01), 0, 0.012 + layer * 0.026), (0.09, 0.36, 0.022), board,
-                    rot=(0, 0, rnd.uniform(-0.05, 0.05)), bevel=0.003)
-    elif res == 'stone':
-        stone = lib.mat_grain('block', (0.6, 0.6, 0.62), (0.8, 0.79, 0.78), scale=8, stretch=(1, 1, 1), bump=0.8)
-        spots = [(-0.07, -0.07, 0), (0.07, -0.07, 0), (-0.07, 0.07, 0), (0.07, 0.07, 0),
-                 (0, -0.07, 1), (0, 0.07, 1), (-0.035, 0, 2), (0.035, 0, 2)]
-        for k in range(n):
-            x, y, layer = spots[k]
-            lib.box((x, y, 0.04 + layer * 0.075), (0.12, 0.12, 0.075), stone, rot=(0, 0, rnd.uniform(-0.2, 0.2)), bevel=0.012)
-
-
 def build_tree():
     bark = lib.mat_grain('bark', (0.36, 0.2, 0.09), (0.62, 0.38, 0.18), scale=7, stretch=(1, 1, 5), bump=0.9)
     foliage = leaves()
@@ -325,155 +282,6 @@ def build_deposit(size):
                   noise=0.8, seed=k, subdiv=1, flat=True)
 
 
-def build_log():
-    logs = wood('log', light=True)
-    cut = cut_ends()
-    gx, gy = lib.ground_dir(0)
-    yaw = math.atan2(gy, gx)
-    lib.cylinder((0, 0, 0), 0.05, 0.3, logs, rot=(0, math.pi / 2, yaw), verts=12)
-    for sgn in (-1, 1):
-        lib.cylinder((sgn * 0.15 * gx, sgn * 0.15 * gy, 0), 0.047, 0.004, cut, rot=(0, math.pi / 2, yaw), verts=12)
-
-
-# ------------------------------------------------------------------------------------------ carrier
-
-class Figure:
-    """A small, stocky settler built from parts on pivots, facing +X before the root is turned."""
-
-    def __init__(self):
-        skin = lib.mat_flat('skin', SKIN, 0.6)
-        hair = lib.mat_grain('hair', HAIR, tuple(min(1, c * 1.8) for c in HAIR), scale=30, stretch=(1, 1, 3), bump=0.4)
-        tunic = lib.mat_grain('tunic', tuple(c * 0.9 for c in TUNIC), TUNIC, scale=20, stretch=(1, 1, 4), bump=0.3)
-        team = lib.mat_flat('team', TEAM, 0.6)
-        sandals = lib.mat_flat('sandals', SANDALS)
-
-        self.root = bpy.data.objects.new('root', None)
-        bpy.context.scene.collection.objects.link(self.root)
-
-        def pivot(name, loc):
-            e = bpy.data.objects.new(name, None)
-            bpy.context.scene.collection.objects.link(e)
-            e.parent = self.root
-            e.location = loc
-            bpy.context.view_layer.update()  # so children attach to the pivot's real position
-            return e
-
-        def attach(obj, parent):
-            bpy.context.view_layer.update()
-            world = obj.matrix_world.copy()
-            obj.parent = parent
-            obj.matrix_world = world
-
-        hip_z = 0.27
-        self.legs = []
-        for side in (-1, 1):
-            p = pivot(f'hip{side}', (0, side * 0.055, hip_z))
-            leg = lib.cylinder((0, side * 0.055, hip_z - 0.13), 0.042, 0.26, skin, radius2=0.036, verts=10)
-            shoe = lib.box((0.03, side * 0.055, 0.02), (0.11, 0.06, 0.04), sandals, bevel=0.015)
-            attach(leg, p)
-            attach(shoe, p)
-            self.legs.append(p)
-        for obj in (
-            # Tunic to the knees, flaring out, with a coloured hem and belt; bare arms and legs.
-            lib.cylinder((0, 0, 0.37), 0.13, 0.3, tunic, radius2=0.092, verts=16),
-            lib.cylinder((0, 0, 0.235), 0.132, 0.03, team, verts=16),
-            lib.cylinder((0, 0, 0.405), 0.107, 0.035, team, verts=16),
-            lib.cylinder((0, 0, 0.535), 0.092, 0.05, tunic, radius2=0.07, verts=16),
-            lib.sphere((0.005, 0, 0.64), 0.105, skin),
-            lib.sphere((-0.006, 0, 0.678), 0.109, hair, scale=(1.02, 1.03, 0.74)),
-            lib.sphere((0.106, 0, 0.625), 0.022, skin),
-        ):
-            attach(obj, self.root)
-        self.arms = []
-        self.hands = []
-        for side in (-1, 1):
-            p = pivot(f'shoulder{side}', (0, side * 0.12, 0.52))
-            sleeve = lib.cylinder((0, side * 0.12, 0.49), 0.045, 0.07, tunic, verts=10)
-            arm = lib.cylinder((0, side * 0.12, 0.4), 0.032, 0.16, skin, verts=10)
-            hand = lib.sphere((0, side * 0.12, 0.31), 0.034, skin)
-            attach(sleeve, p)
-            attach(arm, p)
-            attach(hand, p)
-            self.arms.append(p)
-            self.hands.append(hand)
-
-    def pose(self, yaw, leg, arm, carry):
-        self.root.rotation_euler = (0, 0, yaw)
-        for side, p in zip((-1, 1), self.legs):
-            p.rotation_euler = (0, math.radians(side * leg), 0)
-        for side, p in zip((-1, 1), self.arms):
-            if carry:
-                # Both arms forward and in, hands together in front of the belly.
-                p.rotation_euler = (math.radians(-side * 22), math.radians(-55), 0)
-            else:
-                p.rotation_euler = (0, math.radians(-side * arm), 0)
-        bpy.context.view_layer.update()
-
-    def hand_point(self):
-        """Between the hands, from the evaluated scene (what the render actually shows)."""
-        from mathutils import Vector
-
-        dg = bpy.context.evaluated_depsgraph_get()
-        pts = []
-        for h in self.hands:
-            ev = h.evaluated_get(dg)
-            corners = [ev.matrix_world @ Vector(c) for c in ev.bound_box]
-            pts.append(sum(corners, Vector()) / 8)
-        return (pts[0] + pts[1]) / 2
-
-
-WALK = [(24, 20), (0, 0), (-24, -20), (0, 0)]  # (leg, arm) degrees per walk frame
-DIR_COUNT = 8
-
-
-def build_carrier(scene):
-    """Sheet: 8 rows (directions E, SE, S, SW, W, NW, N, NE), 10 columns: walk 0–3 and stand, empty
-    handed, then the same carrying. Plus where the carried ware goes (offset from the anchor)."""
-    w, h, ax, ay = 26, 38, 13, 34
-    lib.setup_camera(scene, w, h, ax, ay)
-    fig = Figure()
-    poses = [(leg, arm, False) for leg, arm in WALK] + [(0, 6, False)]
-    poses += [(leg, 0, True) for leg, _ in WALK] + [(0, 0, True)]
-    cw, ch = w * lib.RESOLUTION, h * lib.RESOLUTION
-    sheet = np.zeros((DIR_COUNT * ch, len(poses) * cw, 4), dtype=np.float32)
-    carry = []
-    behind = []
-    for d in range(DIR_COUNT):
-        gx, gy = lib.ground_dir(d * math.pi / 4)
-        yaw = math.atan2(gy, gx)
-        row = []
-        for c, (leg, arm, holding) in enumerate(poses):
-            fig.pose(yaw, leg, arm, holding)
-            path = os.path.join(TMP, f'carrier_{d}_{c}.png')
-            lib.render_to(scene, path)
-            img = bpy.data.images.load(path)
-            px = np.empty(cw * ch * 4, dtype=np.float32)
-            img.pixels.foreach_get(px)
-            bpy.data.images.remove(img)
-            # Blender images start at the bottom row; the sheet's row 0 is the top.
-            sheet[(DIR_COUNT - 1 - d) * ch:(DIR_COUNT - d) * ch, c * cw:(c + 1) * cw] = px.reshape(ch, cw, 4)
-            if holding:
-                sx, sy = lib.screen_point(scene, fig.hand_point())
-                row.append([round(sx - ax, 1), round(sy - ay, 1)])
-        carry.append(row)
-        # Goods in hand go behind the figure when the hands are further from the camera than the body.
-        fig.pose(yaw, 0, 0, True)
-        hand_depth = lib.camera_depth(scene, fig.hand_point())
-        behind.append(hand_depth > lib.camera_depth(scene, (0, 0, 0.35)))
-    save_sheet(sheet, os.path.join(OUT, 'carrier.png'))
-    meta = {'cell': [w, h], 'anchor': [ax, ay], 'columns': len(poses), 'walk': 4, 'carryColumn': 5, 'carryAt': carry, 'carryBehind': behind}
-    with open(os.path.join(OUT, 'carrier.json'), 'w') as f:
-        json.dump(meta, f, indent=1)
-
-
-def save_sheet(pixels, path):
-    h, w, _ = pixels.shape
-    img = bpy.data.images.new('sheet', width=w, height=h, alpha=True)
-    img.pixels.foreach_set(pixels.ravel())  # rows are already in Blender's bottom-up order
-    img.filepath_raw = path
-    img.file_format = 'PNG'
-    img.save()
-    bpy.data.images.remove(img)
 
 
 # ------------------------------------------------------------------------------------------ main
@@ -481,32 +289,23 @@ def save_sheet(pixels, path):
 SINGLE = {
     # name: (builder, logical w, h, anchor x, y) — sizes of the procedural sprites they replace.
     'woodcutter': (build_woodcutter, 150, 140, 75, 100),
+    'sawmill': (buildings.build_sawmill, 150, 140, 75, 100),
+    'stonecutter': (buildings.build_stonecutter, 150, 140, 75, 100),
+    'tower': (buildings.build_tower, 150, 210, 75, 170),
+    'house_large': (buildings.build_house_large, 220, 190, 110, 135),
     'tree': (build_tree, 84, 100, 34, 80),
     'deposit0': (lambda: build_deposit(0), 64, 72, 30, 58),
     'deposit1': (lambda: build_deposit(1), 64, 72, 30, 58),
     'deposit2': (lambda: build_deposit(2), 64, 72, 30, 58),
-    'log': (build_log, 16, 10, 8, 5),
 }
 
 
 #: Construction stages rendered before the finished building (0 stakes … 3 roof half on).
 STAGES = 4
-PILE = (44, 34, 22, 24)  # logical w, h, anchor of a goods pile at a door
-
-
-def render_piles():
-    w, h, ax, ay = PILE
-    for res in ('log', 'plank', 'stone'):
-        for n in range(1, PILE_MAX + 1):
-            scene = lib.reset_scene()
-            lib.setup_camera(scene, w, h, ax, ay)
-            build_pile(res, n)
-            lib.render_to(scene, os.path.join(OUT, f'pile-{res}-{n}.png'))
-
 
 def main():
     args = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
-    names = args or ['carrier', 'piles', *SINGLE]
+    names = args or ['settlers', 'piles', 'wares', *SINGLE]
     os.makedirs(OUT, exist_ok=True)
     os.makedirs(TMP, exist_ok=True)
     for name in names:
@@ -516,15 +315,17 @@ def main():
             todo = [name]
         for n in todo:
             scene = lib.reset_scene()
-            if n == 'carrier':
-                build_carrier(scene)
+            if n == 'settlers':
+                figures.build_settlers(OUT, TMP)
                 continue
-            if n == 'piles':
-                render_piles()
+            if n == 'piles' or n.startswith('piles:'):
+                # `piles` renders every resource's piles, `piles:fish,coal` only those.
+                goods.render_piles(OUT, TMP, n.split(':', 1)[1].split(',') if ':' in n else None)
+                continue
+            if n == 'wares':
+                goods.render_wares(OUT, TMP)
                 continue
             build, w, h, ax, ay = SINGLE[n]
-            if n == 'log':
-                bpy.data.objects['ShadowCatcher'].hide_render = True
             lib.setup_camera(scene, w, h, ax, ay)
             build()
             staged = any('stage' in o for o in scene.objects)

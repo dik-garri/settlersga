@@ -1,4 +1,4 @@
-import { Container, Graphics, MeshSimple, Sprite, Texture, type Application } from 'pixi.js';
+import { CanvasSource, Container, Graphics, MeshSimple, Sprite, Texture, type Application } from 'pixi.js';
 import { BUILD_TICKS_PER_UNIT, BUILDINGS, CROP_KINDS, SHOT_TICKS, TREE_MATURE } from '../sim/config';
 import { RESOURCES, Terrain, type Building, type BuildingType, type Resource, type Settler } from '../sim/types';
 import { CHUNK } from '../sim/map';
@@ -28,9 +28,10 @@ import {
 } from './animConfig';
 import { Effects } from './effects';
 import { AnimalLayer } from './animals';
+import { setFrame, type Settler3d } from './settler3d';
 import { BODY_STAND, BODY_WORK, CARRY_AT } from './settlerArt';
 import { depthOf, HALF_H, HALF_W, toScreen, toTile } from './iso';
-import { ART3D_STAGES, PILE_MAX } from './art3d';
+import { ART3D_BANNERS, ART3D_STAGES, PILE_MAX } from './art3d';
 import { needsLevelling } from '../sim/digging';
 import { BANNERS, EDGE_DIRS, GROUND_PRIORITY, groundVariants, PLAYER_COLORS, type GroundKind } from './sprites';
 
@@ -71,6 +72,8 @@ interface BuildingView {
   /** Owner the flag was last drawn for (buildings change hands when conquered). */
   owner: number;
   flag: Sprite;
+  /** Whether the flag sits on the finished building's roof yet. */
+  flagPlaced: boolean;
   /** Owner banner on the roof (castle, towers), shown once the building stands. */
   banner: Sprite | null;
   /** Tiles the body and the door pile are registered under (see `addStatic`). */
@@ -189,12 +192,21 @@ export class GameRenderer {
   private hintAt = 0;
   private readonly ghostSprite: Sprite;
   /**
-   * Fog of war for the local player, above the objects: per chunk a Graphics with black diamonds
-   * over unexplored tiles and a dimming veil over explored ones out of sight. Redrawn (throttled)
-   * only for visible chunks whose per-tile state changed; objects on unexplored tiles are hidden.
+   * Fog of war for the local player, above the objects, soft-edged as in Settlers 4: per chunk a
+   * tiny canvas with one pixel per tile (plus a one-tile margin) whose alpha is that tile's darkness
+   * — black where unexplored, a veil where explored but out of sight — stretched over the chunk's
+   * tile corners (raised by the terrain height) with linear filtering, so darkness fades smoothly
+   * across tile boundaries. Redrawn (throttled) only for visible chunks whose per-tile state
+   * changed; objects on unexplored tiles are hidden.
    */
   private readonly fog = new Container();
-  private readonly fogChunks: Graphics[] = [];
+  private readonly fogChunks: Container[] = [];
+  /** Per chunk: the darkness canvas and its mesh (built lazily, rebuilt when heights change). */
+  private readonly fogCanvas: (HTMLCanvasElement | null)[] = [];
+  private readonly fogMesh: (MeshSimple | null)[] = [];
+  private readonly fogTex: (Texture | null)[] = [];
+  /** Per chunk: tile states (with the margin) as last drawn. */
+  private readonly fogPrev: (Uint8Array | null)[] = [];
   /** Per tile as last drawn: 0 unexplored, 1 explored, 2 in sight; 255 forces a redraw. */
   private readonly fogSeen: Uint8Array;
   private lastFogSync = -Infinity;
@@ -215,8 +227,8 @@ export class GameRenderer {
   private readonly settlerTex: SettlerTextures;
   /** Wild animals (`animals.ts`). */
   private readonly animals: AnimalLayer;
-  /** [dir][column] of the pre-rendered carrier (`?art=3d`), replacing the layered figure. */
-  private readonly carrier3d: Texture[][] | null;
+  /** Pre-rendered 3D settlers (`?art=3d`), replacing the layered figure. */
+  private readonly settler3d: Settler3d | null;
   private readonly wareTex = {} as Record<Resource, Texture>;
   private readonly playerTint = PLAYER_COLORS.map(toTint);
   private readonly tints = new Map<string, number>();
@@ -251,7 +263,7 @@ export class GameRenderer {
     this.world.addChild(this.ground, this.territory, this.marks, this.hints, this.objects, this.shots, this.fog, this.ghostLayer);
     this.settlerTex = atlas.settlerTextures();
     this.animals = new AnimalLayer(sim, this.objects, (n) => atlas.get(n), fogOn);
-    this.carrier3d = atlas.carrier3d();
+    this.settler3d = atlas.art3d?.settlers ?? null;
     for (const r of RESOURCES) this.wareTex[r] = atlas.get(`ware:${r}`);
     this.effects = new Effects(atlas, sim, (x, y) => this.surface(x, y), this.sound);
     // Glints sit right on the ground; smoke and sparks above the objects but under the fog.
@@ -280,10 +292,14 @@ export class GameRenderer {
       g.visible = false;
       this.territoryChunks.push(g);
       this.territory.addChild(g);
-      const f = new Graphics();
+      const f = new Container();
       f.visible = false;
       this.fogChunks.push(f);
       this.fog.addChild(f);
+      this.fogCanvas.push(null);
+      this.fogMesh.push(null);
+      this.fogTex.push(null);
+      this.fogPrev.push(null);
     }
     this.chunkVisible = new Uint8Array(chunks);
     this.chunkSeen = new Int32Array(chunks).fill(-1);
@@ -500,6 +516,9 @@ export class GameRenderer {
       if (!this.chunkReady[c]) continue; // built from the new heights when it comes into view
       this.buildChunkGround(c);
       this.drawTerritoryChunk(c);
+      // The fog mesh follows the new heights (its texture is kept).
+      this.fogMesh[c]?.destroy();
+      this.fogMesh[c] = null;
       for (const obj of this.chunkObjects[c]) {
         const at = this.staticAt.get(obj);
         if (!at) continue;
@@ -643,39 +662,85 @@ export class GameRenderer {
       const y0 = Math.floor(c / map.chunksX) * CHUNK;
       const x1 = Math.min(map.w, x0 + CHUNK);
       const y1 = Math.min(map.h, y0 + CHUNK);
-      let changed = false;
-      for (let y = y0; y < y1; y++) {
-        for (let x = x0; x < x1; x++) {
-          const i = map.idx(x, y);
-          const st = !this.sim.isExplored(x, y, LOCAL_PLAYER) ? 0 : this.sim.isVisible(x, y, LOCAL_PLAYER) ? 2 : 1;
-          if (st !== this.fogSeen[i]) {
-            this.fogSeen[i] = st;
+      // The chunk's tiles plus a one-tile margin (it feeds the blend at the edges), as last drawn.
+      const W = CHUNK + 2;
+      let prev = this.fogPrev[c];
+      let changed = prev === null || this.fogMesh[c] === null;
+      if (!prev) prev = this.fogPrev[c] = new Uint8Array(W * W);
+      for (let ty = 0; ty < W; ty++) {
+        for (let tx = 0; tx < W; tx++) {
+          const x = Math.min(map.w - 1, Math.max(0, x0 - 1 + tx));
+          const y = Math.min(map.h - 1, Math.max(0, y0 - 1 + ty));
+          const st = this.fogState(x, y);
+          if (st !== prev[ty * W + tx]) {
+            prev[ty * W + tx] = st;
             changed = true;
           }
+          if (x >= x0 && x < x1 && y >= y0 && y < y1) this.fogSeen[map.idx(x, y)] = st;
         }
       }
       if (!changed) continue;
-      const g = this.fogChunks[c];
-      g.clear();
-      for (const [state, alpha] of [
-        [0, 1],
-        [1, 0.42],
-      ] as const) {
-        let any = false;
-        for (let y = y0; y < y1; y++) {
-          for (let x = x0; x < x1; x++) {
-            if (this.fogSeen[map.idx(x, y)] !== state) continue;
-            g.poly(this.diamond(x, y));
-            any = true;
-          }
-        }
-        if (any) g.fill({ color: 0x05070a, alpha });
-      }
+      this.drawFogChunk(c, x0, y0, x1, y1, prev);
       for (const obj of this.chunkObjects[c]) {
         const at = this.staticAt.get(obj);
         if (at) obj.visible = this.fogSeen[map.idx(Math.round(at.x), Math.round(at.y))] !== 0;
       }
     }
+  }
+
+  private fogState(x: number, y: number): number {
+    return !this.sim.isExplored(x, y, LOCAL_PLAYER) ? 0 : this.sim.isVisible(x, y, LOCAL_PLAYER) ? 2 : 1;
+  }
+
+  private drawFogChunk(c: number, x0: number, y0: number, x1: number, y1: number, states: Uint8Array): void {
+    const W = CHUNK + 2;
+    let canvas = this.fogCanvas[c];
+    if (!canvas) {
+      canvas = document.createElement('canvas');
+      canvas.width = W;
+      canvas.height = W;
+      this.fogCanvas[c] = canvas;
+    }
+    const ctx = canvas.getContext('2d')!;
+    const img = ctx.createImageData(W, W);
+    const ALPHA = [255, 107, 0]; // unexplored, explored out of sight (0.42), in sight
+    for (let k = 0; k < W * W; k++) {
+      img.data[k * 4] = 5;
+      img.data[k * 4 + 1] = 7;
+      img.data[k * 4 + 2] = 10;
+      img.data[k * 4 + 3] = ALPHA[states[k]];
+    }
+    ctx.putImageData(img, 0, 0);
+    let tex = this.fogTex[c];
+    if (tex) tex.source.update();
+    else tex = this.fogTex[c] = new Texture({ source: new CanvasSource({ resource: canvas, scaleMode: 'linear' }) });
+    if (this.fogMesh[c]) return;
+    const vertices: number[] = [];
+    const uvs: number[] = [];
+    const indices: number[] = [];
+    const cols = x1 - x0 + 1;
+    for (let vy = y0; vy <= y1; vy++) {
+      for (let vx = x0; vx <= x1; vx++) {
+        const p = this.corner(vx, vy);
+        vertices.push(p.x, p.y);
+        // Corner (vx, vy) sits at tile coordinate (vx − ½, vy − ½); texel k's centre is tile x0 − 1 + k.
+        uvs.push((vx - x0 + 1) / W, (vy - y0 + 1) / W);
+      }
+    }
+    for (let y = 0; y < y1 - y0; y++) {
+      for (let x = 0; x < x1 - x0; x++) {
+        const a = y * cols + x;
+        indices.push(a, a + 1, a + cols + 1, a, a + cols + 1, a + cols);
+      }
+    }
+    const mesh = new MeshSimple({
+      texture: tex,
+      vertices: new Float32Array(vertices),
+      uvs: new Float32Array(uvs),
+      indices: new Uint32Array(indices),
+    });
+    this.fogMesh[c] = mesh;
+    this.fogChunks[c].addChild(mesh);
   }
 
   /** Each arrow flies on a shallow arc from the shooter's shoulder to the target. */
@@ -838,7 +903,7 @@ export class GameRenderer {
 
   /**
    * A player's border as in Settlers 4: a row of little posts topped with a cube in the player's
-   * colour, one on every border edge (between an owned tile and one that is not).
+   * colour, two on every border edge (between an owned tile and one that is not).
    */
   private drawBorder(
     g: Graphics,
@@ -863,33 +928,33 @@ export class GameRenderer {
           [x, y, x + 1, y, !owned(x, y - 1)],
         ];
         for (const [ax, ay, bx, by, edge] of edges) {
-          // Every other edge along the border, by a parity that neighbouring tiles agree on.
           if (!edge) continue;
+          // Two posts per edge, at a quarter and three quarters of its length.
           const a = this.corner(ax, ay);
           const b = this.corner(bx, by);
-          posts.push([(a.x + b.x) / 2, (a.y + b.y) / 2]);
+          for (const t of [0.25, 0.75]) posts.push([a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t]);
         }
       }
     }
     if (posts.length === 0) return;
     // Shadows, then posts, then the cubes (three faces each: lit top, left side, darker right side).
-    for (const [px, py] of posts) g.ellipse(px + 3, py + 1, 5, 2.2);
+    for (const [px, py] of posts) g.ellipse(px + 2, py + 0.8, 3, 1.4);
     g.fill({ color: 0x000000, alpha: 0.35 });
-    for (const [px, py] of posts) g.rect(px - 1.5, py - 9, 3, 9);
+    for (const [px, py] of posts) g.rect(px - 0.9, py - 6, 1.8, 6);
     g.fill({ color: 0x2a2620 });
-    const s = 4.2;
+    const s = 2.6;
     for (const [px, py] of posts) {
-      const top = py - 12;
+      const top = py - 7.5;
       g.poly([px, top - s * 0.5, px + s, top, px, top + s * 0.5, px - s, top]);
     }
     g.fill({ color: shadeColor(color, 1.25) });
     for (const [px, py] of posts) {
-      const top = py - 12;
+      const top = py - 7.5;
       g.poly([px - s, top, px, top + s * 0.5, px, top + s * 0.5 + s, px - s, top + s]);
     }
     g.fill({ color });
     for (const [px, py] of posts) {
-      const top = py - 12;
+      const top = py - 7.5;
       g.poly([px, top + s * 0.5, px + s, top, px + s, top + s, px, top + s * 0.5 + s]);
     }
     g.fill({ color: shadeColor(color, 0.65) });
@@ -985,10 +1050,15 @@ export class GameRenderer {
       if (v.owner !== b.owner) {
         v.owner = b.owner;
         v.flag.texture = this.atlas.get(`flag:${b.owner}`);
-        if (v.banner) v.banner.texture = this.atlas.get(`flag:${b.owner}`);
+        if (v.banner) v.banner.texture = this.atlas.get(`banner:${b.owner}`);
       }
       if (v.banner) v.banner.visible = b.done;
-      v.flag.visible = this.occupied(b);
+      v.flag.visible = !v.banner && this.occupied(b);
+      if (v.flag.visible && !v.flagPlaced) {
+        const top = this.atlas.topOf(`building:${b.type}`);
+        v.flag.position.set(top.x, top.y + 2);
+        v.flagPlaced = true;
+      }
       const progress = this.sim.buildProgress(b);
       const staged = this.atlas.has(`stage:${b.type}:0`);
       v.site.visible = !b.done && !staged;
@@ -1036,8 +1106,9 @@ export class GameRenderer {
     const site = new Sprite(this.atlas.get(b.w >= 3 ? 'building:site3' : 'building:site2'));
     const main = new Sprite();
     body.addChild(site, main);
-    const at = BANNERS[b.type];
-    const banner = at ? new Sprite(this.atlas.get(`flag:${b.owner}`)) : null;
+    // The owner's banner over military buildings; a 3D model brings its own pole position.
+    const at = (this.atlas.art3d && ART3D_BANNERS[b.type]) || BANNERS[b.type];
+    const banner = at ? new Sprite(this.atlas.get(`banner:${b.owner}`)) : null;
     if (banner && at) {
       banner.position.set(at.x, at.y);
       banner.visible = b.done;
@@ -1048,9 +1119,11 @@ export class GameRenderer {
     const d = this.surface(b.door.x, b.door.y);
     front.position.set(d.x, d.y);
     front.zIndex = depthOf(b.door.x, b.door.y) - 0.05;
+    // The flag stands on top of the building (placed when the finished texture is shown); military
+    // buildings show their banner instead.
     const flag = new Sprite(this.atlas.get(`flag:${b.owner}`));
-    flag.position.set(-16, 3);
-    front.addChild(flag);
+    flag.visible = false;
+    body.addChild(flag);
     this.effects.attachBuilding(b, body);
 
     this.addStatic(body, cx, cy);
@@ -1058,6 +1131,7 @@ export class GameRenderer {
     const v: BuildingView = {
       owner: b.owner,
       flag,
+      flagPlaced: false,
       banner,
       at: { x: cx, y: cy },
       doorAt: { ...b.door },
@@ -1084,29 +1158,43 @@ export class GameRenderer {
     const key = `${out},${inp},${waitingPlank},${waitingStone}`;
     if (key === v.pileKey) return;
     v.pileKey = key;
-    // Keep the flag (child 0), drop the old pile.
-    while (v.front.children.length > 1) v.front.children[1].destroy();
-    const stack = (res: Resource, count: number, ox: number) => {
-      if (count <= 0) return;
-      // A pre-rendered pile of exactly this many (`?art=3d`), else single wares stacked up.
-      const pile = `pile:${res}:${Math.min(count, PILE_MAX)}`;
-      if (this.atlas.has(pile)) {
-        const s = new Sprite(this.atlas.get(pile));
-        // Half a tile from the door towards the building: on the trodden earth beside the entrance.
-        s.position.set(ox + 12, -4);
-        v.front.addChild(s);
-        return;
-      }
-      for (let i = 0; i < count; i++) {
-        const s = new Sprite(this.atlas.get(`ware:${res}`));
-        s.position.set(ox + (i % 2) * 7, 8 - Math.floor(i / 2) * 4);
-        v.front.addChild(s);
+    // Drop the old pile.
+    while (v.front.children.length > 0) v.front.children[0].destroy();
+    // Each kind of goods gets its own spot: output to the right of the door (down the +x edge),
+    // inputs and site materials to the left along the front wall; a fifth kind starts a second row
+    // nearer the camera.
+    const spot = (side: 1 | -1, k: number): [number, number] => {
+      const col = k % 4;
+      const row = Math.floor(k / 4);
+      return side === 1
+        ? [20 + col * 17 - row * 16, -4 + col * 8.5 + row * 8]
+        : [-22 - col * 17 - row * 16, -4 - col * 8.5 + row * 8];
+    };
+    // Next free spot per side; goods beyond PILE_MAX start another pile on the next spot.
+    const next = { [1]: 0, [-1]: 0 };
+    const stack = (res: Resource, count: number, side: 1 | -1) => {
+      for (let left = count; left > 0; left -= PILE_MAX) {
+        const n = Math.min(left, PILE_MAX);
+        const [x, y] = spot(side, next[side]++);
+        // A pre-rendered pile of exactly this many (`?art=3d`), else single wares stacked up.
+        const pile = `pile:${res}:${n}`;
+        if (this.atlas.has(pile)) {
+          const s = new Sprite(this.atlas.get(pile));
+          s.position.set(x, y);
+          v.front.addChild(s);
+          continue;
+        }
+        for (let i = 0; i < n; i++) {
+          const s = new Sprite(this.atlas.get(`ware:${res}`));
+          s.position.set(x - 12 + (i % 2) * 7, y + 12 - Math.floor(i / 2) * 4);
+          v.front.addChild(s);
+        }
       }
     };
-    for (const r of RESOURCES) stack(r, b.output[r], 8);
-    for (const r of RESOURCES) stack(r, b.input[r], -34);
-    stack('plank', waitingPlank, -34);
-    stack('stone', waitingStone, -50);
+    for (const r of RESOURCES) if (b.output[r] > 0) stack(r, b.output[r], 1);
+    for (const r of RESOURCES) if (b.input[r] > 0) stack(r, b.input[r], -1);
+    if (waitingPlank > 0) stack('plank', waitingPlank, -1);
+    if (waitingStone > 0) stack('stone', waitingStone, -1);
   }
 
   private syncSettlers(alpha: number, timeMs: number): void {
@@ -1177,36 +1265,62 @@ export class GameRenderer {
       const pd = PAINTED_DIR[shown];
       const tex = this.settlerTex;
 
-      let bob = 0;
+      // Work or hold frame: the same indices drive the layered figure and the 3D frames.
+      let action: ActionId | null = null;
+      let f: number;
       if (working) {
-        const action = this.actionOf(s, style);
+        action = this.actionOf(s, style);
         const def: ActionDef = ACTIONS[action];
-        const f = workFrame(timeMs, s.id, def.loopMs);
-        v.body.texture = tex.body[pd][BODY_WORK];
-        v.arm.texture = tex.workArm[action][pd][f];
+        f = workFrame(timeMs, s.id, def.loopMs);
         if (f !== v.frame) {
           v.frame = f;
           if (def.sound && f === def.soundFrame) this.sound(def.sound, px, py);
         }
       } else {
         v.frame = -1;
-        const tool = s.carrying !== null ? 'carry' : style.holds;
-        const f = moving ? walkFrame(v.walked) : WALK_FRAMES;
-        v.body.texture = tex.body[pd][moving ? f : BODY_STAND];
-        v.arm.texture = tex.holdArm[tool][pd][f];
-        if (moving) bob = walkBob(f);
+        f = moving ? walkFrame(v.walked) : WALK_FRAMES;
       }
-      v.tunic.texture = tex.tunic[pd];
-      v.head.texture = tex.head[pd];
-      v.hat.texture = tex.hat[style.hatStyle][pd];
-      const behind = FACES_AWAY[pd];
-      if (behind !== v.armBehind) {
-        // Facing away, the near arm, its tool and the goods in hand are hidden behind the body.
-        v.armBehind = behind;
-        v.root.setChildIndex(v.arm, behind ? 0 : 4);
-        v.root.setChildIndex(v.ware, behind ? 0 : 5);
+      const tool = s.carrying !== null ? 'carry' : style.holds;
+      const s3d = this.settler3d;
+      let bob = 0;
+      if (s3d) {
+        // Pre-rendered figure: full frame, its tunic/shield part tinted, the hat on top; 8 painted
+        // directions, so no mirroring.
+        const fr = action ? s3d.work[action][shown][f] : s3d.hold[tool][shown][f];
+        setFrame(v.body, fr.full);
+        v.tunic.visible = fr.tint !== null;
+        if (fr.tint) setFrame(v.tunic, fr.tint);
+        const hat = s3d.hats[style.hatStyle][shown];
+        v.hat.visible = hat !== null;
+        if (hat) setFrame(v.hat, hat);
+        v.head.visible = v.arm.visible = false;
+        v.root.scale.x = 1;
+        const away = s3d.carryBehind[shown];
+        if (away !== v.armBehind) {
+          v.armBehind = away;
+          v.root.setChildIndex(v.ware, away ? 0 : 5);
+        }
+      } else {
+        if (action) {
+          v.body.texture = tex.body[pd][BODY_WORK];
+          v.arm.texture = tex.workArm[action][pd][f];
+        } else {
+          v.body.texture = tex.body[pd][moving ? f : BODY_STAND];
+          v.arm.texture = tex.holdArm[tool][pd][f];
+          if (moving) bob = walkBob(f);
+        }
+        v.tunic.texture = tex.tunic[pd];
+        v.head.texture = tex.head[pd];
+        v.hat.texture = tex.hat[style.hatStyle][pd];
+        const behind = FACES_AWAY[pd];
+        if (behind !== v.armBehind) {
+          // Facing away, the near arm, its tool and the goods in hand are hidden behind the body.
+          v.armBehind = behind;
+          v.root.setChildIndex(v.arm, behind ? 0 : 4);
+          v.root.setChildIndex(v.ware, behind ? 0 : 5);
+        }
+        v.root.scale.x = MIRRORED[shown] ? -1 : 1;
       }
-      v.root.scale.x = MIRRORED[shown] ? -1 : 1;
 
       v.rank.visible = s.level > 0;
       if (s.level > 0) v.rank.texture = this.atlas.get(`chevrons:${s.level}`);
@@ -1215,23 +1329,8 @@ export class GameRenderer {
       v.ware.visible = s.carrying !== null;
       if (s.carrying) {
         v.ware.texture = this.wareTex[s.carrying];
-        v.ware.position.set(CARRY_AT[pd][0], CARRY_AT[pd][1]);
-      }
-      const c3d = this.carrier3d && s.kind === 'carrier' && !working ? this.carrier3d : null;
-      v.tunic.visible = v.head.visible = v.hat.visible = v.arm.visible = c3d === null;
-      if (c3d) {
-        // One pre-rendered sprite per direction and frame; goods go where the hands are.
-        const meta = this.atlas.art3d!.carrier;
-        const f = moving ? walkFrame(v.walked) : meta.walk;
-        v.body.texture = c3d[shown][(s.carrying !== null ? meta.carryColumn : 0) + f];
-        v.root.scale.x = 1;
-        const away = meta.carryBehind[shown];
-        if (away !== v.armBehind) {
-          v.armBehind = away;
-          v.root.setChildIndex(v.arm, away ? 0 : 4);
-          v.root.setChildIndex(v.ware, away ? 0 : 5);
-        }
-        if (s.carrying !== null) v.ware.position.set(meta.carryAt[shown][f][0], meta.carryAt[shown][f][1]);
+        const at = s3d ? s3d.carryAt[shown][action ? WALK_FRAMES : f] : CARRY_AT[pd];
+        v.ware.position.set(at[0], at[1]);
       }
     }
   }
@@ -1267,7 +1366,9 @@ export class GameRenderer {
   private styleSettler(v: SettlerView, s: Settler): void {
     const style = styleOf(s.kind);
     v.kind = s.kind;
-    v.tunic.tint = style.fighter ? this.playerTint[(s.owner - 1) % this.playerTint.length] : this.tintOf(style.tunic);
+    // 3D figures wear their owner's colour, as in Settlers 4 (the tool and hat tell the profession).
+    const own = style.fighter || this.settler3d !== null;
+    v.tunic.tint = own ? this.playerTint[(s.owner - 1) % this.playerTint.length] : this.tintOf(style.tunic);
     v.hat.tint = this.tintOf(style.hat);
   }
 
@@ -1318,7 +1419,7 @@ export class GameRenderer {
     ware.scale.set(0.85);
     ware.visible = false;
     const rank = new Sprite(this.atlas.get('chevrons:1'));
-    rank.position.set(0, -40);
+    rank.position.set(0, this.settler3d ? this.settler3d.rankY : -40);
     rank.visible = false;
     root.addChild(body, tunic, head, hat, arm, ware, rank);
     const v: SettlerView = {

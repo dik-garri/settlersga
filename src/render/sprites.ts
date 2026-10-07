@@ -1765,6 +1765,68 @@ export function paintChevrons(ctx: Ctx, level: number): void {
 }
 
 /** Flag on a pole marking a door, 14×28 with the pole base at (2, 26), in the owner's colour. */
+/**
+ * The owner's banner on military buildings, as in Settlers 4: a cloth in the player's colour with a
+ * light border and a white emblem (an eagle with spread wings), hanging from a crossbar on a pole.
+ * 30×52 canvas, anchored at the foot of the pole (15, 50).
+ */
+export function paintBanner(ctx: Ctx, color = PLAYER_COLORS[0]): void {
+  ctx.translate(15, 50);
+  // Pole with a knob, crossbar with end caps.
+  ctx.fillStyle = '#3a2614';
+  ctx.fillRect(-1.2, -48, 2.4, 48);
+  ctx.fillStyle = '#c9a24a';
+  ctx.beginPath();
+  ctx.arc(0, -48.5, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#4a3018';
+  ctx.fillRect(-12, -45, 24, 2.2);
+  ctx.fillStyle = '#c9a24a';
+  ctx.fillRect(-13, -45.4, 2.2, 3);
+  ctx.fillRect(10.8, -45.4, 2.2, 3);
+  // Cloth: a swallowtail with a slight sway, shaded towards the right.
+  const cloth = () => {
+    ctx.beginPath();
+    ctx.moveTo(-10, -43);
+    ctx.lineTo(10, -43);
+    ctx.quadraticCurveTo(11, -32, 10, -20);
+    ctx.lineTo(4, -23);
+    ctx.lineTo(0, -18);
+    ctx.lineTo(-4, -23);
+    ctx.lineTo(-10, -20);
+    ctx.quadraticCurveTo(-9, -32, -10, -43);
+    ctx.closePath();
+  };
+  cloth();
+  const g = ctx.createLinearGradient(-10, 0, 10, 0);
+  g.addColorStop(0, shade(color, 1.25));
+  g.addColorStop(0.55, color);
+  g.addColorStop(1, shade(color, 0.6));
+  ctx.fillStyle = g;
+  ctx.fill();
+  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = '#e8d9a8';
+  ctx.stroke();
+  // Emblem: a white eagle — body, spread wings, head.
+  ctx.fillStyle = '#f4f1e6';
+  ctx.beginPath();
+  ctx.moveTo(0, -38.5);
+  ctx.lineTo(7, -35);
+  ctx.lineTo(5.5, -32.5);
+  ctx.lineTo(2, -33.5);
+  ctx.lineTo(2.2, -29);
+  ctx.lineTo(0, -26.5);
+  ctx.lineTo(-2.2, -29);
+  ctx.lineTo(-2, -33.5);
+  ctx.lineTo(-5.5, -32.5);
+  ctx.lineTo(-7, -35);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(0, -38.8, 1.6, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 export function paintFlag(ctx: Ctx, color = PLAYER_COLORS[0]): void {
   ctx.translate(2, 26);
   ctx.strokeStyle = '#4a3420';

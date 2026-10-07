@@ -11,6 +11,7 @@ import {
   paintField,
   paintSign,
   paintFlag,
+  paintBanner,
   paintGround,
   paintGroundEdge,
   EDGE_DIRS,
@@ -21,9 +22,9 @@ import {
   PLAYER_COLORS,
   type GroundKind,
 } from './sprites';
-import { DIRS, WALK_FRAMES, WORK_FRAMES } from './anim';
+import { WALK_FRAMES, WORK_FRAMES } from './anim';
+import { ART3D_BUILDINGS, ART3D_PILES, ART3D_STAGED, ART3D_STAGES, ART3D_SPRITES, PILE, PILE_MAX, type Art3d } from './art3d';
 import { addAnimalSprites } from './animals';
-import { ART3D_PILES, ART3D_STAGED, ART3D_STAGES, ART3D_SPRITES, PILE_MAX, type Art3d } from './art3d';
 import { ACTION_IDS, ACTIONS, HAT_STYLES, styleOf, TOOLS, type ActionId, type HatStyle, type ToolShape } from './animConfig';
 import { paintFlash, paintGlint, paintGlow, paintPuff, paintSpark } from './fxArt';
 import {
@@ -242,6 +243,7 @@ export class SpriteAtlas {
     // Per-player door flags (fighters' colours are tints, see `SettlerTextures`).
     PLAYER_COLORS.forEach((color, k) => {
       a.add(`flag:${k + 1}`, 14, 28, 2, 26, (ctx) => paintFlag(ctx, color));
+      a.add(`banner:${k + 1}`, 30, 52, 15, 50, (ctx) => paintBanner(ctx, color));
     });
     for (let level = 1; level < SOLDIER_LEVELS.length; level++) {
       a.add(`chevrons:${level}`, 12, 10, 6, 5, (ctx) => paintChevrons(ctx, level));
@@ -249,13 +251,6 @@ export class SpriteAtlas {
     addAnimalSprites((...args) => a.add(...args), art3d);
     if (art3d) addArt3d(a, art3d);
     this.textures = a.build();
-  }
-
-  /** [dir][column] of the 3D carrier sheet (`?art=3d`), or null. */
-  carrier3d(): Texture[][] | null {
-    const art = this.art3d;
-    if (!art) return null;
-    return DIRS.map((_, d) => Array.from({ length: art.carrier.columns }, (_, c) => this.get(`c3d:${d}:${c}`)));
   }
 
   /** Settler layer lookups, resolved once. */
@@ -279,6 +274,43 @@ export class SpriteAtlas {
       holdArm,
       workArm,
     };
+  }
+
+  private readonly tops = new Map<string, { x: number; y: number }>();
+
+  /**
+   * The highest drawn point of a sprite, relative to its anchor (logical pixels): where a flag goes on
+   * a building's roof. Scans the middle half of the sprite's columns, so a chimney at a gable end or
+   * a lean-to does not win over the ridge. Cached.
+   */
+  topOf(name: string): { x: number; y: number } {
+    const cached = this.tops.get(name);
+    if (cached) return cached;
+    const t = this.get(name);
+    const f = t.frame;
+    const res = t.source.resolution;
+    const canvas = t.source.resource as HTMLCanvasElement;
+    const sx = Math.round(f.x * res);
+    const sy = Math.round(f.y * res);
+    const sw = Math.round(f.width * res);
+    const sh = Math.round(f.height * res);
+    // Read through a small scratch canvas, so the atlas page itself is never read back.
+    const scratch = document.createElement('canvas');
+    scratch.width = sw;
+    scratch.height = sh;
+    const sctx = scratch.getContext('2d', { willReadFrequently: true })!;
+    sctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+    const data = sctx.getImageData(0, 0, sw, sh).data;
+    let top = { x: 0, y: -f.height * t.defaultAnchor!.y };
+    found: for (let y = 0; y < sh; y++) {
+      for (let x = Math.floor(sw * 0.25); x < Math.ceil(sw * 0.75); x++) {
+        if (data[(y * sw + x) * 4 + 3] < 128) continue;
+        top = { x: x / res - f.width * t.defaultAnchor!.x, y: y / res - f.height * t.defaultAnchor!.y };
+        break found;
+      }
+    }
+    this.tops.set(name, top);
+    return top;
   }
 
   has(name: string): boolean {
@@ -368,8 +400,13 @@ function imageIcon(img: HTMLImageElement, size: number, className: string, frame
 }
 
 export function wareIcon(res: Resource, size = 18): HTMLCanvasElement {
-  const img3d = iconArt?.images.get(res === 'log' ? 'log' : '');
-  if (img3d) return imageIcon(img3d, size, 'ware-icon');
+  const wares = iconArt?.images.get('wares');
+  const k = iconArt ? iconArt.wares.order.indexOf(res) : -1;
+  if (wares && iconArt && k >= 0) {
+    const [w, h] = iconArt.wares.frame;
+    const r = wares.height / h;
+    return imageIcon(wares, size, 'ware-icon', [k * w * r, 0, w * r, h * r]);
+  }
   const canvas = document.createElement('canvas');
   const dpr = window.devicePixelRatio || 1;
   canvas.width = size * dpr;
@@ -387,12 +424,10 @@ export function wareIcon(res: Resource, size = 18): HTMLCanvasElement {
 
 /** Standalone settler portrait for HTML UI. */
 export function settlerIcon(kind: SettlerKind, size = 56): HTMLCanvasElement {
-  const sheet = kind === 'carrier' ? iconArt?.images.get('carrier') : undefined;
-  if (sheet && iconArt) {
-    // Standing, facing south-east (row 1 of the sheet).
-    const { cell, columns, walk } = iconArt.carrier;
-    const r = sheet.width / (cell[0] * columns);
-    return imageIcon(sheet, size, '', [walk * cell[0] * r, 1 * cell[1] * r, cell[0] * r, cell[1] * r]);
+  if (iconArt) {
+    // Standing with the profession's tool, facing south-east.
+    const { page, rect } = iconArt.settlers.portrait(styleOf(kind).holds, 1);
+    return imageIcon(page, size, '', rect);
   }
   const canvas = document.createElement('canvas');
   const dpr = window.devicePixelRatio || 1;
@@ -444,26 +479,21 @@ function addArt3d(a: AtlasBuilder, art: Art3d): void {
     const img = art.images.get(name)!;
     a.add(key, s.w, s.h, s.ax, s.ay, (ctx) => ctx.drawImage(img, 0, 0, s.w, s.h));
   };
-  one('building:woodcutter', 'woodcutter');
+  for (const type of Object.keys(ART3D_BUILDINGS)) one(`building:${type}`, type);
   for (const type of ART3D_STAGED) {
     for (let k = 0; k < ART3D_STAGES; k++) one(`stage:${type}:${k}`, `${type}-s${k}`);
   }
   for (const res of ART3D_PILES) {
-    for (let n = 1; n <= PILE_MAX; n++) one(`pile:${res}:${n}`, `pile-${res}-${n}`);
+    const strip = art.images.get(`piles-${res}`)!;
+    for (let n = 1; n <= PILE_MAX; n++) {
+      a.add(`pile:${res}:${n}`, PILE.w, PILE.h, PILE.ax, PILE.ay, (ctx) => drawFrame(ctx, strip, n - 1, PILE.w, PILE.h));
+    }
   }
+  // Carried wares (and the pile fallback): one frame per resource.
+  const wares = art.images.get('wares')!;
+  const [ww, wh, wax, way] = art.wares.frame;
+  art.wares.order.forEach((res, k) => a.add(`ware:${res}`, ww, wh, wax, way, (ctx) => drawFrame(ctx, wares, k, ww, wh)));
   one('tree:0', 'tree');
   for (let v = 1; v < 4; v++) a.alias(`tree:${v}`, 'tree:0');
   for (let v = 0; v < 3; v++) one(`deposit:${v}`, `deposit${v}`);
-  one('ware:log', 'log');
-  const { cell, anchor, columns } = art.carrier;
-  const sheet = art.images.get('carrier')!;
-  const [w, h] = cell;
-  const r = sheet.width / (w * columns); // the sheet's resolution
-  for (let d = 0; d < DIRS.length; d++) {
-    for (let c = 0; c < columns; c++) {
-      a.add(`c3d:${d}:${c}`, w, h, anchor[0], anchor[1], (ctx) =>
-        ctx.drawImage(sheet, c * w * r, d * h * r, w * r, h * r, 0, 0, w, h),
-      );
-    }
-  }
 }
