@@ -29,7 +29,7 @@ import {
 import { Effects } from './effects';
 import { BODY_STAND, BODY_WORK, CARRY_AT } from './settlerArt';
 import { depthOf, HALF_H, HALF_W, toScreen, toTile } from './iso';
-import { ART3D_STAGES, PILE_MAX } from './art3d';
+import { ART3D_BANNERS, ART3D_STAGES, PILE_MAX } from './art3d';
 import { needsLevelling } from '../sim/digging';
 import { BANNERS, EDGE_DIRS, GROUND_PRIORITY, groundVariants, PLAYER_COLORS, type GroundKind } from './sprites';
 
@@ -1042,7 +1042,7 @@ export class GameRenderer {
       if (v.owner !== b.owner) {
         v.owner = b.owner;
         v.flag.texture = this.atlas.get(`flag:${b.owner}`);
-        if (v.banner) v.banner.texture = this.atlas.get(`flag:${b.owner}`);
+        if (v.banner) v.banner.texture = this.atlas.get(`banner:${b.owner}`);
       }
       if (v.banner) v.banner.visible = b.done;
       v.flag.visible = this.occupied(b);
@@ -1093,8 +1093,9 @@ export class GameRenderer {
     const site = new Sprite(this.atlas.get(b.w >= 3 ? 'building:site3' : 'building:site2'));
     const main = new Sprite();
     body.addChild(site, main);
-    const at = BANNERS[b.type];
-    const banner = at ? new Sprite(this.atlas.get(`flag:${b.owner}`)) : null;
+    // The owner's banner over military buildings; a 3D model brings its own pole position.
+    const at = (this.atlas.art3d && ART3D_BANNERS[b.type]) || BANNERS[b.type];
+    const banner = at ? new Sprite(this.atlas.get(`banner:${b.owner}`)) : null;
     if (banner && at) {
       banner.position.set(at.x, at.y);
       banner.visible = b.done;

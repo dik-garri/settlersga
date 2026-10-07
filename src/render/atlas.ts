@@ -11,6 +11,7 @@ import {
   paintField,
   paintSign,
   paintFlag,
+  paintBanner,
   paintGround,
   paintGroundEdge,
   EDGE_DIRS,
@@ -22,7 +23,7 @@ import {
   type GroundKind,
 } from './sprites';
 import { DIRS, WALK_FRAMES, WORK_FRAMES } from './anim';
-import { ART3D_PILES, ART3D_STAGED, ART3D_STAGES, ART3D_SPRITES, PILE_MAX, type Art3d } from './art3d';
+import { ART3D_BUILDINGS, ART3D_PILES, ART3D_STAGED, ART3D_STAGES, ART3D_SPRITES, PILE_MAX, type Art3d } from './art3d';
 import { ACTION_IDS, ACTIONS, HAT_STYLES, styleOf, TOOLS, type ActionId, type HatStyle, type ToolShape } from './animConfig';
 import { paintFlash, paintGlint, paintGlow, paintPuff, paintSpark } from './fxArt';
 import {
@@ -241,6 +242,7 @@ export class SpriteAtlas {
     // Per-player door flags (fighters' colours are tints, see `SettlerTextures`).
     PLAYER_COLORS.forEach((color, k) => {
       a.add(`flag:${k + 1}`, 14, 28, 2, 26, (ctx) => paintFlag(ctx, color));
+      a.add(`banner:${k + 1}`, 30, 52, 15, 50, (ctx) => paintBanner(ctx, color));
     });
     for (let level = 1; level < SOLDIER_LEVELS.length; level++) {
       a.add(`chevrons:${level}`, 12, 10, 6, 5, (ctx) => paintChevrons(ctx, level));
@@ -442,7 +444,7 @@ function addArt3d(a: AtlasBuilder, art: Art3d): void {
     const img = art.images.get(name)!;
     a.add(key, s.w, s.h, s.ax, s.ay, (ctx) => ctx.drawImage(img, 0, 0, s.w, s.h));
   };
-  one('building:woodcutter', 'woodcutter');
+  for (const type of Object.keys(ART3D_BUILDINGS)) one(`building:${type}`, type);
   for (const type of ART3D_STAGED) {
     for (let k = 0; k < ART3D_STAGES; k++) one(`stage:${type}:${k}`, `${type}-s${k}`);
   }
