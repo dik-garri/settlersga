@@ -16,12 +16,16 @@ const size = Number(arg('size', '64'));
 const players = Number(arg('players', '2'));
 const passive = arg('passive', '0') === '1';
 const every = Number(arg('every', '10'));
+/** --teams=1,1,2,2: team per player; the game ends once one side has won. */
+const teams = arg('teams', '') ? arg('teams', '').split(',').map(Number) : undefined;
 const perMinute = TICKS_PER_SECOND * 60;
 
 for (const seed of seeds) {
   const ai = Array.from({ length: players }, (_, k) => k + 1).filter((p) => !(passive && p === 1));
-  const w = new World(seed, { size, players, ai });
-  console.log(`seed ${seed} · ${size}×${size} · players ${players} · AI ${ai.join(',')}${passive ? ' · player 1 passive' : ''}`);
+  const w = new World(seed, { size, players, ai, teams });
+  console.log(
+    `seed ${seed} · ${size}×${size} · players ${players} · AI ${ai.join(',')}${passive ? ' · player 1 passive' : ''}${teams ? ` · teams ${teams.join(',')}` : ''}`,
+  );
   const t0 = performance.now();
   let end = '';
   for (let i = 1; i <= minutes * perMinute; i++) {
@@ -45,7 +49,7 @@ for (const seed of seeds) {
       });
       console.log(`  ${(i / perMinute).toFixed(0).padStart(3)} min`);
       rows.forEach((r) => console.log(r));
-      if (w.outcome(1) !== 'playing' && players === 2) break;
+      if (w.players.some((p) => w.outcome(p.id) === 'won')) break;
     }
   }
   console.log(`  result: ${end || 'nobody defeated'} · ${((performance.now() - t0) / (w.tick || 1)).toFixed(3)} ms/tick`);

@@ -864,10 +864,22 @@ export const AI = {
   placeTries: 40,
   /** The last this-many units of a tool are kept for the first building of a type that needs it. */
   keepTools: 1,
-  /** Its army make-up (weights for `World.setShare`): mostly swordsmen, archers for the towers. */
-  weaponShares: { sword: 65, bow: 35 } as Partial<Record<Resource, number>>,
+  /**
+   * Its army make-up (weights for `World.setShare`). S4 garrisons have more archer slots than before,
+   * and archers in a tower let its swordsman go on an attack (a tower keeps one fighter), so more bows
+   * than it used to make; swordsmen still lead, as only they capture.
+   */
+  weaponShares: { sword: 55, bow: 45 } as Partial<Record<Resource, number>>,
   /** The level it orders recruits at (the barracks falls back to what the gold on hand pays for). */
   recruitLevel: 2,
+  /**
+   * Materials it keeps back while nothing of its own still produces them (its stone deposits are
+   * worked out): only producers of that material may use the reserve; border-pushing military
+   * buildings may use it down to `reserveFloor`, so it can still reach new deposits and always keeps
+   * enough to open a mine of it.
+   */
+  reserve: { stone: 4 } as Partial<Record<Resource, number>>,
+  reserveFloor: { stone: 1 } as Partial<Record<Resource, number>>,
 };
 
 // ---------------------------------------------------------------- wild animals

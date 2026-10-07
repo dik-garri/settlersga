@@ -131,7 +131,16 @@ function think(w: World, ai: AiState): void {
       if (waiting && ai.wantOre === waiting.res) sought = true;
       continue;
     }
-    if (!ctx.affordable(step.type) || !ctx.staffable(step.type, count(step.type) === 0)) continue;
+    if (!ctx.affordable(step.type) || !ctx.staffable(step.type, count(step.type) === 0)) {
+      // A mine of a material it is short of (no producer left) is looked for even before it can pay.
+      const mine = BUILDINGS[step.type].mine;
+      if (mine && ctx.short.includes(mine.res) && !sought && !ctx.knowsOre(step.type)) {
+        sought = true;
+        ai.wantOre = mine.res;
+        prospect(ctx, ai);
+      }
+      continue;
+    }
     if (BUILDINGS[step.type].garrison && !ctx.canMan(step.type)) continue;
     const mine = BUILDINGS[step.type].mine;
     if (tryPlace(ctx, ai, step.type)) {
@@ -161,8 +170,12 @@ function think(w: World, ai: AiState): void {
     military.length < AI.maxMilitary &&
     military.every((b) => b.done && b.garrison.length > 0)
   ) {
-    // The largest military building it can pay for and man: more spare fighters at the front.
-    const type = FRONTIER.find((t) => ctx.canMan(t) && ctx.affordable(t));
+    // The largest military building it can pay for and man: more spare fighters at the front. Short
+    // of a material (stone), the cheapest in it: every unit goes into reaching new deposits.
+    const cheapFirst = (a: BuildingType, b: BuildingType) =>
+      ctx.short.reduce((n, r) => n + costOf(a)[r] - costOf(b)[r], 0);
+    const order = ctx.short.length > 0 ? [...FRONTIER].sort(cheapFirst) : FRONTIER;
+    const type = order.find((t) => ctx.canMan(t) && ctx.affordable(t));
     if (type) {
       ctx.frontier = true;
       if (!tryPlace(ctx, ai, type)) ai.blockedUntil.frontier = w.tick + RETRY_TICKS;
@@ -277,6 +290,8 @@ class Context {
   readonly tiles: number[];
   /** Military buildings go as close to the nearest enemy as possible (instead of claiming resources). */
   frontier = false;
+  /** Reserved materials (`AI.reserve`) nothing of its own produces any more: towers lean towards them. */
+  readonly short: Resource[];
   private readonly castle: Point;
   /**
    * Centers of the enemy buildings it knows of (fog), or else foreign land its buildings see;
@@ -294,6 +309,27 @@ class Context {
     const known = knownEnemies(w, me);
     this.enemies = known.length > 0 ? known.map((e) => centerOf(e.b)) : this.foreignLandInSight();
     this.tiles = this.territory();
+    this.short = (Object.keys(AI.reserve) as Resource[]).filter((r) => !this.producing(r));
+  }
+
+  /** Some own staffed building still produces `res` (a gatherer with targets, a mine with ore, a workshop). */
+  private producing(res: Resource): boolean {
+    return this.own.some((b) => {
+      if (!b.done || b.workerId === null) return false;
+      const gather = gatheredBy(b.type);
+      if (gather?.res === res) return hasGatherTargetNear(this.w, b, gather);
+      const def = BUILDINGS[b.type];
+      if (def.mine?.res === res) return oreLeft(this.w, b) > 0;
+      return (def.recipe?.outputs[res] ?? 0) > 0;
+    });
+  }
+
+  /** Its geologists have found ore for this mine within its territory. */
+  knowsOre(type: BuildingType): boolean {
+    const mine = BUILDINGS[type].mine;
+    if (!mine) return false;
+    const m = this.w.map;
+    return this.tiles.some((i) => oreOf(m.ore[i]) === mine.res && m.oreAmount[i] > 0 && this.w.isProspected(i % m.w, Math.floor(i / m.w), this.me));
   }
 
   /** Another player's land in sight of its military buildings (sampled every third tile). */
@@ -336,14 +372,22 @@ class Context {
     return stride === 1 ? all : all.filter((i) => (i % m.w) % stride === 0 && Math.floor(i / m.w) % stride === 0);
   }
 
-  /** Enough unpromised materials for this building on top of what open sites still need. */
+  /**
+   * Enough unpromised materials for this building on top of what open sites still need — and, for a
+   * material it is `short` of, on top of `AI.reserve` unless the building produces that material or
+   * pushes the border (a military building with land), which is how it finds new deposits.
+   */
   affordable(type: BuildingType): boolean {
     const cost = costOf(type);
+    const def = BUILDINGS[type];
     return RESOURCES.every((r) => {
       if (cost[r] === 0) return true;
       let committed = 0;
       for (const b of this.own) if (!b.done) committed += Math.max(0, costOf(b.type)[r] - b.delivered[r] - b.inbound[r]);
-      return available(this.w, this.me, r) - committed >= cost[r];
+      const produces = gatheredBy(type)?.res === r || def.mine?.res === r || (def.recipe?.outputs[r] ?? 0) > 0;
+      const pushes = !!(def.garrison && def.territory);
+      const keep = !this.short.includes(r) || produces ? 0 : pushes ? (AI.reserveFloor[r] ?? 0) : (AI.reserve[r] ?? 0);
+      return available(this.w, this.me, r) - committed - keep >= cost[r];
     });
   }
 
@@ -514,6 +558,8 @@ class Context {
     const { w, me } = this;
     const m = w.map;
     const mountain = this.wantOre ? 4 : 1;
+    // Out of stone (say): deposits of it weigh four times as much.
+    const deposit = this.short.includes('stone') ? 4 : 1;
     let n = 0;
     for (let y = Math.floor(cy - r); y <= Math.ceil(cy + r); y++) {
       for (let x = Math.floor(cx - r); x <= Math.ceil(cx + r); x++) {
@@ -525,7 +571,8 @@ class Context {
           continue;
         }
         if (m.terrain[i] === Terrain.Mountain) n += mountain;
-        else if (m.tree[i] || m.stone[i] || m.terrain[i] === Terrain.Water) n++;
+        else if (m.stone[i]) n += deposit;
+        else if (m.tree[i] || m.terrain[i] === Terrain.Water) n++;
       }
     }
     return n;
