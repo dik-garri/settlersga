@@ -29,6 +29,8 @@ import {
 import { Effects } from './effects';
 import { BODY_STAND, BODY_WORK, CARRY_AT } from './settlerArt';
 import { depthOf, HALF_H, HALF_W, toScreen, toTile } from './iso';
+import { ART3D_STAGES, PILE_MAX } from './art3d';
+import { needsLevelling } from '../sim/digging';
 import { BANNERS, EDGE_DIRS, GROUND_PRIORITY, groundVariants, PLAYER_COLORS, type GroundKind } from './sprites';
 
 const TERRAIN_KIND: Record<Terrain, GroundKind> = {
@@ -180,6 +182,10 @@ export class GameRenderer {
   /** Arrows in flight (`World.shots`), redrawn every frame above everything standing on the ground. */
   private readonly shots = new Graphics();
   private readonly ghostLayer = new Container();
+  /** Placement hints: a dot on every spot in view where the chosen building fits. */
+  private readonly hints = new Graphics();
+  private hintKey = '';
+  private hintAt = 0;
   private readonly ghostSprite: Sprite;
   /**
    * Fog of war for the local player, above the objects: per chunk a Graphics with black diamonds
@@ -239,7 +245,7 @@ export class GameRenderer {
     /** Draw the fog of war (`?fog=off` disables it for debugging). */
     private readonly fogOn = true,
   ) {
-    this.world.addChild(this.ground, this.territory, this.marks, this.objects, this.shots, this.fog, this.ghostLayer);
+    this.world.addChild(this.ground, this.territory, this.marks, this.hints, this.objects, this.shots, this.fog, this.ghostLayer);
     this.settlerTex = atlas.settlerTextures();
     this.carrier3d = atlas.carrier3d();
     for (const r of RESOURCES) this.wareTex[r] = atlas.get(`ware:${r}`);
@@ -555,6 +561,7 @@ export class GameRenderer {
     selected: number | null,
     hover: { x: number; y: number } | null,
     area: Area | null = null,
+    placing: BuildingType | null = null,
   ) {
     this.view = view;
     this.nowMs = timeMs;
@@ -570,6 +577,50 @@ export class GameRenderer {
     this.syncFog(timeMs);
     this.drawShots(alpha);
     this.drawMarks(ghost, selected, hover, area);
+    this.drawHints(placing, timeMs);
+  }
+
+  /**
+   * While a building is being placed, marks every spot in view where it fits, at the centre of the
+   * would-be footprint (as in Settlers 4): green on level ground, yellow where a digger must level
+   * it first. Recomputed when the view, the type, territory or buildings change, and every 600 ms
+   * (trees grow, settlers move); only tiles the player owns are tested, so the cost follows the
+   * visible territory.
+   */
+  private drawHints(type: BuildingType | null, timeMs: number): void {
+    if (!type) {
+      if (this.hintKey) {
+        this.hints.clear();
+        this.hintKey = '';
+      }
+      return;
+    }
+    const v = this.view;
+    const key = `${type}|${Math.round(v.x / 64)},${Math.round(v.y / 64)},${Math.round(v.w / 64)}|${this.sim.territoryVersion}|${this.sim.buildingsVersion}`;
+    if (key === this.hintKey && timeMs - this.hintAt < 600) return;
+    this.hintKey = key;
+    this.hintAt = timeMs;
+    const g = this.hints;
+    g.clear();
+    const { map } = this.sim;
+    const def = BUILDINGS[type];
+    const corners = [toTile(v.x, v.y), toTile(v.x + v.w, v.y), toTile(v.x, v.y + v.h), toTile(v.x + v.w, v.y + v.h)];
+    const x0 = Math.max(0, Math.floor(Math.min(...corners.map((c) => c.x))) - 2);
+    const x1 = Math.min(map.w - 1, Math.ceil(Math.max(...corners.map((c) => c.x))) + 2);
+    const y0 = Math.max(0, Math.floor(Math.min(...corners.map((c) => c.y))) - 2);
+    const y1 = Math.min(map.h - 1, Math.ceil(Math.max(...corners.map((c) => c.y))) + 2);
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        if (map.owner[map.idx(x, y)] !== LOCAL_PLAYER || !this.sim.canPlace(type, x, y)) continue;
+        const cx = x + (def.w - 1) / 2;
+        const cy = y + (def.h - 1) / 2;
+        const p = this.surface(cx, cy);
+        if (p.x < v.x - 32 || p.x > v.x + v.w + 32 || p.y < v.y - 32 || p.y > v.y + v.h + 32) continue;
+        const flat = def.terrain === 'mountain' || !needsLevelling(map, type, x, y);
+        g.ellipse(p.x, p.y, flat ? 6 : 4.5, flat ? 3.2 : 2.4).fill({ color: flat ? 0x4fd84a : 0xe8cf3a, alpha: 0.9 });
+        g.ellipse(p.x, p.y, flat ? 6 : 4.5, flat ? 3.2 : 2.4).stroke({ width: 1, color: 0x10240c, alpha: 0.7 });
+      }
+    }
   }
 
   /** Whether the local player has seen the tile (always true with the fog off). */
@@ -909,9 +960,18 @@ export class GameRenderer {
         if (v.banner) v.banner.texture = this.atlas.get(`flag:${b.owner}`);
       }
       if (v.banner) v.banner.visible = b.done;
+      v.flag.visible = this.occupied(b);
       const progress = this.sim.buildProgress(b);
-      v.site.visible = !b.done;
-      if (b.done) {
+      const staged = this.atlas.has(`stage:${b.type}:0`);
+      v.site.visible = !b.done && !staged;
+      if (!b.done && staged) {
+        // Pre-rendered construction stages: stakes while the diggers clear the site, then the timber
+        // frame, the lower walls and the walls with half the roof as the builders work.
+        const stage = !b.levelled ? 0 : Math.min(ART3D_STAGES - 1, 1 + Math.floor(progress * (ART3D_STAGES - 1)));
+        v.main.texture = this.atlas.get(`stage:${b.type}:${stage}`);
+        v.main.anchor.copyFrom(v.main.texture.defaultAnchor!);
+        v.main.visible = true;
+      } else if (b.done) {
         v.main.texture = this.atlas.get(`building:${b.type}`);
         v.main.anchor.copyFrom(v.main.texture.defaultAnchor!);
         v.main.visible = true;
@@ -924,6 +984,18 @@ export class GameRenderer {
       }
       this.syncPile(b, v);
     }
+  }
+
+  /**
+   * The door flag goes up once a building is in use: a workplace when its worker has moved in, a
+   * military building while garrisoned (the castle always), anything else once built.
+   */
+  private occupied(b: Building): boolean {
+    if (!b.done) return false;
+    const def = BUILDINGS[b.type];
+    if (def.worker) return b.workerId !== null;
+    if (def.garrison) return b.garrison.length > 0 || !!def.garrison.claimsWhenEmpty;
+    return true;
   }
 
   private createBuildingView(b: Building): BuildingView {
@@ -987,6 +1059,16 @@ export class GameRenderer {
     // Keep the flag (child 0), drop the old pile.
     while (v.front.children.length > 1) v.front.children[1].destroy();
     const stack = (res: Resource, count: number, ox: number) => {
+      if (count <= 0) return;
+      // A pre-rendered pile of exactly this many (`?art=3d`), else single wares stacked up.
+      const pile = `pile:${res}:${Math.min(count, PILE_MAX)}`;
+      if (this.atlas.has(pile)) {
+        const s = new Sprite(this.atlas.get(pile));
+        // Half a tile from the door towards the building: on the trodden earth beside the entrance.
+        s.position.set(ox + 12, -4);
+        v.front.addChild(s);
+        return;
+      }
       for (let i = 0; i < count; i++) {
         const s = new Sprite(this.atlas.get(`ware:${res}`));
         s.position.set(ox + (i % 2) * 7, 8 - Math.floor(i / 2) * 4);

@@ -14,7 +14,7 @@ import {
   UNREACHABLE_TICKS,
   TERRAIN,
 } from './config';
-import { levelStep } from './digging';
+import { clearStrokes, levelStep } from './digging';
 import { assaultTick, joinTick, releaseJoin, soldierIdle } from './military';
 import { canPlant, findGatherTarget, findPlotFor, harvest, isGatherTarget, plant, type Target } from './nature';
 import { findPath } from './pathfinding';
@@ -153,7 +153,9 @@ export function updateSettler(w: World, s: Settler): void {
       s.working = true;
       if (++task.n < DIG_EVERY) return;
       task.n = 0;
-      if (levelStep(w.map, b)) {
+      // Flatten a sloped site first, then clear it.
+      if (b.levelTo >= 0 && !levelStep(w.map, b)) return;
+      if (++b.dug >= clearStrokes(b)) {
         b.levelled = true;
         b.diggerId = null;
         s.tasks.shift();

@@ -102,8 +102,9 @@ describe('fog of war', () => {
   });
 
   it('prospects for gold, mines and smelts it, and promotes its soldiers', { timeout: LONG }, () => {
-    // 64×64 maps have no gold; this 96×96 one has some on player 2's side.
-    const w = new World(11, { size: 96, players: 2, ai: [2] });
+    // 64×64 maps have no gold; this 96×96 one has some on player 2's side (and stone enough to get
+    // there: on many maps the AI still runs out of stone first, see the roadmap).
+    const w = new World(21, { size: 96, players: 2, ai: [2] });
     let ranked = 0;
     for (let i = 0; i < 30 * MINUTE && ranked === 0; i++) {
       w.step();

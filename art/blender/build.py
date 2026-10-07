@@ -142,9 +142,48 @@ def plank_roof(cx, cy, L, W, H, rh, boards, axis='x', overhang=0.12, width=0.085
         lib.cylinder((cx, cy, H + rh + 0.035), 0.04, along + 2 * overhang + 0.06, boards[0], rot=(math.pi / 2, 0, 0), verts=10)
 
 
+def stakes(points, mat, string):
+    """Pegs at the corners of a footprint with a string between them (construction stage 0)."""
+    for x, y in points:
+        lib.box((x, y, 0.07), (0.025, 0.025, 0.14), mat, rot=(0.08, -0.06, 0))
+    for (xa, ya), (xb, yb) in zip(points, points[1:] + points[:1]):
+        length = math.hypot(xb - xa, yb - ya)
+        lib.box(((xa + xb) / 2, (ya + yb) / 2, 0.11), (length, 0.006, 0.006), string,
+                rot=(0, 0, math.atan2(yb - ya, xb - xa)))
+
+
+def timber_frame(cx, cy, L, W, H, rh, beam, axis='x'):
+    """Square-timber skeleton the walls are raised around: corner posts, plates and gable rafters."""
+    x0, x1, y0, y1 = cx - L / 2, cx + L / 2, cy - W / 2, cy + W / 2
+    t = 0.05
+    for x in (x0, x1):
+        for y in (y0, y1):
+            lib.box((x, y, H / 2), (t, t, H), beam)
+    lib.box((cx, y0, H), (L + t, t, t), beam)
+    lib.box((cx, y1, H), (L + t, t, t), beam)
+    lib.box((x0, cy, H), (t, W + t, t), beam)
+    lib.box((x1, cy, H), (t, W + t, t), beam)
+    across = W if axis == 'x' else L
+    ang = math.atan2(rh, across / 2)
+    length = math.hypot(across / 2, rh) + 0.06
+    ends = (x0, x1) if axis == 'x' else (y0, y1)
+    for e in ends:
+        for side in (-1, 1):
+            if axis == 'x':
+                lib.box((e, cy + side * across / 4, H + rh / 2), (t, length, t), beam, rot=(-side * ang, 0, 0))
+            else:
+                lib.box((cx + side * across / 4, e, H + rh / 2), (length, t, t), beam, rot=(0, side * ang, 0))
+    if axis == 'x':
+        lib.box((cx, cy, H + rh), (L + 0.1, t, t), beam)
+    else:
+        lib.box((cx, cy, H + rh), (t, W + 0.1, t), beam)
+
+
 def build_woodcutter():
-    """A log cabin after the Settlers 4 woodcutter: round-log walls, a roof of loose boards, a lower
-    annex at the side and a stack of logs in front, on trodden earth."""
+    """A log cabin after the Settlers 4 woodcutter: round-log walls, a roof of loose boards and a
+    lower annex at the side, on trodden earth. Goods (the logs it cuts) are not part of the model:
+    the game draws the real pile at the door. Tagged with construction stages: 0 stakes, 1 timber
+    frame, 2 lower walls, 3 walls and half the roof, 4 finished."""
     logs = lib.mat_grain('logs', (0.36, 0.18, 0.08), (0.62, 0.36, 0.17), scale=7, stretch=(1, 1, 6), bump=1.0)
     ends = lib.mat_grain('ends', (0.82, 0.6, 0.32), (0.93, 0.76, 0.48), scale=30, stretch=(1, 1, 1), bump=0.4)
     boards = [
@@ -156,39 +195,86 @@ def build_woodcutter():
             ((0.44, 0.36, 0.22), (0.62, 0.52, 0.34)),
         ))
     ]
+    beam = lib.mat_grain('beam', (0.3, 0.16, 0.07), (0.46, 0.26, 0.12), scale=5, stretch=(1, 1, 8), bump=0.6)
     dark = lib.mat_flat('dark', (0.07, 0.05, 0.04))
-    lib.pad((0.05, -0.08, 0), 1.0, 0.98, lib.mat_grain('earth', (0.34, 0.18, 0.09), (0.66, 0.42, 0.22), scale=16,
+    string = lib.mat_flat('string', (0.92, 0.88, 0.75))
+    # The earth reaches out over the door tile, where the goods piles lie.
+    lib.pad((0.08, -0.22, 0), 1.0, 1.12, lib.mat_grain('earth', (0.34, 0.18, 0.09), (0.66, 0.42, 0.22), scale=16,
                                                        stretch=(1, 1, 1), bump=1.0, detail=12), jitter=0.1, seed=5)
+    lib.tag(0)
+
+    cx, cy, L, W, H, rh = -0.22, 0.12, 0.95, 0.85, 0.52, 0.46
+    ax, ay, aL, aW, aH, arh = 0.52, 0.2, 0.48, 0.68, 0.36, 0.24
+    stakes([(cx - L / 2, cy - W / 2), (ax + aL / 2, cy - W / 2), (ax + aL / 2, cy + W / 2), (cx - L / 2, cy + W / 2)],
+           beam, string)
+    lib.tag(0, until=0)
+
+    timber_frame(cx, cy, L, W, H, rh, beam, axis='x')
+    timber_frame(ax, ay, aL, aW, aH, arh, beam, axis='y')
+    lib.tag(1, until=3)
 
     # Main cabin: ridge along X, so its big board slope faces the camera; the door on the −Y wall.
-    cx, cy, L, W, H, rh = -0.22, 0.12, 0.95, 0.85, 0.52, 0.46
     log_cabin(cx, cy, L, W, H, logs, ends, gable_h=rh, gable_axis='x', door=(cx + 0.12, 0.24, 0.36))
+    log_cabin(ax, ay, aL, aW, aH, logs, ends, r=0.04, gable_h=arh, gable_axis='y', overhang=0.05)
+    lib.tag(None, split=lambda o: 2 if o.location.z < H * 0.45 else 3)
+
+    plank_roof(cx, cy, L, W, H, rh, boards, axis='x', seed=2)
+    plank_roof(ax, ay, aL, aW, aH, arh, boards, axis='y', overhang=0.09, seed=4)
+    # Half the boards go on in stage 3 (those on the camera's side of each ridge), the rest at the end.
+    lib.tag(None, split=lambda o: 3 if o.location.y < cy - 0.05 or o.location.x > ax + 0.05 else 4)
+
     lib.box((cx + 0.12, cy - W / 2 + 0.03, 0.18), (0.22, 0.06, 0.36), dark)
     for dx in (-0.13, 0.13):
         lib.box((cx + 0.12 + dx, cy - W / 2 - 0.04, 0.19), (0.04, 0.04, 0.38), boards[1])
     lib.box((cx + 0.12, cy - W / 2 - 0.04, 0.39), (0.32, 0.05, 0.04), boards[1])
-    plank_roof(cx, cy, L, W, H, rh, boards, axis='x', seed=2)
-
-    # Lower annex on the +X side, ridge along Y.
-    ax, ay, aL, aW, aH, arh = 0.52, 0.2, 0.48, 0.68, 0.36, 0.24
-    log_cabin(ax, ay, aL, aW, aH, logs, ends, r=0.04, gable_h=arh, gable_axis='y', overhang=0.05)
     lib.box((ax, ay - aW / 2 - 0.01, 0.16), (0.18, 0.04, 0.2), dark)
-    plank_roof(ax, ay, aL, aW, aH, arh, boards, axis='y', overhang=0.09, seed=4)
-
-    # Stack of logs in front, lying along X: 4, 3, 2, 1.
-    px, py = 0.6, -0.6
-    for row, n in enumerate((4, 3, 2, 1)):
-        for k in range(n):
-            y = py + (k - (n - 1) / 2) * 0.115
-            z = 0.055 + row * 0.095
-            lib.cylinder((px, y, z), 0.055, 0.6, logs, rot=(0, math.pi / 2, 0), verts=12)
-            for sgn in (-1, 1):
-                lib.cylinder((px + sgn * 0.3, y, z), 0.051, 0.006, ends, rot=(0, math.pi / 2, 0), verts=12)
     # Chopping block and a few chips by the door.
     lib.cylinder((-0.55, -0.6, 0.08), 0.1, 0.16, logs, verts=14)
     lib.cylinder((-0.55, -0.6, 0.163), 0.095, 0.006, ends, verts=14)
     for k, (x, y) in enumerate(((-0.35, -0.7), (-0.7, -0.45), (-0.2, -0.55), (0.0, -0.8))):
         lib.box((x, y, 0.015), (0.06, 0.03, 0.015), ends, rot=(0, 0, k * 1.3))
+    lib.tag(4)
+
+
+# Goods lying at a door: one sprite per count, as many items as there really are.
+PILE_MAX = 8
+
+
+def build_pile(res, n):
+    import random
+
+    rnd = random.Random(n)
+    if res == 'log':
+        logs = wood('logs', light=False)
+        cut = cut_ends()
+        rows = []
+        left = n
+        width = 4
+        while left > 0:
+            rows.append(min(width, left))
+            left -= rows[-1]
+            width -= 1
+        for row, count in enumerate(rows):
+            for k in range(count):
+                y = (k - (count - 1) / 2) * 0.09
+                z = 0.04 + row * 0.075
+                x = rnd.uniform(-0.02, 0.02)
+                lib.cylinder((x, y, z), 0.04, 0.34, logs, rot=(0, math.pi / 2, 0), verts=10)
+                for sgn in (-1, 1):
+                    lib.cylinder((x + sgn * 0.17, y, z), 0.037, 0.005, cut, rot=(0, math.pi / 2, 0), verts=10)
+    elif res == 'plank':
+        board = lib.mat_grain('plank', (0.74, 0.54, 0.3), (0.86, 0.68, 0.42), scale=4, stretch=(1, 9, 1), bump=0.4)
+        for k in range(n):
+            layer, col = divmod(k, 2)
+            lib.box(((col - 0.5) * 0.1 + rnd.uniform(-0.01, 0.01), 0, 0.012 + layer * 0.026), (0.09, 0.36, 0.022), board,
+                    rot=(0, 0, rnd.uniform(-0.05, 0.05)), bevel=0.003)
+    elif res == 'stone':
+        stone = lib.mat_grain('block', (0.6, 0.6, 0.62), (0.8, 0.79, 0.78), scale=8, stretch=(1, 1, 1), bump=0.8)
+        spots = [(-0.07, -0.07, 0), (0.07, -0.07, 0), (-0.07, 0.07, 0), (0.07, 0.07, 0),
+                 (0, -0.07, 1), (0, 0.07, 1), (-0.035, 0, 2), (0.035, 0, 2)]
+        for k in range(n):
+            x, y, layer = spots[k]
+            lib.box((x, y, 0.04 + layer * 0.075), (0.12, 0.12, 0.075), stone, rot=(0, 0, rnd.uniform(-0.2, 0.2)), bevel=0.012)
 
 
 def build_tree():
@@ -397,9 +483,24 @@ SINGLE = {
 }
 
 
+#: Construction stages rendered before the finished building (0 stakes … 3 roof half on).
+STAGES = 4
+PILE = (44, 34, 22, 24)  # logical w, h, anchor of a goods pile at a door
+
+
+def render_piles():
+    w, h, ax, ay = PILE
+    for res in ('log', 'plank', 'stone'):
+        for n in range(1, PILE_MAX + 1):
+            scene = lib.reset_scene()
+            lib.setup_camera(scene, w, h, ax, ay)
+            build_pile(res, n)
+            lib.render_to(scene, os.path.join(OUT, f'pile-{res}-{n}.png'))
+
+
 def main():
     args = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
-    names = args or ['carrier', *SINGLE]
+    names = args or ['carrier', 'piles', *SINGLE]
     os.makedirs(OUT, exist_ok=True)
     os.makedirs(TMP, exist_ok=True)
     for name in names:
@@ -412,11 +513,20 @@ def main():
             if n == 'carrier':
                 build_carrier(scene)
                 continue
+            if n == 'piles':
+                render_piles()
+                continue
             build, w, h, ax, ay = SINGLE[n]
             if n == 'log':
                 bpy.data.objects['ShadowCatcher'].hide_render = True
             lib.setup_camera(scene, w, h, ax, ay)
             build()
+            staged = any('stage' in o for o in scene.objects)
+            if staged:
+                for k in range(STAGES):
+                    lib.show_stage(k)
+                    lib.render_to(scene, os.path.join(OUT, f'{n}-s{k}.png'))
+                lib.show_stage(STAGES)
             lib.render_to(scene, os.path.join(OUT, f'{n}.png'))
         print('rendered', name)
 

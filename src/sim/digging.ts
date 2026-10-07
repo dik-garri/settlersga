@@ -1,4 +1,4 @@
-import { BUILD_MAX_SLOPE, BUILDINGS } from './config';
+import { BUILD_MAX_SLOPE, BUILDINGS, CLEAR_STROKES_PER_TILE } from './config';
 import type { GameMap } from './map';
 import type { Building, BuildingType } from './types';
 
@@ -14,6 +14,16 @@ function siteCorners(x: number, y: number, w: number, h: number): [number, numbe
 export function needsLevelling(map: GameMap, type: BuildingType, x: number, y: number): boolean {
   const def = BUILDINGS[type];
   return def.terrain !== 'mountain' && map.heightRange(x, y, x + def.w - 1, y + def.h) > BUILD_MAX_SLOPE;
+}
+
+/** Whether a site of this type is cleared by a digger before building (all but mines). */
+export function needsDigger(type: BuildingType): boolean {
+  return BUILDINGS[type].terrain !== 'mountain';
+}
+
+/** Spade strokes it takes to clear a site, levelling aside. */
+export function clearStrokes(b: Pick<Building, 'w' | 'h'>): number {
+  return b.w * b.h * CLEAR_STROKES_PER_TILE;
 }
 
 /** The height a site is flattened to: the rounded mean of its corners. */

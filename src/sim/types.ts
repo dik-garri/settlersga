@@ -147,11 +147,16 @@ export interface Building {
   garrisonInbound: number;
   /** Of `garrisonInbound`, how many are archers (so recruiting fills archer slots only once). */
   garrisonArchersInbound: number;
-  /** Construction site on sloped ground: false until a digger has flattened it; builders wait. */
+  /**
+   * Construction site: false until a digger has cleared it (and flattened it, on sloped ground);
+   * builders wait, carriers already bring materials. Mines need no digger.
+   */
   levelled: boolean;
   diggerId: number | null;
-  /** Height the digger flattens the site's corners to (set when the site is laid out). */
+  /** Height the digger flattens the site's corners to (set when the site is laid out); −1: flat already. */
   levelTo: number;
+  /** Spade strokes spent clearing the site; it is cleared at `clearStrokes(b)`. */
+  dug: number;
 }
 
 export type Task =

@@ -64,6 +64,10 @@ export const OUTPUT_SHARES: Partial<Record<Resource, number>> = { sword: 60, bow
 /** A barracks only takes a recruit while the player keeps at least this many idle carriers. */
 export const BARRACKS_MIN_IDLE = 2;
 export const START_BUILDERS = 3;
+/** Diggers at the start: every site is cleared by one before the builders start (as in Settlers 4). */
+export const START_DIGGERS = 2;
+/** Spade strokes (one per `DIG_EVERY` ticks) to clear one footprint tile, on top of any levelling. */
+export const CLEAR_STROKES_PER_TILE = 6;
 export const START_PLANKS = 20;
 export const START_STONE = 10;
 /** Tools in the castle at the start, enough for the first workplaces. */

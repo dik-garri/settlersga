@@ -100,7 +100,8 @@ async function main() {
     const view = camera.viewRect(app.screen.width, app.screen.height);
     audio.listen(camera.x, camera.y, view.w / 2, camera.zoom);
     audio.update();
-    renderer.sync(acc / TICK_MS, now, view, input.ghost(), state.selected, state.hover, input.area());
+    const placing = state.placing && state.placing !== 'geologist' ? state.placing : null;
+    renderer.sync(acc / TICK_MS, now, view, input.ghost(), state.selected, state.hover, input.area(), placing);
     hud.update(now);
     minimap.update(now, app.screen.width, app.screen.height);
   });

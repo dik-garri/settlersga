@@ -22,7 +22,7 @@ import {
   type GroundKind,
 } from './sprites';
 import { DIRS, WALK_FRAMES, WORK_FRAMES } from './anim';
-import { ART3D_SPRITES, type Art3d } from './art3d';
+import { ART3D_PILES, ART3D_STAGED, ART3D_STAGES, ART3D_SPRITES, PILE_MAX, type Art3d } from './art3d';
 import { ACTION_IDS, ACTIONS, HAT_STYLES, styleOf, TOOLS, type ActionId, type HatStyle, type ToolShape } from './animConfig';
 import { paintFlash, paintGlint, paintGlow, paintPuff, paintSpark } from './fxArt';
 import {
@@ -278,6 +278,10 @@ export class SpriteAtlas {
     };
   }
 
+  has(name: string): boolean {
+    return this.textures.has(name);
+  }
+
   get(name: string): Texture {
     const t = this.textures.get(name);
     if (!t) throw new Error(`unknown sprite ${name}`);
@@ -375,6 +379,12 @@ function addArt3d(a: AtlasBuilder, art: Art3d): void {
     a.add(key, s.w, s.h, s.ax, s.ay, (ctx) => ctx.drawImage(img, 0, 0, s.w, s.h));
   };
   one('building:woodcutter', 'woodcutter');
+  for (const type of ART3D_STAGED) {
+    for (let k = 0; k < ART3D_STAGES; k++) one(`stage:${type}:${k}`, `${type}-s${k}`);
+  }
+  for (const res of ART3D_PILES) {
+    for (let n = 1; n <= PILE_MAX; n++) one(`pile:${res}:${n}`, `pile-${res}-${n}`);
+  }
   one('tree:0', 'tree');
   for (let v = 1; v < 4; v++) a.alias(`tree:${v}`, 'tree:0');
   for (let v = 0; v < 3; v++) one(`deposit:${v}`, `deposit${v}`);

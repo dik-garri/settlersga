@@ -36,9 +36,24 @@ export interface Art3d {
   ground: GroundMeta;
 }
 
+/** Construction stages rendered per building (`STAGES` in build.py): 0 stakes … 3 roof half on. */
+export const ART3D_STAGES = 4;
+/** Buildings rendered with their construction stages. */
+export const ART3D_STAGED = ['woodcutter'];
+/** Goods piles at a door: one sprite per count up to `PILE_MAX` (`build_pile` in build.py). */
+export const ART3D_PILES = ['log', 'plank', 'stone'];
+export const PILE_MAX = 8;
+const PILE = { w: 44, h: 34, ax: 22, ay: 24 };
+
+const WOODCUTTER = { w: 150, h: 140, ax: 75, ay: 100 };
+
 /** Logical size and anchor of the single-image sprites, matching `build.py`'s `SINGLE` table. */
 export const ART3D_SPRITES: Record<string, { w: number; h: number; ax: number; ay: number }> = {
-  woodcutter: { w: 150, h: 140, ax: 75, ay: 100 },
+  woodcutter: WOODCUTTER,
+  ...Object.fromEntries(Array.from({ length: ART3D_STAGES }, (_, k) => [`woodcutter-s${k}`, WOODCUTTER])),
+  ...Object.fromEntries(
+    ART3D_PILES.flatMap((res) => Array.from({ length: PILE_MAX }, (_, k) => [`pile-${res}-${k + 1}`, PILE])),
+  ),
   tree: { w: 84, h: 100, ax: 34, ay: 80 },
   deposit0: { w: 56, h: 44, ax: 28, ay: 34 },
   deposit1: { w: 56, h: 44, ax: 28, ay: 34 },

@@ -77,7 +77,8 @@ describe('tools', () => {
       [-5, 4],
       [1, 6],
     ]) {
-      placeNear(w, 'house_small', c.x + dx, c.y + dy);
+      // Already cleared, so only the builder rule is under test (diggers clear sites first).
+      placeNear(w, 'house_small', c.x + dx, c.y + dy)!.levelled = true;
     }
     run(w, 200);
     expect(builders()).toBe(5);

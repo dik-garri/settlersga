@@ -84,9 +84,12 @@ function dispatchFor(w: World, owner: PlayerId): void {
     ];
   }
 
-  // Sloped sites waiting for levelling: carriers pick up shovels and become diggers.
+  // Sloped sites waiting for levelling: carriers pick up shovels and become diggers. Plain clearing
+  // is left to the diggers there are (it is quick), so shovels stay for foresters.
   const diggerTool = PROFESSIONS.digger.tool!;
-  const sitesToDig = own.filter((b) => !b.done && !b.levelled && b.diggerId === null && isReachable(w, b)).length;
+  const sitesToDig = own.filter(
+    (b) => !b.done && !b.levelled && b.levelTo >= 0 && b.diggerId === null && isReachable(w, b),
+  ).length;
   const comingDiggers = w.settlers.filter(
     (s) =>
       s.owner === owner &&

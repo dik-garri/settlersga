@@ -140,6 +140,23 @@ def apply_ao(strength=0.75, distance=0.12):
         mat['ao'] = True
 
 
+def tag(stage, until=None, split=None):
+    """Marks every object not yet tagged as appearing at construction `stage` (and, with `until`,
+    disappearing after it). `split(obj)` may return the stage per object instead."""
+    for obj in bpy.context.scene.objects:
+        if obj.type not in ('MESH',) or 'stage' in obj:
+            continue
+        obj['stage'] = split(obj) if split else stage
+        obj['until'] = 99 if until is None else until
+
+
+def show_stage(k):
+    """Shows what stands at construction stage `k` (untagged objects always)."""
+    for obj in bpy.context.scene.objects:
+        if 'stage' in obj:
+            obj.hide_render = not (obj['stage'] <= k <= obj['until'])
+
+
 def render_to(scene, path):
     apply_ao()
     scene.render.filepath = path

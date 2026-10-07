@@ -11,6 +11,7 @@ import {
   PROSPECT_TICKS,
   PROSPECT_TILES,
   START_BUILDERS,
+  START_DIGGERS,
   START_CARRIERS,
   START_SOLDIERS,
   START_PLANKS,
@@ -18,7 +19,7 @@ import {
   START_TOOLS,
   totalCost,
 } from './config';
-import { levelTarget, needsLevelling } from './digging';
+import { levelTarget, needsDigger, needsLevelling } from './digging';
 import { dispatch } from './logistics';
 import { createAi, updateAi, type AiState } from './ai';
 import {
@@ -167,6 +168,7 @@ export class World {
     recomputeTerritory(this);
     for (let i = 0; i < START_CARRIERS; i++) spawnSettler(this, 'carrier', castle);
     for (let i = 0; i < START_BUILDERS; i++) spawnSettler(this, 'builder', castle);
+    for (let i = 0; i < START_DIGGERS; i++) spawnSettler(this, 'digger', castle);
     for (let i = 0; i < START_SOLDIERS; i++) enterGarrison(this, castle, spawnSettler(this, 'soldier', castle));
     return player;
   }
@@ -411,9 +413,10 @@ export class World {
     const { door: from } = this.castleOf(player);
     if (!findPath(this.map, from.x, from.y, door.x, door.y)) return null;
     const b = addBuilding(this, type, x, y, player, false);
-    if (needsLevelling(this.map, type, x, y)) {
+    if (needsDigger(type)) {
+      // Diggers clear every site first (and flatten a sloped one); carriers bring materials meanwhile.
       b.levelled = false;
-      b.levelTo = levelTarget(this.map, b);
+      b.levelTo = needsLevelling(this.map, type, x, y) ? levelTarget(this.map, b) : -1;
     }
     return b;
   }
