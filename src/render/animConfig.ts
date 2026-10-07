@@ -140,8 +140,8 @@ export interface BuildingFx {
 
 export const BUILDING_FX: Partial<Record<BuildingType, BuildingFx>> = {
   bakery: { smoke: 'working', glow: true },
-  toolsmith: { smoke: 'working', sound: 'hammer' },
-  weaponsmith: { smoke: 'working', sound: 'hammer' },
+  toolsmith: { smoke: 'working', glow: true, sound: 'hammer' },
+  weaponsmith: { smoke: 'working', glow: true, sound: 'hammer' },
   ironsmelter: { smoke: 'working', glow: true, sound: 'hiss' },
   goldsmelter: { smoke: 'working', glow: true, sound: 'hiss' },
   sawmill: { sound: 'saw' },

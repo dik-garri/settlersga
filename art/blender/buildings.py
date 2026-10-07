@@ -1244,8 +1244,14 @@ def tile_face(e0, e1, r0, r1, mats, rnd, size=0.13, shape='scale', lift=0.03):
         u = (b - a).normalized() if width > 1e-4 else (e1 - e0).normalized()
         n = u.cross(up.normalized()).normalized()
         shift = 0.25 if r % 2 else -0.25
+        # Keep whole tiles inside the face, so hips and verges stay clean instead of toothed.
+        margin = min(0.5, size * 0.45 / width) if width > 1e-4 else 0.5
         for k in range(cols):
-            s = min(1.0, max(0.0, (k + 0.5 + shift) / cols))
+            s = (k + 0.5 + shift) / cols
+            if s < margin or s > 1 - margin:
+                s = min(1 - margin, max(margin, s))
+                if cols > 1 and (k == 0 or k == cols - 1) and abs(shift) > 0 and (s == margin or s == 1 - margin):
+                    continue
             p = a.lerp(b, s) + n * (lift + 0.01 * (r % 2))
             jitter = Vector((rnd.uniform(-0.08, 0.08), rnd.uniform(-0.08, 0.08), 0))
             place_on(roof_piece(mats[rnd.randrange(len(mats))], size, shape), p, u + jitter, up)
@@ -1947,4 +1953,450 @@ def build_barracks():
     lib.box((0.78, -0.6, 0.22), (0.05, 0.05, 0.44), beam, rot=(0.2, 0, 0))
     for k, (rr, m) in enumerate(((0.16, straw), (0.11, red), (0.06, straw), (0.025, red))):
         lib.cylinder((0.78, -0.66 - k * 0.006, 0.36), rr, 0.04, m, rot=(math.pi / 2 - 0.2, 0, -0.5), verts=24)
+    lib.tag(4)
+
+
+# ------------------------------------------------------------------------------------- toolsmith (2×2)
+
+def build_toolsmith():
+    """Our toolsmith, deliberately unlike our weaponsmith: an open-sided timber workshop on a stone
+    footing under a hipped roof of wooden shingles, a square brick hearth inside with a tapering stone
+    hood and chimney rising through the roof, a closed stone storeroom at the back; outside a
+    grindstone on its frame, a rack of finished tools and a water barrel."""
+    rnd = random.Random(191)
+    walls = stone_walls()
+    blocks = block_mats()
+    beam = beam_mat()
+    planks = boards_mats()
+    sh = shingle_mats('tsh')
+    bricks = grain_set('brick', (((0.46, 0.2, 0.12), (0.7, 0.34, 0.2)), ((0.4, 0.18, 0.1), (0.62, 0.3, 0.18))), scale=9)
+    iron = lib.mat_flat('iron', (0.3, 0.31, 0.34), rough=0.3)
+    stone = lib.mat_grain('grind', (0.6, 0.56, 0.48), (0.82, 0.78, 0.7), scale=10, stretch=(1, 1, 1), bump=0.6)
+    water = lib.mat_flat('water', (0.24, 0.5, 0.62), rough=0.1)
+    fire = lib.mat_flat('fire', (1.0, 0.5, 0.1), rough=0.6)
+    dark = lib.mat_flat('dark', (0.05, 0.04, 0.03))
+    earth_pad((0.1, -0.2, 0), 0.98, 1.08, seed=191)
+    lib.tag(0)
+    corner_stakes(-0.85, 0.85, -0.85, 0.85)
+    lib.tag(0, until=0)
+    x0, x1, y0, y1, H = -0.75, 0.6, -0.5, 0.75, 0.62
+    lib.box(((x0 + x1) / 2, (y0 + y1) / 2, 0.06), (x1 - x0 + 0.06, y1 - y0 + 0.06, 0.12), blocks[1], bevel=0.02)
+    lib.tag(1)
+    # Storeroom: a closed stone room along the back (+Y) third.
+    sy0 = y1 - 0.42
+    stone_house(x0, x1, sy0, y1, H, rnd, walls, blocks, z0=0.12, block=0.18)
+    # Open hall in front: posts and plates.
+    for x in (x0 + 0.03, (x0 + x1) / 2, x1 - 0.03):
+        lib.box((x, y0 + 0.03, 0.12 + (H - 0.12) / 2), (0.07, 0.07, H - 0.12), beam, bevel=0.01)
+    lib.box((x1 - 0.03, (y0 + sy0) / 2, 0.12 + (H - 0.12) / 2), (0.07, 0.07, H - 0.12), beam, bevel=0.01)
+    lib.box(((x0 + x1) / 2, y0 + 0.03, H), (x1 - x0 + 0.06, 0.07, 0.07), beam)
+    lib.box((x1 - 0.03, (y0 + y1) / 2, H), (0.07, y1 - y0 + 0.06, 0.07), beam)
+    for x in (x0 + 0.03 + 0.2, x1 - 0.03 - 0.2):
+        lib.box((x, y0 + 0.03, H - 0.12), (0.32, 0.05, 0.05), beam, rot=(0, 0.6 if x < 0 else -0.6, 0))
+    lib.tag(2)
+    # Brick hearth with a stone hood and chimney, glowing coals.
+    hx, hy = x0 + 0.35, sy0 - 0.2
+    lib.box((hx, hy, 0.24), (0.42, 0.36, 0.24), bricks[0], bevel=0.015)
+    lib.box((hx, hy - 0.05, 0.37), (0.26, 0.18, 0.03), fire)
+    lib.cylinder((hx, hy + 0.04, 0.62), 0.24, 0.3, walls, radius2=0.11, verts=4, rot=(0, 0, math.pi / 4))
+    note_fx('toolsmith', 'glow', (hx, hy - 0.22, 0.38))
+    # The anvil in the hall and a quench trough.
+    lib.box((0.12, y0 + 0.3, 0.2), (0.12, 0.12, 0.16), planks[1], bevel=0.01)
+    lib.box((0.12, y0 + 0.3, 0.31), (0.22, 0.09, 0.06), iron, bevel=0.01)
+    lib.tag(3)
+    hip_roof((x0 + x1) / 2, (y0 + y1) / 2, x1 - x0, y1 - y0, H, 0.38, sh, lib.mat_flat('tsh-r', (0.36, 0.24, 0.12)), rnd,
+             overhang=0.12, size=0.12, shape='tile', ridge_frac=0.55)
+    chimney(hx, hy + 0.04, 0.78, H + 0.62, bricks, rnd, name='toolsmith')
+    lib.tag(None, split=lambda o: 4)
+    # Outside: grindstone on a frame, a tool rack, a water barrel.
+    gx, gy = 0.7, -0.85
+    for dy in (-0.07, 0.07):
+        lib.box((gx, gy + dy, 0.13), (0.05, 0.03, 0.26), beam, rot=(0.12 if dy > 0 else -0.12, 0, 0))
+    lib.cylinder((gx, gy, 0.24), 0.15, 0.06, stone, rot=(math.pi / 2, 0, 0), verts=24)
+    lib.cylinder((gx, gy, 0.24), 0.02, 0.22, iron, rot=(math.pi / 2, 0, 0), verts=8)
+    rx, ry = -0.85, -0.5
+    lib.box((rx, ry, 0.26), (0.04, 0.5, 0.04), beam)
+    for dy in (-0.22, 0.22):
+        lib.box((rx, ry + dy, 0.15), (0.04, 0.04, 0.3), beam)
+    for k in range(4):
+        y = ry - 0.15 + k * 0.1
+        lib.box((rx - 0.02, y, 0.16), (0.015, 0.015, 0.22), beam, rot=(0.15, 0, 0))
+        head = (0.07, 0.03, 0.04) if k % 2 else (0.03, 0.08, 0.03)
+        lib.box((rx - 0.02, y, 0.05), head, iron)
+    lib.cylinder((-0.3, -0.9, 0.11), 0.1, 0.22, planks[1], verts=16)
+    lib.cylinder((-0.3, -0.9, 0.215), 0.09, 0.01, water, verts=16)
+    for z in (0.04, 0.18):
+        torus((-0.3, -0.9, z), 0.102, 0.008, iron)
+    lib.tag(4)
+
+
+# ------------------------------------------------------------------------------------- pig farm (2×2)
+
+def build_pigfarm():
+    """Our pig farm: a low half-timbered sty with a deep thatched roof running down to the yard side,
+    a small fieldstone house with a wooden-shingle roof and a chimney at its end, and a fenced muddy
+    yard in front with a feeding trough and a few pigs."""
+    rnd = random.Random(201)
+    walls = stone_walls()
+    blocks = block_mats()
+    beam = beam_mat()
+    planks = boards_mats()
+    straw = straw_mat()
+    sh = shingle_mats('psh')
+    plaster = lib.mat_stones('pplaster', (0.86, 0.8, 0.66), (0.72, 0.64, 0.5), (0.6, 0.52, 0.4), scale=6, bump=0.3)
+    mud = lib.mat_grain('mud', (0.26, 0.17, 0.09), (0.44, 0.3, 0.17), scale=14, stretch=(1, 1, 1), bump=0.9)
+    pig = lib.mat_grain('pig', (0.86, 0.6, 0.54), (0.96, 0.74, 0.68), scale=20, stretch=(1, 1, 1), bump=0.2)
+    door = door_mat()
+    earth_pad((0.1, -0.2, 0), 0.98, 1.08, seed=201)
+    lib.tag(0)
+    corner_stakes(-0.85, 0.85, -0.85, 0.85)
+    lib.tag(0, until=0)
+    # Stone house at the back left.
+    hx0, hx1, hy0, hy1, H, rh = -0.85, -0.2, 0.05, 0.85, 0.6, 0.36
+    lib.box(((hx0 + hx1) / 2, (hy0 + hy1) / 2, 0.05), (hx1 - hx0 + 0.06, hy1 - hy0 + 0.06, 0.1), blocks[1], bevel=0.02)
+    # Sty along the back right.
+    sx0, sx1, sy0, sy1, sH = -0.2, 0.75, 0.15, 0.8, 0.42
+    lib.box(((sx0 + sx1) / 2, (sy0 + sy1) / 2, 0.04), (sx1 - sx0, sy1 - sy0, 0.08), blocks[3], bevel=0.02)
+    lib.tag(1)
+    stone_house(hx0, hx1, hy0, hy1, H * 0.5, rnd, walls, blocks, block=0.18)
+    half_timber(sx0, sx1, sy0, sy1, 0.08, sH, plaster, beam, rnd)
+    lib.tag(2)
+    stone_house(hx0, hx1, hy0, hy1, H, rnd, walls, blocks, z0=H * 0.5, block=0.18)
+    lib.gable(((hx0 + hx1) / 2, (hy0 + hy1) / 2, H), hx1 - hx0, rh - 0.02, hy0 + 0.01, walls, along='y')
+    lib.box((hx0 + 0.42, hy0 - 0.05, 0.2), (0.2, 0.04, 0.38), door, bevel=0.008)
+    window(hx0 + 0.15, hy0 - 0.04, 0.42, 0.12, 0.13, beam, lib.mat_flat('dark', (0.05, 0.04, 0.03)))
+    for k in range(3):  # low half-doors of the sty
+        lib.box((sx0 + 0.18 + k * 0.3, sy0 - 0.03, 0.17), (0.16, 0.03, 0.18), planks[k % len(planks)], bevel=0.006)
+    lib.tag(3)
+    scale_roof((hx0 + hx1) / 2, (hy0 + hy1) / 2, hx1 - hx0, hy1 - hy0, H, rh, sh, lib.mat_flat('psh-r', (0.36, 0.24, 0.12)),
+               axis='y', overhang=0.08, seed=202, size=0.11, shape='tile')
+    chimney((hx0 + hx1) / 2, hy1 - 0.15, H, H + rh + 0.18, blocks, rnd)
+    # Deep thatch over the sty, a lean-to sloping towards the yard (−Y).
+    tz_hi, tz_lo = sH + 0.34, sH - 0.06
+    lib.box(((sx0 + sx1) / 2, (sy0 + sy1) / 2 - 0.04, (tz_hi + tz_lo) / 2),
+            (sx1 - sx0 + 0.16, math.hypot(sy1 - sy0 + 0.22, tz_hi - tz_lo), 0.1), straw,
+            rot=(math.atan2(tz_hi - tz_lo, sy1 - sy0 + 0.22), 0, 0), bevel=0.03)
+    lib.tag(None, split=lambda o: 3 if o.location.x > 0.3 else 4)
+    # Fenced yard in front with mud, a trough and pigs.
+    lib.pad((0.25, -0.38, 0.004), 0.55, 0.36, mud, jitter=0.15, seed=203, core=0.8, reach=1.1)
+    fx0, fx1, fy0, fy1 = -0.4, 0.82, -0.85, sy0
+    for (xa, ya, xb, yb) in ((fx0, fy0, fx1, fy0), (fx1, fy0, fx1, fy1), (fx0, fy0, fx0, fy1 - 0.1)):
+        n = max(2, int(math.hypot(xb - xa, yb - ya) / 0.22))
+        for k in range(n + 1):
+            t = k / n
+            lib.box((xa + (xb - xa) * t, ya + (yb - ya) * t, 0.1), (0.035, 0.035, 0.2), beam)
+        for z in (0.08, 0.16):
+            rod((xa, ya, z), (xb, yb, z), 0.014, beam, verts=6)
+    lib.box((0.1, -0.2, 0.05), (0.42, 0.12, 0.08), planks[1], bevel=0.01)
+    for k, (x, y, a) in enumerate(((0.45, -0.5, 0.4), (-0.05, -0.55, 2.0), (0.6, -0.15, -1.2))):
+        body = lib.sphere((x, y, 0.09), 0.08, pig, scale=(1.5, 0.95, 0.9))
+        body.rotation_euler = (0, 0, a)
+        lib.sphere((x + math.cos(a) * 0.13, y + math.sin(a) * 0.13, 0.1), 0.05, pig, scale=(1.2, 1, 1))
+        for dx, dy in ((0.07, 0.04), (0.07, -0.04), (-0.07, 0.04), (-0.07, -0.04)):
+            c, s = math.cos(a), math.sin(a)
+            lib.cylinder((x + c * dx - s * dy, y + s * dx + c * dy, 0.025), 0.015, 0.05, pig, verts=6)
+    lib.tag(4)
+
+
+# ------------------------------------------------------------------------------------- forester (2×2)
+
+def build_forester():
+    """Our forester's lodge: a small low hut of round logs with a moss-grown plank roof, a rectangular
+    sign board carved with a young fir on a post, a fenced bed of seedlings and a few young firs."""
+    rnd = random.Random(211)
+    B = _b()
+    logs = lib.mat_grain('flogs', (0.3, 0.17, 0.08), (0.52, 0.32, 0.15), scale=7, stretch=(1, 1, 6), bump=1.0)
+    ends = ends_mat()
+    boards = grain_set('fboard', (((0.34, 0.24, 0.12), (0.52, 0.38, 0.2)), ((0.3, 0.26, 0.16), (0.46, 0.4, 0.28)),
+                                  ((0.26, 0.2, 0.1), (0.44, 0.32, 0.18))), scale=4, stretch=(1, 9, 1), bump=0.7)
+    moss = lib.mat_leaves('moss', (0.1, 0.22, 0.06), (0.22, 0.4, 0.1), (0.4, 0.56, 0.16), scale=22)
+    needles = lib.mat_leaves('needles', (0.04, 0.16, 0.08), (0.1, 0.32, 0.14), (0.24, 0.48, 0.2), scale=18)
+    bark = lib.mat_grain('fbark', (0.24, 0.14, 0.07), (0.4, 0.26, 0.14), scale=8, stretch=(1, 1, 5), bump=0.8)
+    soil = lib.mat_grain('soil', (0.2, 0.12, 0.06), (0.36, 0.24, 0.12), scale=16, stretch=(1, 1, 1), bump=1.0)
+    signwood = lib.mat_grain('signwood', (0.62, 0.48, 0.26), (0.8, 0.66, 0.4), scale=6, stretch=(1, 6, 1), bump=0.4)
+    green = lib.mat_flat('carved', (0.16, 0.36, 0.14), rough=0.6)
+    dark = lib.mat_flat('dark', (0.05, 0.04, 0.03))
+    earth_pad((0.1, -0.2, 0), 0.95, 1.05, seed=211)
+    lib.tag(0)
+    corner_stakes(-0.7, 0.6, -0.55, 0.75)
+    lib.tag(0, until=0)
+    cx, cy, L, W, H, rh = -0.1, 0.25, 0.85, 0.75, 0.42, 0.3
+    B.log_cabin(cx, cy, L, W, H, logs, ends, r=0.045, gable_h=rh, gable_axis='x', door=(cx + 0.18, 0.22, 0.32))
+    lib.box((cx + 0.18, cy - W / 2 + 0.03, 0.16), (0.2, 0.06, 0.32), dark)
+    lib.tag(None, split=lambda o: 2 if o.location.z < H * 0.5 else 3)
+    B.plank_roof(cx, cy, L, W, H, rh, boards, axis='x', overhang=0.1, seed=212)
+    lib.tag(None, split=lambda o: 3 if o.location.y < cy else 4)
+    for k in range(6):  # moss patches on the roof
+        x = cx + rnd.uniform(-L / 2, L / 2)
+        y = cy - W / 4 + rnd.uniform(-0.1, 0.1)
+        lib.lumpy((x, y, H + rh * 0.45 + 0.05), 0.06, moss, scale=(1.4, 1, 0.4), strength=0.4, noise=0.6, seed=k, subdiv=1)
+    # Sign: a rectangular board on a post, carved with a young fir (our own emblem).
+    px, py = 0.7, -0.55
+    lib.box((px, py, 0.3), (0.04, 0.04, 0.6), bark)
+    lib.box((px - 0.02, py, 0.48), (0.03, 0.26, 0.2), signwood, bevel=0.01)
+    for k, (w, z) in enumerate(((0.14, 0.42), (0.1, 0.47), (0.06, 0.52))):
+        lib.box((px - 0.04, py, z), (0.01, w, 0.045), green)
+    lib.box((px - 0.04, py, 0.4), (0.01, 0.02, 0.03), dark)
+    # Seedling bed with a little fence.
+    bx, by = 0.35, -0.45
+    lib.box((bx, by, 0.02), (0.4, 0.34, 0.04), soil)
+    for k in range(6):
+        x = bx - 0.13 + (k % 3) * 0.13
+        y = by - 0.08 + (k // 3) * 0.16
+        lib.cylinder((x, y, 0.07), 0.04, 0.09, needles, radius2=0.004, verts=8)
+    for (xa, ya, xb, yb) in ((bx - 0.22, by - 0.19, bx + 0.22, by - 0.19), (bx + 0.22, by - 0.19, bx + 0.22, by + 0.19)):
+        for k in range(4):
+            t = k / 3
+            lib.box((xa + (xb - xa) * t, ya + (yb - ya) * t, 0.06), (0.02, 0.02, 0.12), bark)
+        rod((xa, ya, 0.1), (xb, yb, 0.1), 0.01, bark, verts=6)
+    # Young firs around the lodge.
+    for k, (x, y, s) in enumerate(((-0.75, -0.4, 0.8), (-0.7, 0.75, 1.0), (0.55, 0.75, 0.75))):
+        lib.cylinder((x, y, 0.1 * s), 0.025 * s, 0.2 * s, bark, verts=8)
+        for j in range(3):
+            lib.cylinder((x, y, (0.2 + j * 0.16) * s + 0.08 * s), (0.2 - j * 0.05) * s, 0.22 * s, needles, radius2=0.01,
+                         verts=12)
+    lib.tag(4)
+
+
+# ------------------------------------------------------------------------------------- eyecatchers (1×1, fountain 2×2)
+
+def weathered():
+    """Pale, weathered limestone with mossy grime, and a dark bronze."""
+    stone = lib.mat_grain('lime', (0.62, 0.6, 0.54), (0.88, 0.86, 0.8), scale=9, stretch=(1, 1, 1), bump=0.7)
+    old = lib.mat_grain('limeold', (0.5, 0.52, 0.44), (0.74, 0.74, 0.66), scale=9, stretch=(1, 1, 1), bump=0.8)
+    moss = lib.mat_leaves('emoss', (0.12, 0.26, 0.08), (0.24, 0.42, 0.12), (0.42, 0.58, 0.18), scale=24)
+    bronze = lib.mat_grain('bronze', (0.3, 0.42, 0.34), (0.56, 0.5, 0.3), scale=12, stretch=(1, 1, 1), bump=0.3)
+    return stone, old, moss, bronze
+
+
+def plinth(size, h, stone, old):
+    lib.box((0, 0, h * 0.3), (size, size, h * 0.6), old, bevel=0.02)
+    lib.box((0, 0, h * 0.75), (size * 0.85, size * 0.85, h * 0.3), stone, bevel=0.02)
+
+
+def mossy(rnd, moss, n, r, z):
+    for k in range(n):
+        a = rnd.uniform(0, math.tau)
+        lib.lumpy((math.cos(a) * r, math.sin(a) * r, z), 0.04, moss, scale=(1.4, 1, 0.5), strength=0.4, noise=0.6, seed=k,
+                  subdiv=1)
+
+
+def build_flowerbed():
+    """A raised octagonal bed of stone kerbs with a small clipped shrub and flowers of three colours."""
+    rnd = random.Random(221)
+    stone, old, moss, _ = weathered()
+    soil = lib.mat_grain('bedsoil', (0.22, 0.13, 0.06), (0.36, 0.24, 0.12), scale=16, stretch=(1, 1, 1), bump=1.0)
+    leaves = lib.mat_leaves('bedleaves', (0.06, 0.2, 0.04), (0.16, 0.42, 0.08), (0.36, 0.62, 0.16), scale=20)
+    petals = [lib.mat_flat('pet0', (0.9, 0.3, 0.32)), lib.mat_flat('pet1', (0.96, 0.82, 0.3)),
+              lib.mat_flat('pet2', (0.62, 0.42, 0.86))]
+    lib.tag(1)
+    for k in range(8):
+        a = k / 8 * math.tau
+        lib.box((math.cos(a) * 0.36, math.sin(a) * 0.36, 0.07), (0.3, 0.07, 0.14), [stone, old][k % 2],
+                rot=(0, 0, a + math.pi / 2), bevel=0.015)
+    lib.cylinder((0, 0, 0.1), 0.34, 0.06, soil, verts=16)
+    lib.tag(2)
+    lib.lumpy((0, 0, 0.24), 0.14, leaves, scale=(1, 1, 1.2), strength=0.4, noise=0.6, seed=1, subdiv=2)
+    for k in range(18):
+        a = rnd.uniform(0, math.tau)
+        d = rnd.uniform(0.16, 0.3)
+        lib.cylinder((math.cos(a) * d, math.sin(a) * d, 0.16), 0.006, 0.08, leaves, verts=5)
+        lib.sphere((math.cos(a) * d, math.sin(a) * d, 0.21), 0.03, petals[k % 3], scale=(1, 1, 0.6), subdiv=1)
+    mossy(rnd, moss, 3, 0.36, 0.12)
+    lib.tag(4)
+
+
+def build_column():
+    """A single fluted column of weathered stone on a stepped base, a simple capital crowned by a
+    bronze brazier bowl; ivy at its foot."""
+    rnd = random.Random(231)
+    stone, old, moss, bronze = weathered()
+    lib.tag(1)
+    plinth(0.62, 0.22, stone, old)
+    lib.tag(2)
+    H = 1.35
+    lib.cylinder((0, 0, 0.22 + H / 2), 0.13, H, stone, radius2=0.115, verts=20)
+    for k in range(12):
+        a = k / 12 * math.tau
+        lib.box((math.cos(a) * 0.125, math.sin(a) * 0.125, 0.22 + H / 2), (0.018, 0.018, H * 0.96), old,
+                rot=(0, 0, a))
+    lib.tag(3)
+    lib.box((0, 0, 0.22 + H + 0.04), (0.32, 0.32, 0.08), stone, bevel=0.02)
+    lib.cylinder((0, 0, 0.22 + H + 0.1), 0.16, 0.06, old, radius2=0.12, verts=20)
+    lib.cylinder((0, 0, 0.22 + H + 0.18), 0.17, 0.1, bronze, radius2=0.08, verts=20)
+    mossy(rnd, moss, 5, 0.22, 0.25)
+    lib.tag(4)
+
+
+def build_statue():
+    """A bronze stag standing on a tall stone pedestal (our own figure), its antlers raised; a little
+    moss on the steps."""
+    rnd = random.Random(241)
+    stone, old, moss, bronze = weathered()
+    lib.tag(1)
+    plinth(0.6, 0.24, stone, old)
+    lib.box((0, 0, 0.24 + 0.32), (0.42, 0.42, 0.64), stone, bevel=0.03)
+    lib.box((0, 0, 0.24 + 0.66), (0.48, 0.48, 0.06), old, bevel=0.015)
+    lib.tag(2)
+    z = 0.93
+    lib.sphere((0, 0, z + 0.26), 0.14, bronze, scale=(1.6, 0.8, 0.9))  # body, along X (towards the camera's right)
+    for dx in (-0.13, 0.13):
+        for dy in (-0.06, 0.06):
+            lib.cylinder((dx, dy, z + 0.1), 0.025, 0.22, bronze, verts=8)
+    rod((0.18, 0, z + 0.32), (0.28, 0, z + 0.5), 0.05, bronze)  # neck
+    lib.sphere((0.3, 0, z + 0.53), 0.06, bronze, scale=(1.4, 0.8, 0.9))  # head
+    for side in (-1, 1):  # antlers
+        rod((0.28, side * 0.03, z + 0.58), (0.24, side * 0.12, z + 0.78), 0.012, bronze, verts=6)
+        rod((0.25, side * 0.09, z + 0.7), (0.34, side * 0.15, z + 0.78), 0.01, bronze, verts=6)
+        rod((0.25, side * 0.07, z + 0.64), (0.18, side * 0.16, z + 0.72), 0.01, bronze, verts=6)
+    lib.tag(3)
+    mossy(rnd, moss, 4, 0.3, 0.2)
+    lib.tag(4)
+
+
+def build_obelisk():
+    """A tall tapering obelisk of weathered stone on a stepped base, plain faces with two carved bands
+    and a bronze cap; moss creeping up its foot."""
+    rnd = random.Random(251)
+    stone, old, moss, bronze = weathered()
+    lib.tag(1)
+    plinth(0.62, 0.26, stone, old)
+    lib.tag(2)
+    H = 1.6
+    lib.cylinder((0, 0, 0.26 + H / 2), 0.17, H, stone, radius2=0.1, verts=4, rot=(0, 0, math.pi / 4))
+    for z in (0.26 + H * 0.25, 0.26 + H * 0.6):
+        t = (z - 0.26) / H
+        r = 0.17 + (0.1 - 0.17) * t
+        lib.cylinder((0, 0, z), r + 0.012, 0.035, old, verts=4, rot=(0, 0, math.pi / 4))
+    lib.tag(3)
+    lib.cylinder((0, 0, 0.26 + H + 0.07), 0.1, 0.14, bronze, radius2=0.005, verts=4, rot=(0, 0, math.pi / 4))
+    mossy(rnd, moss, 5, 0.24, 0.28)
+    lib.tag(4)
+
+
+def build_fountain():
+    """A round fountain (2×2): a stone basin of curved kerb blocks full of water, a fluted pillar in the
+    middle carrying a smaller bowl that spills into it, a bronze finial."""
+    rnd = random.Random(261)
+    stone, old, moss, bronze = weathered()
+    water = lib.mat_flat('fwater', (0.3, 0.6, 0.74), rough=0.05)
+    paving = grain_set('fpave', (((0.46, 0.44, 0.4), (0.68, 0.66, 0.6)), ((0.52, 0.5, 0.46), (0.74, 0.72, 0.66))), scale=8,
+                       bump=0.7)
+    earth_pad((0.0, -0.1, 0), 1.0, 1.05, seed=261)
+    lib.tag(0)
+    corner_stakes(-0.85, 0.85, -0.85, 0.85)
+    lib.tag(0, until=0)
+    for k in range(24):
+        a = k / 24 * math.tau
+        lib.box((math.cos(a) * 0.86, math.sin(a) * 0.86, 0.02), (0.26, 0.2, 0.03), paving[k % 2], rot=(0, 0, a + math.pi / 2),
+                bevel=0.01)
+    lib.tag(1)
+    R = 0.7
+    lib.cylinder((0, 0, 0.06), R, 0.08, old, verts=40)
+    for k in range(20):
+        a = k / 20 * math.tau
+        lib.box((math.cos(a) * R, math.sin(a) * R, 0.16), (R * math.tau / 20 * 0.96, 0.12, 0.24), [stone, old][k % 2],
+                rot=(0, 0, a + math.pi / 2), bevel=0.02)
+    lib.tag(2)
+    lib.cylinder((0, 0, 0.22), R - 0.06, 0.02, water, verts=40)
+    lib.cylinder((0, 0, 0.5), 0.09, 0.6, stone, radius2=0.075, verts=16)
+    lib.cylinder((0, 0, 0.82), 0.28, 0.08, stone, radius2=0.12, verts=24)
+    lib.cylinder((0, 0, 0.86), 0.25, 0.015, water, verts=24)
+    lib.tag(3)
+    lib.cylinder((0, 0, 0.96), 0.05, 0.2, bronze, radius2=0.02, verts=12)
+    lib.sphere((0, 0, 1.08), 0.04, bronze)
+    for k in range(3):  # thin spills from the small bowl's lip
+        a = k / 3 * math.tau + 0.4
+        rod((math.cos(a) * 0.27, math.sin(a) * 0.27, 0.84), (math.cos(a) * 0.33, math.sin(a) * 0.33, 0.24), 0.008, water,
+            verts=6)
+    mossy(rnd, moss, 6, R + 0.02, 0.28)
+    lib.tag(4)
+
+
+# ------------------------------------------------------------------------------------- fisher (2×2)
+
+def hull(cx, cy, L, B, D, planks, keel, rnd, strakes=6):
+    """An upturned clinker hull lying keel-up along X: overlapping strakes from the gunwale on the
+    ground up to the keel, narrowing to a point at each end."""
+    from mathutils import Vector
+
+    for side in (-1, 1):
+        for s in range(strakes):
+            t = (s + 0.5) / strakes  # 0 at the gunwale, 1 at the keel
+            a = t * math.pi / 2
+            for k in range(8):
+                u0, u1 = k / 8, (k + 1) / 8
+                um = (u0 + u1) / 2
+                taper = math.sin(um * math.pi) ** 0.6
+                x = cx - L / 2 + um * L
+                y = cy + side * B / 2 * math.cos(a) * taper
+                z = D * math.sin(a) * (0.75 + 0.25 * taper)
+                along = Vector((L / 8, side * B / 2 * math.cos(a) * (math.sin(u1 * math.pi) ** 0.6 - math.sin(u0 * math.pi) ** 0.6), 0))
+                down = Vector((0, side * B / 2 * math.sin(a) * taper, -D * math.cos(a)))
+                plank = lib.box((0, 0, 0), (along.length * 1.04, 0.075 * taper + 0.02, 0.022),
+                                planks[(s + k) % len(planks)], bevel=0.004)
+                place_on(plank, (x, y, z), along, -down if side > 0 else down)
+    rod((cx - L / 2 - 0.04, cy, D * 0.78), (cx + L / 2 + 0.04, cy, D * 0.78), 0.035, keel)
+    for end in (-1, 1):
+        rod((cx + end * L / 2, cy, 0.0), (cx + end * (L / 2 + 0.06), cy, D * 0.85), 0.03, keel)
+
+
+def build_fisher():
+    """Our fisherman's hut, after the old shore custom: a big clinker boat hull turned keel-up on low
+    stone footings as a shelter, a plank door in its end; beside it a frame of poles with nets drying,
+    a rack of fish, baskets and a short plank jetty towards the water."""
+    rnd = random.Random(271)
+    blocks = block_mats()
+    planks = grain_set('hull', (((0.3, 0.22, 0.14), (0.5, 0.38, 0.24)), ((0.36, 0.28, 0.18), (0.56, 0.44, 0.3)),
+                                ((0.26, 0.2, 0.14), (0.44, 0.34, 0.24))), scale=4, stretch=(1, 9, 1), bump=0.7)
+    keel = lib.mat_grain('keel', (0.2, 0.12, 0.06), (0.36, 0.24, 0.12), scale=5, stretch=(1, 1, 8), bump=0.6)
+    pole = lib.mat_grain('pole', (0.42, 0.3, 0.16), (0.62, 0.46, 0.26), scale=6, stretch=(1, 1, 8), bump=0.5)
+    net = lib.mat_flat('net', (0.62, 0.58, 0.46), rough=0.9)
+    fish = lib.mat_flat('fish', (0.66, 0.7, 0.74), rough=0.35)
+    wicker = lib.mat_grain('wicker', (0.5, 0.36, 0.16), (0.74, 0.58, 0.3), scale=24, stretch=(1, 1, 1), bump=0.8)
+    dark = lib.mat_flat('dark', (0.05, 0.04, 0.03))
+    door = door_mat()
+    earth_pad((0.1, -0.2, 0), 0.98, 1.08, seed=271)
+    lib.tag(0)
+    corner_stakes(-0.85, 0.85, -0.85, 0.85)
+    lib.tag(0, until=0)
+    cx, cy, L, B, D = -0.15, 0.2, 1.35, 0.9, 0.62
+    for x in (cx - L / 2 + 0.2, cx, cx + L / 2 - 0.2):
+        for y in (cy - B / 2 + 0.04, cy + B / 2 - 0.04):
+            lib.box((x, y, 0.06), (0.16, 0.14, 0.12), blocks[rnd.randrange(len(blocks))], bevel=0.02)
+    lib.tag(1)
+    hull(cx, cy, L, B, D, planks, keel, rnd)
+    lib.tag(None, split=lambda o: 2 if o.location.z < D * 0.5 else 3)
+    # The end towards the camera's right (+X) closed by an upright plank wall with a door.
+    ex = cx + L / 2 - 0.12
+    for k in range(5):
+        y = cy - 0.26 + k * 0.13
+        h = D * 0.85 * math.sin(math.acos(min(1.0, abs(y - cy) / (B / 2 * 0.62))))
+        lib.box((ex, y, h / 2), (0.03, 0.12, h), planks[k % len(planks)], bevel=0.004)
+    lib.box((ex + 0.02, cy - 0.02, 0.18), (0.03, 0.16, 0.34), dark)
+    lib.box((ex + 0.035, cy - 0.02, 0.17), (0.02, 0.14, 0.32), door)
+    lib.tag(4)
+    # Net frame: three poles and a cross pole, nets draped between.
+    nx, ny = 0.6, -0.35
+    for dy in (-0.32, 0.0, 0.32):
+        lib.cylinder((nx, ny + dy, 0.32), 0.022, 0.64, pole, verts=8)
+    rod((nx, ny - 0.34, 0.6), (nx, ny + 0.34, 0.6), 0.02, pole)
+    for k in range(2):
+        y0n = ny - 0.3 + k * 0.32
+        lib.box((nx - 0.02, y0n + 0.14, 0.4), (0.012, 0.26, 0.38), net)
+        lib.box((nx - 0.04, y0n + 0.14, 0.24), (0.01, 0.22, 0.06), net, rot=(0.2, 0, 0))
+    # Fish rack: a low frame with fish hung in a row.
+    fx, fy = -0.55, -0.62
+    for dx in (-0.25, 0.25):
+        lib.box((fx + dx, fy, 0.18), (0.03, 0.03, 0.36), pole)
+    rod((fx - 0.27, fy, 0.34), (fx + 0.27, fy, 0.34), 0.015, pole)
+    for k in range(5):
+        x = fx - 0.18 + k * 0.09
+        lib.sphere((x, fy, 0.26), 0.035, fish, scale=(0.5, 0.4, 1.8))
+    # Baskets and a jetty plank towards the shore.
+    for (x, y, r) in ((0.2, -0.75, 0.08), (0.35, -0.82, 0.07)):
+        lib.cylinder((x, y, 0.06), r, 0.12, wicker, radius2=r * 0.85, verts=14)
+    for k in range(4):
+        lib.box((0.75 + k * 0.08, -0.9 + k * 0.02, 0.03), (0.07, 0.36, 0.025), planks[k % len(planks)],
+                rot=(0, 0, 0.3), bevel=0.004)
     lib.tag(4)
