@@ -310,7 +310,7 @@ STAGES = 4
 
 def main():
     args = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
-    names = args or ['settlers', 'piles', 'wares', *SINGLE]
+    names = args or ['settlers', 'piles', 'wares', 'millsails', *SINGLE]
     os.makedirs(OUT, exist_ok=True)
     os.makedirs(TMP, exist_ok=True)
     for name in names:
@@ -326,6 +326,10 @@ def main():
             if n == 'piles' or n.startswith('piles:'):
                 # `piles` renders every resource's piles, `piles:fish,coal` only those.
                 goods.render_piles(OUT, TMP, n.split(':', 1)[1].split(',') if ':' in n else None)
+                continue
+            if n == 'millsails':
+                _, w, h, ax, ay = SINGLE['mill']
+                buildings.render_mill_sails(OUT, TMP, w, h, ax, ay, goods.save_strip)
                 continue
             if n == 'wares':
                 goods.render_wares(OUT, TMP)

@@ -35,6 +35,9 @@ export interface Art3d {
   wares: WaresMeta;
 }
 
+/** Frames of the 3D mill sails over a quarter turn (`SAIL_FRAMES` in buildings.py); same canvas as the mill. */
+export const MILL_SAIL_FRAMES = 12;
+
 /** Construction stages rendered per building (`STAGES` in build.py): 0 stakes … 3 roof half on. */
 export const ART3D_STAGES = 4;
 /**
@@ -116,7 +119,7 @@ export async function loadArt3d(): Promise<Art3d> {
   const ground = (await (await fetch(`${base}ground.json`)).json()) as GroundMeta;
   await Promise.all(ground.kinds.map(async (k) => images.set(`ground-${k}`, await loadImage(`${base}ground-${k}.png`))));
   const wares = (await (await fetch(`${base}wares.json`)).json()) as WaresMeta;
-  const strips = [...ART3D_PILES.map((r) => `piles-${r}`), 'wares'];
+  const strips = [...ART3D_PILES.map((r) => `piles-${r}`), 'wares', 'millsails'];
   await Promise.all(strips.map(async (n) => images.set(n, await loadImage(`${base}${n}.png`))));
   // Animal sheets are optional: a kind without one falls back to the procedural painter.
   await Promise.all(

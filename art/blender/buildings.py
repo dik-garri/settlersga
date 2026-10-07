@@ -13,6 +13,7 @@ script Blender runs; they are reached through `__main__` at call time.
 """
 
 import math
+import os
 import random
 
 import bpy
@@ -960,6 +961,86 @@ def build_mill():
                  rot=(math.pi / 2, 0, a + math.pi / 2), verts=12)
     note_fx('mill', 'hub', (hx + math.cos(a) * 0.12, hy + math.sin(a) * 0.12, hz))
     lib.tag(4)
+
+
+#: Where the mill's sails turn: the hub `build_mill` places (same constants), and the axis direction.
+MILL_HUB_AXIS = -math.pi / 4
+#: Sail frames over a quarter turn (four arms repeat every 90°).
+SAIL_FRAMES = 12
+
+
+def mill_hub():
+    cx, cy, r1, gz, TH = 0.0, 0.05, 0.33, 0.12 + 0.5, 1.35
+    top = gz + 0.04 + TH
+    a = MILL_HUB_AXIS
+    return (cx + math.cos(a) * (r1 + 0.22), cy + math.sin(a) * (r1 + 0.22), top - 0.1)
+
+
+def build_mill_sails():
+    """Four sail arms on the mill's hub: a timber stock with a lattice of laths and a cloth sail on one
+    side of each arm, as on old post and tower mills. Built around an empty whose local X is the
+    shaft, so a frame is just the empty turned about X (see `render_mill_sails`)."""
+    beam = beam_mat()
+    laths = lib.mat_grain('laths', (0.5, 0.36, 0.2), (0.7, 0.54, 0.32), scale=5, stretch=(1, 1, 8), bump=0.4)
+    cloth = lib.mat_grain('cloth', (0.86, 0.78, 0.6), (0.97, 0.92, 0.78), scale=14, stretch=(1, 1, 3), bump=0.3)
+    hub = bpy.data.objects.new('sails', None)
+    bpy.context.scene.collection.objects.link(hub)
+    hub.location = mill_hub()
+    hub.rotation_mode = 'XYZ'
+    hub.rotation_euler = (0, 0, MILL_HUB_AXIS)
+    bpy.context.view_layer.update()
+    parts = []
+    parts.append(lib.cylinder((0.05, 0, 0), 0.055, 0.1, beam, rot=(0, math.pi / 2, 0), verts=12))
+    length, w0, w1 = 0.95, 0.24, 0.24
+    for k in range(4):
+        t = k * math.pi / 2
+        c, s_ = math.cos(t), math.sin(t)
+
+        def P(along, side):
+            # Local YZ plane: radial direction (c, s) in (Y, Z), the side across it; X towards the camera.
+            return (0.09, c * along - s_ * side, s_ * along + c * side)
+
+        def rot_for():
+            return (t, 0, 0)
+
+        parts.append(lib.box(P(length / 2, 0), (0.035, length, 0.04), beam, rot=rot_for(), bevel=0.006))
+        # Lattice: two side rails and cross laths, on one side of the stock.
+        for side in (0.03, w0):
+            parts.append(lib.box(P(0.2 + (length - 0.2) / 2, side), (0.02, length - 0.2, 0.015), laths, rot=rot_for()))
+        for j in range(8):
+            along = 0.24 + j * (length - 0.28) / 7
+            parts.append(lib.box(P(along, (0.03 + w1) / 2), (0.02, 0.012, w1), laths, rot=rot_for()))
+        # The cloth, slightly behind the lattice, a little billowed.
+        parts.append(lib.box((0.062, *P(0.2 + (length - 0.24) / 2, (0.03 + w1) / 2)[1:]),
+                             (0.008, length - 0.26, w1 - 0.03), cloth, rot=rot_for()))
+    for o in parts:
+        world = o.matrix_world.copy()
+        o.parent = hub
+        o.matrix_world = hub.matrix_world @ world
+    return hub
+
+
+def render_mill_sails(out_dir, tmp_dir, w, h, ax, ay, save_strip):
+    """Renders `SAIL_FRAMES` frames of the sails turning through 90° on the mill's canvas (so a frame
+    lines up with the mill sprite) and saves them as one strip `millsails.png`."""
+    import numpy as np
+
+    scene = lib.reset_scene()
+    bpy.data.objects['ShadowCatcher'].hide_render = True
+    lib.setup_camera(scene, w, h, ax, ay)
+    hub = build_mill_sails()
+    frames = []
+    for k in range(SAIL_FRAMES):
+        hub.rotation_euler = (k / SAIL_FRAMES * math.pi / 2, 0, MILL_HUB_AXIS)
+        bpy.context.view_layer.update()
+        path = os.path.join(tmp_dir, f'sails_{k}.png')
+        lib.render_to(scene, path)
+        img = bpy.data.images.load(path)
+        px = np.empty(len(img.pixels), dtype=np.float32)
+        img.pixels.foreach_get(px)
+        frames.append(px.reshape(img.size[1], img.size[0], 4))
+        bpy.data.images.remove(img)
+    save_strip(frames, os.path.join(out_dir, 'millsails.png'))  # rows stay in Blender's bottom-up order
 
 
 # ------------------------------------------------------------------------------------- bakery (2×2)

@@ -1,3 +1,4 @@
+import { MILL_SAIL_FRAMES } from './art3d';
 import { Container, Sprite, type Texture } from 'pixi.js';
 import { TERRAIN } from '../sim/config';
 import type { Building } from '../sim/types';
@@ -27,6 +28,8 @@ interface BuildingFxView {
   smokeMode: 'always' | 'working' | null;
   glows: Sprite[];
   sails: Sprite | null;
+  /** How far the sails have turned (radians). */
+  sailAngle: number;
   lastTimer: number;
   lastProgress: number;
   activeUntil: number;
@@ -77,6 +80,8 @@ export class Effects {
   private readonly tex: Record<'puff' | 'spark' | 'glow' | 'glint' | 'flash' | 'sails', Texture>;
   /** 3D buildings are drawn (`?art=3d`): their effects sit at the anchors their renders recorded. */
   private readonly art3d: boolean;
+  /** Pre-rendered 3D sail frames over a quarter turn (`?art=3d`), or null for the flat rotating sprite. */
+  private readonly sailFrames: Texture[] | null;
 
   constructor(
     atlas: SpriteAtlas,
@@ -86,6 +91,9 @@ export class Effects {
     private readonly sound: (id: SoundId, x: number, y: number) => void,
   ) {
     this.art3d = atlas.art3d !== null;
+    this.sailFrames = atlas.has('sails3d:0')
+      ? Array.from({ length: MILL_SAIL_FRAMES }, (_, k) => atlas.get(`sails3d:${k}`))
+      : null;
     this.tex = {
       puff: atlas.get('fx:puff'),
       spark: atlas.get('fx:spark'),
@@ -210,6 +218,7 @@ export class Effects {
       smokeMode: fx?.smoke ?? null,
       glows: [],
       sails: null,
+      sailAngle: 0,
       lastTimer: b.timer,
       lastProgress: b.progress,
       activeUntil: 0,
@@ -229,7 +238,14 @@ export class Effects {
         v.glows.push(g);
       }
     }
-    if (fx?.sails && anchors.hub) {
+    if (fx?.sails && this.sailFrames) {
+      // 3D sails: a frame on the building's own canvas, flipped through as they turn.
+      const s = new Sprite(this.sailFrames[0]);
+      s.anchor.copyFrom(this.sailFrames[0].defaultAnchor!);
+      s.visible = false;
+      body.addChild(s);
+      v.sails = s;
+    } else if (fx?.sails && anchors.hub) {
       const s = new Sprite(this.tex.sails);
       s.anchor.set(0.5);
       s.position.set(anchors.hub[0], anchors.hub[1]);
@@ -258,7 +274,16 @@ export class Effects {
       const onScreen = body.parent !== null && body.visible;
       if (v.sails) {
         v.sails.visible = b.done;
-        if (onScreen && b.done) v.sails.rotation = (v.sails.rotation + (dtMs / 1000) * (working ? 2.2 : 0.12)) % (Math.PI * 2);
+        if (onScreen && b.done) {
+          v.sailAngle = (v.sailAngle + (dtMs / 1000) * (working ? 2.2 : 0.12)) % (Math.PI * 2);
+          if (this.sailFrames) {
+            // Four arms repeat every quarter turn.
+            const q = (v.sailAngle % (Math.PI / 2)) / (Math.PI / 2);
+            v.sails.texture = this.sailFrames[Math.floor(q * MILL_SAIL_FRAMES) % MILL_SAIL_FRAMES];
+          } else {
+            v.sails.rotation = v.sailAngle;
+          }
+        }
       }
       for (const g of v.glows) {
         g.visible = working && onScreen;

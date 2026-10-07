@@ -25,7 +25,7 @@ import {
   type GroundKind,
 } from './sprites';
 import { WALK_FRAMES, WORK_FRAMES } from './anim';
-import { ART3D_BUILDINGS, ART3D_PILES, ART3D_STAGED, ART3D_STAGES, ART3D_SPRITES, PILE, PILE_MAX, type Art3d } from './art3d';
+import { MILL_SAIL_FRAMES, ART3D_BUILDINGS, ART3D_PILES, ART3D_STAGED, ART3D_STAGES, ART3D_SPRITES, PILE, PILE_MAX, type Art3d } from './art3d';
 import { addAnimalSprites } from './animals';
 import { ACTION_IDS, ACTIONS, HAT_STYLES, styleOf, TOOLS, type ActionId, type HatStyle, type ToolShape } from './animConfig';
 import { paintFlash, paintGlint, paintGlow, paintPuff, paintSpark } from './fxArt';
@@ -485,6 +485,17 @@ function addArt3d(a: AtlasBuilder, art: Art3d): void {
     a.add(key, s.w, s.h, s.ax, s.ay, (ctx) => ctx.drawImage(img, 0, 0, s.w, s.h));
   };
   for (const type of Object.keys(ART3D_BUILDINGS)) one(`building:${type}`, type);
+  // The mill's sails, turning: frames on the mill's own canvas, so they line up with the building.
+  const sails = art.images.get('millsails');
+  if (sails) {
+    const c = ART3D_BUILDINGS.mill;
+    const r = sails.height / c.h;
+    for (let k = 0; k < MILL_SAIL_FRAMES; k++) {
+      a.add(`sails3d:${k}`, c.w, c.h, c.ax, c.ay, (ctx) =>
+        ctx.drawImage(sails, k * c.w * r, 0, c.w * r, c.h * r, 0, 0, c.w, c.h),
+      );
+    }
+  }
   for (const type of ART3D_STAGED) {
     for (let k = 0; k < ART3D_STAGES; k++) one(`stage:${type}:${k}`, `${type}-s${k}`);
   }
