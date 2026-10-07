@@ -113,6 +113,16 @@ export function buildShowcase(): World {
     if (row >= 3) break;
   }
 
+  // A storage yard with stock on it (the 3D yard shows its goods on the platform); frozen so the
+  // stock is not hauled away.
+  const yard = [...w.buildings.values()].find((b) => b.type === 'warehouse' && b.done);
+  if (yard) {
+    yard.unreachableUntil = FROZEN;
+    (['log', 'plank', 'stone', 'grain', 'flour', 'bread', 'coal', 'iron'] as Resource[]).forEach((r, k) => {
+      yard.output[r] += 3 + k;
+    });
+  }
+
   // Goods piles of every resource: frozen finished huts with four kinds each at their doors,
   // counts from 1 to 12 so piles split past eight.
   const kinds = [...RESOURCES];
