@@ -1015,7 +1015,7 @@ export const AI = {
   /** No attacks before this tick (25 game minutes): the opening is for building up. */
   peaceTicks: 25 * 60 * TICKS_PER_SECOND,
   /** Ticks between attacks. */
-  attackCooldown: 600,
+  attackCooldown: 1200,
   /** With at least this many soldiers and no enemy in reach, build military buildings towards the enemy… */
   frontierSoldiers: 8,
   /**
@@ -1054,6 +1054,34 @@ export const AI = {
   /** At most one eyecatcher per this many own buildings, built only while it holds `decorSpare`. */
   decorEvery: 8,
   decorSpare: { stone: 12, plank: 10 } as Partial<Record<Resource, number>>,
+  /**
+   * While it knows no enemy, at most this many military buildings: scouting goes towards the other
+   * start positions (public, like the map size) instead of spreading outposts everywhere.
+   */
+  maxScoutOutposts: 8,
+  /**
+   * Own tiles this close (steps) to the border are kept for military buildings, mines and gatherers:
+   * workshops and houses stay in the core, so there is always room to push the border.
+   */
+  borderReserve: 2,
+  /**
+   * A building it wanted found no room: for this many ticks it is «cramped» and pushes its border with
+   * whatever fighter it can spare, without waiting for `frontierSoldiers`.
+   */
+  crampedTicks: 1200,
+  /**
+   * Buildings it cannot do without: with no room anywhere for one, it demolishes a less valuable
+   * building to make room (an eyecatcher, a second workshop of a type). The barracks: without it no
+   * new fighters, so no growth — the trap a full small territory otherwise locks it in.
+   */
+  makeRoomFor: ['barracks', 'ironsmelter', 'goldsmelter', 'weaponsmith', 'toolsmith'] as readonly BuildingType[],
+  /** Think ticks between specialist decisions (pioneers, thieves). */
+  specialistEvery: 600,
+  /** Sends a pioneer only while it holds this many shovels (diggers and foresters need them too). */
+  pioneerShovels: 2,
+  /** Sends a thief only with at least this many idle carriers and a known enemy store this close (tiles). */
+  thiefIdle: 8,
+  thiefRange: 40,
 };
 
 // ---------------------------------------------------------------- wild animals

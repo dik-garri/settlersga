@@ -37,10 +37,11 @@ import {
   type BuildingDef,
 } from './config';
 import { inBuildingSight, visionRadius } from './fog';
+import { claimable, robbable } from './specialists';
 import { FIGHTERS, isFighter, isMilitary, keepOf } from './military';
 import { hasGatherTargetNear, isGatherTarget } from './nature';
 import { RESOURCES, Terrain, type Building, type BuildingType, type PlayerId, type Point, type Resource } from './types';
-import type { World } from './world';
+import { startPositions, type World } from './world';
 
 /** Per computer player; saved with the world. */
 export interface AiState {
@@ -48,12 +49,24 @@ export interface AiState {
   nextThink: number;
   lastAttack: number;
   /** Building type (or 'frontier') → tick before which the AI does not look for a spot again. */
-  blockedUntil: Partial<Record<BuildingType | 'frontier' | 'decor', number>>;
+  blockedUntil: Partial<Record<BuildingType | 'frontier' | 'decor' | 'room', number>>;
   /** Ore it wants a mine for but knows no deposit of: towers then favour mountains, geologists go out. */
   wantOre: Resource | null;
   /** Its weapon shares have been set (once, through `setShare`). */
   sharesSet: boolean;
-  stats: { placed: number; attacks: number; soldiersSent: number; geologists: number; demolished: number };
+  /** Tick until which it is short of room (a wanted building found no spot): it pushes its border harder. */
+  crampedUntil: number;
+  /** Tick of its next pioneer/thief decision. */
+  nextSpecialists: number;
+  stats: {
+    placed: number;
+    attacks: number;
+    soldiersSent: number;
+    geologists: number;
+    demolished: number;
+    pioneers: number;
+    thieves: number;
+  };
 }
 
 export function createAi(player: PlayerId): AiState {
@@ -66,7 +79,9 @@ export function createAi(player: PlayerId): AiState {
     blockedUntil: {},
     wantOre: null,
     sharesSet: false,
-    stats: { placed: 0, attacks: 0, soldiersSent: 0, geologists: 0, demolished: 0 },
+    crampedUntil: 0,
+    nextSpecialists: AI.specialistEvery + player * 13,
+    stats: { placed: 0, attacks: 0, soldiersSent: 0, geologists: 0, demolished: 0, pioneers: 0, thieves: 0 },
   };
 }
 
@@ -103,6 +118,10 @@ function think(w: World, ai: AiState): void {
     }
   }
   const attacked = attackIfStrong(w, ai);
+  if (w.tick >= (ai.nextSpecialists ?? 0)) {
+    ai.nextSpecialists = w.tick + AI.specialistEvery;
+    useSpecialists(w, ai, own);
+  }
 
   const sites = own.filter((b) => !b.done);
   if (sites.length >= AI.maxOpenSites) return;
@@ -110,8 +129,14 @@ function think(w: World, ai: AiState): void {
 
   // Scouting: foreign land in sight but no enemy building known — a lookout tower at that border
   // sees much further than a tower (whose land stops at the other's border).
+  // Only lookouts near that land count against the limit: one put up earlier, further back, must not
+  // keep it from building one where it matters (at most twice the limit in all).
   if (ctx.scoutingBorder) {
-    const lookout = LOOKOUTS.find((t) => own.filter((b) => b.type === t).length < AI.maxLookouts && ctx.affordable(t));
+    const lookout = LOOKOUTS.find((t) => {
+      const mine = own.filter((b) => b.type === t);
+      const useful = mine.filter((b) => ctx.nearEnemies(centerOf(b), visionRadius(t))).length;
+      return useful < AI.maxLookouts && mine.length < AI.maxLookouts * 2 && ctx.affordable(t);
+    });
     if (lookout && (ai.blockedUntil[lookout] ?? -Infinity) <= w.tick) {
       if (tryPlace(ctx, ai, lookout)) return;
       ai.blockedUntil[lookout] = w.tick + RETRY_TICKS;
@@ -165,13 +190,21 @@ function think(w: World, ai: AiState): void {
       ai.wantOre = mine.res;
       prospect(ctx, ai);
     }
+    // A workshop, house or barracks with nowhere to go: its land is full, so it must grow — and a
+    // building it cannot do without (the barracks: no new fighters, so no growth) gets room made.
+    if (!mine && !gatheredBy(step.type) && !BUILDINGS[step.type].garrison) {
+      ai.crampedUntil = w.tick + AI.crampedTicks;
+      if (AI.makeRoomFor.includes(step.type) && makeRoom(w, ai, own, step.type)) return;
+    }
     ai.blockedUntil[step.type] = w.tick + RETRY_TICKS;
   }
 
   // Spare materials go into eyecatchers: they raise its settlement value and so its army's strength
   // on foreign land (`strength.ts`), one per `AI.decorEvery` buildings.
   const decor = own.filter((b) => BUILDINGS[b.type].eyecatcher).length;
-  if (decor * AI.decorEvery < own.length && (ai.blockedUntil.decor ?? -Infinity) <= w.tick) {
+  // Not while cramped: an eyecatcher takes the room a workshop or tower needs.
+  const roomy = w.tick >= (ai.crampedUntil ?? 0);
+  if (roomy && decor * AI.decorEvery < own.length && (ai.blockedUntil.decor ?? -Infinity) <= w.tick) {
     const spare = (Object.entries(AI.decorSpare) as [Resource, number][]).every(([r, n]) => available(w, me, r) >= n);
     const type = spare ? EYECATCHERS.find((t) => ctx.affordable(t)) : undefined;
     if (type) {
@@ -186,13 +219,18 @@ function think(w: World, ai: AiState): void {
   // soldiers for an attack is pointless when no new ones can be made (e.g. coal worked out).
   const soldiers = w.settlers.filter((s) => s.owner === me && isFighter(s)).length;
   const military = own.filter((b) => isMilitary(b));
+  // Cramped (no room for a wanted building) it grows with any fighter it can spare; without a known
+  // enemy it keeps the number of outposts down — they go towards the other starts, not everywhere.
+  const cramped = w.tick < (ai.crampedUntil ?? 0);
+  const garrisoned = military.filter((b) => BUILDINGS[b.type].garrison).length;
   if (
     !attacked &&
-    (ai.wantOre !== null || !enemyInReach(w, me, military)) &&
+    (ai.wantOre !== null || cramped || !enemyInReach(w, me, military)) &&
     (ai.blockedUntil.frontier ?? -Infinity) <= w.tick &&
-    soldiers >= AI.frontierSoldiers &&
+    (soldiers >= AI.frontierSoldiers || cramped) &&
     military.length < AI.maxMilitary &&
-    military.every((b) => b.done && b.garrison.length > 0)
+    (ctx.knowsEnemy || cramped || garrisoned < AI.maxScoutOutposts) &&
+    military.every((b) => b.done && (b.garrison.length > 0 || !BUILDINGS[b.type].garrison))
   ) {
     // The largest military building it can pay for and man: more spare fighters at the front. Short
     // of a material (stone), the cheapest in it: every unit goes into reaching new deposits.
@@ -233,13 +271,54 @@ const FRONTIER = (Object.keys(BUILDINGS) as BuildingType[])
   .sort((a, b) => BUILDINGS[b].garrison!.capacity - BUILDINGS[a].garrison!.capacity);
 
 function tryPlace(ctx: Context, ai: AiState, type: BuildingType): boolean {
-  const spot = ctx.bestSpot(type);
+  // The border band is a preference: with no room in the core, a workshop may still go there —
+  // houses and eyecatchers may not (more of them can wait until the border has moved out).
+  let spot = ctx.bestSpot(type);
+  const yields = !BUILDINGS[type].residence && !BUILDINGS[type].eyecatcher;
+  if (!spot && ctx.reserveBand && yields) {
+    ctx.reserveBand = false;
+    spot = ctx.bestSpot(type);
+    ctx.reserveBand = true;
+  }
   if (!spot) return false;
   ai.stats.placed++;
   return true;
 }
 
 /** No known ore for a wanted mine: send a geologist to the nearest unexplored mountain we own. */
+/**
+ * No room anywhere for a building it cannot do without (`AI.makeRoomFor`): demolishes the least
+ * valuable building at least as large — an eyecatcher, else a second (or later) workshop of a type
+ * it has several of — so the next think can place it there. One demolition per `RETRY_TICKS`.
+ */
+function makeRoom(w: World, ai: AiState, own: Building[], type: BuildingType): boolean {
+  if ((ai.blockedUntil.room ?? -Infinity) > w.tick) return false;
+  ai.blockedUntil.room = w.tick + RETRY_TICKS;
+  const need = BUILDINGS[type];
+  const count = (t: BuildingType) => own.filter((b) => b.type === t).length;
+  let victim: Building | null = null;
+  let worst = Infinity;
+  for (const b of own) {
+    const def = BUILDINGS[b.type];
+    if (!b.done || def.w < need.w || def.h < need.h || def.garrison || def.storage || def.mine || def.residence) continue;
+    const value = def.eyecatcher ? 0 : count(b.type) > 1 && def.recipe ? 1 : Infinity;
+    // Ties: the newest (highest id) first.
+    if (value < worst || (value === worst && victim && b.id > victim.id)) {
+      worst = value;
+      victim = b;
+    }
+  }
+  if (!victim || worst === Infinity) return false;
+  const victimType = victim.type;
+  if (!w.demolish(victim.id, ai.player)) return false;
+  ai.stats.demolished++;
+  // The plan would rebuild the demolished type on the freed spot first: hold it back for a while.
+  ai.blockedUntil[victimType] = w.tick + RETRY_TICKS * 4;
+  // Retry the wanted building right away on the next think.
+  delete ai.blockedUntil[type];
+  return true;
+}
+
 function prospect(ctx: Context, ai: AiState): void {
   const { w, me } = ctx;
   if (w.settlers.some((s) => s.owner === me && s.kind === 'geologist')) return;
@@ -297,10 +376,12 @@ function attackIfStrong(w: World, ai: AiState): boolean {
     if (!ready.some((s) => PROFESSIONS[s.kind].combat?.captures)) continue;
     // Its fighters fight there at its attack strength (its own settlement value, which it knows);
     // the defenders' strength it cannot know, so it assumes the base 100 %.
+    // Strength scales both the chance to land a blow and its damage (`blow`), so it counts squared.
+    const field = attackStrength(w, me) / 100;
     const power =
-      (ready.reduce((n, s) => n + SOLDIER_LEVELS[s.level].damage * (PROFESSIONS[s.kind].combat?.melee ?? 1), 0) *
-        attackStrength(w, me)) /
-      100;
+      ready.reduce((n, s) => n + SOLDIER_LEVELS[s.level].damage * (PROFESSIONS[s.kind].combat?.melee ?? 1), 0) *
+      field *
+      field;
     const defense = defenders * (BUILDINGS[b.type].garrison!.defense ?? 1);
     if (ready.length < AI.minAttackers || power < AI.attackRatio * defense + 1) continue;
     // Prefer the castle (it ends the game), then the largest margin.
@@ -336,6 +417,17 @@ class Context {
   private readonly enemies: Point[];
   /** It knows no enemy building but sees foreign land (`enemies` are then points of that land). */
   readonly scoutingBorder: boolean;
+  /**
+   * It knows no enemy and sees no foreign land: `enemies` are then the other start positions it has
+   * not explored (where the others began — public, like the map size), so scouting has a direction.
+   */
+  readonly scoutingStarts: boolean;
+  /** It knows an enemy building. */
+  readonly knowsEnemy: boolean;
+  /** Own tiles within `AI.borderReserve` steps of the border: kept for military buildings. */
+  private readonly band: Set<number>;
+  /** Whether workshops and houses keep off the band (cleared for a retry when nothing else fits). */
+  reserveBand = true;
 
   constructor(
     readonly w: World,
@@ -345,10 +437,44 @@ class Context {
   ) {
     this.castle = centerOf(w.castleOf(me));
     const known = knownEnemies(w, me);
+    this.knowsEnemy = known.length > 0;
     this.enemies = known.length > 0 ? known.map((e) => centerOf(e.b)) : this.foreignLandInSight();
     this.scoutingBorder = known.length === 0 && this.enemies.length > 0;
+    this.scoutingStarts = false;
+    if (this.enemies.length === 0) {
+      this.enemies = unexploredStarts(w, me);
+      this.scoutingStarts = this.enemies.length > 0;
+    }
     this.tiles = this.territory();
+    this.band = this.borderBand();
     this.short = (Object.keys(AI.reserve) as Resource[]).filter((r) => !this.producing(r));
+  }
+
+  /** Some enemy point (known building, foreign land in sight, or a start it scouts for) within `r` of `p`. */
+  nearEnemies(p: Point, r: number): boolean {
+    return this.enemies.some((e) => Math.hypot(e.x - p.x, e.y - p.y) <= r);
+  }
+
+  /** Own tiles within `AI.borderReserve` 4-steps of a tile that is not its own. */
+  private borderBand(): Set<number> {
+    const m = this.w.map;
+    const band = new Set<number>();
+    const r = AI.borderReserve;
+    if (r <= 0) return band;
+    for (const i of this.tiles) {
+      const x = i % m.w;
+      const y = Math.floor(i / m.w);
+      search: for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.abs(dx) + Math.abs(dy) > r) continue;
+          if (!m.inBounds(x + dx, y + dy) || m.owner[m.idx(x + dx, y + dy)] !== this.me) {
+            band.add(i);
+            break search;
+          }
+        }
+      }
+    }
+    return band;
   }
 
   /** Some own staffed building still produces `res` (a gatherer with targets, a mine with ore, a workshop). */
@@ -547,6 +673,8 @@ class Context {
       }
       const enemy = Math.min(...this.enemies.map((e) => Math.hypot(e.x - cx, e.y - cy)));
       if (this.frontier) return -enemy;
+      // Scouting for the other starts: a line of towers towards them, not a ring around the castle.
+      if (this.scoutingStarts) return fromCastle * 0.3 - enemy + this.unclaimedResources(cx, cy, reach) * 0.1;
       return fromCastle - enemy * 0.4 + this.unclaimedResources(cx, cy, reach) * 0.15;
     }
 
@@ -567,7 +695,12 @@ class Context {
       const d = Math.min(...cutters.map((b) => Math.hypot(centerOf(b).x - cx, centerOf(b).y - cy)));
       return d <= worker.plant!.radius ? this.freeGrass(cx, cy, worker.plant!.radius) - d * 2 : null;
     }
-    // Workshops, houses, storage: keep the base compact.
+    // Workshops, houses, storage: keep the base compact, and off the border band (room for towers).
+    if (this.reserveBand) {
+      for (let dy = 0; dy <= def.h; dy++) {
+        for (let dx = 0; dx < def.w; dx++) if (this.band.has(m.idx(x + dx, y + dy))) return null;
+      }
+    }
     return -fromCastle;
   }
 
@@ -645,4 +778,96 @@ function prerequisiteMet(w: World, me: PlayerId, own: Building[], after: Buildin
   if (own.some((b) => b.type === after && b.done)) return true;
   const mine = BUILDINGS[after].mine;
   return !!mine && available(w, me, mine.res) > 0;
+}
+
+/**
+ * Start positions (public: they follow from the map size and the number of players) it has not
+ * explored and that are not its own or an ally's: where the others most likely are.
+ */
+function unexploredStarts(w: World, me: PlayerId): Point[] {
+  const friendly = [...w.buildings.values()].filter((b) => w.allied(b.owner, me)).map((b) => centerOf(b));
+  return startPositions(w.map.w, w.players.length).filter((st) => {
+    if (friendly.some((f) => Math.hypot(f.x - st.x, f.y - st.y) < 8)) return false;
+    return !w.isExplored(st.x, st.y, me);
+  });
+}
+
+/**
+ * Pioneers and thieves, through the public orders and errands only: a pioneer pushes its border into
+ * neutral land rich in resources (or towards the starts it scouts for); a thief robs a known enemy
+ * store within reach while it has carriers to spare.
+ */
+function useSpecialists(w: World, ai: AiState, own: Building[]): void {
+  const me = ai.player;
+  const idle = w.settlers.filter((s) => s.owner === me && s.kind === 'carrier' && s.tasks.length === 0).length;
+  const has = (kind: 'pioneer' | 'thief') => w.settlers.some((s) => s.owner === me && s.kind === kind);
+
+  // Pioneer: only with shovels to spare (diggers and foresters need them).
+  if (available(w, me, 'shovel') >= AI.pioneerShovels || has('pioneer')) {
+    if (!has('pioneer')) w.orderSpecialist('pioneer', 1, me);
+    const free = w.settlers.some((s) => s.owner === me && s.kind === 'pioneer' && s.tasks.length === 0 && !s.errand);
+    if (free) {
+      const spot = pioneerSpot(w, me, own);
+      if (spot && w.sendPioneer(spot.x, spot.y, me)) ai.stats.pioneers++;
+    }
+  }
+
+  // Thief: a known enemy store with goods, close to its land.
+  if (idle >= AI.thiefIdle) {
+    const castle = centerOf(w.castleOf(me));
+    let target: Building | null = null;
+    let best = Infinity;
+    for (const { b } of knownEnemies(w, me)) {
+      if (!BUILDINGS[b.type].storage || !robbable(w, b, me)) continue;
+      const d = Math.hypot(b.door.x - castle.x, b.door.y - castle.y);
+      if (d <= AI.thiefRange && d < best) {
+        best = d;
+        target = b;
+      }
+    }
+    if (target) {
+      if (!has('thief')) w.orderSpecialist('thief', 1, me);
+      if (w.sendThief(target.id, me)) ai.stats.thieves++;
+    }
+  }
+}
+
+/**
+ * A neutral spot next to its land worth a pioneer: around its military buildings' edges, the most
+ * explored unclaimed resources nearby, leaning towards the starts it still scouts for (bounded sample).
+ */
+function pioneerSpot(w: World, me: PlayerId, own: Building[]): Point | null {
+  const m = w.map;
+  const castle = centerOf(w.castleOf(me));
+  const targets = knownEnemies(w, me).length === 0 ? unexploredStarts(w, me) : [];
+  let best: Point | null = null;
+  let bestScore = -Infinity;
+  for (const b of own) {
+    if (!isMilitary(b) || !b.done) continue;
+    const c = centerOf(b);
+    const r = (BUILDINGS[b.type].territory ?? 0) + 1;
+    for (let a = 0; a < 16; a++) {
+      const x = Math.round(c.x + Math.cos((a / 16) * Math.PI * 2) * r);
+      const y = Math.round(c.y + Math.sin((a / 16) * Math.PI * 2) * r);
+      if (!claimable(w, x, y, me)) continue;
+      let value = 0;
+      for (let dy = -3; dy <= 3; dy++) {
+        for (let dx = -3; dx <= 3; dx++) {
+          if (!m.inBounds(x + dx, y + dy)) continue;
+          const i = m.idx(x + dx, y + dy);
+          if (m.owner[i] !== 0 || !w.isExplored(x + dx, y + dy, me)) continue;
+          if (m.stone[i]) value += 3;
+          else if (m.terrain[i] === Terrain.Mountain) value += 2;
+          else if (m.tree[i] || m.isBuildable(x + dx, y + dy)) value += 1;
+        }
+      }
+      const toward = targets.length ? -Math.min(...targets.map((t) => Math.hypot(t.x - x, t.y - y))) * 0.5 : 0;
+      const score = value + toward - Math.hypot(x - castle.x, y - castle.y) * 0.1;
+      if (score > bestScore || (score === bestScore && best && m.idx(x, y) < m.idx(best.x, best.y))) {
+        bestScore = score;
+        best = { x, y };
+      }
+    }
+  }
+  return best;
 }
