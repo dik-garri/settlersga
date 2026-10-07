@@ -23,132 +23,162 @@ OUT = os.path.join(ROOT, 'public', 'art', '3d')
 TMP = os.path.join(ROOT, 'art', '.tmp')
 
 # ------------------------------------------------------------------------------------------ palette
+# Colours as on screen (sRGB), after Settlers 4: saturated, warm earth, blue-grey Roman stone.
 
-SKIN = (0.96, 0.78, 0.64)
-HAIR = (0.52, 0.36, 0.2)
-SHIRT = (0.93, 0.89, 0.8)
-VEST = (0.7, 0.5, 0.32)
-TROUSERS = (0.5, 0.4, 0.3)
-SHOES = (0.36, 0.25, 0.16)
+SKIN = (0.93, 0.66, 0.48)
+HAIR = (0.17, 0.11, 0.07)
+TUNIC = (0.95, 0.93, 0.88)
+TEAM = (0.16, 0.32, 0.86)  # player colour trim (blue, like the local player)
+SANDALS = (0.45, 0.27, 0.13)
+
+EARTH = ((0.42, 0.28, 0.17), (0.6, 0.42, 0.26))
+WOOD_DARK = ((0.28, 0.17, 0.09), (0.46, 0.3, 0.16))
+WOOD_LIGHT = ((0.66, 0.46, 0.26), (0.8, 0.6, 0.36))
+CUT = ((0.86, 0.68, 0.42), (0.94, 0.8, 0.56))
 
 
-def wood_mat(name='wood', light=False):
-    if light:
-        return lib.mat_noisy(name, (0.74, 0.58, 0.4), (0.82, 0.66, 0.46), scale=4, stretch=(1, 1, 8))
-    return lib.mat_noisy(name, (0.48, 0.34, 0.2), (0.58, 0.42, 0.26), scale=4, stretch=(1, 1, 8))
+def earth():
+    return lib.mat_grain('earth', *EARTH, scale=9, stretch=(1, 1, 1), bump=0.6)
+
+
+def wood(name='wood', light=False):
+    a, b = WOOD_LIGHT if light else WOOD_DARK
+    return lib.mat_grain(name, a, b, scale=4, stretch=(1, 1, 9), bump=0.5)
+
+
+def cut_ends():
+    return lib.mat_grain('cut', *CUT, scale=18, stretch=(1, 1, 1), bump=0.3)
+
+
+def leaves(name='leaves'):
+    return lib.mat_leaves(name, (0.04, 0.16, 0.03), (0.13, 0.4, 0.07), (0.4, 0.66, 0.16))
 
 
 # ------------------------------------------------------------------------------------------ models
 
-def build_woodcutter():
-    stone = lib.mat_brick('stone', (0.66, 0.62, 0.55), (0.74, 0.7, 0.62), (0.5, 0.46, 0.4), scale=7, row=0.3, width=0.55)
-    plaster = lib.mat_noisy('plaster', (0.86, 0.8, 0.66), (0.92, 0.86, 0.72), scale=12)
-    beam = wood_mat('beam')
-    roof = lib.mat_brick('roof', (0.76, 0.33, 0.2), (0.84, 0.42, 0.26), (0.5, 0.2, 0.12), scale=6, row=0.22, width=0.4, mortar_size=0.035, roof='y')
-    dark = lib.mat_flat('dark', (0.2, 0.16, 0.12))
-    door_mat = wood_mat('door')
-    shutter = lib.mat_flat('shutter', (0.36, 0.5, 0.3))
-    log_mat = wood_mat('log', light=True)
-    cut = lib.mat_noisy('cut', (0.86, 0.72, 0.5), (0.92, 0.8, 0.6), scale=20)
-    iron = lib.mat_flat('iron', (0.62, 0.64, 0.68), rough=0.4)
+def column(x, y, h, stone, base):
+    """A Roman corner column: plinth, shaft, capital."""
+    lib.box((x, y, 0.035), (0.13, 0.13, 0.07), base, bevel=0.01)
+    lib.cylinder((x, y, h / 2), 0.045, h - 0.06, stone, verts=12)
+    lib.box((x, y, h - 0.02), (0.13, 0.13, 0.05), base, bevel=0.01)
 
-    # Ridge along Y, so the gable with the door faces the camera's lower left (the −Y side, where
-    # the game's door tile is).
-    cx, cy = 0.02, 0.05
-    L, W, H, plinth, rh = 1.15, 1.3, 0.68, 0.22, 0.48
+
+def build_woodcutter():
+    walls = lib.mat_stones('walls', (0.86, 0.86, 0.88), (0.6, 0.62, 0.68), (0.28, 0.27, 0.3), scale=11)
+    trim = lib.mat_grain('trim', (0.82, 0.8, 0.74), (0.92, 0.9, 0.84), scale=10, stretch=(1, 1, 1), bump=0.2)
+    roof = lib.mat_tiles('roof', (0.86, 0.45, 0.2), (0.72, 0.32, 0.14), (0.32, 0.13, 0.06), scale=5, along='y')
+    shingles = lib.mat_grain('shingles', (0.32, 0.22, 0.13), (0.5, 0.36, 0.2), scale=12, stretch=(1, 4, 1), bump=0.8)
+    dark = lib.mat_flat('dark', (0.08, 0.06, 0.05))
+    door = wood('door')
+    beam = wood('beam')
+    logs = wood('logs', light=True)
+    cut = cut_ends()
+    iron = lib.mat_flat('iron', (0.55, 0.57, 0.62), rough=0.35)
+    ivy = leaves('ivy')
+
+    lib.pad((0.05, -0.05, 0), 0.98, 0.98, earth(), jitter=0.08, seed=3)
+
+    # House: ridge along Y, gable with the door towards the camera's lower left (−Y).
+    cx, cy = -0.12, 0.12
+    L, W, H, rh = 1.0, 1.15, 0.62, 0.42
     x0, x1, y0, y1 = cx - L / 2, cx + L / 2, cy - W / 2, cy + W / 2
-    lib.box((cx, cy, plinth / 2), (L + 0.04, W + 0.04, plinth), stone, bevel=0.015)
-    lib.box((cx, cy, plinth + (H - plinth) / 2), (L, W, H - plinth), plaster)
-    lib.gable((cx, cy, H), L - 0.02, rh - 0.03, y0 + 0.01, plaster, along='y')
-    lib.gable((cx, cy, H), L - 0.02, rh - 0.03, y1 - 0.01, plaster, along='y')
-    # Timber frame: corner posts, sills and top plates on the two walls the camera sees.
+    lib.box((cx, cy, H / 2), (L, W, H), walls)
+    lib.gable((cx, cy, H), L - 0.02, rh - 0.02, y0 + 0.01, walls, along='y')
+    lib.gable((cx, cy, H), L - 0.02, rh - 0.02, y1 - 0.01, walls, along='y')
     for x in (x0, x1):
         for y in (y0, y1):
-            lib.box((x, y, (plinth + H) / 2), (0.07, 0.07, H - plinth), beam)
-    lib.box((cx, y0 - 0.005, H - 0.03), (L + 0.04, 0.07, 0.06), beam)
-    lib.box((cx, y0 - 0.005, plinth + 0.02), (L + 0.04, 0.07, 0.05), beam)
-    lib.box((x1 + 0.005, cy, plinth + 0.02), (0.07, W + 0.04, 0.05), beam)
-    lib.box((x1 + 0.005, cy, H - 0.03), (0.07, W + 0.04, 0.06), beam)
-    for y in (cy - 0.2, cy + 0.25):
-        lib.box((x1 + 0.005, y, (plinth + H) / 2), (0.07, 0.06, H - plinth), beam)
-    brace = math.atan2(H - plinth, 0.4)
-    lib.box((x1 + 0.01, y1 - 0.25, (plinth + H) / 2), (0.05, 0.55, 0.05), beam, rot=(-brace, 0, 0))
-    # Gable timbers: king post and rafters.
-    lib.box((cx, y0 - 0.01, H + rh / 2 - 0.02), (0.06, 0.05, rh - 0.06), beam)
-    for side in (-1, 1):
-        lib.box((cx + side * L / 4, y0 - 0.015, H + rh / 2 - 0.01), (math.hypot(L / 2, rh) + 0.02, 0.05, 0.06), beam,
-                rot=(0, side * math.atan2(rh, L / 2), 0))
-    lib.prism_roof((cx, cy, H), W, L, rh, roof, overhang=0.09, thickness=0.07, along='y')
-    lib.box((cx, cy, H + rh + 0.03), (0.1, W + 0.2, 0.07), lib.mat_flat('ridge', (0.62, 0.26, 0.15)), bevel=0.02)
-    # Chimney through the far slope.
-    lib.box((cx - 0.28, cy + 0.35, H + 0.38), (0.17, 0.17, 0.62), stone, bevel=0.01)
-    lib.box((cx - 0.28, cy + 0.35, H + 0.7), (0.21, 0.21, 0.05), stone, bevel=0.01)
-    # Door under the gable (the game's door tile is in front of the right part of this wall).
-    lib.box((0.3, y0 - 0.015, 0.2), (0.26, 0.04, 0.42), door_mat, bevel=0.01)
-    lib.box((0.3, y0 - 0.025, 0.43), (0.32, 0.05, 0.05), beam)
-    lib.box((-0.24, y0 - 0.015, 0.45), (0.17, 0.04, 0.16), dark)
-    for dx in (-0.13, 0.13):
-        lib.box((-0.24 + dx, y0 - 0.025, 0.45), (0.085, 0.03, 0.18), shutter, bevel=0.005)
-    lib.box((cx, y0 - 0.015, H + 0.16), (0.12, 0.04, 0.12), dark)
-    lib.box((x1 + 0.015, cy + 0.02, 0.45), (0.04, 0.17, 0.16), dark)
-    for dy in (-0.13, 0.13):
-        lib.box((x1 + 0.025, cy + 0.02 + dy, 0.45), (0.03, 0.085, 0.18), shutter, bevel=0.005)
-    # Log pile against the +X wall and a chopping block by the door.
-    for row, n in enumerate((4, 3, 2)):
-        for i in range(n):
-            y = cy + 0.05 + (i + row * 0.5) * 0.14
-            lib.cylinder((x1 + 0.16, y, 0.065 + row * 0.115), 0.065, 0.34, log_mat, rot=(0, math.pi / 2, 0), verts=12)
-            lib.cylinder((x1 + 0.33, y, 0.065 + row * 0.115), 0.061, 0.005, cut, rot=(0, math.pi / 2, 0), verts=12)
-    lib.cylinder((0.85, -0.85, 0.09), 0.12, 0.18, log_mat, verts=14)
-    lib.cylinder((0.85, -0.85, 0.185), 0.115, 0.01, cut, verts=14)
-    lib.box((0.85, -0.85, 0.3), (0.025, 0.025, 0.22), beam, rot=(0.25, 0, 0))
-    lib.box((0.85, -0.83, 0.2), (0.025, 0.12, 0.06), iron)
-    for i, (x, y) in enumerate(((0.58, -0.95), (0.95, -0.6), (0.68, -0.72))):
-        lib.box((x, y, 0.01), (0.06, 0.03, 0.015), cut, rot=(0, 0, i * 1.1))
+            column(x, y, H, trim, trim)
+    lib.box((cx, y0 - 0.01, H - 0.02), (L + 0.08, 0.06, 0.05), trim, bevel=0.01)
+    lib.box((x1 + 0.01, cy, H - 0.02), (0.06, W + 0.08, 0.05), trim, bevel=0.01)
+    lib.prism_roof((cx, cy, H), W, L, rh, roof, overhang=0.1, thickness=0.06, along='y')
+    lib.box((cx, cy, H + rh + 0.02), (0.09, W + 0.22, 0.07), lib.mat_flat('ridge', (0.6, 0.24, 0.1)), bevel=0.025)
+    # Door with a stone frame, a small window above it, a shuttered window on the side.
+    dx = cx + 0.18
+    lib.box((dx, y0 - 0.02, 0.21), (0.24, 0.04, 0.42), door, bevel=0.01)
+    lib.box((dx - 0.15, y0 - 0.03, 0.23), (0.05, 0.05, 0.46), trim, bevel=0.01)
+    lib.box((dx + 0.15, y0 - 0.03, 0.23), (0.05, 0.05, 0.46), trim, bevel=0.01)
+    lib.box((dx, y0 - 0.03, 0.47), (0.36, 0.06, 0.06), trim, bevel=0.01)
+    lib.box((cx - 0.22, y0 - 0.015, 0.4), (0.15, 0.04, 0.17), dark)
+    lib.box((cx - 0.22, y0 - 0.03, 0.31), (0.21, 0.05, 0.035), trim)
+    lib.cylinder((cx, y0 - 0.01, H + 0.15), 0.06, 0.03, dark, rot=(math.pi / 2, 0, 0), verts=16)
+    lib.box((x1 + 0.015, cy + 0.18, 0.4), (0.04, 0.15, 0.17), dark)
+    # Lean-to shelter on the +X side with the log pile under it.
+    sx0, sx1 = x1 + 0.05, x1 + 0.45
+    for y in (cy - 0.35, cy + 0.42):
+        lib.box((sx1, y, 0.24), (0.05, 0.05, 0.48), beam)
+    lib.box((sx1, cy + 0.035, 0.47), (0.06, 0.85, 0.05), beam)
+    tilt = math.atan2(0.18, sx1 - sx0)
+    lib.box(((sx0 + sx1) / 2 + 0.02, cy + 0.035, 0.55), (sx1 - sx0 + 0.16, 0.95, 0.035), shingles, rot=(0, tilt, 0))
+    for row, n in enumerate((5, 4, 3)):
+        for k in range(n):
+            y = cy - 0.27 + (k + row * 0.5) * 0.14
+            z = 0.06 + row * 0.105
+            lib.cylinder(((sx0 + sx1) / 2 + 0.02, y, z), 0.06, 0.34, logs, rot=(0, math.pi / 2, 0), verts=12)
+            lib.cylinder((sx1 + 0.17, y, z), 0.056, 0.006, cut, rot=(0, math.pi / 2, 0), verts=12)
+    # Chopping block with an axe, chips around it.
+    bx, by = 0.62, -0.72
+    lib.cylinder((bx, by, 0.09), 0.11, 0.18, logs, verts=14)
+    lib.cylinder((bx, by, 0.183), 0.105, 0.008, cut, verts=14)
+    lib.box((bx - 0.02, by, 0.29), (0.025, 0.025, 0.22), beam, rot=(0.3, 0.15, 0))
+    lib.box((bx - 0.02, by + 0.02, 0.2), (0.025, 0.11, 0.06), iron)
+    for k, (x, y) in enumerate(((0.4, -0.85), (0.8, -0.55), (0.5, -0.55), (0.75, -0.9))):
+        lib.box((x, y, 0.015), (0.06, 0.03, 0.015), cut, rot=(0, 0, k * 1.3))
+    # Ivy climbing the back corner and the gable.
+    for k, (x, y, z, r) in enumerate(((x0 + 0.02, y0 + 0.05, 0.15, 0.09), (x0 + 0.03, y0 + 0.08, 0.32, 0.08),
+                                      (x0 + 0.06, y0 + 0.02, 0.46, 0.07), (x0 - 0.02, y0 + 0.2, 0.1, 0.08))):
+        lib.lumpy((x, y, z), r, ivy, strength=0.5, noise=0.5, seed=k)
 
 
 def build_tree():
-    bark = lib.mat_noisy('bark', (0.4, 0.29, 0.19), (0.52, 0.39, 0.26), scale=10, stretch=(1, 1, 6))
-    leaves = lib.mat_noisy('leaves', (0.2, 0.42, 0.12), (0.42, 0.64, 0.2), scale=9, detail=8, rough=0.9)
-    lib.cylinder((0, 0, 0.3), 0.08, 0.6, bark, radius2=0.04, verts=12)
-    for a, z in ((0.6, 0.48), (2.6, 0.55), (4.4, 0.5)):
-        lib.cylinder((math.cos(a) * 0.08, math.sin(a) * 0.08, z), 0.025, 0.25, bark,
-                     rot=(math.sin(a) * -0.9, math.cos(a) * 0.9, 0), verts=8)
-    # A dense crown from many small clumps, so it reads as foliage rather than one ball.
-    clumps = [
-        ((0, 0, 1.0), 0.3), ((0.2, 0.08, 0.85), 0.22), ((-0.2, 0.06, 0.88), 0.22),
-        ((0.06, -0.22, 0.84), 0.22), ((-0.06, 0.22, 0.9), 0.21), ((0.16, -0.12, 1.12), 0.2),
-        ((-0.14, -0.1, 1.1), 0.19), ((0.02, 0.12, 1.22), 0.18), ((0.22, 0.16, 1.02), 0.16),
-        ((-0.22, -0.16, 0.95), 0.16), ((0.0, -0.05, 1.32), 0.14),
-    ]
-    for i, (loc, r) in enumerate(clumps):
-        lib.lumpy(loc, r, leaves, scale=(1, 1, 0.85), strength=0.5, noise=0.45, seed=i)
+    bark = lib.mat_grain('bark', (0.36, 0.2, 0.09), (0.62, 0.38, 0.18), scale=7, stretch=(1, 1, 5), bump=0.9)
+    foliage = leaves()
+    # A slightly crooked trunk flaring at the base, with a few limbs into the crown.
+    lib.cylinder((0, 0, 0.06), 0.11, 0.12, bark, radius2=0.075, verts=12)
+    lib.cylinder((0.01, 0, 0.32), 0.075, 0.44, bark, radius2=0.05, verts=12, rot=(0.06, 0.05, 0))
+    for a, z, l in ((0.5, 0.5, 0.32), (2.4, 0.56, 0.3), (4.2, 0.52, 0.3), (5.6, 0.62, 0.26)):
+        lib.cylinder((math.cos(a) * 0.09, math.sin(a) * 0.09, z + 0.08), 0.03, l, bark, radius2=0.015,
+                     rot=(math.sin(a) * -0.8, math.cos(a) * 0.8, 0), verts=8)
+    # Crown: many small leaf clumps over an ellipsoid, so light catches individual clusters.
+    import random
+
+    rnd = random.Random(7)
+    for k in range(150):
+        u = rnd.uniform(0, math.tau)
+        v = rnd.uniform(-0.55, 1.0)
+        rr = math.sqrt(max(0.0, 1 - v * v)) * rnd.uniform(0.8, 1.08)
+        x = math.cos(u) * rr * 0.37
+        y = math.sin(u) * rr * 0.37
+        z = 0.98 + v * 0.31
+        leaf = lib.lumpy((x, y, z), rnd.uniform(0.045, 0.075), foliage, scale=(1, 1, 0.7), strength=0.5, noise=0.3,
+                         seed=k, subdiv=1, flat=True)
+        leaf.rotation_euler = (rnd.uniform(0, 3), rnd.uniform(0, 3), rnd.uniform(0, 3))
+    lib.lumpy((0, 0, 0.98), 0.32, foliage, scale=(1, 1, 0.9), strength=0.3, noise=0.5, seed=99)
 
 
 def build_deposit(size):
-    rock = lib.mat_noisy('rock', (0.6, 0.58, 0.54), (0.76, 0.73, 0.68), scale=7, detail=6)
+    rock = lib.mat_grain('rock', (0.38, 0.39, 0.42), (0.66, 0.66, 0.66), scale=6, stretch=(1, 1, 1), bump=1.0)
     rocks = [
-        ((0.0, 0.0, 0.12), 0.21, (1.1, 1.0, 0.8)),
-        ((0.22, -0.13, 0.07), 0.14, (1.2, 0.9, 0.7)),
-        ((-0.21, 0.1, 0.08), 0.15, (1.0, 1.1, 0.75)),
-        ((0.13, 0.21, 0.06), 0.13, (1.0, 1.2, 0.7)),
-        ((-0.12, -0.22, 0.05), 0.12, (1.2, 1.0, 0.7)),
-        ((0.31, 0.12, 0.04), 0.1, (1.0, 1.0, 0.7)),
-        ((-0.31, -0.05, 0.04), 0.1, (1.1, 1.0, 0.7)),
+        ((0.0, 0.0, 0.13), 0.22, (1.1, 1.0, 0.85)),
+        ((0.23, -0.13, 0.08), 0.15, (1.2, 0.9, 0.75)),
+        ((-0.22, 0.1, 0.09), 0.16, (1.0, 1.1, 0.8)),
+        ((0.13, 0.22, 0.07), 0.14, (1.0, 1.2, 0.75)),
+        ((-0.12, -0.23, 0.06), 0.13, (1.2, 1.0, 0.75)),
+        ((0.32, 0.12, 0.05), 0.11, (1.0, 1.0, 0.75)),
+        ((-0.32, -0.05, 0.05), 0.11, (1.1, 1.0, 0.75)),
     ]
     keep = (7, 5, 3)[size]
-    for i, (loc, r, sc) in enumerate(rocks[:keep]):
-        lib.lumpy(loc, r, rock, scale=sc, strength=0.45, noise=0.9, seed=i, subdiv=2, flat=True)
+    for k, (loc, r, sc) in enumerate(rocks[:keep]):
+        lib.lumpy(loc, r, rock, scale=sc, strength=0.5, noise=0.9, seed=k, subdiv=2, flat=True)
 
 
 def build_log():
-    log_mat = wood_mat('log', light=True)
-    cut = lib.mat_noisy('cut', (0.78, 0.62, 0.4), (0.86, 0.72, 0.5), scale=20)
+    logs = wood('log', light=True)
+    cut = cut_ends()
     gx, gy = lib.ground_dir(0)
     yaw = math.atan2(gy, gx)
-    lib.cylinder((0, 0, 0), 0.05, 0.3, log_mat, rot=(0, math.pi / 2, yaw), verts=12)
-    for s in (-1, 1):
-        lib.cylinder((s * 0.15 * gx, s * 0.15 * gy, 0), 0.047, 0.004, cut, rot=(0, math.pi / 2, yaw), verts=12)
+    lib.cylinder((0, 0, 0), 0.05, 0.3, logs, rot=(0, math.pi / 2, yaw), verts=12)
+    for sgn in (-1, 1):
+        lib.cylinder((sgn * 0.15 * gx, sgn * 0.15 * gy, 0), 0.047, 0.004, cut, rot=(0, math.pi / 2, yaw), verts=12)
 
 
 # ------------------------------------------------------------------------------------------ carrier
@@ -158,12 +188,10 @@ class Figure:
 
     def __init__(self):
         skin = lib.mat_flat('skin', SKIN, 0.6)
-        hair = lib.mat_flat('hair', HAIR)
-        shirt = lib.mat_noisy('shirt', SHIRT, tuple(c * 0.92 for c in SHIRT), scale=20)
-        vest = lib.mat_flat('vest', VEST)
-        trousers = lib.mat_flat('trousers', TROUSERS)
-        shoes = lib.mat_flat('shoes', SHOES)
-        belt = lib.mat_flat('belt', (0.38, 0.26, 0.16))
+        hair = lib.mat_grain('hair', HAIR, tuple(min(1, c * 1.8) for c in HAIR), scale=30, stretch=(1, 1, 3), bump=0.4)
+        tunic = lib.mat_grain('tunic', tuple(c * 0.9 for c in TUNIC), TUNIC, scale=20, stretch=(1, 1, 4), bump=0.3)
+        team = lib.mat_flat('team', TEAM, 0.6)
+        sandals = lib.mat_flat('sandals', SANDALS)
 
         self.root = bpy.data.objects.new('root', None)
         bpy.context.scene.collection.objects.link(self.root)
@@ -182,30 +210,34 @@ class Figure:
             obj.parent = parent
             obj.matrix_world = world
 
-        hip_z = 0.25
+        hip_z = 0.27
         self.legs = []
         for side in (-1, 1):
-            p = pivot(f'hip{side}', (0, side * 0.058, hip_z))
-            leg = lib.cylinder((0, side * 0.058, hip_z - 0.12), 0.05, 0.24, trousers, radius2=0.042, verts=10)
-            shoe = lib.box((0.03, side * 0.058, 0.025), (0.12, 0.07, 0.05), shoes, bevel=0.02)
+            p = pivot(f'hip{side}', (0, side * 0.055, hip_z))
+            leg = lib.cylinder((0, side * 0.055, hip_z - 0.13), 0.042, 0.26, skin, radius2=0.036, verts=10)
+            shoe = lib.box((0.03, side * 0.055, 0.02), (0.11, 0.06, 0.04), sandals, bevel=0.015)
             attach(leg, p)
             attach(shoe, p)
             self.legs.append(p)
         for obj in (
-            lib.cylinder((0, 0, 0.39), 0.1, 0.28, shirt, radius2=0.088, verts=16),
-            lib.cylinder((0, 0, 0.385), 0.104, 0.2, vest, radius2=0.094, verts=16),
-            lib.cylinder((0, 0, 0.28), 0.106, 0.04, belt, verts=16),
-            lib.sphere((0.005, 0, 0.62), 0.1, skin),
-            lib.sphere((-0.01, 0, 0.655), 0.103, hair, scale=(1, 1, 0.65)),
-            lib.sphere((0.1, 0, 0.61), 0.022, skin),
+            # Tunic to the knees, flaring out, with a coloured hem and belt; bare arms and legs.
+            lib.cylinder((0, 0, 0.37), 0.13, 0.3, tunic, radius2=0.092, verts=16),
+            lib.cylinder((0, 0, 0.235), 0.132, 0.03, team, verts=16),
+            lib.cylinder((0, 0, 0.405), 0.107, 0.035, team, verts=16),
+            lib.cylinder((0, 0, 0.535), 0.092, 0.05, tunic, radius2=0.07, verts=16),
+            lib.sphere((0.005, 0, 0.64), 0.105, skin),
+            lib.sphere((-0.006, 0, 0.678), 0.109, hair, scale=(1.02, 1.03, 0.74)),
+            lib.sphere((0.106, 0, 0.625), 0.022, skin),
         ):
             attach(obj, self.root)
         self.arms = []
         self.hands = []
         for side in (-1, 1):
-            p = pivot(f'shoulder{side}', (0, side * 0.125, 0.5))
-            arm = lib.cylinder((0, side * 0.125, 0.41), 0.038, 0.18, shirt, verts=10)
-            hand = lib.sphere((0, side * 0.125, 0.31), 0.034, skin)
+            p = pivot(f'shoulder{side}', (0, side * 0.12, 0.52))
+            sleeve = lib.cylinder((0, side * 0.12, 0.49), 0.045, 0.07, tunic, verts=10)
+            arm = lib.cylinder((0, side * 0.12, 0.4), 0.032, 0.16, skin, verts=10)
+            hand = lib.sphere((0, side * 0.12, 0.31), 0.034, skin)
+            attach(sleeve, p)
             attach(arm, p)
             attach(hand, p)
             self.arms.append(p)
@@ -295,7 +327,7 @@ def save_sheet(pixels, path):
 SINGLE = {
     # name: (builder, logical w, h, anchor x, y) — sizes of the procedural sprites they replace.
     'woodcutter': (build_woodcutter, 150, 140, 75, 100),
-    'tree': (build_tree, 80, 96, 32, 78),
+    'tree': (build_tree, 84, 100, 34, 80),
     'deposit0': (lambda: build_deposit(0), 56, 44, 28, 34),
     'deposit1': (lambda: build_deposit(1), 56, 44, 28, 34),
     'deposit2': (lambda: build_deposit(2), 56, 44, 28, 34),

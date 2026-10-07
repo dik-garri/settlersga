@@ -434,7 +434,9 @@ export class GameRenderer {
         const i = map.idx(x, y);
         const kind = kindAt(x, y)!;
         const quad = [this.corner(x, y), this.corner(x + 1, y), this.corner(x + 1, y + 1), this.corner(x, y + 1)];
-        quadOf(this.atlas.get(`ground:${kind}:${hash(i) % groundVariants(kind)}`), quad);
+        const period = this.atlas.groundPeriod[kind];
+        const variant = period ? (x % period) + period * (y % period) : hash(i) % groundVariants(kind);
+        quadOf(this.atlas.get(`ground:${kind}:${variant}`), quad);
         const own = priority(kind);
         EDGE_DIRS.forEach(([du, dv], dir) => {
           const n = kindAt(x + du, y + dv);

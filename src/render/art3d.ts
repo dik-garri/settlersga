@@ -21,15 +21,25 @@ export interface CarrierSheetMeta {
   carryBehind: boolean[];
 }
 
+/** `ground.json` written by `art/textures/ground.py`. */
+export interface GroundMeta {
+  /** Tile (x, y) uses variant (x mod period) + period·(y mod period); textures are seamless. */
+  period: number;
+  /** Logical size of one diamond frame (as the procedural ground sprites). */
+  frame: [number, number];
+  kinds: string[];
+}
+
 export interface Art3d {
   images: Map<string, HTMLImageElement>;
   carrier: CarrierSheetMeta;
+  ground: GroundMeta;
 }
 
 /** Logical size and anchor of the single-image sprites, matching `build.py`'s `SINGLE` table. */
 export const ART3D_SPRITES: Record<string, { w: number; h: number; ax: number; ay: number }> = {
   woodcutter: { w: 150, h: 140, ax: 75, ay: 100 },
-  tree: { w: 80, h: 96, ax: 32, ay: 78 },
+  tree: { w: 84, h: 100, ax: 34, ay: 80 },
   deposit0: { w: 56, h: 44, ax: 28, ay: 34 },
   deposit1: { w: 56, h: 44, ax: 28, ay: 34 },
   deposit2: { w: 56, h: 44, ax: 28, ay: 34 },
@@ -51,5 +61,7 @@ export async function loadArt3d(): Promise<Art3d> {
   const images = new Map<string, HTMLImageElement>();
   await Promise.all(names.map(async (n) => images.set(n, await loadImage(`${base}${n}.png`))));
   const carrier = (await (await fetch(`${base}carrier.json`)).json()) as CarrierSheetMeta;
-  return { images, carrier };
+  const ground = (await (await fetch(`${base}ground.json`)).json()) as GroundMeta;
+  await Promise.all(ground.kinds.map(async (k) => images.set(`ground-${k}`, await loadImage(`${base}ground-${k}.png`))));
+  return { images, carrier, ground };
 }

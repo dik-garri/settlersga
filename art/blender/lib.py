@@ -47,13 +47,13 @@ def reset_scene(samples=48):
     scene.world = world
     world.use_nodes = True
     bg = world.node_tree.nodes['Background']
-    bg.inputs['Color'].default_value = (0.62, 0.72, 0.85, 1)
-    bg.inputs['Strength'].default_value = 0.55
+    bg.inputs['Color'].default_value = (0.55, 0.66, 0.85, 1)
+    bg.inputs['Strength'].default_value = 0.42
 
     # Sun from the screen's upper left, like the procedural art's lighting.
     sun_data = bpy.data.lights.new('Sun', 'SUN')
-    sun_data.energy = 2.4
-    sun_data.angle = math.radians(8)
+    sun_data.energy = 3.3
+    sun_data.angle = math.radians(4)
     sun_data.color = (1.0, 0.96, 0.88)
     sun = bpy.data.objects.new('Sun', sun_data)
     scene.collection.objects.link(sun)
@@ -110,22 +110,73 @@ def ground_dir(screen_angle):
     return gx / n, gy / n
 
 
+def apply_ao(strength=0.75, distance=0.12):
+    """Darkens creases and contacts in every material (base colour × ambient occlusion), the dark
+    crevices that give Settlers 4 sprites their depth. Idempotent."""
+    for mat in bpy.data.materials:
+        if not mat.use_nodes or mat.get('ao'):
+            continue
+        nodes, links = mat.node_tree.nodes, mat.node_tree.links
+        bsdf = nodes.get('Principled BSDF')
+        if bsdf is None:
+            continue
+        sock = bsdf.inputs['Base Color']
+        ao = nodes.new('ShaderNodeAmbientOcclusion')
+        ao.inputs['Distance'].default_value = distance
+        ao.samples = 8
+        fac = nodes.new('ShaderNodeMapRange')
+        fac.inputs['To Min'].default_value = 1 - strength
+        links.new(ao.outputs['AO'], fac.inputs['Value'])
+        mul = nodes.new('ShaderNodeMix')
+        mul.data_type = 'RGBA'
+        mul.blend_type = 'MULTIPLY'
+        mul.inputs['Factor'].default_value = 1.0
+        if sock.links:
+            links.new(sock.links[0].from_socket, mul.inputs['A'])
+        else:
+            mul.inputs['A'].default_value = sock.default_value
+        links.new(fac.outputs['Result'], mul.inputs['B'])
+        links.new(mul.outputs['Result'], sock)
+        mat['ao'] = True
+
+
 def render_to(scene, path):
+    apply_ao()
     scene.render.filepath = path
     bpy.ops.render.render(write_still=True)
     clean_alpha(path)
 
 
+#: Post-processing towards the Settlers 4 look: punchy colour, firm contrast, crisp detail.
+SATURATION = 1.2
+CONTRAST = 1.15
+SHARPEN = 0.6
+
+
 def clean_alpha(path, floor=0.05):
-    """The shadow catcher leaves a faint veil over the whole frame; drop alpha below `floor`."""
+    """Finishes a render: drops the faint veil the shadow catcher leaves over the frame (alpha below
+    `floor`), then boosts saturation and contrast and sharpens (unsharp mask) the colour."""
     import numpy as np
 
     img = bpy.data.images.load(path)
+    w, h = img.size
     px = np.empty(len(img.pixels), dtype=np.float32)
     img.pixels.foreach_get(px)
-    rgba = px.reshape(-1, 4)
-    rgba[rgba[:, 3] < floor] = 0
-    img.pixels.foreach_set(px)
+    rgba = px.reshape(h, w, 4)
+    rgba[rgba[..., 3] < floor] = 0
+    a = rgba[..., 3:4]
+    # Work on straight (unpremultiplied) colour where there is coverage.
+    rgb = np.where(a > 0, rgba[..., :3], 0.0)
+    grey = rgb @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
+    rgb = grey[..., None] + (rgb - grey[..., None]) * SATURATION
+    rgb = (rgb - 0.5) * CONTRAST + 0.5
+    blur = rgb.copy()
+    blur[1:-1, 1:-1] = (
+        rgb[:-2, 1:-1] + rgb[2:, 1:-1] + rgb[1:-1, :-2] + rgb[1:-1, 2:] + 4 * rgb[1:-1, 1:-1]
+    ) / 8
+    rgb = rgb + (rgb - blur) * SHARPEN
+    rgba[..., :3] = np.clip(np.where(a > 0, rgb, 0.0), 0, 1)
+    img.pixels.foreach_set(rgba.ravel())
     img.save()
     bpy.data.images.remove(img)
 
@@ -207,6 +258,151 @@ def mat_brick(name, c1, c2, mortar, scale=8.0, row=0.25, width=0.5, mortar_size=
     return mat
 
 
+def _bump(nodes, links, bsdf, height_socket, strength=0.4, distance=0.02):
+    bump = nodes.new('ShaderNodeBump')
+    bump.inputs['Strength'].default_value = strength
+    bump.inputs['Distance'].default_value = distance
+    links.new(height_socket, bump.inputs['Height'])
+    links.new(bump.outputs['Normal'], bsdf.inputs['Normal'])
+
+
+def _ramp(nodes, stops):
+    ramp = nodes.new('ShaderNodeValToRGB')
+    els = ramp.color_ramp.elements
+    while len(els) < len(stops):
+        els.new(0.5)
+    for el, (pos, col) in zip(els, stops):
+        el.position = pos
+        el.color = (*lin(col), 1)
+    return ramp
+
+
+def mat_stones(name, light, dark, mortar, scale=9.0, bump=0.6):
+    """Irregular fieldstone masonry: Voronoi cells with colour variation and dark mortar joints."""
+    mat, nodes, links, bsdf = _principled(name)
+    bsdf.inputs['Roughness'].default_value = 0.9
+    coord = nodes.new('ShaderNodeTexCoord')
+    vor = nodes.new('ShaderNodeTexVoronoi')
+    vor.feature = 'DISTANCE_TO_EDGE'
+    vor.inputs['Scale'].default_value = scale
+    links.new(coord.outputs['Object'], vor.inputs['Vector'])
+    cells = nodes.new('ShaderNodeTexVoronoi')
+    cells.inputs['Scale'].default_value = scale
+    links.new(coord.outputs['Object'], cells.inputs['Vector'])
+    stone = _ramp(nodes, [(0.0, dark), (1.0, light)])
+    links.new(cells.outputs['Color'], stone.inputs['Fac'])  # Color output drives a per-stone value
+    joint = nodes.new('ShaderNodeMapRange')
+    joint.inputs['From Min'].default_value = 0.02
+    joint.inputs['From Max'].default_value = 0.08
+    links.new(vor.outputs['Distance'], joint.inputs['Value'])
+    mix = nodes.new('ShaderNodeMix')
+    mix.data_type = 'RGBA'
+    mix.inputs['A'].default_value = (*lin(mortar), 1)
+    links.new(joint.outputs['Result'], mix.inputs['Factor'])
+    links.new(stone.outputs['Color'], mix.inputs['B'])
+    grime = nodes.new('ShaderNodeTexNoise')
+    grime.inputs['Scale'].default_value = scale * 3
+    grime.inputs['Detail'].default_value = 8
+    links.new(coord.outputs['Object'], grime.inputs['Vector'])
+    dirt = nodes.new('ShaderNodeMix')
+    dirt.data_type = 'RGBA'
+    dirt.blend_type = 'MULTIPLY'
+    dirt.inputs['Factor'].default_value = 0.35
+    links.new(mix.outputs['Result'], dirt.inputs['A'])
+    links.new(grime.outputs['Color'], dirt.inputs['B'])
+    links.new(dirt.outputs['Result'], bsdf.inputs['Base Color'])
+    _bump(nodes, links, bsdf, joint.outputs['Result'], strength=bump)
+    return mat
+
+
+def mat_tiles(name, c1, c2, mortar, scale=7.0, along='y'):
+    """Weathered terracotta roof tiles: offset rows (by height), per-tile colour, ridged bump."""
+    mat, nodes, links, bsdf = _principled(name)
+    bsdf.inputs['Roughness'].default_value = 0.8
+    coord = nodes.new('ShaderNodeTexCoord')
+    sep = nodes.new('ShaderNodeSeparateXYZ')
+    links.new(coord.outputs['Object'], sep.inputs['Vector'])
+    comb = nodes.new('ShaderNodeCombineXYZ')
+    links.new(sep.outputs[along.upper()], comb.inputs['X'])
+    links.new(sep.outputs['Z'], comb.inputs['Y'])
+    brick = nodes.new('ShaderNodeTexBrick')
+    brick.inputs['Color1'].default_value = (*lin(c1), 1)
+    brick.inputs['Color2'].default_value = (*lin(c2), 1)
+    brick.inputs['Mortar'].default_value = (*lin(mortar), 1)
+    brick.inputs['Scale'].default_value = scale
+    brick.inputs['Mortar Size'].default_value = 0.03
+    brick.inputs['Bias'].default_value = 0.0
+    brick.inputs['Brick Width'].default_value = 0.42
+    brick.inputs['Row Height'].default_value = 0.2
+    brick.offset = 0.5
+    links.new(comb.outputs['Vector'], brick.inputs['Vector'])
+    grime = nodes.new('ShaderNodeTexNoise')
+    grime.inputs['Scale'].default_value = 14
+    grime.inputs['Detail'].default_value = 8
+    links.new(coord.outputs['Object'], grime.inputs['Vector'])
+    dirt = nodes.new('ShaderNodeMix')
+    dirt.data_type = 'RGBA'
+    dirt.blend_type = 'MULTIPLY'
+    dirt.inputs['Factor'].default_value = 0.45
+    links.new(brick.outputs['Color'], dirt.inputs['A'])
+    links.new(grime.outputs['Color'], dirt.inputs['B'])
+    links.new(dirt.outputs['Result'], bsdf.inputs['Base Color'])
+    # Each tile bulges: a wave across the tile plus the joints.
+    wave = nodes.new('ShaderNodeTexWave')
+    wave.inputs['Scale'].default_value = scale * 1.2
+    wave.bands_direction = 'X'
+    links.new(comb.outputs['Vector'], wave.inputs['Vector'])
+    add = nodes.new('ShaderNodeMath')
+    links.new(wave.outputs['Fac'], add.inputs[0])
+    links.new(brick.outputs['Fac'], add.inputs[1])
+    _bump(nodes, links, bsdf, add.outputs['Value'], strength=0.7)
+    return mat
+
+
+def mat_grain(name, a, b, scale=5.0, stretch=(1, 1, 10), bump=0.5, detail=8.0):
+    """Wood, thatch, bark: stretched noise colour with matching bump."""
+    mat, nodes, links, bsdf = _principled(name)
+    bsdf.inputs['Roughness'].default_value = 0.85
+    coord = nodes.new('ShaderNodeTexCoord')
+    mapping = nodes.new('ShaderNodeMapping')
+    mapping.inputs['Scale'].default_value = stretch
+    links.new(coord.outputs['Object'], mapping.inputs['Vector'])
+    noise = nodes.new('ShaderNodeTexNoise')
+    noise.inputs['Scale'].default_value = scale
+    noise.inputs['Detail'].default_value = detail
+    noise.inputs['Roughness'].default_value = 0.65
+    links.new(mapping.outputs['Vector'], noise.inputs['Vector'])
+    ramp = _ramp(nodes, [(0.3, a), (0.7, b)])
+    links.new(noise.outputs['Fac'], ramp.inputs['Fac'])
+    links.new(ramp.outputs['Color'], bsdf.inputs['Base Color'])
+    _bump(nodes, links, bsdf, noise.outputs['Fac'], strength=bump)
+    return mat
+
+
+def mat_leaves(name, dark, mid, light, scale=14.0):
+    """Foliage: speckled dark-to-bright greens with a strong bump, like many small leaves."""
+    mat, nodes, links, bsdf = _principled(name)
+    bsdf.inputs['Roughness'].default_value = 0.7
+    coord = nodes.new('ShaderNodeTexCoord')
+    vor = nodes.new('ShaderNodeTexVoronoi')
+    vor.inputs['Scale'].default_value = scale
+    links.new(coord.outputs['Object'], vor.inputs['Vector'])
+    noise = nodes.new('ShaderNodeTexNoise')
+    noise.inputs['Scale'].default_value = scale / 3
+    noise.inputs['Detail'].default_value = 6
+    links.new(coord.outputs['Object'], noise.inputs['Vector'])
+    mixf = nodes.new('ShaderNodeMath')
+    mixf.operation = 'MULTIPLY_ADD'
+    mixf.inputs[1].default_value = 0.6
+    links.new(vor.outputs['Distance'], mixf.inputs[0])
+    links.new(noise.outputs['Fac'], mixf.inputs[2])
+    ramp = _ramp(nodes, [(0.35, dark), (0.6, mid), (0.85, light)])
+    links.new(mixf.outputs['Value'], ramp.inputs['Fac'])
+    links.new(ramp.outputs['Color'], bsdf.inputs['Base Color'])
+    _bump(nodes, links, bsdf, vor.outputs['Distance'], strength=0.9, distance=0.05)
+    return mat
+
+
 # -------------------------------------------------------------------------------------------- meshes
 
 def _finish(obj, mat, bevel=0.0, smooth=False):
@@ -221,11 +417,40 @@ def _finish(obj, mat, bevel=0.0, smooth=False):
     return obj
 
 
+def pad(loc, hx, hy, mat, verts=96, jitter=0.12, seed=1, thickness=0.012, power=4.0):
+    """A flat, ragged, squarish patch on the ground (half sizes `hx`, `hy`): the trodden earth around
+    buildings. A superellipse with a jittered edge."""
+    import random
+
+    rnd = random.Random(seed)
+    cx, cy, cz = loc
+    # A smooth wobble (a few low-frequency waves), not per-vertex noise.
+    waves = [(rnd.randint(2, 7), rnd.uniform(0, math.tau), rnd.uniform(0.3, 1.0)) for _ in range(4)]
+    norm = sum(w[2] for w in waves)
+    pts = []
+    for i in range(verts):
+        a = i / verts * math.tau
+        c, s_ = math.cos(a), math.sin(a)
+        k = 1 + jitter * sum(amp * math.sin(f * a + ph) for f, ph, amp in waves) / norm
+        x = math.copysign(abs(c) ** (2 / power), c) * hx * k
+        y = math.copysign(abs(s_) ** (2 / power), s_) * hy * k
+        pts.append((cx + x, cy + y, cz))
+    mesh = bpy.data.meshes.new('pad')
+    mesh.from_pydata([(cx, cy, cz)] + pts, [], [(0, i + 1, (i + 1) % verts + 1) for i in range(verts)])
+    obj = bpy.data.objects.new('pad', mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.data.materials.append(mat)
+    mod = obj.modifiers.new('Solid', 'SOLIDIFY')
+    mod.thickness = thickness
+    mod.offset = 1
+    return obj
+
+
 def box(loc, size, mat, rot=(0, 0, 0), bevel=0.0):
     bpy.ops.mesh.primitive_cube_add(size=1, location=loc, rotation=rot)
     obj = bpy.context.active_object
     obj.scale = size
-    bpy.ops.object.transform_apply(scale=True)
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
     return _finish(obj, mat, bevel)
 
 
@@ -242,7 +467,7 @@ def sphere(loc, radius, mat, scale=(1, 1, 1), subdiv=3):
     bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=subdiv, radius=radius, location=loc)
     obj = bpy.context.active_object
     obj.scale = scale
-    bpy.ops.object.transform_apply(scale=True)
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
     return _finish(obj, mat, smooth=True)
 
 

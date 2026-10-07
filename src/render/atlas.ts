@@ -19,6 +19,7 @@ import {
   paintTree,
   paintWare,
   PLAYER_COLORS,
+  type GroundKind,
 } from './sprites';
 import { DIRS, WALK_FRAMES, WORK_FRAMES } from './anim';
 import { ART3D_SPRITES, type Art3d } from './art3d';
@@ -151,19 +152,39 @@ export class SpriteAtlas {
 
   /** Pre-rendered 3D sprites replacing some procedural ones (`?art=3d`, see `art3d.ts`). */
   readonly art3d: Art3d | null;
+  /** Ground kinds drawn from a seamless texture: tile (x, y) uses variant (x mod p) + p·(y mod p). */
+  readonly groundPeriod: Partial<Record<GroundKind, number>> = {};
 
   constructor(art3d: Art3d | null = null) {
     this.art3d = art3d;
     const a = new AtlasBuilder();
+    // Textured ground (`?art=3d`): seamless diamonds cut from one periodic texture per kind.
+    const textured = (kind: GroundKind) => (art3d?.ground.kinds.includes(kind) ? art3d.images.get(`ground-${kind}`)! : null);
     for (const kind of GROUND_PRIORITY) {
+      const sheet = textured(kind);
+      if (sheet) {
+        const p = art3d!.ground.period;
+        this.groundPeriod[kind] = p;
+        for (let v = 0; v < p * p; v++) a.add(`ground:${kind}:${v}`, 66, 34, 33, 17, (ctx) => drawFrame(ctx, sheet, v, 66, 34));
+        continue;
+      }
       for (let v = 0; v < groundVariants(kind); v++) {
         a.add(`ground:${kind}:${v}`, 66, 34, 33, 17, (ctx) => paintGround(ctx, kind, v));
       }
     }
     // Transition overlays sit on the same page as the ground (the ground mesh uses one texture).
     for (const kind of GROUND_PRIORITY) {
+      const sheet = textured(kind);
       for (let dir = 0; dir < EDGE_DIRS.length; dir++) {
-        a.add(`edge:${kind}:${dir}`, 66, 34, 33, 17, (ctx) => paintGroundEdge(ctx, kind, dir));
+        a.add(`edge:${kind}:${dir}`, 66, 34, 33, 17, (ctx) => {
+          ctx.save();
+          paintGroundEdge(ctx, kind, dir);
+          ctx.restore();
+          if (!sheet) return;
+          // Keep the procedural ragged mask, take the colour from the texture.
+          ctx.globalCompositeOperation = 'source-atop';
+          drawFrame(ctx, sheet, 0, 66, 34);
+        });
       }
     }
     for (let v = 0; v < 4; v++) a.add(`tree:${v}`, 48, 80, 24, 72, (ctx) => paintTree(ctx, v));
@@ -338,6 +359,12 @@ export function buildingIcon(type: BuildingType, size = 56): HTMLCanvasElement {
   ctx.scale(scale, scale);
   BUILDING_PAINTERS[type](ctx);
   return canvas;
+}
+
+/** Draws frame `k` of a horizontal strip of w×h (logical) frames at the context origin. */
+function drawFrame(ctx: CanvasRenderingContext2D, sheet: HTMLImageElement, k: number, w: number, h: number): void {
+  const r = sheet.height / h;
+  ctx.drawImage(sheet, k * w * r, 0, w * r, h * r, 0, 0, w, h);
 }
 
 /** Registers the 3D sprites under the keys of the procedural ones they replace (later wins). */
