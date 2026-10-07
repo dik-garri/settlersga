@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Browser prototype of a Settlers 3/4-style economy game: isometric 2D, sprites, TypeScript + Vite + PixiJS 8. UI text is in Russian. Design spec: `docs/superpowers/specs/2026-10-06-settlers-prototype-design.md`. Long-term plan toward Settlers 4 parity, with phases and known tech debt: `docs/ROADMAP.md` — check it before starting a new feature and keep it current.
+Browser prototype of a Settlers 3/4-style economy game: isometric 2D, sprites, TypeScript + Vite + PixiJS 8. UI text is in Russian. Original prototype spec (historical, describes only the first version): `docs/superpowers/specs/2026-10-06-settlers-prototype-design.md`. Long-term plan toward Settlers 4 parity, with phases and known tech debt: `docs/ROADMAP.md` — check it before starting a new feature and keep it current. Out of scope by decision: magic and dark forces, a map editor, ships and harbours (for now).
 
 ## Workflow
 
