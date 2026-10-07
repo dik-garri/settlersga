@@ -724,3 +724,401 @@ def build_house_large():
     scale_roof((cx0 + cx1) / 2, (cy0 + cy1) / 2, cx1 - cx0, cy1 - cy0, cH, crh, slates, slate_ridge, axis='x',
                overhang=0.1, seed=35, size=0.14)
     lib.tag(4)
+
+
+# ------------------------------------------------------------------------------------- effect anchors
+
+# Screen-space points (relative to the sprite anchor) of a building's live effects — chimney mouths
+# for smoke, the mill's sail hub — recorded while rendering; art3d.ts copies them into ART3D_FX.
+FX_AT = {}
+
+
+def note_fx(name, kind, point):
+    scene = bpy.context.scene
+    sx, sy = lib.screen_point(scene, point)
+    ox, oy = lib.screen_point(scene, (0, 0, 0))
+    FX_AT.setdefault(name, {}).setdefault(kind, []).append((round(sx - ox, 1), round(sy - oy, 1)))
+    print('fx', name, kind, FX_AT[name][kind][-1])
+
+
+# ------------------------------------------------------------------------------------- shared pieces
+
+def straw_mat(name='straw'):
+    """Golden thatch: streaky straw running downhill."""
+    return lib.mat_grain(name, (0.62, 0.46, 0.14), (0.92, 0.78, 0.36), scale=9, stretch=(1, 1, 14), bump=1.0)
+
+
+def terracotta_mats(prefix='tc'):
+    return [lib.mat_grain(f'{prefix}{k}', a, b, scale=9, stretch=(1, 1, 1), bump=0.5) for k, (a, b) in enumerate((
+        ((0.66, 0.26, 0.1), (0.9, 0.46, 0.22)),
+        ((0.58, 0.2, 0.08), (0.82, 0.38, 0.18)),
+        ((0.72, 0.32, 0.14), (0.95, 0.54, 0.28)),
+    ))]
+
+
+def shingle_mats(prefix='sh'):
+    """Weathered wooden shingles: warm browns and a few silvered ones."""
+    return [lib.mat_grain(f'{prefix}{k}', a, b, scale=10, stretch=(1, 4, 1), bump=0.7) for k, (a, b) in enumerate((
+        ((0.42, 0.28, 0.12), (0.66, 0.48, 0.24)),
+        ((0.5, 0.34, 0.15), (0.74, 0.56, 0.3)),
+        ((0.46, 0.4, 0.3), (0.64, 0.58, 0.46)),
+    ))]
+
+
+def door_mat():
+    return lib.mat_grain('door', (0.36, 0.2, 0.08), (0.56, 0.34, 0.14), scale=4, stretch=(1, 1, 9), bump=0.6)
+
+
+def stone_house(x0, x1, y0, y1, z1, rnd, walls, blocks, z0=0.0, block=0.18):
+    """A stone box from z0 to z1: a dark core with rugged blocks on the two visible faces."""
+    lib.box(((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2), (x1 - x0, y1 - y0, z1 - z0), walls)
+    stone_course(x0, x1, y0, y1, z0 + 0.04, z1, blocks, rnd, block=block, depth=0.055)
+
+
+def chimney(x, y, zb, zt, blocks, rnd, name=None):
+    """A square stone chimney from zb to zt; records its mouth for smoke when `name` is given."""
+    z, k = zb, 0
+    while z < zt:
+        lib.box((x + rnd.uniform(-0.006, 0.006), y + rnd.uniform(-0.006, 0.006), z + 0.045), (0.17, 0.17, 0.085),
+                blocks[k % len(blocks)], rot=(0, 0, rnd.uniform(-0.06, 0.06)), bevel=0.012)
+        z += 0.09
+        k += 1
+    lib.box((x, y, zt + 0.03), (0.21, 0.21, 0.05), blocks[0], bevel=0.012)
+    if name:
+        note_fx(name, 'smoke', (x, y, zt + 0.08))
+
+
+def thatch_cone(loc, r, h, straw, layers=3):
+    """A conical thatched roof of a few overlapping straw skirts, with a little knob on top."""
+    x, y, z = loc
+    for k in range(layers):
+        t = k / layers
+        lib.cylinder((x, y, z + h * t * 0.5 + h * (1 - t * 0.5) / 2), r * (1 - t * 0.5) + 0.02, h * (1 - t * 0.5), straw,
+                     radius2=0.01 + r * 0.05 * (layers - k - 1), verts=28)
+    lib.cylinder((x, y, z + h + 0.03), 0.03, 0.08, straw, radius2=0.012, verts=10)
+
+
+def arch_door(x, y, z0, w, h, door, stones, face='y'):
+    """A plank door with a round top and a ring of voussoirs, set in the −Y wall at x."""
+    r = w / 2
+    lib.box((x, y - 0.04, z0 + (h - r) / 2), (w, 0.04, h - r), door, bevel=0.008)
+    lib.cylinder((x, y - 0.04, z0 + h - r), r, 0.04, door, rot=(math.pi / 2, 0, 0), verts=20)
+    for k in range(9):
+        a = math.pi * k / 8
+        lib.box((x + math.cos(a) * (r + 0.045), y - 0.07, z0 + h - r + math.sin(a) * (r + 0.045)), (0.07, 0.06, 0.08),
+                stones[k % len(stones)], rot=(0, -a + math.pi / 2, 0), bevel=0.012)
+
+
+# ------------------------------------------------------------------------------------- farm (3×3)
+
+def build_farm():
+    """Our farm: a long fieldstone farmhouse under wooden shingles with a chimney, an open thatched
+    barn on posts full of hay on the left, a round stave granary under a straw cap on the right, a
+    bit of fence and a trough by the door."""
+    rnd = random.Random(41)
+    walls = stone_walls()
+    blocks = block_mats()
+    beam = beam_mat()
+    straw = straw_mat()
+    hay = lib.mat_grain('hay', (0.7, 0.56, 0.2), (0.95, 0.84, 0.44), scale=14, stretch=(1, 1, 1), bump=1.0)
+    staves = lib.mat_grain('staves', (0.38, 0.22, 0.09), (0.6, 0.4, 0.18), scale=5, stretch=(1, 1, 9), bump=0.6)
+    iron = lib.mat_flat('iron', (0.22, 0.22, 0.24), rough=0.4)
+    door = door_mat()
+    dark = lib.mat_flat('dark', (0.06, 0.05, 0.04))
+    sh = shingle_mats()
+    earth_pad((0.2, -0.35, 0), 1.5, 1.6, seed=41)
+    lib.tag(0)
+    corner_stakes(-1.45, 1.45, -1.3, 1.3)
+    lib.tag(0, until=0)
+
+    # House: ridge along Y — its long shingled slope faces the camera's right (+X), the gable with
+    # the door faces −Y (the door tile is in front of x = 1).
+    hx0, hx1, hy0, hy1, H, rh = -0.55, 0.62, -1.3, 0.95, 0.7, 0.55
+    B = _b()
+    B.timber_frame((hx0 + hx1) / 2, (hy0 + hy1) / 2, hx1 - hx0, hy1 - hy0, H, rh, beam, axis='y')
+    lib.box(((hx0 + hx1) / 2, (hy0 + hy1) / 2, 0.05), (hx1 - hx0 + 0.06, hy1 - hy0 + 0.06, 0.1), blocks[1], bevel=0.02)
+    lib.tag(1, until=3)
+    stone_house(hx0, hx1, hy0, hy1, H * 0.5, rnd, walls, blocks, block=0.2)
+    lib.tag(2)
+    stone_house(hx0, hx1, hy0, hy1, H, rnd, walls, blocks, z0=H * 0.5, block=0.2)
+    lib.gable(((hx0 + hx1) / 2, (hy0 + hy1) / 2, H), hx1 - hx0, rh - 0.02, hy0 + 0.01, walls, along='y')
+    lib.gable(((hx0 + hx1) / 2, (hy0 + hy1) / 2, H), hx1 - hx0, rh - 0.02, hy1 - 0.01, walls, along='y')
+    lib.box((0.32, hy0 - 0.05, 0.22), (0.24, 0.04, 0.44), door, bevel=0.01)
+    lib.box((0.32, hy0 - 0.07, 0.46), (0.32, 0.06, 0.06), beam, bevel=0.01)
+    window(-0.2, hy0 - 0.04, 0.42, 0.14, 0.15, beam, dark)
+    window(hx1 + 0.04, 0.15, 0.45, 0.16, 0.16, beam, dark, face='x')
+    window(hx1 + 0.04, -0.75, 0.45, 0.16, 0.16, beam, dark, face='x')
+    window((hx0 + hx1) / 2, hy0 - 0.03, H + rh * 0.38, 0.12, 0.12, beam, dark)
+    lib.tag(3)
+    scale_roof((hx0 + hx1) / 2, (hy0 + hy1) / 2, hx1 - hx0, hy1 - hy0, H, rh, sh, lib.mat_flat('ridge', (0.38, 0.24, 0.1)),
+               axis='y', overhang=0.12, seed=42, size=0.13, shape='tile')
+    lib.tag(None, split=lambda o: 3 if o.location.x > (hx0 + hx1) / 2 else 4)
+    chimney(hx0 + 0.32, hy1 - 0.4, H, H + rh + 0.2, blocks, rnd, name='farm')
+    lib.tag(4)
+
+    # Open barn on the left: posts, a thatched lean-to sloping away from the house, hay heaped inside.
+    bx0, bx1, by0, by1 = -1.45, hx0 - 0.02, -1.0, 0.75
+    lo, hi = 0.42, 0.68
+    for (x, y, h) in ((bx0, by0, lo), (bx0, by1, lo), (bx1, by0, hi), (bx1, by1, hi)):
+        lib.cylinder((x, y, h / 2), 0.035, h, beam, verts=8)
+    lib.box((bx0, (by0 + by1) / 2, lo), (0.05, by1 - by0 + 0.1, 0.05), beam)
+    lib.tag(2)
+    for k in range(5):
+        lib.lumpy((bx0 + 0.22 + (k % 2) * 0.32, by0 + 0.3 + k * 0.32, 0.13), 0.19, hay, scale=(1.1, 1, 0.75),
+                  strength=0.35, noise=0.9, seed=k)
+    lib.tag(3)
+    tilt = math.atan2(hi - lo, bx1 - bx0)
+    run = math.hypot(bx1 - bx0, hi - lo) + 0.22
+    for k in range(3):  # three overlapping straw layers, the lower ones further out
+        lib.box(((bx0 + bx1) / 2 - 0.04 * k, (by0 + by1) / 2, (lo + hi) / 2 + 0.06 - 0.025 * k),
+                (run - 0.12 * k, by1 - by0 + 0.3, 0.07), straw, rot=(0, -tilt, 0), bevel=0.035)
+    lib.tag(4)
+
+    # Round granary on the right of the house.
+    gx, gy, gr, gh = 1.08, 0.55, 0.34, 0.6
+    lib.cylinder((gx, gy, 0.04), gr + 0.05, 0.08, blocks[1], verts=24)
+    lib.tag(1)
+    for k in range(22):
+        a = k / 22 * math.tau
+        lib.box((gx + math.cos(a) * gr, gy + math.sin(a) * gr, gh / 2 + 0.06), (0.1, 0.035, gh), staves,
+                rot=(0, 0, a + math.pi / 2), bevel=0.006)
+    for z in (0.18, gh - 0.02):
+        torus((gx, gy, z), gr + 0.02, 0.014, iron)
+    lib.tag(None, split=lambda o: 2 if o.location.z < 0.3 else 3)
+    thatch_cone((gx, gy, gh + 0.04), gr + 0.12, 0.42, straw)
+    lib.tag(4)
+
+    # A short fence and a water trough near the door.
+    for k in range(5):
+        lib.box((0.72 + k * 0.17, -1.42, 0.12), (0.035, 0.035, 0.24), beam)
+    for z in (0.1, 0.2):
+        lib.box((1.06, -1.42, z), (0.7, 0.03, 0.035), beam)
+    lib.box((-0.8, -1.2, 0.07), (0.4, 0.16, 0.12), staves, bevel=0.01)
+    lib.tag(4)
+
+
+# ------------------------------------------------------------------------------------- mill (2×2)
+
+def build_mill():
+    """Our windmill: a round stone tower tapering up from a wider drum of planks on a stone footing,
+    with small windows and a railed gallery, under a conical thatched cap. The sails are not
+    modelled: the game turns its own sails sprite at the hub this model records (FX_AT['mill'])."""
+    rnd = random.Random(51)
+    blocks = block_mats()
+    walls = stone_walls()
+    beam = beam_mat()
+    straw = straw_mat()
+    planks = boards_mats()
+    glass = lib.mat_flat('glass', (0.7, 0.62, 0.42), rough=0.3)
+    door = door_mat()
+    earth_pad((0.1, -0.3, 0), 1.0, 1.1, seed=51)
+    lib.tag(0)
+    corner_stakes(-0.85, 0.85, -0.85, 0.85)
+    lib.tag(0, until=0)
+
+    cx, cy = 0.0, 0.05
+    R, DH = 0.64, 0.5
+    lib.cylinder((cx, cy, 0.06), R + 0.04, 0.12, blocks[1], verts=32)
+    lib.tag(1)
+    lib.cylinder((cx, cy, 0.12 + DH / 2), R - 0.02, DH, walls, verts=32)
+    for k in range(26):
+        a = k / 26 * math.tau
+        lib.box((cx + math.cos(a) * R, cy + math.sin(a) * R, 0.12 + DH / 2), (0.18, 0.04, DH),
+                planks[k % len(planks)], rot=(0, 0, a + math.pi / 2), bevel=0.005)
+    for a in (-2.1, -1.0, -0.2):  # windows on the camera side
+        lib.box((cx + math.cos(a) * (R + 0.025), cy + math.sin(a) * (R + 0.025), 0.33), (0.14, 0.03, 0.13), glass,
+                rot=(0, 0, a + math.pi / 2))
+    a = -1.55  # door, towards the door tile
+    lib.box((cx + math.cos(a) * (R + 0.03), cy + math.sin(a) * (R + 0.03), 0.21), (0.22, 0.03, 0.3), door,
+            rot=(0, 0, a + math.pi / 2), bevel=0.008)
+    lib.tag(2)
+    gz = 0.12 + DH
+    lib.cylinder((cx, cy, gz + 0.02), R + 0.08, 0.04, planks[1], verts=32)
+    for k in range(16):
+        a = k / 16 * math.tau
+        lib.cylinder((cx + math.cos(a) * (R + 0.04), cy + math.sin(a) * (R + 0.04), gz + 0.12), 0.018, 0.2, beam, verts=6)
+    torus((cx, cy, gz + 0.22), R + 0.04, 0.02, beam)
+    lib.tag(3)
+    TH, r0, r1, rows = 1.35, 0.46, 0.33, 12
+    for r in range(rows):
+        t = (r + 0.5) / rows
+        rr = r0 + (r1 - r0) * t
+        z = gz + 0.04 + TH * t
+        lib.cylinder((cx, cy, z), rr - 0.03, TH / rows + 0.01, walls, verts=20)
+        for k in range(14):
+            a = (k + 0.5 * (r % 2)) / 14 * math.tau
+            lib.box((cx + math.cos(a) * rr, cy + math.sin(a) * rr, z), (rr * math.tau / 14 * 0.92, 0.08, TH / rows * 0.86),
+                    blocks[rnd.randrange(len(blocks))], rot=(0, 0, a + math.pi / 2), bevel=0.012)
+    lib.tag(None, split=lambda o: 3 if o.location.z < gz + TH * 0.5 else 4)
+    top = gz + 0.04 + TH
+    thatch_cone((cx, cy, top - 0.04), r1 + 0.24, 0.6, straw)
+    # The hub: a timber block on the camera side of the tower, where the game turns the sails.
+    a = -math.pi / 4  # between −Y and +X: straight at the camera
+    hx, hy, hz = cx + math.cos(a) * (r1 + 0.1), cy + math.sin(a) * (r1 + 0.1), top - 0.1
+    lib.box((hx, hy, hz), (0.14, 0.14, 0.14), beam, rot=(0, 0, a), bevel=0.02)
+    lib.cylinder((hx + math.cos(a) * 0.08, hy + math.sin(a) * 0.08, hz), 0.05, 0.06, beam,
+                 rot=(math.pi / 2, 0, a + math.pi / 2), verts=12)
+    note_fx('mill', 'hub', (hx + math.cos(a) * 0.12, hy + math.sin(a) * 0.12, hz))
+    lib.tag(4)
+
+
+# ------------------------------------------------------------------------------------- bakery (2×2)
+
+def build_bakery():
+    """Our bakery: a two-storey stone house under orange terracotta with a lower front wing, an arched
+    door, a big stone chimney over the oven, and a hanging sign with a carved pretzel."""
+    rnd = random.Random(61)
+    walls = stone_walls()
+    blocks = block_mats()
+    beam = beam_mat()
+    tiles = terracotta_mats()
+    ridge = lib.mat_flat('tc-ridge', (0.62, 0.26, 0.1))
+    dark = lib.mat_flat('dark', (0.06, 0.05, 0.04))
+    door = door_mat()
+    sign = lib.mat_flat('sign', (0.24, 0.36, 0.56), rough=0.6)
+    bread = lib.mat_grain('bread', (0.58, 0.32, 0.1), (0.82, 0.54, 0.24), scale=12, stretch=(1, 1, 1), bump=0.6)
+    glass = lib.mat_flat('wglass', (0.82, 0.8, 0.72), rough=0.4)
+    earth_pad((0.1, -0.3, 0), 1.05, 1.15, seed=61)
+    lib.tag(0)
+
+    # Main block at the back (ridge along X); the lower front wing (ridge along Y) has its gable
+    # with the door towards −Y, just left of the door tile.
+    mx0, mx1, my0, my1, mH, mrh = -0.8, 0.85, -0.15, 0.85, 0.95, 0.42
+    fx0, fx1, fy0, fy1, fH, frh = -0.7, 0.32, -0.95, -0.15, 0.52, 0.32
+    corner_stakes(mx0, mx1, fy0, my1)
+    lib.tag(0, until=0)
+    lib.box(((mx0 + mx1) / 2, (my0 + my1) / 2, 0.05), (mx1 - mx0 + 0.06, my1 - my0 + 0.06, 0.1), blocks[1], bevel=0.02)
+    lib.box(((fx0 + fx1) / 2, (fy0 + fy1) / 2, 0.05), (fx1 - fx0 + 0.06, fy1 - fy0 + 0.06, 0.1), blocks[1], bevel=0.02)
+    lib.tag(1)
+    stone_house(mx0, mx1, my0, my1, mH * 0.5, rnd, walls, blocks)
+    stone_house(fx0, fx1, fy0, fy1, fH, rnd, walls, blocks)
+    lib.tag(2)
+    stone_house(mx0, mx1, my0, my1, mH, rnd, walls, blocks, z0=mH * 0.5)
+    lib.gable(((mx0 + mx1) / 2, (my0 + my1) / 2, mH), my1 - my0, mrh - 0.02, mx1 - 0.01, walls, along='x')
+    lib.gable(((fx0 + fx1) / 2, (fy0 + fy1) / 2, fH), fx1 - fx0, frh - 0.02, fy0 + 0.01, walls, along='y')
+    arch_door((fx0 + fx1) / 2 + 0.08, fy0, 0.02, 0.24, 0.4, door, [blocks[2], blocks[0]])
+    note_fx('bakery', 'glow', ((fx0 + fx1) / 2 + 0.08, fy0 - 0.08, 0.2))  # the oven's light at the door
+    window(-0.45, fy0 - 0.04, 0.3, 0.13, 0.14, beam, dark)
+    window(0.6, my0 - 0.04, mH * 0.72, 0.16, 0.18, beam, glass)
+    window(mx1 + 0.04, 0.35, mH * 0.72, 0.16, 0.18, beam, glass, face='x')
+    window(mx1 + 0.04, 0.35, mH * 0.28, 0.16, 0.16, beam, dark, face='x')
+    lib.tag(3)
+    scale_roof((mx0 + mx1) / 2, (my0 + my1) / 2, mx1 - mx0, my1 - my0, mH, mrh, tiles, ridge, axis='x',
+               overhang=0.1, seed=62, size=0.12, shape='tile')
+    lib.tag(None, split=lambda o: 3 if o.location.y < (my0 + my1) / 2 else 4)
+    scale_roof((fx0 + fx1) / 2, (fy0 + fy1) / 2, fx1 - fx0, fy1 - fy0, fH, frh, tiles, ridge, axis='y',
+               overhang=0.08, seed=63, size=0.11, shape='tile')
+    chimney(0.5, 0.55, mH, mH + mrh + 0.28, blocks, rnd, name='bakery')
+    # Hanging sign on a bracket at the wing's corner: a blue board with a carved pretzel.
+    sx, sy = fx1 + 0.14, fy0 - 0.02
+    lib.box((sx - 0.07, sy, 0.66), (0.22, 0.03, 0.03), beam)
+    lib.box((sx, sy - 0.01, 0.52), (0.03, 0.15, 0.17), sign, bevel=0.01)
+    torus((sx + 0.025, sy - 0.035, 0.52), 0.045, 0.014, bread, rot=(0, math.pi / 2, 0))
+    torus((sx + 0.025, sy + 0.025, 0.52), 0.045, 0.014, bread, rot=(0, math.pi / 2, 0))
+    lib.tag(4)
+
+
+# ------------------------------------------------------------------------------------- waterworks (2×2)
+
+def build_waterworks():
+    """Our waterworks: a small stone pump house under terracotta, a timber water wheel on its right
+    wall, and a stone trough of water under a little tiled lean-to in front."""
+    rnd = random.Random(71)
+    walls = stone_walls()
+    blocks = block_mats()
+    beam = beam_mat()
+    planks = boards_mats()
+    tiles = terracotta_mats()
+    ridge = lib.mat_flat('tc-ridge', (0.62, 0.26, 0.1))
+    water = lib.mat_flat('water', (0.24, 0.56, 0.72), rough=0.1)
+    iron = lib.mat_flat('iron', (0.22, 0.22, 0.24), rough=0.4)
+    door = door_mat()
+    earth_pad((0.1, -0.3, 0), 1.0, 1.1, seed=71)
+    lib.tag(0)
+
+    x0, x1, y0, y1, H, rh = -0.7, 0.45, -0.6, 0.85, 0.66, 0.4
+    corner_stakes(x0, x1 + 0.3, y0 - 0.45, y1)
+    lib.tag(0, until=0)
+    lib.box(((x0 + x1) / 2, (y0 + y1) / 2, 0.05), (x1 - x0 + 0.06, y1 - y0 + 0.06, 0.1), blocks[1], bevel=0.02)
+    lib.tag(1)
+    stone_house(x0, x1, y0, y1, H * 0.5, rnd, walls, blocks)
+    lib.tag(2)
+    stone_house(x0, x1, y0, y1, H, rnd, walls, blocks, z0=H * 0.5)
+    lib.gable(((x0 + x1) / 2, (y0 + y1) / 2, H), x1 - x0, rh - 0.02, y0 + 0.01, walls, along='y')
+    lib.box((0.2, y0 - 0.05, 0.2), (0.22, 0.04, 0.38), door, bevel=0.008)
+    lib.box((0.2, y0 - 0.07, 0.41), (0.3, 0.06, 0.05), beam)
+    lib.tag(3)
+    scale_roof((x0 + x1) / 2, (y0 + y1) / 2, x1 - x0, y1 - y0, H, rh, tiles, ridge, axis='y',
+               overhang=0.1, seed=72, size=0.12, shape='tile')
+    lib.tag(None, split=lambda o: 3 if o.location.x > (x0 + x1) / 2 else 4)
+
+    # Water wheel on the +X wall: two rims, spokes, paddles, an iron axle.
+    wx, wy, wz, wr = x1 + 0.15, 0.25, 0.36, 0.34
+    for dx in (-0.06, 0.06):
+        torus((wx + dx, wy, wz), wr, 0.02, beam, rot=(0, math.pi / 2, 0))
+    for k in range(4):
+        lib.box((wx, wy, wz), (0.03, wr * 2, 0.03), beam, rot=(k / 4 * math.pi, 0, 0))
+    for k in range(16):
+        a = k / 16 * math.tau
+        lib.box((wx, wy + math.cos(a) * wr, wz + math.sin(a) * wr), (0.16, 0.025, 0.09), planks[k % len(planks)],
+                rot=(a, 0, 0), bevel=0.004)
+    lib.cylinder((wx - 0.06, wy, wz), 0.035, 0.22, iron, rot=(0, math.pi / 2, 0), verts=10)
+    lib.tag(4)
+
+    # Stone trough with water under a lean-to, in front of the house on the left.
+    tx0, tx1, ty0, ty1 = -0.78, -0.12, -1.08, -0.68
+    lib.box(((tx0 + tx1) / 2, (ty0 + ty1) / 2, 0.09), (tx1 - tx0, ty1 - ty0, 0.18), blocks[2], bevel=0.015)
+    lib.box(((tx0 + tx1) / 2, (ty0 + ty1) / 2, 0.175), (tx1 - tx0 - 0.08, ty1 - ty0 - 0.08, 0.02), water)
+    lib.tag(3)
+    for x in (tx0, tx1):
+        lib.box((x, ty0 - 0.02, 0.24), (0.04, 0.04, 0.48), beam)
+    tilt = math.atan2(0.15, ty1 - ty0 + 0.1)
+    for k in range(5):
+        x = tx0 - 0.04 + (k + 0.5) * (tx1 - tx0 + 0.08) / 5
+        lib.box((x, (ty0 + ty1) / 2 + 0.02, 0.5), ((tx1 - tx0 + 0.08) / 5 * 0.9, ty1 - ty0 + 0.26, 0.025),
+                tiles[k % len(tiles)], rot=(-tilt, 0, 0), bevel=0.005)
+    lib.tag(4)
+
+
+# ------------------------------------------------------------------------------------- warehouse (2×2)
+
+def build_warehouse():
+    """Our storage yard: an open, round paved platform — rings of dark and light cobbles round a pale
+    centre stone with a gilded wheat-sheaf rosette. The game stacks the stored goods on the ring."""
+    rnd = random.Random(81)
+    cobbles = [lib.mat_grain(f'cob{k}', a, b, scale=8, stretch=(1, 1, 1), bump=0.8) for k, (a, b) in enumerate((
+        ((0.38, 0.38, 0.4), (0.62, 0.62, 0.64)),
+        ((0.46, 0.45, 0.43), (0.7, 0.69, 0.66)),
+        ((0.3, 0.3, 0.32), (0.5, 0.5, 0.52)),
+    ))]
+    light = lib.mat_grain('centre', (0.72, 0.68, 0.58), (0.9, 0.87, 0.78), scale=6, stretch=(1, 1, 1), bump=0.5)
+    gold = lib.mat_flat('wheat', (0.86, 0.68, 0.22), rough=0.4)
+    earth_pad((0.0, -0.15, 0), 1.0, 1.05, seed=81)
+    lib.tag(0)
+    corner_stakes(-0.95, 0.95, -0.95, 0.95)
+    lib.tag(0, until=0)
+
+    def ring(r0, r1, n, mats, stage):
+        rr = (r0 + r1) / 2
+        for k in range(n):
+            a = (k + rnd.uniform(-0.12, 0.12)) / n * math.tau
+            lib.box((math.cos(a) * rr, math.sin(a) * rr, 0.045), (rr * math.tau / n * 0.86, (r1 - r0) * 0.86,
+                    0.05 + rnd.uniform(0, 0.015)), mats[rnd.randrange(len(mats))], rot=(0, 0, a + math.pi / 2),
+                    bevel=0.012)
+        lib.tag(stage)
+
+    lib.cylinder((0, 0, 0.02), 1.0, 0.04, cobbles[2], verts=48)
+    lib.tag(1)
+    ring(0.86, 1.0, 40, cobbles[2:], 1)
+    ring(0.7, 0.86, 34, cobbles[:2], 2)
+    ring(0.56, 0.7, 28, cobbles, 2)
+    ring(0.44, 0.56, 22, cobbles[:2], 3)
+    ring(0.34, 0.44, 18, cobbles[2:], 3)
+    lib.cylinder((0, 0, 0.05), 0.33, 0.06, light, verts=32, bevel=0.01)
+    for k in range(8):
+        a = k / 8 * math.tau
+        o = lib.sphere((math.cos(a) * 0.17, math.sin(a) * 0.17, 0.085), 0.05, gold, scale=(1.6, 0.6, 0.35))
+        o.rotation_euler = (0, 0, a)
+        lib.box((math.cos(a) * 0.08, math.sin(a) * 0.08, 0.085), (0.1, 0.012, 0.012), gold, rot=(0, 0, a))
+    lib.sphere((0, 0, 0.09), 0.055, gold, scale=(1, 1, 0.4))
+    lib.tag(4)

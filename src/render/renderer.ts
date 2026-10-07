@@ -31,7 +31,12 @@ import { AnimalLayer } from './animals';
 import { setFrame, type Settler3d } from './settler3d';
 import { BODY_STAND, BODY_WORK, CARRY_AT } from './settlerArt';
 import { depthOf, HALF_H, HALF_W, toScreen, toTile } from './iso';
-import { ART3D_BANNERS, ART3D_STAGES, PILE_MAX } from './art3d';
+import { ART3D_BANNERS, ART3D_STAGES, ART3D_YARDS, PILE_MAX } from './art3d';
+
+/** Goods kinds shown on an open storage yard, and the ring they stand on (screen px from its centre). */
+const YARD_KINDS = 8;
+const YARD_RX = 30;
+const YARD_RY = 15;
 import { needsLevelling } from '../sim/digging';
 import { pathLevel } from '../sim/paths';
 import { chatPartner } from '../sim/idle';
@@ -1181,7 +1186,10 @@ export class GameRenderer {
 
   /** Goods lying at the door: output pile on the right, input pile on the left. */
   private syncPile(b: Building, v: BuildingView): void {
-    if (BUILDINGS[b.type].storage) return;
+    if (BUILDINGS[b.type].storage) {
+      if (b.done && this.atlas.art3d && ART3D_YARDS.includes(b.type)) this.syncYard(b, v);
+      return;
+    }
     // Materials on a site not yet built in; the builder uses planks first, then stone.
     const used = b.done ? 0 : Math.floor(b.progress / BUILD_TICKS_PER_UNIT);
     const usedPlanks = Math.min(used, b.delivered.plank);
@@ -1229,6 +1237,35 @@ export class GameRenderer {
     for (const r of RESOURCES) if (b.input[r] > 0) stack(r, b.input[r], -1);
     if (waitingPlank > 0) stack('plank', waitingPlank, -1);
     if (waitingStone > 0) stack('stone', waitingStone, -1);
+  }
+
+  /**
+   * An open storage yard (`ART3D_YARDS`, `?art=3d`) shows its stock on the platform, as in Settlers 4:
+   * the `YARD_KINDS` most plentiful goods, one pre-rendered pile each (up to `PILE_MAX` items),
+   * around the ring between the kerb and the centre stone, drawn back to front.
+   */
+  private syncYard(b: Building, v: BuildingView): void {
+    const key = RESOURCES.map((r) => Math.min(b.output[r], PILE_MAX)).join(',');
+    if (key === v.pileKey) return;
+    v.pileKey = key;
+    while (v.front.children.length > 0) v.front.children[0].destroy();
+    const kinds = RESOURCES.filter((r) => b.output[r] > 0)
+      .sort((p, q) => b.output[q] - b.output[p] || RESOURCES.indexOf(p) - RESOURCES.indexOf(q))
+      .slice(0, YARD_KINDS);
+    // The platform's centre, seen from the door tile where the front container stands.
+    const c = this.surface(v.at.x, v.at.y);
+    const d = this.surface(v.doorAt.x, v.doorAt.y);
+    const spots = kinds.map((res, k) => {
+      // Start at the back of the ring and go round, so few kinds sit where they are best seen.
+      const a = -Math.PI / 2 + (k / YARD_KINDS) * Math.PI * 2;
+      return { res, x: c.x - d.x + Math.cos(a) * YARD_RX, y: c.y - d.y + Math.sin(a) * YARD_RY + 4 };
+    });
+    spots.sort((p, q) => p.y - q.y);
+    for (const { res, x, y } of spots) {
+      const s = new Sprite(this.atlas.get(`pile:${res}:${Math.min(b.output[res], PILE_MAX)}`));
+      s.position.set(x, y);
+      v.front.addChild(s);
+    }
   }
 
   private syncSettlers(alpha: number, timeMs: number): void {

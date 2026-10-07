@@ -47,6 +47,11 @@ export const ART3D_BUILDINGS: Record<string, { w: number; h: number; ax: number;
   stonecutter: { w: 150, h: 140, ax: 75, ay: 100 },
   tower: { w: 150, h: 210, ax: 75, ay: 170 },
   house_large: { w: 220, h: 190, ax: 110, ay: 135 },
+  farm: { w: 220, h: 190, ax: 110, ay: 135 },
+  mill: { w: 150, h: 210, ax: 75, ay: 165 },
+  bakery: { w: 150, h: 140, ax: 75, ay: 100 },
+  waterworks: { w: 150, h: 140, ax: 75, ay: 100 },
+  warehouse: { w: 150, h: 140, ax: 75, ay: 100 },
 };
 /** Buildings rendered with their construction stages. */
 export const ART3D_STAGED = Object.keys(ART3D_BUILDINGS);
@@ -57,6 +62,18 @@ export const ART3D_STAGED = Object.keys(ART3D_BUILDINGS);
 export const ART3D_BANNERS: Record<string, { x: number; y: number }> = {
   tower: { x: 3.2, y: -73.3 },
 };
+/**
+ * Live-effect anchors of 3D buildings, from the sprite anchor (printed by buildings.py's `note_fx`
+ * while rendering): chimney mouths for smoke and the mill's sail hub. Under `?art=3d` they replace
+ * the procedural painters' `buildingFxAnchors` for these types.
+ */
+export const ART3D_FX: Record<string, { smoke?: [number, number][]; glow?: [number, number][]; hub?: [number, number] }> = {
+  farm: { smoke: [[10.2, -72.4]] },
+  mill: { hub: [1.6, -63.2] },
+  bakery: { smoke: [[33.6, -68.6]], glow: [[-36.5, 6.9]] },
+};
+/** Storage yards drawn as open platforms whose stock lies on them (`syncPile`). */
+export const ART3D_YARDS = ['warehouse'];
 /**
  * Goods piles at a door, for every resource: `piles-<res>.png` is a strip of `PILE_MAX` frames, frame
  * k holding k + 1 items (`GOODS` in art/blender/goods.py).

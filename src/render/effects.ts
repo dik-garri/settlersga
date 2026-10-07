@@ -5,7 +5,8 @@ import type { World } from '../sim/world';
 import type { SpriteAtlas } from './atlas';
 import { BUILDING_FX, WORKING_GRACE_MS, type SoundId } from './animConfig';
 import { CHUNK } from '../sim/map';
-import { buildingFxAnchors } from './sprites';
+import { ART3D_FX } from './art3d';
+import { buildingFxAnchors, type FxAnchors } from './sprites';
 
 /** Particle budget: the oldest particles are recycled first when it runs out. */
 const MAX_PARTICLES = 700;
@@ -74,6 +75,8 @@ export class Effects {
   private readonly waterChunks: (Container | null)[];
   private readonly glintPhase: Float32Array[] = [];
   private readonly tex: Record<'puff' | 'spark' | 'glow' | 'glint' | 'flash' | 'sails', Texture>;
+  /** 3D buildings are drawn (`?art=3d`): their effects sit at the anchors their renders recorded. */
+  private readonly art3d: boolean;
 
   constructor(
     atlas: SpriteAtlas,
@@ -82,6 +85,7 @@ export class Effects {
     /** Positional sound hook (world pixels); the renderer filters what is off screen. */
     private readonly sound: (id: SoundId, x: number, y: number) => void,
   ) {
+    this.art3d = atlas.art3d !== null;
     this.tex = {
       puff: atlas.get('fx:puff'),
       spark: atlas.get('fx:spark'),
@@ -186,10 +190,18 @@ export class Effects {
 
   // -------------------------------------------------------------- buildings
 
+  /** Effect anchors of a building type: the 3D model's (`ART3D_FX`) under `?art=3d`, else the painter's. */
+  private anchorsOf(type: Building['type']): FxAnchors {
+    const base = buildingFxAnchors(type);
+    const art = this.art3d ? ART3D_FX[type] : undefined;
+    if (!art) return base;
+    return { smoke: art.smoke ?? base.smoke, glow: art.glow ?? base.glow, hub: art.hub ?? base.hub };
+  }
+
   /** Called when the renderer creates a building view; adds sails and fire glows to its body. */
   attachBuilding(b: Building, body: Container): void {
     const fx = BUILDING_FX[b.type];
-    const anchors = buildingFxAnchors(b.type);
+    const anchors = this.anchorsOf(b.type);
     const v: BuildingFxView = {
       b,
       body,
