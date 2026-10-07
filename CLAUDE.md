@@ -32,6 +32,7 @@ npm run sim:probe      # economy health: standard opening, 60 min on 4 seeds (--
 npm run sim:bench      # sim performance: 256×256 map, 1000 settlers (--size= --settlers= --ticks=)
 npm run sim:ai         # computer players, headless: AI vs AI or vs a passive player 1 (--passive=1 --seeds= --minutes= --cost=1)
 npm run art:render     # Blender: re-render the 3D sprite pilot into public/art/3d (-- settlers woodcutter tree deposit piles wares; piles:fish,coal for some)
+npm run art:quantize   # after any art:render: shrink every 3D sprite to a 256-colour PNG (Pillow)
 npm run art:ground     # Blender: regenerate the seamless ground textures (grass) into public/art/3d
 npm run art:animals    # Blender: re-render the animal sheets into public/art/3d (-- deer donkey duck chicken)
 ```
