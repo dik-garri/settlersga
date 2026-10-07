@@ -307,8 +307,9 @@ function fractalNoise(rng: Rng, w: number, h: number): Float32Array {
  * Resources every start is guaranteed, the same for each player (fair starts) and at the same
  * offsets from the castle centre. Mountains are lobes of ore, each big enough for its own mine;
  * `elevate` gives every lobe a summit. Quarries are fields of stone boulders. The near mountain (coal
- * and iron) lies inside the castle's land; the far one (stone and gold) just beyond it, so it takes
- * a tower to reach, as gold usually does in Settlers 4. Lobe radii grow a little with the map
+ * and iron) lies inside the castle's land; the far one (stone, gold and more coal — the most used
+ * ore) just beyond it — not taking
+ * building land from the start — so it takes a tower to reach, as gold usually does in Settlers 4. Lobe radii grow a little with the map
  * (`guaranteeScale`), so bigger maps get more.
  */
 export const START_GUARANTEES = {
@@ -322,11 +323,12 @@ export const START_GUARANTEES = {
       ],
     },
     {
-      dx: 9,
-      dy: 8,
+      dx: 10,
+      dy: 10,
       lobes: [
         { dx: -1.8, dy: 0, r: 2.1, ore: 'stone' as const },
         { dx: 1.8, dy: 0, r: 2.1, ore: 'goldore' as const },
+        { dx: 0, dy: -3.4, r: 2.1, ore: 'coal' as const },
       ],
     },
   ],

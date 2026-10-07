@@ -50,6 +50,11 @@ const TERRAIN_KIND: Record<Terrain, GroundKind> = {
 
 const TREE_SCALE = [0, 0.35, 0.55, 0.78, 1];
 
+/** Chunk unloading (`unloadHiddenChunks`): built chunks kept regardless, hidden time before a chunk goes, and per call. */
+const KEEP_CHUNKS = 256;
+const UNLOAD_AFTER_MS = 20_000;
+const UNLOADS_PER_CALL = 32;
+
 /** First-time chunk builds allowed per frame (see `syncVisibleChunks`). */
 const CHUNK_BUILDS_PER_FRAME = 6;
 
@@ -169,6 +174,14 @@ export class GameRenderer {
    */
   private readonly chunkReady: Uint8Array;
   private readonly territoryPending: Uint8Array;
+  /**
+   * Scaling (1024×1024): a built chunk out of view for `UNLOAD_AFTER_MS` gives its render data back
+   * (`unloadChunk`) — ground mesh, shading, decals, boulders, trees, deposits, signs, territory and
+   * fog — and is rebuilt by `ensureChunk` when it comes into view again. Buildings stay.
+   */
+  private readonly chunkHiddenAt: Float64Array;
+  private readonly boulders: Container[][] = [];
+  private lastUnload = 0;
   private lastHeightSync = 0;
   /** Where each static object stands (tile coordinates) and its offset from that surface point. */
   private readonly staticAt = new WeakMap<Container, { x: number; y: number; ox: number; oy: number }>();
@@ -313,10 +326,12 @@ export class GameRenderer {
     this.heightSeen = new Uint32Array(chunks);
     this.chunkReady = new Uint8Array(chunks);
     this.territoryPending = new Uint8Array(chunks);
+    this.chunkHiddenAt = new Float64Array(chunks);
     this.chunkBounds = new Float32Array(chunks * 4);
     this.groundSheet = new Texture({ source: this.atlas.get('ground:grass:0').source });
     for (let c = 0; c < chunks; c++) {
       this.chunkObjects.push(new Set());
+      this.boulders.push([]);
       this.computeChunkBounds(c);
     }
     this.buildGround();
@@ -420,6 +435,7 @@ export class GameRenderer {
         rock.scale.set((kind === 'rock' ? 0.8 : 0.4) + ((hash(i) >> 4) % 4) * 0.08);
         rock.zIndex = depthOf(x, y);
         this.addStatic(rock, x, y);
+        this.boulders[c].push(rock);
       }
     }
   }
@@ -574,8 +590,8 @@ export class GameRenderer {
     if (this.chunkVisible[c]) this.objects.addChild(obj);
   }
 
-  private removeStatic(obj: Container, x: number, y: number): void {
-    this.chunkObjects[this.sim.map.chunkOf(Math.round(x), Math.round(y))].delete(obj);
+  private removeStatic(obj: Container, x: number, y: number, chunk?: number): void {
+    this.chunkObjects[chunk ?? this.sim.map.chunkOf(Math.round(x), Math.round(y))].delete(obj);
     obj.destroy();
   }
 
@@ -598,6 +614,7 @@ export class GameRenderer {
     this.syncHeights(timeMs);
     this.syncTerritory();
     this.syncVisibleChunks();
+    this.unloadHiddenChunks(timeMs);
     this.syncChangedTiles();
     this.syncBuildings();
     this.syncSettlers(alpha, timeMs);
@@ -780,6 +797,65 @@ export class GameRenderer {
     }
   }
 
+  /**
+   * Gives back the render data of chunks long out of view: at most a few per call, the longest
+   * hidden first, and only while more chunks are built than `KEEP_CHUNKS` (so small maps never
+   * unload). Called about once a second.
+   */
+  private unloadHiddenChunks(timeMs: number): void {
+    if (timeMs - this.lastUnload < 1000) return;
+    this.lastUnload = timeMs;
+    let ready = 0;
+    for (let c = 0; c < this.chunkReady.length; c++) ready += this.chunkReady[c];
+    if (ready <= KEEP_CHUNKS) return;
+    const stale: number[] = [];
+    for (let c = 0; c < this.chunkReady.length; c++) {
+      if (this.chunkReady[c] && !this.chunkVisible[c] && timeMs - this.chunkHiddenAt[c] > UNLOAD_AFTER_MS) stale.push(c);
+    }
+    stale.sort((a, b) => this.chunkHiddenAt[a] - this.chunkHiddenAt[b] || a - b);
+    for (const c of stale.slice(0, Math.min(UNLOADS_PER_CALL, ready - KEEP_CHUNKS))) this.unloadChunk(c);
+  }
+
+  private unloadChunk(c: number): void {
+    const { map } = this.sim;
+    this.chunkReady[c] = 0;
+    this.groundLayers[c]?.destroy({ children: true });
+    this.groundLayers[c] = null;
+    for (const rock of this.boulders[c]) this.removeStatic(rock, 0, 0, c);
+    this.boulders[c] = [];
+    const x0 = (c % map.chunksX) * CHUNK;
+    const y0 = Math.floor(c / map.chunksX) * CHUNK;
+    for (let y = y0; y < Math.min(map.h, y0 + CHUNK); y++) {
+      for (let x = x0; x < Math.min(map.w, x0 + CHUNK); x++) {
+        const i = map.idx(x, y);
+        for (const list of [this.treeSprites, this.depositSprites, this.signSprites]) {
+          const sprite = list[i];
+          if (sprite) this.removeStatic(sprite, x, y);
+          list[i] = null;
+        }
+        for (const list of [this.cropSprites, this.pathSprites]) {
+          list[i]?.destroy();
+          list[i] = null;
+        }
+        this.treeState[i] = 0;
+        this.depositState[i] = 0;
+        this.signState[i] = 0;
+        this.cropState[i] = 0;
+        this.pathState[i] = 0;
+      }
+    }
+    // Tiles re-sync on the next view; territory is redrawn by `ensureChunk`.
+    this.chunkSeen[c] = -1;
+    this.territoryChunks[c].clear();
+    this.territoryPending[c] = 1;
+    this.fogMesh[c]?.destroy();
+    this.fogMesh[c] = null;
+    this.fogTex[c]?.destroy(true);
+    this.fogTex[c] = null;
+    this.fogCanvas[c] = null;
+    this.fogPrev[c] = null;
+  }
+
   private syncVisibleChunks(): void {
     const { x, y, w, h } = this.view;
     const b = this.chunkBounds;
@@ -792,6 +868,7 @@ export class GameRenderer {
       if (visible && !this.chunkReady[c] && builds-- <= 0) continue; // next frame
       this.chunkVisible[c] = visible;
       if (visible) this.ensureChunk(c);
+      else this.chunkHiddenAt[c] = this.nowMs;
       this.groundChunks[c].visible = visible === 1;
       this.territoryChunks[c].visible = visible === 1;
       this.fogChunks[c].visible = visible === 1 && this.fogOn;
