@@ -55,7 +55,7 @@ export const ART3D_STAGED = Object.keys(ART3D_BUILDINGS);
  * by buildings.py's `note_banner` when it renders); replaces `BANNERS` in `sprites.ts` under `?art=3d`.
  */
 export const ART3D_BANNERS: Record<string, { x: number; y: number }> = {
-  tower: { x: 3.2, y: -52.1 },
+  tower: { x: 3.2, y: -73.3 },
 };
 /**
  * Goods piles at a door, for every resource: `piles-<res>.png` is a strip of `PILE_MAX` frames, frame
