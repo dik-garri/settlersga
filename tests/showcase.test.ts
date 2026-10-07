@@ -16,5 +16,8 @@ describe('dev showcase (?demo)', () => {
     const piles = all.filter((b) => b.done && frozen(b));
     expect(piles.length).toBeGreaterThanOrEqual(6);
     expect(piles.some((b) => Object.values(b.output).some((n) => n > 8))).toBe(true);
+    // The infirmary is in use and the lookout tower stands.
+    expect(w.settlers.some((s) => s.tasks.some((t) => t.t === 'heal'))).toBe(true);
+    expect(all.some((b) => b.type === 'lookout' && b.done)).toBe(true);
   });
 });
