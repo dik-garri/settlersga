@@ -22,6 +22,7 @@ import {
 import { levelTarget, needsDigger, needsLevelling } from './digging';
 import { dispatch } from './logistics';
 import { createAi, updateAi, type AiState } from './ai';
+import { spawnAnimals, updateAnimals, type Animal } from './animals';
 import {
   assaultsByTarget,
   attack,
@@ -136,9 +137,14 @@ export class World {
   /** Current sight per player (derived; what was ever seen is `map.explored`). See fog.ts. */
   readonly fog: FogState = createFog();
   nextId = 1;
+  /** Wild animals (`animals.ts`, saved), with their own id counter and random stream. */
+  readonly animals: Animal[] = [];
+  nextAnimalId = 1;
+  readonly animalRng: Rng;
 
   constructor(seed = 1, opts: WorldOptions = {}) {
     this.rng = createRng(seed ^ 0x9e3779b9);
+    this.animalRng = createRng(seed ^ 0x2545f491);
     if (opts.from) {
       this.map = mapFromSave(opts.from);
       restoreWorld(this, opts.from);
@@ -150,6 +156,7 @@ export class World {
     this.map = generateMap(seed, size, starts);
     for (const st of starts) this.addPlayer(st.x - 1, st.y - 1);
     for (const p of opts.ai ?? []) if (this.players.some((pl) => pl.id === p)) this.ai.push(createAi(p));
+    spawnAnimals(this, starts);
   }
 
   static load(save: SaveData): World {
@@ -433,6 +440,7 @@ export class World {
       s.py = s.y;
     }
     updateNature(this);
+    updateAnimals(this);
     const assaults = assaultsByTarget(this);
     for (const b of this.buildings.values()) {
       updateBuilding(this, b);

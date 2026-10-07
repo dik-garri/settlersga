@@ -2,8 +2,10 @@
  * Pre-rendered 3D sprites (the Blender pipeline in `art/blender`, output in `public/art/3d`). A pilot:
  * with `?art=3d` they replace the procedural woodcutter, tree, stone deposit, log and the carrier.
  * Every sprite keeps the anchor convention of the sprite it replaces, so the renderer is unchanged
- * except for the carrier, whose 8-direction sheet replaces the layered figure.
+ * except for the carrier, whose 8-direction sheet replaces the layered figure. Animal sheets
+ * (`animal-<kind>.png`, see `animalArt.ts`) are loaded here too.
  */
+import { ANIMAL_KINDS } from '../sim/config';
 
 /** `carrier.json` written by `art/blender/build.py`. */
 export interface CarrierSheetMeta {
@@ -72,7 +74,7 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 
 export async function loadArt3d(): Promise<Art3d> {
   const base = `${import.meta.env.BASE_URL}art/3d/`;
-  const names = [...Object.keys(ART3D_SPRITES), 'carrier'];
+  const names = [...Object.keys(ART3D_SPRITES), 'carrier', ...ANIMAL_KINDS.map((k) => `animal-${k}`)];
   const images = new Map<string, HTMLImageElement>();
   await Promise.all(names.map(async (n) => images.set(n, await loadImage(`${base}${n}.png`))));
   const carrier = (await (await fetch(`${base}carrier.json`)).json()) as CarrierSheetMeta;
