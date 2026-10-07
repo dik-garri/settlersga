@@ -1,9 +1,10 @@
 import type { Camera } from '../render/camera';
 import type { Area, GameRenderer, Ghost } from '../render/renderer';
-import { BUILDINGS, PROSPECT_RADIUS } from '../sim/config';
+import { BUILDINGS, PIONEER, PROSPECT_RADIUS } from '../sim/config';
+import { claimable } from '../sim/specialists';
 import { Terrain, type BuildingType } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
-import type { GameState, Placeable } from './state';
+import { isCommand, type GameState, type Placeable } from './state';
 
 const KEY_PAN_SPEED = 900; // screen px per second
 const EDGE_PAN_SPEED = 700;
@@ -66,7 +67,7 @@ export class InputController {
 
   ghost(): Ghost | null {
     const { placing } = this.state;
-    if (!placing || placing === 'geologist' || !this.pointer) return null;
+    if (!placing || isCommand(placing) || !this.pointer) return null;
     const t = this.tileAt(this.pointer.x, this.pointer.y);
     const a = this.anchorFor(placing, t.x, t.y);
     return { type: placing, ...a, valid: this.world.canPlace(placing, a.x, a.y) };
@@ -74,11 +75,23 @@ export class InputController {
 
   /** Tiles a geologist sent to the cursor would examine. */
   area(): Area | null {
-    if (this.state.placing !== 'geologist' || !this.pointer) return null;
+    const { placing } = this.state;
+    if ((placing !== 'geologist' && placing !== 'pioneer') || !this.pointer) return null;
     const t = this.tileAt(this.pointer.x, this.pointer.y);
     const x = Math.round(t.x);
     const y = Math.round(t.y);
     const m = this.world.map;
+    if (placing === 'pioneer') {
+      // Where a pioneer sent here would push the border: valid if some tile there is claimable.
+      let valid = false;
+      const r = PIONEER.radius;
+      for (let ty = y - r; ty <= y + r && !valid; ty++) {
+        for (let tx = x - r; tx <= x + r && !valid; tx++) {
+          if (Math.hypot(tx - x, ty - y) <= r && claimable(this.world, tx, ty, LOCAL_PLAYER)) valid = true;
+        }
+      }
+      return { x, y, r, valid };
+    }
     const valid = this.world.owns(x, y) && m.terrain[m.idx(x, y)] === Terrain.Mountain;
     return { x, y, r: PROSPECT_RADIUS, valid };
   }
@@ -144,6 +157,19 @@ export class InputController {
     const p = this.local(e);
     const t = this.tileAt(p.x, p.y);
     const { placing } = this.state;
+    if (placing === 'pioneer') {
+      const ok = this.world.sendPioneer(Math.round(t.x), Math.round(t.y));
+      this.cb.onMessage(ok ? 'Первопроходец отправлен' : 'Нужна ничейная земля у своей границы и свободный первопроходец (заказ — в ⚙)');
+      if (ok && !e.shiftKey) this.cb.onSelectBuildType(null);
+      return;
+    }
+    if (placing === 'thief') {
+      const target = this.world.buildingAt(Math.round(t.x), Math.round(t.y));
+      const ok = target ? this.world.sendThief(target.id) : false;
+      this.cb.onMessage(ok ? 'Вор отправлен' : 'Нужно разведанное чужое здание с товарами и свободный вор (заказ — в ⚙)');
+      if (ok && !e.shiftKey) this.cb.onSelectBuildType(null);
+      return;
+    }
     if (placing === 'geologist') {
       const ok = this.world.sendGeologist(Math.round(t.x), Math.round(t.y));
       this.cb.onMessage(ok ? 'Геолог отправлен' : 'Нужна неразведанная гора на своей земле и свободный носильщик');

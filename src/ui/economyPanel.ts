@@ -74,7 +74,11 @@ export class EconomyPanel {
     this.el.innerHTML = '';
 
     this.el.append(el('h4', '', 'Рабочие'));
-    const hint = el('p', 'muted', 'Как в Settlers 4: строители и землекопы набираются из свободных носильщиков с инструментом, только сколько заказано.');
+    const hint = el(
+      'p',
+      'muted',
+      'Как в Settlers 4: строители, землекопы и специалисты (первопроходцы, воры) набираются из свободных носильщиков с инструментом, только сколько заказано. Первопроходца и вора посылают из меню строительства.',
+    );
     this.el.append(hint);
     ORDERABLE.forEach((kind, i) => {
       const [have, ordered] = workers[i];
@@ -88,6 +92,10 @@ export class EconomyPanel {
         button('−1', 'Заказать на одного меньше', () => set(ordered - 1)),
         button('+1', 'Заказать ещё одного', () => set(ordered + 1)),
         button('+5', 'Заказать ещё пятерых', () => set(ordered + 5)),
+        button('↩', 'Отпустить одного свободного (на своей земле): снова станет носильщиком', () => {
+          w.dismissSpecialist(kind);
+          this.update();
+        }),
       );
       this.el.append(row);
     });

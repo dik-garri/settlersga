@@ -11,7 +11,7 @@ import { audioControls } from './ui/audioControls';
 import { Hud } from './ui/hud';
 import { InputController } from './ui/input';
 import { Minimap } from './ui/minimap';
-import { createState } from './ui/state';
+import { createState, isCommand } from './ui/state';
 import { readStartLevel, startMenu } from './ui/startMenu';
 import { hasSave, readSave, storeSave } from './ui/storage';
 
@@ -111,7 +111,7 @@ async function main() {
     const view = camera.viewRect(app.screen.width, app.screen.height);
     audio.listen(camera.x, camera.y, view.w / 2, camera.zoom);
     audio.update();
-    const placing = state.placing && state.placing !== 'geologist' ? state.placing : null;
+    const placing = state.placing && !isCommand(state.placing) ? state.placing : null;
     renderer.sync(acc / TICK_MS, now, view, input.ghost(), state.selected, state.hover, input.area(), placing);
     hud.update(now);
     minimap.update(now, app.screen.width, app.screen.height);

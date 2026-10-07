@@ -32,6 +32,8 @@ const SPEEDS = [1, 2, 4];
 /** Commands that, like buildings, are aimed at a tile from the build menu. */
 const COMMANDS: Record<Exclude<Placeable, BuildingType>, { name: string; category: Category; hint: string }> = {
   geologist: { name: 'Геолог', category: 'mining', hint: 'разведка' },
+  pioneer: { name: 'Первопроходец', category: 'housing', hint: 'граница' },
+  thief: { name: 'Вор', category: 'military', hint: 'кража' },
 };
 
 /** Player-buildable types, then commands, per build-menu tab. */
@@ -313,7 +315,9 @@ export class Hud {
       .join(' · ');
     this.popEl.textContent =
       `Поселенцы: ${people} · носильщики ${busy}/${counts.get('carrier') ?? 0} заняты` +
-      (workers ? ` · ${workers}` : '');
+      (workers ? ` · ${workers}` : '') +
+      ` · сила армии ${Math.round(world.strengthOf())}%`;
+    this.popEl.title = 'Сила армии на чужой земле (как в Settlers 4): растёт с ценностью поселения — материалами в постройках, украшения считаются втройне. На своей земле бойцы всегда сражаются в полную силу.';
 
     for (const [key, b] of this.speedButtons) {
       b.classList.toggle('active', key === 'pause' ? state.paused : !state.paused && state.speed === key);
@@ -322,6 +326,10 @@ export class Hud {
 
     this.hintEl.textContent = state.placing === 'geologist'
       ? 'ЛКМ по своей горе — отправить геолога · ПКМ / Esc — отмена'
+      : state.placing === 'pioneer'
+      ? 'ЛКМ у своей границы — первопроходец займёт ничейную землю (заказ — в ⚙) · ПКМ / Esc — отмена'
+      : state.placing === 'thief'
+      ? 'ЛКМ по разведанному чужому зданию с товарами — послать вора (заказ — в ⚙) · ПКМ / Esc — отмена'
       : state.placing
       ? 'ЛКМ — поставить (Shift — несколько) · ПКМ / Esc — отмена'
       : 'Перетаскивание / WASD — камера · колесо — зум · клик по зданию — информация';
