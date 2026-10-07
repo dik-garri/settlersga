@@ -106,6 +106,16 @@ function think(w: World, ai: AiState): void {
   if (sites.length >= AI.maxOpenSites) return;
   const ctx = new Context(w, me, own, ai.wantOre);
 
+  // Scouting: foreign land in sight but no enemy building known — a lookout tower at that border
+  // sees much further than a tower (whose land stops at the other's border).
+  if (ctx.scoutingBorder) {
+    const lookout = LOOKOUTS.find((t) => own.filter((b) => b.type === t).length < AI.maxLookouts && ctx.affordable(t));
+    if (lookout && (ai.blockedUntil[lookout] ?? -Infinity) <= w.tick) {
+      if (tryPlace(ctx, ai, lookout)) return;
+      ai.blockedUntil[lookout] = w.tick + RETRY_TICKS;
+    }
+  }
+
   // Keep enough idle carriers: they staff new workplaces, carry goods and become soldiers.
   // Houses release their people over time, so settlers still to come count as available.
   const idle = w.settlers.filter((s) => s.owner === me && s.kind === 'carrier' && s.tasks.length === 0).length;
@@ -195,6 +205,9 @@ function enemyInReach(w: World, me: PlayerId, military: Building[]): boolean {
     return own.some((o) => Math.hypot(o.x - c.x, o.y - c.y) <= ATTACK_RANGE);
   });
 }
+
+/** Buildings with a sight of their own (lookout towers), for scouting. */
+const LOOKOUTS = (Object.keys(BUILDINGS) as BuildingType[]).filter((t) => BUILDINGS[t].vision && BUILDINGS[t].playerBuildable);
 
 /** Military buildings the AI pushes its border with, largest garrison first. */
 const FRONTIER = (Object.keys(BUILDINGS) as BuildingType[])
@@ -298,6 +311,8 @@ class Context {
    * empty = it must still find the enemy.
    */
   private readonly enemies: Point[];
+  /** It knows no enemy building but sees foreign land (`enemies` are then points of that land). */
+  readonly scoutingBorder: boolean;
 
   constructor(
     readonly w: World,
@@ -308,6 +323,7 @@ class Context {
     this.castle = centerOf(w.castleOf(me));
     const known = knownEnemies(w, me);
     this.enemies = known.length > 0 ? known.map((e) => centerOf(e.b)) : this.foreignLandInSight();
+    this.scoutingBorder = known.length === 0 && this.enemies.length > 0;
     this.tiles = this.territory();
     this.short = (Object.keys(AI.reserve) as Resource[]).filter((r) => !this.producing(r));
   }
@@ -483,6 +499,12 @@ class Context {
         }
       }
       return ore > 0 ? ore - fromCastle * 0.5 : null;
+    }
+
+    if (def.vision) {
+      // Lookout: as close to the foreign land it sees as possible.
+      if (this.enemies.length === 0) return null;
+      return -Math.min(...this.enemies.map((e) => Math.hypot(e.x - cx, e.y - cy)));
     }
 
     if (def.garrison && def.territory) {

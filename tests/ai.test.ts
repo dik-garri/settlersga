@@ -124,6 +124,18 @@ describe('fog of war', () => {
     expect(explored()).toBeGreaterThan(start * 1.5);
     expect(ownBuildings(w, 1).length).toBe(1);
   });
+
+  it('puts a lookout tower at a border with foreign land and so finds the enemy castle', { timeout: LONG }, () => {
+    const w = new World(42, { players: 2, ai: [2] });
+    let found = -1;
+    for (let t = 0; t < 40 * MINUTE && found < 0; t++) {
+      w.step();
+      if (t % 100 === 0 && knownEnemies(w, 2).some((e) => e.b === w.castleOf(1))) found = t;
+    }
+    expect(ownBuildings(w, 2).some((b) => b.type === 'lookout')).toBe(true);
+    expect(found).toBeGreaterThan(0);
+    expect(found).toBeLessThan(36 * MINUTE);
+  });
 });
 
 describe('victory and defeat', () => {

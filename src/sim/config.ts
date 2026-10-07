@@ -941,6 +941,11 @@ export const AI = {
   attackCooldown: 600,
   /** With at least this many soldiers and no enemy in reach, build military buildings towards the enemy… */
   frontierSoldiers: 8,
+  /**
+   * While it knows no enemy building but sees foreign land, it puts up to this many lookout towers
+   * (`def.vision`) at the border facing it: towers stop at the other's border, too far to see a castle.
+   */
+  maxLookouts: 2,
   /** …up to this many military buildings in total. */
   maxMilitary: 30,
   /** While it knows no enemy, how strongly towers lean towards the map center (per tile). */
