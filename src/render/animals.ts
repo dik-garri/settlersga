@@ -1,9 +1,20 @@
 import { Container, Sprite, type Texture } from 'pixi.js';
 import { ANIMAL_KINDS, type AnimalKind } from '../sim/config';
-import type { Animal } from '../sim/animals';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { dirFromTileVelocity, DIRS } from './anim';
-import { ANIMAL_CELLS, ANIMAL_COLUMNS, ANIMAL_GRAZE, ANIMAL_SCALE, ANIMAL_STAND, ANIMAL_STRIDE, ANIMAL_WALK, paintAnimal } from './animalArt';
+import type { Point, Resource, Settler } from '../sim/types';
+import {
+  ANIMAL_CELLS,
+  ANIMAL_COLUMNS,
+  ANIMAL_GRAZE,
+  ANIMAL_SCALE,
+  ANIMAL_STAND,
+  ANIMAL_STRIDE,
+  ANIMAL_WALK,
+  PACK,
+  paintAnimal,
+  paintPack,
+} from './animalArt';
 import type { Art3d } from './art3d';
 import { depthOf, HALF_H, HALF_W } from './iso';
 
@@ -24,6 +35,7 @@ export function addAnimalSprites(add: Add, art: Art3d | null): void {
       }
     }
   }
+  add('pack', PACK.w, PACK.h, PACK.ax, PACK.ay, paintPack);
 }
 
 interface View {
@@ -34,6 +46,13 @@ interface View {
   lastY: number;
 }
 
+/** A settler drawn as an animal (`UNIT_ANIMALS`): the animal, its pack saddle and the goods on it. */
+interface UnitView extends View {
+  root: Container;
+  pack: Sprite;
+  ware: Sprite;
+}
+
 /**
  * Draws the wild animals: one sprite each, among the depth-sorted objects only while on screen and,
  * with the fog on, only where the local player has sight (like other players' settlers).
@@ -42,16 +61,89 @@ export class AnimalLayer {
   private readonly views = new Map<number, View>();
   /** [kind][dir][frame], resolved once. */
   private readonly tex: Record<AnimalKind, Texture[][]>;
+  /** Settlers drawn as animals, by settler id. */
+  private readonly units = new Map<number, UnitView>();
+  private readonly packTex: Texture;
 
   constructor(
     private readonly sim: World,
     private readonly objects: Container,
     get: (name: string) => Texture,
     private readonly fogOn: boolean,
+    private readonly wareTex: Record<Resource, Texture>,
   ) {
     this.tex = Object.fromEntries(
       ANIMAL_KINDS.map((k) => [k, DIRS.map((_, d) => Array.from({ length: ANIMAL_COLUMNS }, (_, f) => get(`animal:${k}:${d}:${f}`)))]),
     ) as Record<AnimalKind, Texture[][]>;
+    this.packTex = get('pack');
+  }
+
+  /**
+   * Draws a settler that is an animal (`UNIT_ANIMALS`: pack donkeys) like the wild ones, with its pack
+   * saddle and, while loaded, the goods on top. Called by the renderer's settler loop instead of a figure.
+   */
+  syncUnit(s: Settler, kind: AnimalKind, alpha: number, timeMs: number, view: { x: number; y: number; w: number; h: number }): void {
+    let v = this.units.get(s.id);
+    if (!v) {
+      const root = new Container();
+      const sprite = new Sprite();
+      const pack = new Sprite(this.packTex);
+      pack.anchor.copyFrom(this.packTex.defaultAnchor!);
+      pack.position.set(0, -PACK.back * ANIMAL_SCALE[kind]);
+      const ware = new Sprite();
+      ware.scale.set(0.8);
+      ware.position.set(0, -PACK.back * ANIMAL_SCALE[kind] - 4);
+      sprite.scale.set(ANIMAL_SCALE[kind]);
+      root.addChild(sprite, pack, ware);
+      v = { root, sprite, pack, ware, dir: (s.id * 3) % DIRS.length, walked: 0, lastX: s.x, lastY: s.y };
+      this.units.set(s.id, v);
+    }
+    const x = s.px + (s.x - s.px) * alpha;
+    const y = s.py + (s.y - s.py) * alpha;
+    const px = (x - y) * HALF_W;
+    const py = (x + y) * HALF_H - this.sim.map.heightAt(x, y);
+    const step = Math.hypot(x - v.lastX, y - v.lastY);
+    if (step < 1.5) v.walked += step;
+    v.lastX = x;
+    v.lastY = y;
+    const seen = !this.fogOn || s.owner === LOCAL_PLAYER || this.sim.isVisible(Math.round(x), Math.round(y), LOCAL_PLAYER);
+    const onScreen =
+      seen &&
+      s.inside === null &&
+      px > view.x - 40 &&
+      px < view.x + view.w + 40 &&
+      py > view.y - 20 &&
+      py < view.y + view.h + 60;
+    if (onScreen !== (v.root.parent === this.objects)) {
+      if (onScreen) this.objects.addChild(v.root);
+      else this.objects.removeChild(v.root);
+    }
+    if (!onScreen) return;
+    this.pose(kind, s, v, timeMs, s.tasks.length === 0);
+    v.ware.visible = s.carrying !== null;
+    if (s.carrying) {
+      const t = this.wareTex[s.carrying];
+      if (v.ware.texture !== t) {
+        v.ware.texture = t;
+        v.ware.anchor.copyFrom(t.defaultAnchor!);
+      }
+    }
+    v.root.position.set(px, py);
+    v.root.zIndex = depthOf(x, y) + 0.01;
+  }
+
+  /** How many settlers are drawn as animals (for the renderer's check for dead settlers). */
+  get unitCount(): number {
+    return this.units.size;
+  }
+
+  /** Drops the views of animal settlers that are gone (`alive` = the world's settler ids). */
+  pruneUnits(alive: Map<number, unknown>): void {
+    for (const [id, v] of this.units) {
+      if (alive.has(id)) continue;
+      v.root.destroy({ children: true });
+      this.units.delete(id);
+    }
   }
 
   sync(alpha: number, timeMs: number, view: { x: number; y: number; w: number; h: number }): void {
@@ -80,21 +172,22 @@ export class AnimalLayer {
         else this.objects.removeChild(v.sprite);
       }
       if (!onScreen) continue;
-      this.pose(a, v, timeMs);
+      this.pose(a.kind, a, v, timeMs, true);
       v.sprite.position.set(px, py);
       v.sprite.zIndex = depthOf(x, y) + 0.01;
     }
   }
 
-  private pose(a: Animal, v: View, timeMs: number): void {
+  /** Walk frames by distance walked; standing still, now and then grazing (when `graze`). */
+  private pose(kind: AnimalKind, a: Point & { px: number; py: number; id: number }, v: View, timeMs: number, graze: boolean): void {
     const dx = a.x - a.px;
     const dy = a.y - a.py;
     const moving = dx !== 0 || dy !== 0;
     if (moving) v.dir = dirFromTileVelocity(dx, dy, v.dir);
     let frame: number;
-    if (moving) frame = Math.floor((v.walked / ANIMAL_STRIDE[a.kind]) * ANIMAL_WALK) % ANIMAL_WALK;
-    else frame = (Math.floor(timeMs / 2600) + a.id) % 3 === 0 ? ANIMAL_STAND : ANIMAL_GRAZE;
-    const t = this.tex[a.kind][v.dir][frame];
+    if (moving) frame = Math.floor((v.walked / ANIMAL_STRIDE[kind]) * ANIMAL_WALK) % ANIMAL_WALK;
+    else frame = !graze || (Math.floor(timeMs / 2600) + a.id) % 3 === 0 ? ANIMAL_STAND : ANIMAL_GRAZE;
+    const t = this.tex[kind][v.dir][frame];
     if (v.sprite.texture !== t) {
       v.sprite.texture = t;
       v.sprite.anchor.copyFrom(t.defaultAnchor!);

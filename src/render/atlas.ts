@@ -1,5 +1,5 @@
 import { CanvasSource, Rectangle, Texture } from 'pixi.js';
-import { ORE_RESOURCES, oreOf, PATHS, SOLDIER_LEVELS } from '../sim/config';
+import { ORE_RESOURCES, oreOf, PATHS, SOLDIER_LEVELS, type AnimalKind } from '../sim/config';
 import { RESOURCES, type BuildingType, type Resource, type SettlerKind } from '../sim/types';
 import {
   BUILDING_CANVAS,
@@ -8,6 +8,7 @@ import {
   paintBoulder,
   paintDeposit,
   paintChevrons,
+  paintCutOff,
   paintField,
   paintPath,
   PATH_VARIANTS,
@@ -41,6 +42,7 @@ import {
   type Art3d,
 } from './art3d';
 import { addAnimalSprites } from './animals';
+import { ANIMAL_CELLS, ANIMAL_COLUMNS, ANIMAL_STAND, paintAnimal, UNIT_ANIMALS } from './animalArt';
 import { ACTION_IDS, ACTIONS, HAT_STYLES, styleOf, TOOLS, type ActionId, type HatStyle, type ToolShape } from './animConfig';
 import { paintFlash, paintGlint, paintGlow, paintPuff, paintSpark } from './fxArt';
 import {
@@ -273,6 +275,7 @@ export class SpriteAtlas {
     for (let level = 1; level < SOLDIER_LEVELS.length; level++) {
       a.add(`chevrons:${level}`, 12, 10, 6, 5, (ctx) => paintChevrons(ctx, level));
     }
+    a.add('cutoff', 18, 18, 9, 18, paintCutOff);
     addAnimalSprites((...args) => a.add(...args), art3d);
     if (art3d) addArt3d(a, art3d);
     this.textures = a.build();
@@ -449,6 +452,8 @@ export function wareIcon(res: Resource, size = 18): HTMLCanvasElement {
 
 /** Standalone settler portrait for HTML UI. */
 export function settlerIcon(kind: SettlerKind, size = 56): HTMLCanvasElement {
+  const animal = UNIT_ANIMALS[kind];
+  if (animal) return animalIcon(animal, size);
   if (iconArt) {
     // Standing with the profession's tool, facing south-east.
     const { page, rect } = iconArt.settlers.portrait(styleOf(kind).holds, 1);
@@ -467,6 +472,28 @@ export function settlerIcon(kind: SettlerKind, size = 56): HTMLCanvasElement {
   const st = styleOf(kind);
   // Facing south-east, mid-swing of the profession's work.
   paintSettlerPortrait(ctx, 1, st.fighter ? PLAYER_COLORS[0] : st.tunic, st.hat, st.hatStyle, st.work, 1);
+  return canvas;
+}
+
+/** An animal standing, facing south-east (the pack donkey's portrait): the Blender sheet or the painter. */
+function animalIcon(kind: AnimalKind, size: number): HTMLCanvasElement {
+  const c = ANIMAL_CELLS[kind];
+  const canvas = document.createElement('canvas');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = size * dpr;
+  canvas.height = size * dpr;
+  canvas.style.width = `${size}px`;
+  canvas.style.height = `${size}px`;
+  const ctx = canvas.getContext('2d')!;
+  const scale = (size / Math.max(c.w, c.h)) * dpr;
+  ctx.scale(scale, scale);
+  ctx.translate((Math.max(c.w, c.h) - c.w) / 2, (Math.max(c.w, c.h) - c.h) / 2);
+  const sheet = iconArt?.images.get(`animal-${kind}`);
+  const dir = 1;
+  if (sheet) {
+    const r = sheet.width / (c.w * ANIMAL_COLUMNS);
+    ctx.drawImage(sheet, ANIMAL_STAND * c.w * r, dir * c.h * r, c.w * r, c.h * r, 0, 0, c.w, c.h);
+  } else paintAnimal(ctx, kind, dir, ANIMAL_STAND);
   return canvas;
 }
 

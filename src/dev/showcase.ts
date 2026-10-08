@@ -1,6 +1,7 @@
 import { addBuilding, recomputeTerritory, spawnSettler } from '../sim/buildings';
 import { BUILD_TICKS_PER_UNIT, BUILDINGS, costOf, PROFESSIONS, totalCost } from '../sim/config';
 import { clearStrokes } from '../sim/digging';
+import { ENDLESS } from '../sim/economy';
 import { formationSpots } from '../sim/field';
 import { enterGarrison } from '../sim/military';
 import { RESOURCES, Terrain, type Building, type BuildingType, type Resource } from '../sim/types';
@@ -77,6 +78,57 @@ function borderTile(w: World, cx: number, cy: number): { x: number; y: number } 
     }
   }
   return best;
+}
+
+/**
+ * A manned tower on neutral land well beyond the border, on the side away from the other player, whose
+ * land touches none of ours: a piece of land cut off from every warehouse (dev aid, placed directly).
+ */
+function outpost(w: World, cx: number, cy: number): Building | null {
+  const m = w.map;
+  const def = BUILDINGS.tower;
+  const reach = (def.territory ?? 0) + 2;
+  const rival = w.castleOf(2);
+  const base = Math.atan2(cy - rival.y, cx - rival.x);
+  for (let r = 30; r <= 50; r++) {
+    for (let k = 0; k < 32; k++) {
+      const a = base + ((k % 2 ? 1 : -1) * Math.ceil(k / 2) * Math.PI) / 16;
+      const x = Math.round(cx + Math.cos(a) * r);
+      const y = Math.round(cy + Math.sin(a) * r);
+      let ok = m.inBounds(x - reach, y - reach) && m.inBounds(x + reach, y + reach);
+      for (let dy = 0; dy <= def.h && ok; dy++) {
+        for (let dx = 0; dx < def.w && ok; dx++) ok = m.isBuildable(x + dx, y + dy, 'ground');
+      }
+      for (let dy = -reach; dy <= reach && ok; dy++) {
+        for (let dx = -reach; dx <= reach && ok; dx++) ok = m.owner[m.idx(x + dx, y + dy)] === 0;
+      }
+      if (!ok) continue;
+      const t = addBuilding(w, 'tower', x, y, LOCAL_PLAYER, true);
+      enterGarrison(w, t, spawnSettler(w, 'soldier', w.castle));
+      recomputeTerritory(w);
+      return t;
+    }
+  }
+  showcaseMisses.push('outpost');
+  return null;
+}
+
+/** The tile nearest (x, y) with walkable, unbuilt ground all round (5×5), so a squad stands close. */
+function openGround(w: World, x: number, y: number): { x: number; y: number } {
+  const m = w.map;
+  const free = (tx: number, ty: number) =>
+    m.inBounds(tx, ty) && m.isWalkable(tx, ty) && m.door[m.idx(tx, ty)] === 0 && m.building[m.idx(tx, ty)] === 0;
+  for (let r = 0; r <= 12; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        let ok = true;
+        for (let oy = -2; oy <= 2 && ok; oy++) for (let ox = -2; ox <= 2 && ok; ox++) ok = free(x + dx + ox, y + dy + oy);
+        if (ok) return { x: x + dx, y: y + dy };
+      }
+    }
+  }
+  return { x, y };
 }
 
 function run(w: World, ticks: number): void {
@@ -228,6 +280,23 @@ export function buildShowcase(): World {
     thief.inside = null;
     w.sendThief(store.id);
   }
+  // Trade (Settlers 4 logistics): a manned tower out on its own beyond the border — land cut off from
+  // every warehouse, marked as such — with a market of its own; donkeys carry planks and stone there
+  // from the market by the castle, and a site on that land is built with what they bring.
+  const home = [...w.buildings.values()].find((b) => b.type === 'market' && b.done);
+  const post = home ? outpost(w, cx, cy) : null;
+  const away = post ? placeFor(w, 'market', LOCAL_PLAYER, post.x + 3, post.y + 2) : null;
+  if (home && away) {
+    w.setTradeRoute(home.id, away.id);
+    w.orderTrade(home.id, 'plank', ENDLESS);
+    w.orderTrade(home.id, 'stone', ENDLESS);
+    for (let k = 0; k < 3; k++) spawnSettler(w, 'donkey', home);
+    const site = placeNear(w, 'woodcutter', away.x + 2, away.y - 3);
+    if (site) {
+      site.levelled = true;
+      site.dug = clearStrokes(site);
+    }
+  }
   // A field squad round its leader (direct army control): it marches out and stands in formation.
   const squad = (['leader', 'soldier', 'soldier', 'soldier', 'soldier', 'archer', 'archer'] as const).map((kind) => {
     const s = spawnSettler(w, kind, c);
@@ -236,7 +305,8 @@ export function buildShowcase(): World {
     s.home = null;
     return s.id;
   });
-  const field = formationSpots(w, c.door.x - 5, c.door.y + 5, 1)[0];
+  const open = openGround(w, c.door.x - 5, c.door.y + 5);
+  const field = formationSpots(w, open.x, open.y, 1)[0];
   if (field) w.orderMove(squad, field.x, field.y);
   // A few wounded in the castle: they walk to the infirmary and lie there while the demo opens.
   for (const id of c.garrison.slice(0, 3)) {

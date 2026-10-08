@@ -275,8 +275,9 @@ button.wide {
 
 .cat-tabs {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 3px;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 2px;
   margin-bottom: 4px;
 }
 
@@ -290,8 +291,8 @@ button.wide {
 }
 
 .cat-tab canvas {
-  width: 30px !important;
-  height: 30px !important;
+  width: 28px !important;
+  height: 28px !important;
 }
 
 .cat-tab:hover {
@@ -549,6 +550,11 @@ button.wide {
 .eco-toggle.on {
   opacity: 1;
   filter: none;
+}
+
+.eco-toggle.picked {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
 .new-game select {

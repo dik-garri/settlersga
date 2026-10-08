@@ -1,4 +1,5 @@
 import type { AnimalKind } from '../sim/config';
+import type { SettlerKind } from '../sim/types';
 import { MIRRORED, PAINTED_ANGLE, PAINTED_DIR } from './anim';
 
 /**
@@ -28,6 +29,35 @@ export const ANIMAL_SCALE: Record<AnimalKind, number> = { deer: 1.1, donkey: 1.0
 
 /** Tiles walked per full walk cycle (drives the walk frame, so feet do not slide). */
 export const ANIMAL_STRIDE: Record<AnimalKind, number> = { deer: 0.9, donkey: 0.7, duck: 0.35, chicken: 0.35 };
+
+/** Settler kinds drawn as an animal instead of a figure (`AnimalLayer.syncUnit`): the pack donkey. */
+export const UNIT_ANIMALS: Partial<Record<SettlerKind, AnimalKind>> = { donkey: 'donkey' };
+
+/** Pack saddle frame size and anchor (bottom centre), and how high above a pack animal's feet it sits. */
+export const PACK = { w: 30, h: 16, ax: 15, ay: 13, back: 15 };
+
+/** A pack saddle: a blanket over the back with a wicker pannier hanging on either side. */
+export function paintPack(ctx: CanvasRenderingContext2D): void {
+  ctx.translate(PACK.ax, PACK.ay);
+  ctx.fillStyle = '#7a2e22';
+  ctx.beginPath();
+  ctx.ellipse(0, -3, 9, 3.2, 0, 0, Math.PI * 2);
+  ctx.fill();
+  for (const side of [-1, 1]) {
+    ctx.fillStyle = '#a77a3e';
+    ctx.beginPath();
+    ctx.roundRect(side * 9 - 4.5, -5, 9, 8, 2.5);
+    ctx.fill();
+    ctx.strokeStyle = '#6b4a22';
+    ctx.lineWidth = 0.8;
+    for (let k = 0; k < 3; k++) {
+      ctx.beginPath();
+      ctx.moveTo(side * 9 - 4, -3 + k * 2.4);
+      ctx.lineTo(side * 9 + 4, -3 + k * 2.4);
+      ctx.stroke();
+    }
+  }
+}
 
 interface Look {
   body: string;

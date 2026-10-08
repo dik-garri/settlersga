@@ -18,6 +18,7 @@ import { barracksRows, garrisonSlotRows, recruitLevelControls, shareControls, su
 import { el, rowsTable, type View } from './dom';
 import { economyKey, economyRows, toolOrderControls, warehouseControls } from './economyPanel';
 import { glyph } from './icons';
+import { tradeControls, tradeKey, tradeRows } from './tradeView';
 import type { GameState } from './state';
 
 /**
@@ -64,6 +65,8 @@ export class InfoView implements View {
   private attackCount = 1;
   /** Re-render only when the content changes, so buttons in it stay clickable. */
   private infoKey = '';
+  /** Good chosen in a market's order grid. */
+  private tradePick: Resource = 'plank';
 
   constructor(
     private readonly world: World,
@@ -177,8 +180,15 @@ export class InfoView implements View {
       if (def.territory) rows.push(['Радиус земли', `${def.territory} клеток`]);
     }
     if (!enemy && b.done) rows.push(...economyRows(b));
+    rows.push(...tradeRows(this.world, b));
     if (b.priority) rows.push(['Приоритет', 'да']);
-    const key = JSON.stringify([b.id, rows, this.confirmDemolish === b.id, economyKey(this.world, b)]);
+    const key = JSON.stringify([
+      b.id,
+      rows,
+      this.confirmDemolish === b.id,
+      economyKey(this.world, b),
+      tradeKey(this.world, b, this.tradePick),
+    ]);
     if (key === this.infoKey) return;
     this.infoKey = key;
     this.el.innerHTML = '';
@@ -205,6 +215,8 @@ export class InfoView implements View {
     }
     const warehouse = warehouseControls(this.world, b);
     if (warehouse) this.el.append(warehouse);
+    const trade = tradeControls(this.world, b, this.tradePick, (r) => (this.tradePick = r));
+    if (trade) this.el.append(trade);
     if (!def.playerBuildable) return;
     const orders = b.done ? toolOrderControls(this.world, b) : null;
     if (orders) this.el.append(orders);

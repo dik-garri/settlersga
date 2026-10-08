@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildShowcase } from '../src/dev/showcase';
 import { BUILDINGS } from '../src/sim/config';
+import { isCutOff } from '../src/sim/land';
 import { pathLevel } from '../src/sim/paths';
 import type { BuildingType } from '../src/sim/types';
 
@@ -30,6 +31,11 @@ describe('dev showcase (?demo)', () => {
     expect(w.pioneerLand).toBeGreaterThan(0);
     const thief = w.settlers.find((s) => s.kind === 'thief');
     expect(thief?.errand?.b).toBeDefined();
+    // Trade: a market with a route, donkeys under way with goods, and land cut off from every warehouse.
+    expect(all.some((b) => b.type === 'market' && b.trade?.to != null)).toBe(true);
+    expect(w.settlers.some((s) => s.kind === 'donkey' && s.tasks.length > 0)).toBe(true);
+    expect(w.settlers.some((s) => s.kind === 'donkey' && s.carrying !== null)).toBe(true);
+    expect(all.some((b) => b.owner === 1 && isCutOff(w, b))).toBe(true);
     // A field squad stands round its leader (direct army control).
     const leader = w.settlers.find((s) => s.kind === 'leader' && s.post);
     expect(leader).toBeDefined();

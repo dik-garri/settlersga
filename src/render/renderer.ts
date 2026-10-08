@@ -28,6 +28,8 @@ import {
 } from './animConfig';
 import { Effects } from './effects';
 import { AnimalLayer } from './animals';
+import { isCutOff } from '../sim/land';
+import { UNIT_ANIMALS } from './animalArt';
 import { setFrame, type Settler3d } from './settler3d';
 import { BODY_STAND, BODY_WORK, CARRY_AT } from './settlerArt';
 import { depthOf, HALF_H, HALF_W, toScreen, toTile } from './iso';
@@ -99,6 +101,8 @@ interface BuildingView {
   main: Sprite;
   front: Container;
   pileKey: string;
+  /** Marker over a local building cut off from every warehouse (`land.ts`), made when first needed. */
+  cutoff: Sprite | null;
 }
 
 /**
@@ -290,7 +294,7 @@ export class GameRenderer {
   ) {
     this.world.addChild(this.ground, this.territory, this.marks, this.hints, this.objects, this.settlerMark, this.shots, this.fog, this.ghostLayer);
     this.settlerTex = atlas.settlerTextures();
-    this.animals = new AnimalLayer(sim, this.objects, (n) => atlas.get(n), fogOn);
+    this.animals = new AnimalLayer(sim, this.objects, (n) => atlas.get(n), fogOn, this.wareTex);
     this.settler3d = atlas.art3d?.settlers ?? null;
     for (const r of RESOURCES) this.wareTex[r] = atlas.get(`ware:${r}`);
     this.effects = new Effects(atlas, sim, (x, y) => this.surface(x, y), this.sound);
@@ -1363,6 +1367,16 @@ export class GameRenderer {
         v.flag.position.set(top.x, top.y + 2);
         v.flagPlaced = true;
       }
+      // Carriers cannot reach it from any warehouse: only donkeys can supply it.
+      const cut = b.owner === LOCAL_PLAYER && isCutOff(this.sim, b);
+      if (cut && !v.cutoff) {
+        const top = this.atlas.topOf(`building:${b.type}`);
+        v.cutoff = new Sprite(this.atlas.get('cutoff'));
+        v.cutoff.anchor.copyFrom(v.cutoff.texture.defaultAnchor!);
+        v.cutoff.position.set(top.x + 10, top.y - 2);
+        v.body.addChild(v.cutoff);
+      }
+      if (v.cutoff) v.cutoff.visible = cut;
       const progress = this.sim.buildProgress(b);
       const staged = this.atlas.has(`stage:${b.type}:0`);
       v.site.visible = !b.done && !staged;
@@ -1444,6 +1458,7 @@ export class GameRenderer {
       main,
       front,
       pileKey: '',
+      cutoff: null,
     };
     this.buildingViews.set(b.id, v);
     return v;
@@ -1534,15 +1549,22 @@ export class GameRenderer {
   }
 
   private syncSettlers(alpha: number, timeMs: number): void {
-    if (this.settlerViews.size > this.sim.settlers.length) {
+    if (this.settlerViews.size + this.animals.unitCount > this.sim.settlers.length) {
       // Some settlers died.
       for (const [id, v] of this.settlerViews) {
         if (this.sim.settlerById.has(id)) continue;
         v.root.destroy({ children: true });
         this.settlerViews.delete(id);
       }
+      this.animals.pruneUnits(this.sim.settlerById);
     }
     for (const s of this.sim.settlers) {
+      // Pack donkeys are drawn as animals.
+      const animal = UNIT_ANIMALS[s.kind];
+      if (animal) {
+        this.animals.syncUnit(s, animal, alpha, timeMs, this.view);
+        continue;
+      }
       let v = this.settlerViews.get(s.id);
       if (!v) v = this.createSettlerView(s);
       let x = s.px + (s.x - s.px) * alpha;

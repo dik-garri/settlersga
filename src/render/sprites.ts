@@ -2001,6 +2001,38 @@ export function paintChevrons(ctx: Ctx, level: number): void {
   }
 }
 
+/**
+ * Marker over a building cut off from every warehouse (`isCutOff`): a round badge with a road broken
+ * in two by a red gap, 18×18, anchored at its bottom (9, 18).
+ */
+export function paintCutOff(ctx: Ctx): void {
+  ctx.translate(9, 9);
+  ctx.fillStyle = '#f3e6c4';
+  ctx.strokeStyle = '#8a1f17';
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.arc(0, 0, 7.6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  // The two halves of the road.
+  ctx.strokeStyle = '#5a3d22';
+  ctx.lineWidth = 2.2;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-5, 3.2);
+  ctx.lineTo(-1.8, 0.8);
+  ctx.moveTo(1.8, -0.8);
+  ctx.lineTo(5, -3.2);
+  ctx.stroke();
+  // The break.
+  ctx.strokeStyle = '#c62e22';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(-1.6, -3.4);
+  ctx.lineTo(1.6, 3.4);
+  ctx.stroke();
+}
+
 /** Flag on a pole marking a door, 14×28 with the pole base at (2, 26), in the owner's colour. */
 /**
  * The owner's banner on military buildings, as in Settlers 4: a cloth in the player's colour with a

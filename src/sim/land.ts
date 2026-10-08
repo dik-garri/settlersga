@@ -18,6 +18,9 @@ function ensureLand(w: World): void {
   if (w.landVersion !== w.territoryVersion) rebuildLand(w);
 }
 
+/** Flood-fill queue, shared by every world (the fill never yields). */
+let scratch = new Int32Array(0);
+
 /** Rebuilds `w.land` from tile ownership: a flood fill per piece, O(map). */
 export function rebuildLand(w: World): void {
   w.landVersion = w.territoryVersion;
@@ -26,7 +29,8 @@ export function rebuildLand(w: World): void {
   if (w.land.length !== n) w.land = new Int32Array(n);
   const land = w.land;
   land.fill(0);
-  const queue = new Int32Array(n);
+  if (scratch.length < n) scratch = new Int32Array(n);
+  const queue = scratch;
   let next = 0;
   for (let start = 0; start < n; start++) {
     const owner = m.owner[start];

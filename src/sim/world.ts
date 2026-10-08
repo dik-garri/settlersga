@@ -424,8 +424,15 @@ export class World {
     m.trade ??= { to: null, orders: {}, loading: {} };
     const now = m.trade.orders[res] ?? 0;
     if (count === ENDLESS || count === 0) {
-      if (count === 0) delete m.trade.orders[res];
-      else m.trade.orders[res] = ENDLESS;
+      if (count === 0) {
+        delete m.trade.orders[res];
+        // What waits for a donkey goes on the output pile, so carriers take it back to a warehouse.
+        const spare = m.input[res] - (m.trade.loading[res] ?? 0);
+        if (spare > 0) {
+          m.input[res] -= spare;
+          m.output[res] += spare;
+        }
+      } else m.trade.orders[res] = ENDLESS;
     } else if (count > 0 && now !== ENDLESS) {
       m.trade.orders[res] = now + count;
     }
