@@ -1,4 +1,3 @@
-import { wareIcon } from '../render/atlas';
 import { BUILDINGS, PROFESSIONS, RESOURCE_INFO, TRADE } from '../sim/config';
 import { ENDLESS } from '../sim/economy';
 import { isCutOff } from '../sim/land';
@@ -6,6 +5,7 @@ import { routeTarget } from '../sim/trade';
 import { RESOURCES, type Building, type Resource } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { button, el } from './dom';
+import { goodsLists } from './goodsLists';
 
 /**
  * Trade in the building window, as in Settlers 4: a marketplace's route (the destination market and
@@ -93,41 +93,25 @@ export function tradeControls(world: World, b: Building): HTMLElement | null {
 
   box.append(el('h4', '', 'Что возить'));
   box.append(el('p', 'muted', `Носильщики приносят товар на рынок, ослы берут до ${TRADE.donkeyLoad} штук за раз.`));
-  const wrap = el('div', 'accepts');
-  const column = (title: string, on: boolean) => {
-    const col = el('div', `accept-col ${on ? 'yes' : 'no'}`);
-    const head = el('div', 'accept-head');
-    head.append(el('span', '', `${title} (${RESOURCES.filter((r) => carried(b, r) === on).length})`));
-    const all = button(on ? 'ничего' : 'все', on ? 'Не возить ничего: что ждёт на рынке, вернётся на склад' : 'Возить всё без остановки', () => {
-      for (const r of RESOURCES) world.orderTrade(b.id, r, on ? 0 : ENDLESS);
-    });
-    head.append(all);
-    col.append(head);
-    const list = el('div', 'accept-list');
-    for (const r of RESOURCES) {
-      if (carried(b, r) !== on) continue; // the other column's
-      const item = button(
-        '',
-        `${nameOf(r)}: ${on ? 'возим — нажмите, чтобы перестать (что ждёт на рынке, вернётся на склад)' : 'не возим — нажмите, чтобы возить без остановки'}`,
-        () => world.orderTrade(b.id, r, on ? 0 : ENDLESS),
-        'accept-item',
-      );
-      item.append(wareIcon(r, 34));
-      if (on) {
+  box.append(
+    goodsLists({
+      inTitle: 'Возим',
+      outTitle: 'Не возим',
+      isIn: (r) => carried(b, r),
+      set: (r, on) => world.orderTrade(b.id, r, on ? ENDLESS : 0),
+      tipIn: (name) => `${name}: возим — нажмите, чтобы перестать (что ждёт на рынке, вернётся на склад)`,
+      tipOut: (name) => `${name}: не возим — нажмите, чтобы возить без остановки`,
+      noneTip: 'Не возить ничего: что ждёт на рынке, вернётся на склад',
+      allTip: 'Возить всё без остановки',
+      nameOf,
+      // The rest of a finite order (the AI places those) in the corner; units waiting on the market.
+      corner: (r) => {
         const order = b.trade?.orders[r];
-        if (order !== undefined && order !== ENDLESS) item.append(el('span', 'trade-left', String(order)));
-        const n = el('span', 'acc-count', String(waitingAt(b, r)));
-        n.dataset.tradeRes = r;
-        item.append(n);
-      }
-      list.append(item);
-    }
-    if (!list.firstChild) list.append(el('div', 'accept-empty', on ? 'ничего' : '—'));
-    col.append(list);
-    return col;
-  };
-  wrap.append(column('Возим', true), column('Не возим', false));
-  box.append(wrap);
+        return order !== undefined && order !== ENDLESS ? String(order) : null;
+      },
+      count: (r) => ({ value: waitingAt(b, r), dataKey: 'tradeRes' }),
+    }),
+  );
   return box;
 }
 

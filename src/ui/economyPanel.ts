@@ -9,9 +9,10 @@ import {
   workerOrder,
   workersOf,
 } from '../sim/economy';
-import { RESOURCES, type Building, type Resource } from '../sim/types';
+import type { Building, Resource } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { button, el, type View } from './dom';
+import { goodsLists } from './goodsLists';
 
 /**
  * Economy settings as in Settlers 4 (`sim/economy.ts`): the settlers menu's worker orders and the goods
@@ -144,42 +145,26 @@ export function toolOrderControls(world: World, b: Building): HTMLElement | null
   return box;
 }
 
-/** A warehouse's accepted goods: one toggle per resource. */
+/** A warehouse's accepted goods, as in Settlers 4: two lists, a click moves a good across. */
 export function warehouseControls(world: World, b: Building): HTMLElement | null {
   if (!BUILDINGS[b.type].storage || b.owner !== LOCAL_PLAYER || !b.done) return null;
-  // As in Settlers 4: what the store takes in and what it does not, in two columns; a click moves a
-  // good across. Counts (`data-res`) are refreshed in place by `refreshStockCounts`.
-  const box = el('div', 'eco-orders accepts');
-  const column = (title: string, on: boolean) => {
-    const col = el('div', `accept-col ${on ? 'yes' : 'no'}`);
-    const head = el('div', 'accept-head');
-    const count = RESOURCES.filter((res) => !!b.refuse?.includes(res) !== on).length;
-    head.append(el('span', '', `${title} (${count})`));
-    const all = button(on ? 'ничего' : 'все', on ? 'Не принимать ничего' : 'Принимать всё', () => {
-      for (const res of RESOURCES) world.setAccepts(b.id, res, !on);
-    });
-    head.append(all);
-    col.append(head);
-    const list = el('div', 'accept-list');
-    for (const res of RESOURCES) {
-      if (!!b.refuse?.includes(res) === on) continue; // the other column's
-      const item = button(
-        '',
-        `${nameOf(res)}: ${on ? 'везут сюда — нажмите, чтобы не принимать' : 'сюда не везут — нажмите, чтобы принимать'}`,
-        () => world.setAccepts(b.id, res, !on),
-        'accept-item',
-      );
-      item.append(wareIcon(res, 34));
-      const n = el('span', 'acc-count', String(b.output[res]));
-      n.dataset.res = res;
-      item.append(n);
-      list.append(item);
-    }
-    if (!list.firstChild) list.append(el('div', 'accept-empty', on ? 'ничего' : '—'));
-    col.append(list);
-    return col;
-  };
-  box.append(column('Принимает', true), column('Не принимает', false));
+  // Counts (`data-res`) are refreshed in place by `refreshStockCounts`.
+  const box = el('div', 'eco-orders');
+  box.append(
+    goodsLists({
+      inTitle: 'Принимает',
+      outTitle: 'Не принимает',
+      isIn: (res) => !b.refuse?.includes(res),
+      set: (res, on) => world.setAccepts(b.id, res, on),
+      tipIn: (name) => `${name}: везут сюда — нажмите, чтобы не принимать`,
+      tipOut: (name) => `${name}: сюда не везут — нажмите, чтобы принимать`,
+      noneTip: 'Не принимать ничего',
+      allTip: 'Принимать всё',
+      nameOf,
+      count: (res) => ({ value: b.output[res], dataKey: 'res' }),
+      countBoth: true,
+    }),
+  );
   return box;
 }
 
