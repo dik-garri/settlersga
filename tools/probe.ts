@@ -57,10 +57,14 @@ for (const seed of seeds) {
   const t0 = performance.now();
   for (let i = 1; i <= minutes * ticksPerMinute; i++) {
     if ((i - 1) % ticksPerMinute === 0) {
-      // Due entries that found no spot (e.g. a mine before the tower widened the border) retry every minute.
+      // Due entries that found no spot (e.g. a mine before the tower widened the border) retry every
+      // minute; ten minutes overdue they look further (a 3×3 pig farm in a full core goes out on the
+      // tower's land).
       for (let k = 0; k < pending.length; k++) {
         const [minute, type, dx, dy] = pending[k];
-        if (minute * ticksPerMinute <= i - 1 && placeNear(w, type, cx + dx, cy + dy)) pending.splice(k--, 1);
+        if (minute * ticksPerMinute > i - 1) continue;
+        const radius = i - 1 >= (minute + 10) * ticksPerMinute ? 24 : 12;
+        if (placeNear(w, type, cx + dx, cy + dy, radius)) pending.splice(k--, 1);
       }
     }
     w.step();

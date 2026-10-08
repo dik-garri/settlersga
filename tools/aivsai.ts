@@ -2,7 +2,7 @@
  * Computer players against each other (or against a passive player 1), headless. Prints each side's
  * growth every few minutes and how the game ends.
  *
- *   npm run sim:ai -- --seeds=42,7 --minutes=60 --players=2 --passive=0 --levels=easy,hard
+ *   npm run sim:ai -- --seeds=42,7 --minutes=150 --players=2 --passive=0 --levels=easy,hard
  */
 import { PROFESSIONS, TICKS_PER_SECOND, type AiLevel } from '../src/sim/config';
 import { isArcher, isFighter } from '../src/sim/military';
@@ -11,7 +11,7 @@ import { World } from '../src/sim/world';
 import { arg } from './scenario';
 
 const seeds = arg('seeds', '42,7,123').split(',').map(Number);
-const minutes = Number(arg('minutes', '60'));
+const minutes = Number(arg('minutes', '150'));
 const size = Number(arg('size', '64'));
 const players = Number(arg('players', '2'));
 const passive = arg('passive', '0') === '1';

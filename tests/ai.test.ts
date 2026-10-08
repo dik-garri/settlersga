@@ -109,7 +109,7 @@ describe('fog of war', () => {
     const w = new World(42, { size: 96, players: 2, ai: [2] });
     let ranked = 0;
     // With Settlers 4's production times, walking pace and costs its first ranked fighter comes after
-    // about 99 minutes.
+    // about 99 minutes (about 90 with S4 footprints, once its 3×3 barracks gets room).
     for (let i = 0; i < 120 * MINUTE && ranked === 0; i++) {
       w.step();
       if (i % 100 === 0) ranked = w.settlers.filter((s) => s.owner === 2 && s.kind !== 'carrier' && s.level > 0).length;
@@ -140,7 +140,8 @@ describe('fog of war', () => {
     expect(found).toBeGreaterThan(0);
     // Without lookouts it never finds it on this map (its towers stop ~25 tiles short). Since 2.5
     // the guaranteed far mountains draw its first towers elsewhere: ~41 minutes (31 before); with
-    // Settlers 4's production times (docs/TIMINGS.md) ~79.
+    // Settlers 4's production times (docs/TIMINGS.md) ~79; with S4 footprints (4×4 castle, 15×15
+    // start meadow) ~122 while its pioneer was stuck on an unreachable tile, ~75 since that is fixed.
     expect(found).toBeLessThan(88 * MINUTE);
   });
 });

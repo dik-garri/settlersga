@@ -1322,8 +1322,22 @@ export const AI = {
   siegeMargin: 3,
   /** Out of striking range, a siege building's land must reach at least this much closer to the castle than its land does. */
   siegeStep: 4,
+  /**
+   * Scouting on foot: once its siege towards a castle it has not seen has found no spot for this many
+   * ticks (forest, water or swamp in the way), a spare fighter walks to the presumed castle — one at a
+   * time, at most every `scoutEvery` ticks, back into a garrison after `scoutTimeout`.
+   */
+  scoutAfter: 5 * 60 * TICKS_PER_SECOND,
+  scoutEvery: 5 * 60 * TICKS_PER_SECOND,
+  scoutTimeout: 5 * 60 * TICKS_PER_SECOND,
   /** A siege lookout this close (tiles) beyond its land's nearest point to the goal already watches that edge: no second one there. */
   siegeLookoutSlack: 6,
+  /**
+   * A siege lookout goes only where the presumed castle lies this much inside its sight (the castle's
+   * door is ~2 tiles off the start): one further out sees no castle and takes the edge spot a tower
+   * needs to push on.
+   */
+  siegeLookoutSight: 3,
   /** Siege buildings may take it this far beyond `maxMilitary`, no further. */
   siegeExtra: 8,
   /** A party is this many times what the target takes (power against defence); the rest stay home. The castle gets everything. */
@@ -1347,6 +1361,12 @@ export const AI = {
   unseenGarrison: 0.5,
   /** Gathered resources that do not grow back: their gatherers are moved once nothing is left in range. */
   exhaustible: ['stone'] as readonly Resource[],
+  /**
+   * Score taken off a military building's or lookout's spot that a digger must level first (up to
+   * `BUILD_DIG_SLOPE`; all else keeps to level ground): level ground first, but a slope facing the
+   * enemy beats no push at all.
+   */
+  slopePenalty: 5,
   /** Best-scored spots tried with `canPlace` per placement. */
   placeTries: 40,
   /** The last this-many units of a tool are kept for the first building of a type that needs it. */
@@ -1381,7 +1401,7 @@ export const AI = {
    * Own tiles this close (steps) to the border are kept for military buildings, mines and gatherers:
    * workshops and houses stay in the core, so there is always room to push the border.
    */
-  borderReserve: 2,
+  borderReserve: 3,
   /**
    * A building it wanted found no room: for this many ticks it is «cramped» and pushes its border with
    * whatever fighter it can spare, without waiting for `frontierSoldiers`.
@@ -1397,6 +1417,8 @@ export const AI = {
   specialistEvery: 600,
   /** Sends a pioneer only while it holds this many shovels (diggers and foresters need them too). */
   pioneerShovels: 2,
+  /** Best pioneer spots offered per decision: one he cannot walk to is refused, the next is tried. */
+  pioneerTries: 6,
   /** Sends a thief only with at least this many idle carriers and a known enemy store this close (tiles). */
   thiefIdle: 8,
   thiefRange: 40,

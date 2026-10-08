@@ -3,6 +3,7 @@ import { FIELD, hpOf, ORDERABLE, PIONEER, PROFESSIONS, PROSPECT_RADIUS, PROSPECT
 import { workerOrder } from './economy';
 import { restIdle } from './idle';
 import { formationSpots } from './field';
+import { sameRegion } from './regions';
 import { abort } from './settlers';
 import { RESOURCES, Terrain, type Building, type PlayerId, type Resource, type Settler, type SettlerKind, type Task } from './types';
 import type { World } from './world';
@@ -45,14 +46,20 @@ export function claimable(w: World, x: number, y: number, player: PlayerId): boo
   return N4.some(([dx, dy]) => m.inBounds(x + dx, y + dy) && m.owner[m.idx(x + dx, y + dy)] === player);
 }
 
-/** The claimable tile within `PIONEER.radius` of (cx, cy) nearest to `from` (ties: lowest index). */
+/**
+ * The claimable tile within `PIONEER.radius` of (cx, cy) nearest to the pioneer `from` (ties: lowest
+ * index), among those he can walk to (`sameRegion`, O(1)): a tile across a lake or a swamp would send
+ * him into a failed route and a back-off, then to the same tile again, for ever.
+ */
 function nextClaim(w: World, cx: number, cy: number, player: PlayerId, from: { x: number; y: number }) {
   let best: { x: number; y: number } | null = null;
   let bestD = Infinity;
   const r = PIONEER.radius;
+  const m = w.map;
+  const at = m.idx(Math.round(from.x), Math.round(from.y));
   for (let y = cy - r; y <= cy + r; y++) {
     for (let x = cx - r; x <= cx + r; x++) {
-      if (Math.hypot(x - cx, y - cy) > r || !claimable(w, x, y, player)) continue;
+      if (Math.hypot(x - cx, y - cy) > r || !claimable(w, x, y, player) || !sameRegion(m, at, m.idx(x, y))) continue;
       const d = Math.hypot(x - from.x, y - from.y);
       if (d < bestD) {
         bestD = d;
@@ -80,9 +87,8 @@ function idleSpecialist(w: World, player: PlayerId, kind: 'pioneer' | 'thief', x
 
 /** Player command: send an idle pioneer to push the border around (x, y). */
 export function sendPioneer(w: World, x: number, y: number, player: PlayerId): boolean {
-  if (!nextClaim(w, x, y, player, { x, y })) return false;
   const s = idleSpecialist(w, player, 'pioneer', x, y);
-  if (!s) return false;
+  if (!s || !nextClaim(w, x, y, player, s)) return false;
   s.errand = { x, y, n: PIONEER.maxTiles };
   return true;
 }
