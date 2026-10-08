@@ -1,6 +1,7 @@
 import { buildingIcon } from '../render/atlas';
 import {
   BUILDINGS,
+  buildersOf,
   costOf,
   gatheredBy,
   INPUT_CAP,
@@ -10,6 +11,7 @@ import {
   RESOURCE_INFO,
 } from '../sim/config';
 import { available, chooseOutput, oreLeft, residents } from '../sim/buildings';
+import { diggersWanted } from '../sim/digging';
 import { keepOf, wantsRecruit } from '../sim/military';
 import { hasGatherTargetNear } from '../sim/nature';
 import { RESOURCES, type Building, type BuildingType, type Resource, type Settler, type SettlerKind } from '../sim/types';
@@ -112,8 +114,8 @@ export class InfoView implements View {
       for (const r of RESOURCES) {
         if (cost[r] > 0) rows.push([nameOf(r), `${b.delivered[r]} / ${cost[r]} (в пути ${b.inbound[r]})`]);
       }
-      if (!b.levelled) rows.push(['Выравнивание', b.diggerId !== null ? 'землекоп работает' : 'ждёт землекопа']);
-      rows.push(['Строитель', b.builderId !== null ? 'на месте или в пути' : 'ожидается']);
+      if (!b.levelled) rows.push(['Землекопы', b.diggerIds.length > 0 ? `${b.diggerIds.length} из ${diggersWanted(this.world.map, b)}` : 'ждёт землекопа']);
+      rows.push(['Строители', b.builderIds.length > 0 ? `${b.builderIds.length} из ${buildersOf(b.type)}` : `ожидаются (до ${buildersOf(b.type)})`]);
     } else if (def.residence) {
       rows.push(['Жители', `${b.spawned} / ${residents(this.world, b)}`]);
       rows.push(['Статус', b.spawned < residents(this.world, b) ? 'заселяется' : 'заселён']);

@@ -72,7 +72,8 @@ describe('computer player', () => {
       if (player === 2 && b && !w.isExplored(b.door.x, b.door.y, 2)) unseen.push(`${w.tick} ${b.type}`);
       return attack(target, count, player);
     };
-    for (let i = 0; i < 45 * MINUTE && !w.isDefeated(1); i++) w.step();
+    // Settlers 4's production times (docs/TIMINGS.md): it takes the castle after about 47 minutes.
+    for (let i = 0; i < 75 * MINUTE && !w.isDefeated(1); i++) w.step();
     expect(unseen).toEqual([]);
     const ai = w.ai.find((a) => a.player === 2)!;
     expect(ai.stats.attacks).toBeGreaterThanOrEqual(1);
@@ -105,7 +106,8 @@ describe('fog of war', () => {
     // Every start has a guaranteed gold lobe just beyond its castle's land (`START_GUARANTEES`).
     const w = new World(42, { size: 96, players: 2, ai: [2] });
     let ranked = 0;
-    for (let i = 0; i < 30 * MINUTE && ranked === 0; i++) {
+    // With Settlers 4's production times its first ranked fighter comes after about 72 minutes.
+    for (let i = 0; i < 95 * MINUTE && ranked === 0; i++) {
       w.step();
       if (i % 100 === 0) ranked = w.settlers.filter((s) => s.owner === 2 && s.kind !== 'carrier' && s.level > 0).length;
     }
@@ -127,15 +129,16 @@ describe('fog of war', () => {
   it('puts a lookout tower at a border with foreign land and so finds the enemy castle', { timeout: LONG }, () => {
     const w = new World(42, { players: 2, ai: [2] });
     let found = -1;
-    for (let t = 0; t < 50 * MINUTE && found < 0; t++) {
+    for (let t = 0; t < 100 * MINUTE && found < 0; t++) {
       w.step();
       if (t % 100 === 0 && knownEnemies(w, 2).some((e) => e.b === w.castleOf(1))) found = t;
     }
     expect(ownBuildings(w, 2).some((b) => b.type === 'lookout')).toBe(true);
     expect(found).toBeGreaterThan(0);
     // Without lookouts it never finds it on this map (its towers stop ~25 tiles short). Since 2.5
-    // the guaranteed far mountains draw its first towers elsewhere: ~41 minutes (31 before).
-    expect(found).toBeLessThan(44 * MINUTE);
+    // the guaranteed far mountains draw its first towers elsewhere: ~41 minutes (31 before); with
+    // Settlers 4's production times (docs/TIMINGS.md) ~79.
+    expect(found).toBeLessThan(88 * MINUTE);
   });
 });
 

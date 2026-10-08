@@ -44,13 +44,16 @@ for (const seed of seeds) {
     [25, 'house_medium', -8, 2],
   ];
 
+  const pending = [...plan];
   const rows: string[] = [];
   let last = { ...w.stats.produced };
   const t0 = performance.now();
   for (let i = 1; i <= minutes * ticksPerMinute; i++) {
     if ((i - 1) % ticksPerMinute === 0) {
-      for (const [minute, type, dx, dy] of plan) {
-        if (minute * ticksPerMinute === i - 1) placeNear(w, type, c.x + dx, c.y + dy);
+      // Due entries that found no spot (e.g. a mine before the tower widened the border) retry every minute.
+      for (let k = 0; k < pending.length; k++) {
+        const [minute, type, dx, dy] = pending[k];
+        if (minute * ticksPerMinute <= i - 1 && placeNear(w, type, c.x + dx, c.y + dy)) pending.splice(k--, 1);
       }
     }
     w.step();
@@ -76,6 +79,8 @@ for (const seed of seeds) {
       RESOURCES.filter((r) => c.output[r] > 0)
         .map((r) => `${r}:${c.output[r]}`)
         .join(' ') +
-      ` · lost ${lost} · blocked doors ${blocked} · ${(ms / (minutes * ticksPerMinute)).toFixed(3)} ms/tick`,
+      ` · lost ${lost} · blocked doors ${blocked}` +
+      (pending.length ? ` · not placed ${pending.map((p) => p[1]).join(',')}` : '') +
+      ` · ${(ms / (minutes * ticksPerMinute)).toFixed(3)} ms/tick`,
   );
 }
