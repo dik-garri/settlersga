@@ -75,9 +75,9 @@ export function setupProblem(s: GameSetup): string | null {
   if (s.slots[0]?.kind !== 'human') return 'Первое место — ваше';
   if (s.slots.some((x, k) => k > 0 && x.kind === 'human')) return 'Второй игрок за этим компьютером не предусмотрен';
   if (s.mode === 'single' && active.some((x) => x.kind === 'remote')) return 'Игроки по сети — только в сетевой игре';
-  if (active.some((x) => !RACES.find((r) => r.id === x.race)?.ready)) return 'Эта раса появится в фазе 6';
+  if (active.some((x) => !RACES.find((r) => r.id === x.race)?.ready)) return 'Эта раса скоро появится';
   if (active.length > 1 && new Set(active.map((x) => x.team)).size === 1) return 'Все в одной команде — не с кем воевать';
-  if (s.mode === 'network') return 'Сетевая игра появится в фазе 7';
+  if (s.mode === 'network') return 'Сетевая игра скоро появится';
   return null;
 }
 

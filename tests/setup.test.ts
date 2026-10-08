@@ -50,8 +50,8 @@ describe('game setup', () => {
     expect(one({ slots: s.slots.map((x) => ({ ...x, team: 1 })) })).toMatch(/одной команде/);
     expect(one({ slots: [{ ...s.slots[0], kind: 'ai' }, ...s.slots.slice(1)] })).toMatch(/ваше/);
     expect(one({ slots: [s.slots[0], { ...s.slots[1], kind: 'remote' }, ...s.slots.slice(2)] })).toMatch(/сетевой/);
-    expect(one({ slots: [{ ...s.slots[0], race: 'vikings' }, ...s.slots.slice(1)] })).toMatch(/фазе 6/);
-    expect(one({ mode: 'network' })).toMatch(/фазе 7/);
+    expect(one({ slots: [{ ...s.slots[0], race: 'vikings' }, ...s.slots.slice(1)] })).toMatch(/скоро/);
+    expect(one({ mode: 'network' })).toMatch(/скоро/);
     // Alone on the map (a sandbox) is fine.
     expect(one({ slots: [s.slots[0], ...s.slots.slice(1).map((x) => ({ ...x, kind: 'closed' as const }))] })).toBeNull();
   });

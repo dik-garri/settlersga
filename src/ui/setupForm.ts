@@ -21,11 +21,18 @@ import {
  */
 export function setupForm(setup: GameSetup, changed: (problem: string | null) => void): HTMLElement {
   const box = el('div', 'setup');
-  const select = <T extends string | number>(options: [T, string][], value: T, set: (v: T) => void, disabled = false) => {
+  const select = <T extends string | number>(
+    options: [T, string][],
+    value: T,
+    set: (v: T) => void,
+    disabled = false,
+    unavailable: (v: T) => boolean = () => false,
+  ) => {
     const s = el('select');
     for (const [v, text] of options) {
       const o = el('option', '', text);
       o.value = String(v);
+      o.disabled = unavailable(v);
       s.append(o);
     }
     s.value = String(value);
@@ -110,10 +117,11 @@ export function setupForm(setup: GameSetup, changed: (problem: string | null) =>
           k === 0,
         ),
         select(
-          RACES.map((r): [string, string] => [r.id, r.ready ? r.name : `${r.name} — в фазе 6`]),
+          RACES.map((r): [string, string] => [r.id, r.ready ? r.name : `${r.name} — скоро`]),
           slot.race,
           (v) => (slot.race = v as typeof slot.race),
           off,
+          (v) => !RACES.find((r) => r.id === v)?.ready,
         ),
         select(
           Array.from({ length: MAX_SLOTS }, (_, t): [number, string] => [t + 1, `${t + 1}`]),
