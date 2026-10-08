@@ -51,6 +51,7 @@ MATERIALS = {
     'straw': lambda: lib.mat_grain('straw', (0.78, 0.6, 0.2), (0.96, 0.82, 0.38), scale=30, stretch=(9, 1, 1), bump=0.6),
     'ears': lambda: lib.mat_grain('ears', (0.82, 0.62, 0.18), (0.98, 0.84, 0.4), scale=40, stretch=(1, 1, 1), bump=0.8),
     'twine': lambda: lib.mat_flat('twine', (0.45, 0.3, 0.14)),
+    'burlap': lambda: lib.mat_grain('burlap', (0.6, 0.46, 0.28), (0.78, 0.66, 0.46), scale=40, stretch=(1, 1, 1), bump=0.6),
     'sack': lambda: lib.mat_grain('sack', (0.84, 0.8, 0.7), (0.96, 0.94, 0.88), scale=40, stretch=(1, 1, 1), bump=0.5),
     'crust': lambda: lib.mat_grain('crust', (0.62, 0.36, 0.12), (0.82, 0.54, 0.22), scale=14, stretch=(1, 1, 1), bump=0.5),
     'score': lambda: lib.mat_flat('score', (0.94, 0.8, 0.52)),
@@ -252,7 +253,9 @@ def item_bow(m, rnd):
         t = (k + 0.5) / segs * 2 - 1  # −1..1 along the bow
         x = t * 0.16
         y = 0.06 * (1 - t * t)
-        lib.box((x, y, 0.008), (0.042, 0.016, 0.014), m['handle'], rot=(0, 0, -math.atan(-0.12 * t / 0.16 * 2)))
+        # Along the arc's tangent (dy/dx = −0.75 t), a little longer than a step so segments join.
+        slope = -0.75 * t
+        lib.box((x, y, 0.008), (0.04 * math.hypot(1, slope), 0.016, 0.014), m['handle'], rot=(0, 0, math.atan(slope)))
     lib.box((0, 0, 0.008), (0.32, 0.003, 0.003), m['string'])
 
 
@@ -465,3 +468,421 @@ def render_wares(out, tmp):
     with open(os.path.join(out, 'wares.json'), 'w') as f:
         json.dump({'frame': list(WARE), 'order': list(GOODS)}, f)
     print('rendered wares')
+
+
+# ------------------------------------------------------------------------------------------- icons
+# Menu icons: the same item models, each framed tightly in its own square so it reads at 13–48 CSS
+# px. A carried ware is ~14 logical px wide, far too small to scale up into a menu; these render at
+# ICON px, enough for the largest UI use on a 2× display. Bulk goods lie as a small group on the
+# ground (soft contact shadow); tools, weapons and the sheaf stand upright, diagonal with the working
+# end up-right, their broad side to the camera so the silhouettes (axe blade, pick points, hammer
+# block, saw teeth…) read.
+
+#: Pixels of one icon (square).
+ICON = 96
+#: Icons per row of `icons.png`.
+ICON_COLUMNS = 8
+#: Camera elevation above the horizon (a 3/4 view from the front).
+ICON_ELEVATION = math.radians(36)
+#: Empty margin around the item, as a fraction of the icon.
+ICON_MARGIN = 0.05
+
+
+def ground(at, yaw=0, build=None):
+    """Items lying as placed by `at` ((x, y, z, yaw) each, as in pile layouts), the group turned
+    `yaw`°; `build` replaces the ware's model."""
+    return {'view': 'ground', 'at': at, 'yaw': yaw, 'build': build}
+
+
+def upright(build=None, roll=-45, turn=18, tilt=24):
+    """One item stood up facing the camera: its long +X axis rolled to `roll`° (−45 = up-right,
+    −90 = straight up), leant back `tilt`° and turned `turn`° about the vertical to show its depth;
+    `build` replaces the ware's model."""
+    return {'view': 'upright', 'roll': roll, 'turn': turn, 'tilt': tilt, 'build': build}
+
+
+BARS = [(0, -0.045, 0, 0), (0, 0.045, 0, 0), (0, 0, 0.048, math.pi / 2)]
+
+
+# Icon-only models: the carried wares are tuned for ~14 px, where a thin handle and a small head are
+# enough; at menu size the tools need chunkier handles and drawn-out heads (flat profiles extruded
+# with `prism`), so pickaxe, hammer and axe differ at a glance. Built like the items: long axis +X,
+# working end at +X, broad side up (+Z), which `upright` turns to the camera.
+
+ICON_HANDLE = 0.016
+
+
+def prism(points, z0, z1, mat, bevel=0.0):
+    """A flat profile (x, y points, counter-clockwise) extruded from z0 to z1."""
+    import bmesh
+
+    mesh = bpy.data.meshes.new('prism')
+    bm = bmesh.new()
+    low = [bm.verts.new((x, y, z0)) for x, y in points]
+    high = [bm.verts.new((x, y, z1)) for x, y in points]
+    bm.faces.new(list(reversed(low)))
+    bm.faces.new(high)
+    n = len(points)
+    for i in range(n):
+        j = (i + 1) % n
+        bm.faces.new((low[i], low[j], high[j], high[i]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(mesh)
+    bm.free()
+    obj = bpy.data.objects.new('prism', mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    if bevel > 0:
+        mod = obj.modifiers.new('Bevel', 'BEVEL')
+        mod.width = bevel
+        mod.segments = 2
+        mod.limit_method = 'ANGLE'
+    if mat is not None:
+        mesh.materials.append(mat)
+    return obj
+
+
+def strip(centre, width, steps):
+    """Outline of a curved strip: `centre(u)` → (x, y) for u in 0..1, `width(u)` across it."""
+    left, right = [], []
+    for k in range(steps + 1):
+        u = k / steps
+        x, y = centre(u)
+        x2, y2 = centre(min(1, u + 1e-3)) if u < 1 else centre(u)
+        x1, y1 = centre(max(0, u - 1e-3))
+        tx, ty = x2 - x1, y2 - y1
+        n = math.hypot(tx, ty) or 1
+        nx, ny = -ty / n, tx / n
+        w = width(u) / 2
+        left.append((x + nx * w, y + ny * w))
+        right.append((x - nx * w, y - ny * w))
+    return right + list(reversed(left))
+
+
+def icon_handle(x0, x1, m, r=ICON_HANDLE):
+    lib.cylinder(((x0 + x1) / 2, 0, 0), r, x1 - x0, m['handle'], rot=X, verts=12)
+
+
+def icon_axe(m, rnd):
+    icon_handle(-0.17, 0.15, m)
+    lib.box((0.115, 0, 0), (0.05, 0.05, 0.034), m['iron'], bevel=0.006)  # eye round the handle
+    # The blade flares from the eye to a curved cutting edge on the +Y side.
+    edge = [(0.2 - 0.15 * k / 8, 0.125 + 0.028 * math.sin(math.pi * k / 8)) for k in range(9)]
+    prism([(0.095, 0.02), (0.135, 0.02)] + edge, -0.008, 0.008, m['steel'], bevel=0.003)
+    prism([(0.1, -0.02), (0.13, -0.02), (0.125, -0.05), (0.105, -0.05)], -0.014, 0.014, m['iron'], bevel=0.004)
+
+
+def icon_pickaxe(m, rnd):
+    icon_handle(-0.17, 0.14, m)
+    head = strip(lambda u: (0.115 + 0.045 * (1 - (2 * u - 1) ** 2), 0.16 * (2 * u - 1)),
+                 lambda u: 0.006 + 0.034 * (1 - abs(2 * u - 1)) ** 0.7, 16)
+    prism(head, -0.015, 0.015, m['iron'], bevel=0.004)
+
+
+def icon_hammer(m, rnd):
+    icon_handle(-0.17, 0.12, m)
+    lib.box((0.13, 0, 0), (0.075, 0.15, 0.075), m['iron'], bevel=0.01)
+    for s in (-1, 1):
+        lib.box((0.13, s * 0.08, 0), (0.085, 0.014, 0.085), m['band'], bevel=0.005)
+
+
+def icon_shovel(m, rnd):
+    icon_handle(-0.17, 0.06, m)
+    lib.cylinder((-0.17, 0, 0), ICON_HANDLE, 0.08, m['handle'], rot=Y, verts=10)  # T grip
+    prism([(0.04, -0.02), (0.08, -0.025), (0.08, 0.025), (0.04, 0.02)], -0.012, 0.012, m['iron'], bevel=0.003)
+    prism([(0.075, -0.055), (0.17, -0.055), (0.215, 0), (0.17, 0.055), (0.075, 0.055)], -0.006, 0.006, m['steel'], bevel=0.004)
+
+
+def icon_scythe(m, rnd):
+    icon_handle(-0.18, 0.15, m)
+    lib.cylinder((-0.02, 0.035, 0), ICON_HANDLE * 0.8, 0.07, m['handle'], rot=Y, verts=10)  # hand peg
+    blade = strip(lambda u: (0.15 - 0.12 * u * u, 0.01 + 0.22 * u), lambda u: 0.045 * (1 - u) + 0.004, 16)
+    prism(blade, -0.006, 0.006, m['steel'], bevel=0.003)
+
+
+def icon_saw(m, rnd):
+    teeth = []
+    n = 12
+    for k in range(n + 1):
+        x = 0.19 - 0.25 * k / n
+        y = -0.02 - 0.02 * k / n
+        teeth.append((x, y))
+        if k < n:
+            teeth.append((x - 0.25 / n / 2, y - 0.018))
+    # Toothed lower edge from the heel to the toe, then the straight back.
+    prism(list(reversed(teeth)) + [(0.2, -0.02), (0.2, 0.03), (-0.06, 0.05)], -0.004, 0.004, m['steel'])
+    prism([(-0.16, -0.05), (-0.055, -0.05), (-0.055, 0.06), (-0.14, 0.07), (-0.18, 0.01)], -0.014, 0.014, m['handle'], bevel=0.006)
+    lib.cylinder((-0.11, 0.005, 0), 0.022, 0.04, m['band'], verts=12)  # dark hand hole
+
+
+def icon_sword(m, rnd):
+    prism([(-0.04, -0.022), (0.17, -0.022), (0.22, 0), (0.17, 0.022), (-0.04, 0.022)], -0.007, 0.007, m['steel'], bevel=0.004)
+    lib.box((0.07, 0, 0.007), (0.2, 0.008, 0.002), m['iron'])  # fuller
+    lib.box((-0.05, 0, 0), (0.022, 0.12, 0.024), m['gold'], bevel=0.005)
+    lib.cylinder((-0.1, 0, 0), 0.015, 0.08, m['leather'], rot=X, verts=10)
+    lib.sphere((-0.145, 0, 0), 0.022, m['gold'])
+
+
+def icon_bow(m, rnd):
+    # The stave: one smooth strip along the arc, thick in the middle, thin at the tips.
+    stave = strip(lambda u: (0.19 * (2 * u - 1), 0.085 * (1 - (2 * u - 1) ** 2)),
+                  lambda u: 0.024 * (1 - 0.6 * abs(2 * u - 1)) + 0.004, 24)
+    prism(stave, -0.009, 0.009, m['handle'], bevel=0.004)
+    lib.box((0, 0.085, 0), (0.05, 0.03, 0.024), m['leather'], bevel=0.006)  # grip
+    lib.box((0, 0, 0), (0.38, 0.003, 0.003), m['string'])
+    # An arrow on the string, pointing out past the grip.
+    lib.cylinder((0, 0.07, 0.012), 0.004, 0.14, m['handle'], rot=Y, verts=6)
+    lib.cylinder((0, 0.15, 0.012), 0.012, 0.03, m['iron'], rot=(-math.pi / 2, 0, 0), radius2=0.0, verts=4)
+    for s_ in (-1, 1):
+        prism([(0, 0.002), (s_ * 0.016, 0.008), (s_ * 0.016, 0.034), (0, 0.04)], 0.01, 0.014, m['meat'])
+
+
+def icon_rod(m, rnd):
+    lib.cylinder((0.02, 0, 0), 0.012, 0.38, m['handle'], rot=X, verts=10, radius2=0.004)
+    lib.cylinder((-0.14, 0, 0), 0.016, 0.07, m['leather'], rot=X, verts=10)
+    lib.cylinder((-0.09, 0, 0.018), 0.026, 0.02, m['band'], verts=14)  # reel
+    # The line hangs from the tip (screen down is −X−Y here) to a red float.
+    tip, bob = (0.21, 0.0), (0.13, -0.11)
+    dx, dy = bob[0] - tip[0], bob[1] - tip[1]
+    lib.box(((tip[0] + bob[0]) / 2, (tip[1] + bob[1]) / 2, 0), (math.hypot(dx, dy), 0.003, 0.003), m['string'],
+            rot=(0, 0, math.atan2(dy, dx)))
+    lib.sphere((bob[0], bob[1], 0), 0.02, m['meat'])
+    lib.sphere((bob[0] + 0.012, bob[1] + 0.012, 0), 0.012, m['fat'])
+
+
+def icon_armor(m, rnd):
+    """A cuirass standing up (+X up, +Y left, +Z to the camera): a torso-shaped plate (broad
+    shoulders, neck notch, narrow waist) with a ridge and gilt trim, shoulder plates, a belt and a
+    skirt of leather strips."""
+    half = [(0.125, 0.0), (0.135, 0.035), (0.13, 0.075), (0.105, 0.105), (0.065, 0.088), (0.0, 0.074),
+            (-0.065, 0.066), (-0.085, 0.072)]
+    outline = [(x, -y) for x, y in reversed(half)] + half[1:]
+    prism(outline, -0.01, 0.03, m['steel'], bevel=0.016)
+    lib.box((0.02, 0, 0.034), (0.2, 0.01, 0.01), m['steel'], bevel=0.004)  # ridge
+    neck = strip(lambda u: (0.128 - 0.012 * (1 - (2 * u - 1) ** 2), 0.04 * (2 * u - 1)), lambda u: 0.01, 10)
+    prism(neck, 0.02, 0.036, m['gold'], bevel=0.003)
+    for s_ in (-1, 1):
+        lib.sphere((0.1, s_ * 0.105, 0.02), 0.045, m['steel'], scale=(0.75, 1.0, 0.45))  # shoulder plates
+        lib.box((0.1, s_ * 0.105, 0.036), (0.012, 0.06, 0.006), m['gold'], bevel=0.002)
+    lib.box((-0.085, 0, 0.012), (0.028, 0.16, 0.05), m['leather'], bevel=0.008)  # belt
+    lib.sphere((-0.085, 0, 0.038), 0.014, m['gold'])
+    for k in range(6):
+        y = (k - 2.5) * 0.027
+        lib.box((-0.135, y, 0.004), (0.07, 0.022, 0.012), m['leather'], bevel=0.004)
+
+
+def icon_grain(m, rnd):
+    """A sheaf: stalks bound in the middle, fanning out to ears on top and to cut ends below."""
+    r = random.Random(7)
+    for k in range(11):
+        a = (k - 5) / 5
+        z = r.uniform(-0.02, 0.02)
+        top = (0.15, a * 0.07, z)
+        low = (-0.15, a * 0.04, z * 0.5)
+        for (x0, y0, z0), (x1, y1, z1) in (((0, a * 0.012, 0), top), ((0, a * 0.012, 0), low)):
+            dx, dy = x1 - x0, y1 - y0
+            lib.cylinder(((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2), 0.0055, math.hypot(dx, dy), m['straw'],
+                         rot=(0, math.pi / 2, math.atan2(dy, dx)), verts=6)
+        ang = math.atan2(top[1], top[0])
+        lib.sphere((top[0] + 0.03 * math.cos(ang), top[1] + 0.03 * math.sin(ang), top[2]), 0.016, m['ears'],
+                   scale=(2.3, 0.75, 0.75), subdiv=2).rotation_euler = (0, 0, ang)
+    lib.cylinder((0, 0, 0), 0.022, 0.025, m['twine'], rot=X, verts=12)
+
+
+def icon_fish(m, rnd):
+    lib.sphere((0, 0, 0.03), 0.06, m['fish'], scale=(2.3, 0.9, 0.45))
+    prism([(-0.12, 0), (-0.2, 0.06), (-0.175, 0), (-0.2, -0.06)], 0.022, 0.034, m['fin'], bevel=0.003)
+    prism([(-0.05, 0.045), (0.04, 0.045), (-0.03, 0.085)], 0.024, 0.032, m['fin'])  # dorsal
+    lib.sphere((0.1, 0.012, 0.05), 0.011, m['bone'])
+    lib.sphere((0.104, 0.014, 0.056), 0.006, m['coal'])
+    lib.box((0.07, 0, 0.052), (0.004, 0.06, 0.004), m['fin'], rot=(0, 0, 0.15))  # gill line
+
+
+def icon_flour(m, rnd):
+    """An open burlap sack with a white mound of flour in its mouth, a little spilt in front."""
+    lib.lumpy((0, 0, 0.07), 0.075, m['burlap'], scale=(1.0, 1.0, 0.95), strength=0.15, noise=0.6, subdiv=3)
+    lib.cylinder((0, 0, 0.13), 0.068, 0.03, m['burlap'], radius2=0.075, verts=24, bevel=0.008)  # rolled rim
+    lib.lumpy((0, 0, 0.15), 0.064, m['fat'], scale=(1.0, 1.0, 0.45), strength=0.15, noise=0.8, subdiv=3)
+    lib.lumpy((0.075, -0.075, 0.0), 0.04, m['fat'], scale=(1.4, 1.0, 0.4), strength=0.2, noise=0.8, subdiv=2)
+
+
+def icon_goldore(m, rnd):
+    lump('goldore')(m, rnd)
+    for k in range(3):
+        a = rnd.uniform(0, math.tau)
+        lib.lumpy((math.cos(a) * 0.04, math.sin(a) * 0.035, 0.05 + rnd.uniform(-0.01, 0.01)), 0.016, m['gold'],
+                  strength=0.4, noise=1.0, seed=rnd.randrange(1000), subdiv=1, flat=True)
+
+
+def icon_world(scene):
+    """A sky that is bright above and dark below, so metal shows highlights and a horizon."""
+    nodes, links = scene.world.node_tree.nodes, scene.world.node_tree.links
+    bg = nodes['Background']
+    coord = nodes.new('ShaderNodeTexCoord')
+    sep = nodes.new('ShaderNodeSeparateXYZ')
+    links.new(coord.outputs['Generated'], sep.inputs['Vector'])
+    span = nodes.new('ShaderNodeMapRange')
+    span.inputs['From Min'].default_value = -0.3
+    span.inputs['From Max'].default_value = 0.8
+    links.new(sep.outputs['Z'], span.inputs['Value'])
+    ramp = lib._ramp(nodes, [(0.0, (0.1, 0.08, 0.06)), (0.45, (0.45, 0.44, 0.42)), (1.0, (1.0, 0.97, 0.9))])
+    links.new(span.outputs['Result'], ramp.inputs['Fac'])
+    links.new(ramp.outputs['Color'], bg.inputs['Color'])
+    bg.inputs['Strength'].default_value = 0.7
+
+ICONS = {
+    'log': ground([(0, -0.043, 0, 0), (0, 0.043, 0, 0), (0, 0, 0.072, 0)], yaw=32),
+    'plank': ground(layers(2, 0.09, 0.023)[:4], yaw=28),
+    'stone': ground([(-0.066, 0.01, 0, 0.12), (0.066, 0.02, 0, -0.1), (0, 0.012, 0.076, 0.05)], yaw=18),
+    'water': ground([(0, 0, 0, 0)]),
+    'fish': ground([(0, 0, 0, 0)], yaw=14, build=icon_fish),
+    'grain': upright(icon_grain, roll=-70, turn=10, tilt=10),
+    'flour': ground([(0, 0, 0, 0)], build=icon_flour),
+    'bread': ground([(0, 0, 0, 0)], yaw=24),
+    'pig': ground([(0, 0, 0, 0)], yaw=-28),
+    'meat': ground([(0, 0, 0, 0)], yaw=16),
+    'coal': ground(heap(0.09, 0.05), yaw=10),
+    'ironore': ground(heap(0.09, 0.05), yaw=10),
+    'goldore': ground(heap(0.09, 0.05), yaw=10, build=icon_goldore),
+    'iron': ground(BARS, yaw=24),
+    'gold': ground(BARS, yaw=24),
+    'axe': upright(icon_axe),
+    'saw': upright(icon_saw, roll=-30),
+    'pickaxe': upright(icon_pickaxe),
+    'shovel': upright(icon_shovel),
+    'scythe': upright(icon_scythe),
+    'rod': upright(icon_rod),
+    'hammer': upright(icon_hammer),
+    'sword': upright(icon_sword),
+    'bow': upright(icon_bow, turn=10),
+    'armor': upright(icon_armor, roll=-90, turn=14, tilt=14),
+}
+assert list(ICONS) == list(GOODS), 'ICONS must list every resource in GOODS order'
+
+
+def icon_camera(scene):
+    """Orthographic camera looking along +Y, raised by ICON_ELEVATION, rendering ICON² pixels."""
+    cam_data = bpy.data.cameras.new('IconCamera')
+    cam_data.type = 'ORTHO'
+    cam = bpy.data.objects.new('IconCamera', cam_data)
+    scene.collection.objects.link(cam)
+    scene.camera = cam
+    cam.rotation_euler = (math.pi / 2 - ICON_ELEVATION, 0, 0)
+    cam_data.clip_start = 0.1
+    cam_data.clip_end = 100
+    scene.render.resolution_x = ICON
+    scene.render.resolution_y = ICON
+    scene.render.resolution_percentage = 100
+    return cam
+
+
+def icon_light():
+    """Sun from the upper left, a little in front, so faces turned to the camera are lit too."""
+    from mathutils import Vector
+
+    sun = bpy.data.objects['Sun']
+    sun.rotation_euler = Vector((0.75, 0.55, -1.25)).normalized().to_track_quat('-Z', 'Y').to_euler()
+
+
+def fit_camera(cam, roots, shadow):
+    """Centres the camera on what the roots hold and zooms so it fills the frame (less
+    ICON_MARGIN); with `shadow`, the shadow cast on the ground stays in frame too."""
+    from mathutils import Vector
+
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    ray = bpy.data.objects['Sun'].matrix_world.to_quaternion() @ Vector((0, 0, -1))  # light travels
+    pts = []
+    for root in roots:
+        for obj in root.children_recursive:
+            if obj.type != 'MESH':
+                continue
+            ev = obj.evaluated_get(dg)
+            mesh = ev.to_mesh()
+            for v in mesh.vertices:
+                p = ev.matrix_world @ v.co
+                pts.append(p)
+                if shadow and ray.z < 0 and p.z > 0:
+                    pts.append(p + ray * (p.z / -ray.z))
+            ev.to_mesh_clear()
+    rot = cam.matrix_world.to_quaternion()
+    right, up, back = rot @ Vector((1, 0, 0)), rot @ Vector((0, 1, 0)), rot @ Vector((0, 0, 1))
+    xs = [p.dot(right) for p in pts]
+    ys = [p.dot(up) for p in pts]
+    span = max(max(xs) - min(xs), max(ys) - min(ys))
+    cam.location = right * ((min(xs) + max(xs)) / 2) + up * ((min(ys) + max(ys)) / 2) + back * 20
+    cam.data.ortho_scale = span / (1 - 2 * ICON_MARGIN)
+    bpy.context.view_layer.update()
+
+
+def render_icon(res, path):
+    """Renders the icon of `res` into `path` (ICON² pixels); returns Blender's bottom-up pixels."""
+    from mathutils import Matrix
+
+    spec = ICONS[res]
+    build = spec['build'] or GOODS[res][0]
+    scene = lib.reset_scene(samples=64)
+    scene.cycles.device = 'CPU'
+    cam = icon_camera(scene)
+    icon_light()
+    icon_world(scene)
+    m = Mats()
+    rnd = random.Random(3)
+    if spec['view'] == 'ground':
+        group = bpy.data.objects.new('group', None)
+        scene.collection.objects.link(group)
+        for x, y, z, yaw in spec['at']:
+            place(build, m, rnd, x, y, z, yaw).parent = group
+        group.rotation_euler = (0, 0, math.radians(spec['yaw']))
+        root = group
+    else:
+        root = place(build, m, rnd, 0, 0, 0, 0)
+        centre(root)
+        # Lying flat → broad side to the camera (+Z to −Y), long axis rolled, leant back, turned.
+        root.matrix_world = (
+            Matrix.Rotation(math.radians(spec['turn']), 4, 'Z')
+            @ Matrix.Rotation(-math.radians(spec['tilt']), 4, 'X')
+            @ Matrix.Rotation(math.radians(spec['roll']), 4, 'Y')
+            @ Matrix.Rotation(math.pi / 2, 4, 'X')
+            @ root.matrix_world
+        )
+        bpy.data.objects['ShadowCatcher'].hide_render = True
+    fit_camera(cam, [root], spec['view'] == 'ground')
+    lib.render_to(scene, path)
+    img = bpy.data.images.load(path)
+    px = np.empty(len(img.pixels), dtype=np.float32)
+    img.pixels.foreach_get(px)
+    bpy.data.images.remove(img)
+    return px.reshape(ICON, ICON, 4)
+
+
+def render_icons(out, tmp, only=None):
+    """`icons.png`: one menu icon per resource in `GOODS` order, ICON_COLUMNS a row (`icons.json`:
+    icon size, columns and order). With `only`, re-renders just those and keeps the others' pixels
+    from the existing sheet."""
+    order = list(GOODS)
+    rows_n = (len(order) + ICON_COLUMNS - 1) // ICON_COLUMNS
+    w, h = ICON_COLUMNS * ICON, rows_n * ICON
+    path = os.path.join(out, 'icons.png')
+    sheet = np.zeros((h, w, 4), dtype=np.float32)
+    if only and os.path.exists(path):
+        old = bpy.data.images.load(path)
+        if tuple(old.size) == (w, h):
+            old.pixels.foreach_get(sheet.ravel())
+        bpy.data.images.remove(old)
+    for k, res in enumerate(order):
+        if only and res not in only:
+            continue
+        px = render_icon(res, os.path.join(tmp, f'icon-{res}.png'))
+        row, col = divmod(k, ICON_COLUMNS)
+        y0 = (rows_n - 1 - row) * ICON  # Blender's rows run bottom-up
+        sheet[y0:y0 + ICON, col * ICON:(col + 1) * ICON] = px
+        print('rendered icon', res)
+    img = bpy.data.images.new('icons', width=w, height=h, alpha=True)
+    img.pixels.foreach_set(sheet.ravel())
+    img.filepath_raw = path
+    img.file_format = 'PNG'
+    img.save()
+    bpy.data.images.remove(img)
+    with open(os.path.join(out, 'icons.json'), 'w') as f:
+        json.dump({'size': ICON, 'columns': ICON_COLUMNS, 'order': order}, f)
+    print('rendered icons')

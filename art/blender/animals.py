@@ -1,11 +1,16 @@
 """Renders the wild animals' sprite sheets into public/art/3d (animal-<kind>.png).
 
-    blender -b --factory-startup -P art/blender/animals.py -- [deer donkey duck chicken]
+    blender -b --factory-startup -P art/blender/animals.py -- [deer donkey duck chicken] [portraits]
 
 Each sheet is 8 rows (directions in DIRS order: E, SE, S, SW, W, NW, N, NE) × 6 columns: walk
 0..3, standing, grazing (head down). Cells and anchors must match ANIMAL_CELLS in
 src/render/animalArt.ts. Models are built from simple parts on pivots, in the Settlers 4 manner:
 warm saturated colours, soft shading, a shadow on the ground.
+
+`portraits` renders `animal-<kind>-portrait.png` for the kinds in PORTRAITS: the standing pose
+facing south-east, framed like a cell but at PORTRAIT_SCALE × the logical size, for the HTML
+portrait of a unit drawn as that animal (the pack donkey's window), which the sheet's small cells
+would only give blurred.
 """
 
 import math
@@ -161,6 +166,30 @@ def build_chicken(r):
 
 
 BUILDERS = {'deer': build_deer, 'donkey': build_donkey, 'duck': build_duck, 'chicken': build_chicken}
+#: Kinds that are also units with a settler window (UNIT_ANIMALS in animalArt.ts).
+PORTRAITS = ['donkey']
+#: Image pixels per logical pixel of a portrait (a cell is RESOLUTION).
+PORTRAIT_SCALE = 8
+
+
+def render_portrait(kind):
+    """`animal-<kind>-portrait.png`: standing, facing south-east (direction 1), large."""
+    w, h, ax, ay = CELLS[kind]
+    scene = lib.reset_scene(samples=48)
+    scene.cycles.device = 'CPU'
+    scene.render.threads_mode = 'FIXED'
+    scene.render.threads = 4
+    # A cell's framing with room below for the whole shadow, at more pixels.
+    w, h = w + 8, h + 16
+    lib.setup_camera(scene, w, h, ax + 4, ay)
+    scene.render.resolution_x = w * PORTRAIT_SCALE
+    scene.render.resolution_y = h * PORTRAIT_SCALE
+    r = Rig()
+    BUILDERS[kind](r)
+    gx, gy = lib.ground_dir(math.pi / 4)
+    r.pose(math.atan2(gy, gx), 0, False)
+    lib.render_to(scene, os.path.join(OUT, f'animal-{kind}-portrait.png'))
+    print('rendered portrait', kind)
 
 
 def render_kind(kind):
@@ -205,8 +234,12 @@ def main():
     args = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
     os.makedirs(OUT, exist_ok=True)
     os.makedirs(TMP, exist_ok=True)
-    for kind in args or list(BUILDERS):
-        render_kind(kind)
+    for kind in args or [*BUILDERS, 'portraits']:
+        if kind == 'portraits':
+            for k in PORTRAITS:
+                render_portrait(k)
+        else:
+            render_kind(kind)
 
 
 main()
