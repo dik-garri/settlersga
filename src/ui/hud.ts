@@ -11,6 +11,7 @@ import { glyph, type GlyphName } from './icons';
 import { InfoView } from './infoPanel';
 import { OptionsView, SPEEDS } from './optionsView';
 import { SettlerInfoView } from './settlerInfo';
+import { UnitsView } from './unitsView';
 import { SettlersView } from './settlersView';
 import type { GameState, Placeable } from './state';
 import { StatsView } from './statsView';
@@ -55,6 +56,7 @@ export class Hud {
   private readonly stats: StatsView;
   private readonly info: InfoView;
   private readonly settlerInfo: SettlerInfoView;
+  private readonly unitsView: UnitsView;
   private menu: MenuId = 'build';
   private readonly menuButtons = new Map<MenuId, HTMLButtonElement>();
   private readonly title = el('h3', 'content-title');
@@ -87,6 +89,7 @@ export class Hud {
       place: (p) => select(p),
       toast: (text) => this.toast(text),
     });
+    this.unitsView = new UnitsView(world, state, (text) => this.toast(text));
     this.views = {
       build: this.build,
       goods: new GoodsView(world),
@@ -108,6 +111,7 @@ export class Hud {
       b.onclick = () => {
         this.state.selected = null;
         this.state.selectedSettler = null;
+        this.state.selectedUnits = [];
         this.showMenu(m.id);
         b.blur();
       };
@@ -239,6 +243,10 @@ export class Hud {
     } else if (state.selectedSettler !== null && world.getSettler(state.selectedSettler)) {
       this.mount(this.settlerInfo, 'Поселенец');
       for (const b of this.menuButtons.values()) b.classList.remove('active');
+    } else if (state.selectedUnits.length > 0 && this.unitsView.units().length > 0) {
+      // Selected army units: the selection panel, as in Settlers 4.
+      this.mount(this.unitsView, 'Отряд');
+      for (const b of this.menuButtons.values()) b.classList.remove('active');
     } else {
       if (state.selected !== null) state.selected = null;
       if (state.selectedSettler !== null) state.selectedSettler = null;
@@ -273,7 +281,9 @@ export class Hud {
             ? 'ЛКМ по разведанному чужому зданию с товарами — послать вора · ПКМ / Esc — отмена'
             : state.placing
               ? 'ЛКМ — поставить (Shift — несколько) · ПКМ / Esc — отмена'
-              : 'Перетаскивание / WASD — камера · колесо — зум · клик по зданию или поселенцу — его окно';
+              : state.selectedUnits.length > 0
+                ? 'ПКМ по земле — идти · по вражескому зданию — атаковать · по своему — в гарнизон · Shift+ЛКМ — добавить · Esc — снять выбор'
+                : 'ЛКМ-рамка или клик по бойцу — выбрать отряд · ПКМ/СКМ-перетаскивание, WASD — камера · колесо — зум · клик по зданию — его окно';
   }
 
   /** Victory or defeat: time played, a few totals, and a way to start over or keep watching. */

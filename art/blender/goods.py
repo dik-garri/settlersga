@@ -256,6 +256,17 @@ def item_bow(m, rnd):
     lib.box((0, 0, 0.008), (0.32, 0.003, 0.003), m['string'])
 
 
+def item_armor(m, rnd):
+    """A squad leader's armour, lying flat: a rounded breastplate with a raised ridge, two
+    shoulder straps and a belt of leather."""
+    lib.sphere((0, 0, 0.02), 0.1, m['steel'], scale=(1.0, 0.8, 0.28))
+    lib.box((0, 0, 0.045), (0.16, 0.012, 0.012), m['steel'], bevel=0.004)
+    for s in (-1, 1):
+        lib.box((0.07, s * 0.05, 0.035), (0.05, 0.025, 0.012), m['leather'], bevel=0.003)
+    lib.box((-0.08, 0, 0.02), (0.02, 0.15, 0.016), m['leather'], bevel=0.003)
+    lib.sphere((-0.08, 0, 0.03), 0.012, m['gold'])
+
+
 # ----------------------------------------------------------------------------------------- layouts
 # Each returns PILE_MAX placements (x, y, z, yaw); a pile of n items uses the first n.
 
@@ -351,6 +362,7 @@ GOODS = {
     'hammer': (item_hammer, bundle(0.09)),
     'sword': (item_sword, bundle(0.075)),
     'bow': (item_bow, bundle(0.08)),
+    'armor': (item_armor, grid(0.15, 0.05)),
 }
 
 

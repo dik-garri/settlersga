@@ -14,7 +14,7 @@ import { keepOf, wantsRecruit } from '../sim/military';
 import { hasGatherTargetNear } from '../sim/nature';
 import { RESOURCES, type Building, type BuildingType, type Resource, type Settler, type SettlerKind } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
-import { barracksRows, garrisonSlotRows, recruitLevelControls, supportRows } from './armyPanel';
+import { barracksRows, garrisonSlotRows, recruitLevelControls, shareControls, supportRows } from './armyPanel';
 import { el, rowsTable, type View } from './dom';
 import { economyKey, economyRows, toolOrderControls, warehouseControls } from './economyPanel';
 import { glyph } from './icons';
@@ -187,13 +187,29 @@ export class InfoView implements View {
       if (def.garrison && b.done) this.el.append(this.attackControls(b, canSend));
       return;
     }
+    if (def.garrison && b.done) {
+      // Direct army control: step spare fighters out into the field, then order them on the map.
+      const spare = Math.max(0, b.garrison.length - (def.garrison.keep ?? 1));
+      const out = el('div', 'info-actions');
+      const go = el('button', '', `🚩 Вывести бойцов (${spare})`);
+      go.disabled = spare === 0;
+      go.title = 'Свободные бойцы выйдут к двери; выделите их рамкой и командуйте правым щелчком';
+      go.onclick = () => {
+        const n = this.world.releaseFighters(b.id, spare);
+        this.toast(n > 0 ? `Вышли в поле: ${n}` : 'Свободных бойцов нет');
+        this.infoKey = '';
+        go.blur();
+      };
+      out.append(go);
+      this.el.append(out);
+    }
     const warehouse = warehouseControls(this.world, b);
     if (warehouse) this.el.append(warehouse);
     if (!def.playerBuildable) return;
     const orders = b.done ? toolOrderControls(this.world, b) : null;
     if (orders) this.el.append(orders);
     const shared = this.sharedChoices(b);
-    if (shared && shared.length === 2) this.el.append(this.shareControls(shared[0], shared[1]));
+    if (shared && shared.length >= 2) this.el.append(shareControls(this.world, shared, () => (this.infoKey = '')));
     if (def.barracks) this.el.append(recruitLevelControls(this.world, () => (this.infoKey = '')));
     const actions = el('div', 'info-actions');
     if (!b.done || def.recipe || def.residence) {
@@ -239,25 +255,6 @@ export class InfoView implements View {
     const def = BUILDINGS[b.type];
     const choices = def.barracks ? BARRACKS_WEAPONS : (def.recipe?.outputChoice ?? []);
     return choices.length > 0 && choices.every((r) => OUTPUT_SHARES[r] !== undefined) ? choices : null;
-  }
-
-  /** «◀ more A · more B ▶» in steps of 10, keeping the two weights summing to 100. */
-  private shareControls(a: Resource, b: Resource): HTMLElement {
-    const row = el('div', 'info-actions');
-    const shift = (toB: number) => {
-      const total = this.world.shareOf(a) + this.world.shareOf(b) || 100;
-      const bw = Math.max(0, Math.min(100, Math.round((100 * this.world.shareOf(b)) / total) + toB));
-      this.world.setShare(b, bw);
-      this.world.setShare(a, 100 - bw);
-    };
-    const moreA = el('button', '', `◀ ${nameOf(a).toLowerCase()}`);
-    moreA.title = `Больше: ${nameOf(a).toLowerCase()}`;
-    moreA.onclick = () => shift(-10);
-    const moreB = el('button', '', `${nameOf(b).toLowerCase()} ▶`);
-    moreB.title = `Больше: ${nameOf(b).toLowerCase()}`;
-    moreB.onclick = () => shift(10);
-    row.append(moreA, moreB);
-    return row;
   }
 
   private attackControls(b: Building, available: number): HTMLElement {

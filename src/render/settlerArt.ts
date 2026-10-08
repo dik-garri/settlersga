@@ -250,6 +250,19 @@ export function paintHat(ctx: Ctx, pd: number, style: HatStyle): void {
       ctx.fillStyle = '#f2f2f2';
       ctx.fillRect(cx - 2, -24.6, 1.4, 1.2);
       return;
+    case 'plume':
+      ctx.fillStyle = '#d0d0d0';
+      ctx.beginPath();
+      ctx.arc(cx, -21.4, 4, Math.PI, 0);
+      ctx.fill();
+      ctx.fillStyle = '#9a9a9a';
+      ctx.fillRect(cx - 4.3, -21.6, 8.6, 1.2);
+      // Crest and plume (tinted with the hat colour).
+      ctx.fillStyle = '#f2f2f2';
+      ctx.beginPath();
+      ctx.ellipse(cx - fr.f[0] * 0.6, -26.6, 1.6 + Math.abs(fr.f[0]) * 2.2, 2.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      return;
     case 'hood':
       ctx.fillStyle = '#c4c4c4';
       ctx.beginPath();

@@ -34,7 +34,7 @@ PAGE = 2048  # atlas page size in pixels (at lib.RESOLUTION)
 # Mirrors src/render/animConfig.ts: tool shapes, hat styles and the work actions with their tool
 # and near-arm angles (turns of π: 0 hanging down, 0.5 forward, 1 straight up) and bow pull.
 TOOLS = ['none', 'axe', 'hammer', 'pick', 'shovel', 'scythe', 'rod', 'bucket', 'sword', 'bow', 'carry']
-HAT_STYLES = ['cap', 'straw', 'helmet', 'hood', 'chef', 'bare']
+HAT_STYLES = ['cap', 'straw', 'helmet', 'hood', 'chef', 'bare', 'plume']
 ACTIONS = {
     'chop': ('axe', [0.95, 0.62, 0.2, 0.1], None),
     'hammer': ('hammer', [0.82, 0.5, 0.16, 0.34], None),
@@ -603,6 +603,12 @@ def build_hat(style, fig):
         'chef': lambda: [lib.cylinder((-0.01, 0, z + 0.14), 0.12, 0.2, white, radius2=0.14, verts=18),
                          lib.sphere((-0.01, 0, z + 0.25), 0.15, white, scale=(1, 1, 0.5))],
         'bare': lambda: [],
+        # Squad leader: the helmet with a tall crest running front to back and a plume at its top.
+        'plume': lambda: [lib.sphere((-0.005, 0, z + 0.05), 0.135, shiny, scale=(1.05, 1.05, 0.85)),
+                          lib.cylinder((0, 0, z + 0.0), 0.15, 0.025, shiny, verts=20),
+                          lib.box((-0.01, 0, z + 0.2), (0.2, 0.02, 0.07), shiny, bevel=0.01),
+                          lib.lumpy((-0.03, 0, z + 0.27), 0.07, white, scale=(1.6, 0.45, 1.0), strength=0.4,
+                                    noise=0.6, seed=7, subdiv=2)],
     }
     objs = parts[style]()
     for o in objs:

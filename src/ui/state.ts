@@ -15,6 +15,8 @@ export interface GameState {
   selected: number | null;
   /** Settler whose window is shown (a click on a figure); exclusive with `selected`. */
   selectedSettler: number | null;
+  /** Own fighters selected for direct orders (box or click, as in Settlers 4); right-click orders them. */
+  selectedUnits: number[];
   /** Tile under the cursor, if any. */
   hover: { x: number; y: number } | null;
   /** Fog of war shown (`?fog=off` turns it off for debugging). */
@@ -27,6 +29,7 @@ export const createState = (): GameState => ({
   placing: null,
   selected: null,
   selectedSettler: null,
+  selectedUnits: [],
   hover: null,
   fog: true,
 });

@@ -702,6 +702,7 @@ export class GameRenderer {
     area: Area | null = null,
     placing: BuildingType | null = null,
     selectedSettler: number | null = null,
+    selectedUnits: readonly number[] = [],
   ) {
     this.view = view;
     this.nowMs = timeMs;
@@ -720,6 +721,7 @@ export class GameRenderer {
     this.drawShots(alpha);
     this.drawMarks(ghost, selected, hover, area);
     this.markSettler(selectedSettler, timeMs);
+    this.markUnits(selectedUnits);
     this.drawHints(placing, timeMs);
   }
 
@@ -745,6 +747,37 @@ export class GameRenderer {
       }
     }
     return best;
+  }
+
+  /**
+   * Settlers whose feet (on screen) fall inside a rectangle of canvas CSS pixels: what a selection
+   * box catches. Only figures drawn on screen count (the fog of war is respected).
+   */
+  settlersInRect(x0: number, y0: number, x1: number, y1: number): number[] {
+    const [ax, bx] = x0 < x1 ? [x0, x1] : [x1, x0];
+    const [ay, by] = y0 < y1 ? [y0, y1] : [y1, y0];
+    const out: number[] = [];
+    for (const [id, v] of this.settlerViews) {
+      if (!v.root.parent || !v.root.visible || !v.body.visible) continue;
+      const b = v.body.getBounds();
+      const fx = b.x + b.width / 2;
+      const fy = b.y + b.height * 0.85;
+      if (fx >= ax && fx <= bx && fy >= ay && fy <= by) out.push(id);
+    }
+    return out;
+  }
+
+  /** Selected army units (direct control): a ring in the player's colour at each one's feet. */
+  private markUnits(ids: readonly number[]): void {
+    if (ids.length === 0) return;
+    const g = this.settlerMark;
+    for (const id of ids) {
+      const v = this.settlerViews.get(id);
+      if (!v || !v.root.parent || !v.root.visible) continue;
+      const { x, y } = v.root.position;
+      const k = Math.abs(v.root.scale.y);
+      g.ellipse(x, y, 10 * k + 3, 4.5 * k + 1.5).stroke({ width: 2, color: 0x7dff7d, alpha: 0.9 });
+    }
   }
 
   /** Selected settler: a ring at its feet and a bobbing marker over its head, following it. */
