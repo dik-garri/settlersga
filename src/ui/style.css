@@ -10,9 +10,9 @@
   /* Inside width of the minimap frame (main.ts reads it for the minimap canvas). */
   --mm-w: 250px;
   --text: #2c1d0e;
-  --ink-soft: #6b5233;
+  --ink-soft: #4f3820;
   --light: #f3e6c4;
-  --muted: #8a6d48;
+  --muted: #54391d;
   --accent: #b5741c;
   --gold: #d9a441;
   --bronze-hi: #f0cf86;
@@ -228,7 +228,8 @@ button {
 
 .muted {
   margin: 0 0 6px;
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 1.35;
   color: var(--muted);
 }
 
@@ -351,7 +352,7 @@ button.wide {
 
 .build-btn .cost {
   color: var(--ink-soft);
-  font-size: 10.5px;
+  font-size: 11.5px;
 }
 
 /* How many the player has, in the top-left corner like the numbers beside S4's building pictures. */
