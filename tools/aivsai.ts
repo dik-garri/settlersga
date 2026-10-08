@@ -2,9 +2,9 @@
  * Computer players against each other (or against a passive player 1), headless. Prints each side's
  * growth every few minutes and how the game ends.
  *
- *   npm run sim:ai -- --seeds=42,7 --minutes=60 --players=2 --passive=0
+ *   npm run sim:ai -- --seeds=42,7 --minutes=60 --players=2 --passive=0 --levels=easy,hard
  */
-import { PROFESSIONS, TICKS_PER_SECOND } from '../src/sim/config';
+import { PROFESSIONS, TICKS_PER_SECOND, type AiLevel } from '../src/sim/config';
 import { isArcher, isFighter } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
 import { World } from '../src/sim/world';
@@ -18,13 +18,15 @@ const passive = arg('passive', '0') === '1';
 const every = Number(arg('every', '10'));
 /** --teams=1,1,2,2: team per player; the game ends once one side has won. */
 const teams = arg('teams', '') ? arg('teams', '').split(',').map(Number) : undefined;
+/** --levels=easy,hard: difficulty per player (`AI_LEVELS`, default medium). */
+const difficulty = arg('levels', '') ? (arg('levels', '').split(',') as AiLevel[]) : undefined;
 const perMinute = TICKS_PER_SECOND * 60;
 
 for (const seed of seeds) {
   const ai = Array.from({ length: players }, (_, k) => k + 1).filter((p) => !(passive && p === 1));
-  const w = new World(seed, { size, players, ai, teams });
+  const w = new World(seed, { size, players, ai, teams, difficulty });
   console.log(
-    `seed ${seed} · ${size}×${size} · players ${players} · AI ${ai.join(',')}${passive ? ' · player 1 passive' : ''}${teams ? ` · teams ${teams.join(',')}` : ''}`,
+    `seed ${seed} · ${size}×${size} · players ${players} · AI ${ai.join(',')}${passive ? ' · player 1 passive' : ''}${teams ? ` · teams ${teams.join(',')}` : ''}${difficulty ? ` · levels ${difficulty.join(',')}` : ''}`,
   );
   const t0 = performance.now();
   let end = '';

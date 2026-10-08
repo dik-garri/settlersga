@@ -1,12 +1,18 @@
 import { button, el, type View } from './dom';
-import { newGameForm } from './startMenu';
 import type { GameState } from './state';
 
 export const SPEEDS = [1, 2, 4];
 
+/** What the game's menus can do (opened by `PauseMenu`). */
+export interface GameActions {
+  onSave(): void;
+  onLoad(): void;
+  onMenu(): void;
+}
+
 /**
- * The options menu: game speed, saving and loading, sound, a new game and the controls. The speed and
- * sound also have quick buttons in the top strip.
+ * The options menu: game speed, the game menu (save, load, settings, main menu — `PauseMenu`), sound
+ * and the controls. The speed also has quick buttons in the top strip.
  */
 export class OptionsView implements View {
   readonly el = el('div', 'view options-view');
@@ -14,8 +20,7 @@ export class OptionsView implements View {
 
   constructor(
     private readonly state: GameState,
-    actions: { onSave(): void; onLoad(): void },
-    params: URLSearchParams,
+    actions: GameActions,
     sound: HTMLElement | null,
   ) {
     this.el.append(el('h4', '', 'Скорость'));
@@ -34,12 +39,12 @@ export class OptionsView implements View {
     this.el.append(speed, el('h4', '', 'Игра'));
     const game = el('div', 'info-actions');
     game.append(
-      button('Сохранить', 'Сохранить игру (одна ячейка в браузере)', actions.onSave),
+      button('Сохранить', 'Сохранить игру', actions.onSave),
       button('Загрузить', 'Загрузить сохранение', actions.onLoad),
+      button('Меню', 'Меню игры: настройки, выход в главное меню (Esc)', actions.onMenu),
     );
     this.el.append(game);
     if (sound) this.el.append(el('h4', '', 'Звук'), sound);
-    this.el.append(el('h4', '', 'Новая игра'), newGameForm(params));
     this.el.append(el('h4', '', 'Управление'));
     const help = el('dl', 'help');
     for (const [k, v] of [
@@ -50,6 +55,7 @@ export class OptionsView implements View {
       ['1–9, Tab', 'здание, категория'],
       ['Shift + ЛКМ', 'поставить несколько'],
       ['ПКМ / Esc', 'отмена'],
+      ['Esc (ничего не выбрано)', 'меню игры'],
       ['Пробел', 'пауза'],
       ['M', 'звук'],
     ]) {

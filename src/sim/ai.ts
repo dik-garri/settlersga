@@ -24,6 +24,7 @@ import { attackStrength } from './strength';
 import { available, centerOf, claimsTerritory, doorOf, oreLeft, waitingFor } from './buildings';
 import {
   AI,
+  AI_LEVELS,
   AI_PLAN,
   ATTACK_RANGE,
   BUILD_MAX_SLOPE,
@@ -34,6 +35,7 @@ import {
   gatheredBy,
   oreOf,
   PROFESSIONS,
+  type AiLevel,
   type BuildingDef,
 } from './config';
 import { defend, stageStrike, sweep, updateStrike } from './aiField';
@@ -49,6 +51,8 @@ import { startPositions, type World } from './world';
 /** Per computer player; saved with the world. */
 export interface AiState {
   player: PlayerId;
+  /** Difficulty (`AI_LEVELS`); absent in saves from before levels = `medium`. */
+  level?: AiLevel;
   nextThink: number;
   lastAttack: number;
   /** Building type (or 'frontier') → tick before which the AI does not look for a spot again. */
@@ -88,9 +92,25 @@ export interface AiState {
   };
 }
 
-export function createAi(player: PlayerId): AiState {
+/**
+ * The `AI` tuning knobs as scaled by the AI's difficulty (`AI_LEVELS`); `medium` returns the `AI`
+ * values unchanged.
+ */
+export function tuning(ai: AiState): { thinkEvery: number; attackRatio: number; peaceTicks: number; attackCooldown: number; maxOpenSites: number } {
+  const l = AI_LEVELS[ai.level ?? 'medium'];
+  return {
+    thinkEvery: Math.max(1, Math.round(AI.thinkEvery * l.think)),
+    attackRatio: AI.attackRatio * l.attack,
+    peaceTicks: Math.round(AI.peaceTicks * l.peace),
+    attackCooldown: Math.round(AI.attackCooldown * l.cooldown),
+    maxOpenSites: Math.max(1, AI.maxOpenSites + l.sites),
+  };
+}
+
+export function createAi(player: PlayerId, level: AiLevel = 'medium'): AiState {
   return {
     player,
+    level,
     // Stagger the players so their thinks do not all land on the same tick.
     nextThink: player * 7,
     // Finite so it survives a JSON save.
@@ -108,7 +128,7 @@ export function createAi(player: PlayerId): AiState {
 export function updateAi(w: World): void {
   for (const ai of w.ai) {
     if (w.tick < ai.nextThink) continue;
-    ai.nextThink = w.tick + AI.thinkEvery;
+    ai.nextThink = w.tick + tuning(ai).thinkEvery;
     if (!w.isDefeated(ai.player)) think(w, ai);
   }
 }
@@ -146,7 +166,7 @@ function think(w: World, ai: AiState): void {
   }
 
   const sites = own.filter((b) => !b.done);
-  if (sites.length >= AI.maxOpenSites) return;
+  if (sites.length >= tuning(ai).maxOpenSites) return;
   const ctx = new Context(w, me, own, ai.wantOre);
   if (placeTrade(ctx, ai)) return;
   if (siege(ctx, ai)) return;
@@ -538,10 +558,10 @@ export function knownEnemies(w: World, me: PlayerId): { b: Building; defenders: 
  * rest stay in their garrisons, where they defend — a party of all spares leaves its towers at their
  * minimum, and the enemy retakes them at once.
  */
-export function partySize(ready: number, power: number, defense: number, castle: boolean): number {
+export function partySize(ready: number, power: number, defense: number, castle: boolean, ratio = AI.attackRatio): number {
   if (castle || ready === 0) return ready;
   const perFighter = power / ready;
-  return Math.min(ready, Math.max(AI.minAttackers, Math.ceil((AI.overkill * (AI.attackRatio * defense + 1)) / perFighter)));
+  return Math.min(ready, Math.max(AI.minAttackers, Math.ceil((AI.overkill * (ratio * defense + 1)) / perFighter)));
 }
 
 function knownCastles(w: World, me: PlayerId): Map<PlayerId, Building> {
@@ -564,9 +584,10 @@ function attackIfStrong(w: World, ai: AiState): boolean {
   const last = ai.lastTarget ? w.buildings.get(ai.lastTarget) : undefined;
   const pressing = !!last && last.owner === me;
   if (updateStrike(w, ai)) return true;
-  if (w.tick - ai.lastAttack < (pressing ? AI.followUpCooldown : AI.attackCooldown)) return true;
+  const t = tuning(ai);
+  if (w.tick - ai.lastAttack < (pressing ? AI.followUpCooldown : t.attackCooldown)) return true;
   // No rush: the early game is for building up.
-  if (w.tick < AI.peaceTicks) return false;
+  if (w.tick < t.peaceTicks) return false;
   const known = knownEnemies(w, me);
   const castles = knownCastles(w, me);
   // Where each enemy's castle is (or presumably is): attacks work towards it.
@@ -587,10 +608,10 @@ function attackIfStrong(w: World, ai: AiState): boolean {
     const power =
       ready.reduce((n, s) => n + SOLDIER_LEVELS[s.level].damage * (PROFESSIONS[s.kind].combat?.melee ?? 1), 0) * field;
     const defense = defenders * (BUILDINGS[b.type].garrison!.defense ?? 1);
-    if (ready.length < AI.minAttackers || power < AI.attackRatio * defense + 1) continue;
+    if (ready.length < AI.minAttackers || power < t.attackRatio * defense + 1) continue;
     const c = centerOf(b);
     const goal = goals.get(b.owner);
-    let score = power - AI.attackRatio * defense;
+    let score = power - t.attackRatio * defense;
     if (castles.get(b.owner) === b) score += 100;
     else if (goal) score -= Math.hypot(goal.x - c.x, goal.y - c.y) * AI.depthWeight;
     // Neighbours of the same owner it knows of: they will send fighters to retake it.
@@ -605,7 +626,7 @@ function attackIfStrong(w: World, ai: AiState): boolean {
     if (score > bestScore) {
       bestScore = score;
       target = b;
-      send = partySize(ready.length, power, defense, castles.get(b.owner) === b);
+      send = partySize(ready.length, power, defense, castles.get(b.owner) === b, t.attackRatio);
     }
   }
   if (!target) return false;
@@ -662,7 +683,7 @@ export function siegeGoals(w: World, me: PlayerId): (Point & { seen: boolean; ow
  */
 function siege(ctx: Context, ai: AiState): boolean {
   const { w, me } = ctx;
-  if (w.tick < AI.peaceTicks || (ai.blockedUntil.siege ?? -Infinity) > w.tick) return false;
+  if (w.tick < tuning(ai).peaceTicks || (ai.blockedUntil.siege ?? -Infinity) > w.tick) return false;
   const military = ctx.own.filter((b) => isMilitary(b));
   // Bounded: a siege whose new land keeps being taken by closer enemy buildings must not build forever.
   if (military.length === 0 || military.length >= AI.maxMilitary + AI.siegeExtra) return false;

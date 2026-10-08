@@ -1,5 +1,7 @@
 import { addBuilding, doorOf, recomputeTerritory, spawnSettler, updateBuilding } from './buildings';
 import {
+  AI_LEVELS,
+  type AiLevel,
   BUILD_DIG_SLOPE,
   type BuildGround,
   BUILD_TICKS_PER_UNIT,
@@ -115,6 +117,11 @@ export interface WorldOptions {
   from?: SaveData;
   /** Start goods and workers, as in Settlers 4 (default `medium`). */
   start?: StartLevel;
+  /**
+   * Difficulty of each computer player, by player index like `teams` (default `medium`); a level's
+   * `bonus` goods are added to that player's castle.
+   */
+  difficulty?: AiLevel[];
 }
 
 /**
@@ -207,7 +214,13 @@ export class World {
       if (this.players[k] && Number.isFinite(team)) this.players[k].team = team;
     });
     resetSightMasks(this);
-    for (const p of opts.ai ?? []) if (this.players.some((pl) => pl.id === p)) this.ai.push(createAi(p));
+    for (const p of opts.ai ?? []) {
+      if (!this.players.some((pl) => pl.id === p)) continue;
+      const level = opts.difficulty?.[p - 1] ?? 'medium';
+      this.ai.push(createAi(p, level));
+      const castle = this.castleOf(p);
+      for (const [res, n] of Object.entries(AI_LEVELS[level].bonus)) castle.output[res as keyof Stock] += n ?? 0;
+    }
     spawnAnimals(this, starts);
   }
 

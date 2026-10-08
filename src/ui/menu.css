@@ -1,0 +1,566 @@
+/*
+ * The title (intro, main menu) and the in-game menu, in the side panel's look: carved wood, bronze
+ * rims, parchment. All ours: CSS gradients and the shared SVG noise, our own wordmark in Cinzel.
+ */
+
+/* In the title the scene fills the window (no side panel). */
+body.title-mode #game {
+  left: 0;
+}
+
+.title-root {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  padding: 16px;
+  overflow: auto;
+}
+
+.title-vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 60% 75% at 50% 50%, rgba(10, 6, 2, 0.45), rgba(10, 6, 2, 0) 70%),
+    radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 55%, rgba(0, 0, 0, 0.7));
+}
+
+.menu {
+  position: relative;
+  width: min(380px, 100%);
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+}
+
+.menu.wide {
+  width: min(880px, 100%);
+}
+
+/* Our wordmark: carved bronze capitals, nothing borrowed from any logo. */
+.wordmark,
+.intro-title {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.wm-title {
+  font: 700 clamp(40px, 8vw, 64px) / 1 'Cinzel', Georgia, serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--gold);
+  background: linear-gradient(180deg, #fff1c4 0%, var(--bronze-hi) 30%, var(--bronze) 62%, #7a5320 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 2px 0 #2a190b) drop-shadow(0 4px 10px rgba(0, 0, 0, 0.7));
+}
+
+.wm-sub {
+  margin-top: 6px;
+  font: 600 13px 'Cinzel', Georgia, serif;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--light);
+  text-shadow: 0 1px 3px #000;
+}
+
+.menu.wide .wm-title {
+  font-size: clamp(28px, 5vw, 40px);
+}
+
+.menu-panel {
+  padding: 16px 18px;
+  border-radius: 8px;
+  background: var(--grain), radial-gradient(ellipse at 50% 20%, #efdcae, #c9a66b);
+  box-shadow:
+    0 0 0 2px var(--bronze-hi),
+    0 0 0 6px var(--wood),
+    0 0 0 7px var(--bronze-lo),
+    0 12px 36px rgba(0, 0, 0, 0.65);
+  transition: opacity 0.3s;
+}
+
+.menu.busy .menu-panel {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.menu-title {
+  margin: 0 0 12px;
+  text-align: center;
+  font: 700 22px 'Cinzel', Georgia, serif;
+  color: #5e3a12;
+}
+
+.menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* A carved plaque per choice. */
+.menu-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  width: 100%;
+  padding: 9px 14px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--bronze-lo);
+  background: var(--woodgrain), linear-gradient(#835a32, #4e3017);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 220, 160, 0.35),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.35),
+    0 2px 4px rgba(0, 0, 0, 0.45);
+  color: var(--light);
+  text-shadow: 0 1px 2px #000;
+  transition:
+    filter 0.12s,
+    box-shadow 0.12s;
+}
+
+.mb-text {
+  font: 700 18px 'Cinzel', Georgia, serif;
+  letter-spacing: 0.03em;
+}
+
+.mb-note {
+  font-size: 11px;
+  font-style: italic;
+  opacity: 0.75;
+}
+
+.menu-btn:hover,
+.menu-btn:focus-visible {
+  filter: brightness(1.15);
+  outline: none;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 220, 160, 0.35),
+    0 0 0 2px var(--gold),
+    0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+.menu-btn.soon {
+  filter: saturate(0.4);
+  opacity: 0.75;
+}
+
+.menu-small {
+  padding: 4px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--bronze-lo);
+  color: var(--light);
+  background: linear-gradient(#7b5530, #553519);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 220, 160, 0.35),
+    0 1px 2px rgba(0, 0, 0, 0.4);
+  text-shadow: 0 1px 1px #000;
+}
+
+.menu-small:hover,
+.menu-small:focus-visible {
+  filter: brightness(1.15);
+  outline: 2px solid var(--gold);
+  outline-offset: 1px;
+}
+
+.menu-small.active {
+  background: linear-gradient(#d39a3e, #8e5716);
+  border-color: var(--bronze-hi);
+}
+
+.menu-small.danger {
+  background: linear-gradient(#b4442f, #6d1f13);
+}
+
+.menu-small:disabled {
+  opacity: 0.45;
+  cursor: default;
+  filter: none;
+  outline: none;
+}
+
+.menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.menu-row > .menu-small:first-child {
+  margin-right: auto;
+}
+
+.setup-problem {
+  color: #8b2414;
+  font-style: italic;
+}
+
+.menu-soon,
+.menu-text {
+  margin: 0 0 12px;
+  color: var(--ink-soft);
+  text-align: center;
+}
+
+.menu-soon {
+  padding: 8px 10px;
+  border: 1px dashed var(--bronze-lo);
+  border-radius: 5px;
+  background: rgba(255, 245, 215, 0.35);
+}
+
+.menu-notice {
+  margin: 0;
+  padding: 6px 10px;
+  text-align: center;
+  color: var(--light);
+  background: rgba(20, 12, 4, 0.75);
+  border-radius: 5px;
+}
+
+.menu-foot {
+  text-align: center;
+  font-size: 11px;
+  color: rgba(243, 230, 196, 0.8);
+  text-shadow: 0 1px 2px #000;
+}
+
+.menu-panel h4 {
+  margin: 10px 0 4px;
+  font: 700 14px 'Cinzel', Georgia, serif;
+  color: #5e3a12;
+  border-bottom: 1px solid rgba(94, 66, 25, 0.35);
+}
+
+.menu-panel select,
+.menu-panel input[type='text'],
+.menu-panel input[type='number'] {
+  font: inherit;
+  color: var(--text);
+  background: #f6ead0;
+  border: 1px solid var(--bronze-lo);
+  border-radius: 3px;
+  padding: 2px 4px;
+  min-width: 0;
+}
+
+.menu-panel select:disabled {
+  opacity: 0.45;
+}
+
+.set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 3px 0;
+}
+
+.setup {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(0, 1.9fr);
+  gap: 18px;
+}
+
+.seed-box {
+  display: flex;
+  gap: 4px;
+}
+
+.seed-box input {
+  width: 110px;
+}
+
+.slot-table {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1.4fr) minmax(0, 1.3fr) minmax(0, 0.6fr) minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.slot-head {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.menu-panel .muted {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #4d3a22;
+}
+
+.slot-color {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: bold;
+  font-size: 12px;
+  color: #fff;
+  text-shadow: 0 1px 1px #000;
+  box-shadow:
+    0 0 0 1px var(--bronze-lo),
+    inset 0 1px 2px rgba(255, 255, 255, 0.4);
+}
+
+.saves {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.save-new {
+  display: flex;
+  gap: 6px;
+}
+
+.save-new input {
+  flex: 1;
+}
+
+.save-list {
+  max-height: 46vh;
+  overflow: auto;
+}
+
+.save-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+  border-bottom: 1px solid rgba(94, 66, 25, 0.25);
+}
+
+.save-row:hover {
+  background: rgba(255, 245, 215, 0.35);
+}
+
+.save-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.save-info span {
+  font-size: 11px;
+  color: #4d3a22;
+}
+
+.save-row.auto b::after {
+  content: ' ⟳';
+  color: var(--accent);
+}
+
+.save-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.saves-status {
+  margin: 0;
+  min-height: 1.3em;
+  font-style: italic;
+  color: #4d3a22;
+}
+
+.about p {
+  margin: 0 0 10px;
+}
+
+/* The in-game menu: over the game view, the game paused behind it. */
+.pause-menu {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  pointer-events: auto;
+  background: rgba(8, 5, 2, 0.5);
+}
+
+.pause-menu > .menu-panel {
+  width: min(360px, 100%);
+  max-height: 100%;
+  overflow: auto;
+}
+
+.pause-menu.wide > .menu-panel {
+  width: min(640px, 100%);
+}
+
+/* The intro: night lifting into dawn over the live scene, two lines, then the title. */
+.intro {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  overflow: hidden;
+  cursor: pointer;
+  transition: opacity 0.6s;
+}
+
+.intro.fade {
+  opacity: 0;
+}
+
+.intro-night,
+.intro-dawn {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.intro-night {
+  background: #050608;
+  animation: intro-lift 6s ease-in forwards;
+}
+
+.intro-dawn {
+  background:
+    linear-gradient(to top, rgba(255, 150, 70, 0.45), rgba(255, 190, 120, 0.1) 45%, rgba(30, 40, 90, 0.55)),
+    radial-gradient(ellipse at 50% 110%, rgba(255, 170, 80, 0.5), rgba(0, 0, 0, 0) 60%);
+  animation: intro-lift 11s ease-in forwards;
+}
+
+@keyframes intro-lift {
+  to {
+    opacity: 0;
+  }
+}
+
+.intro-caption {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 16%;
+  margin: 0;
+  text-align: center;
+  font:
+    italic 26px 'Palatino Linotype',
+    'Book Antiqua',
+    Palatino,
+    Georgia,
+    serif;
+  color: var(--light);
+  text-shadow:
+    0 1px 3px #000,
+    0 0 18px rgba(0, 0, 0, 0.8);
+  opacity: 0;
+  transition: opacity 1.2s;
+}
+
+.intro-title {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: 36%;
+  opacity: 0;
+  transform: scale(1.08);
+  transition:
+    opacity 2.4s,
+    transform 6s ease-out;
+}
+
+.intro-title .wm-title {
+  font-size: clamp(48px, 11vw, 96px);
+}
+
+.intro-caption.on,
+.intro-title.on {
+  opacity: 1;
+  transform: none;
+}
+
+.intro-skip {
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
+  margin: 0;
+  font-size: 11px;
+  color: rgba(243, 230, 196, 0.6);
+}
+
+.intro-gate {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: #050608;
+}
+
+.gate-text {
+  margin: 0;
+  font: 600 18px 'Cinzel', Georgia, serif;
+  letter-spacing: 0.08em;
+  color: var(--light);
+  animation: gate-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes gate-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.gate-bar {
+  width: min(260px, 70vw);
+  height: 6px;
+  border: 1px solid var(--bronze);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.gate-fill {
+  width: 0;
+  height: 100%;
+  background: linear-gradient(90deg, var(--bronze), var(--gold));
+}
+
+@media (max-width: 720px) {
+  .setup {
+    grid-template-columns: 1fr;
+  }
+
+  .slot-table {
+    grid-template-columns: 22px minmax(0, 1.4fr) minmax(0, 1.2fr) minmax(0, 0.7fr) minmax(0, 1fr);
+    gap: 4px;
+    font-size: 12px;
+  }
+
+  .save-row {
+    flex-wrap: wrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .intro-night,
+  .intro-dawn {
+    animation-duration: 1s;
+  }
+
+  .intro-title,
+  .intro-caption {
+    transition-duration: 0.5s;
+  }
+
+  .gate-text {
+    animation: none;
+  }
+}

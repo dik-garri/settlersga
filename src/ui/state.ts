@@ -28,6 +28,8 @@ export interface GameState {
   hover: { x: number; y: number } | null;
   /** Fog of war shown (`?fog=off` turns it off for debugging). */
   fog: boolean;
+  /** The game menu (`PauseMenu`) is open: the game is paused and the map takes no input. */
+  menu: boolean;
 }
 
 export const createState = (): GameState => ({
@@ -41,4 +43,5 @@ export const createState = (): GameState => ({
   movingWorkArea: null,
   hover: null,
   fog: true,
+  menu: false,
 });
