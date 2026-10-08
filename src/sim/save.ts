@@ -5,7 +5,7 @@ import type { Building, PlayerId, Settler } from './types';
 import type { Player, World } from './world';
 
 /** Bump when the save layout changes incompatibly. */
-export const SAVE_VERSION = 20;
+export const SAVE_VERSION = 21;
 
 const MAP_LAYERS = [
   'terrain',

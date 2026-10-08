@@ -19,6 +19,8 @@ import { canPlant, findGatherTarget, findPlotFor, harvest, isGatherTarget, plant
 import { findPath } from './pathfinding';
 import { pathSpeed, wearTile } from './paths';
 import { restIdle } from './idle';
+import { landAt } from './land';
+import { donkeyAbort, donkeyIdle, loadTick, releaseLoad, unloadTick } from './trade';
 import { claimTick, pioneerIdle, stealTick, thiefIdle, thiefWatch } from './specialists';
 import { findGame, huntTick, releaseHunt } from './hunting';
 import { RESOURCES, Terrain, type Building, type Point, type Settler, type Task } from './types';
@@ -151,6 +153,12 @@ export function updateSettler(w: World, s: Settler): void {
       return claimTick(w, s, task);
     case 'steal':
       return stealTick(w, s, task);
+    case 'load':
+      if (!loadTick(w, s, task)) abort(w, s);
+      return;
+    case 'unload':
+      if (!unloadTick(w, s, task)) abort(w, s);
+      return;
     case 'prospect': {
       s.working = true;
       if (--task.n > 0) return;
@@ -202,6 +210,7 @@ export function updateSettler(w: World, s: Settler): void {
       if (b.progress >= totalCost(b.type) * BUILD_TICKS_PER_UNIT) {
         b.done = true;
         b.builderId = null;
+        w.buildingsVersion++; // finished: it sees farther, and a warehouse now serves its land
         s.tasks.shift();
         // A worker-less territory building (castle-like) claims land as soon as it stands.
         if (BUILDINGS[b.type].territory && !BUILDINGS[b.type].worker) recomputeTerritory(w);
@@ -331,13 +340,23 @@ export function abort(w: World, s: Settler): void {
       case 'hunt':
         releaseHunt(w, task);
         break;
+      case 'load':
+        releaseLoad(w, task);
+        break;
     }
   }
   s.tasks = [];
   s.path = [];
+  if (PROFESSIONS[s.kind].behavior === 'donkey') return donkeyAbort(w, s);
   const res = s.carrying;
   if (!res) return;
-  const store = returning ? undefined : (nearestStorage(w, s.owner, s, res) ?? nearestStorage(w, s.owner, s));
+  // Back to a warehouse on the carrier's own piece of land if there is one, else to any.
+  const piece = landAt(w, s, s.owner);
+  const store = returning
+    ? undefined
+    : ((piece ? nearestStorage(w, s.owner, s, res, piece) : undefined) ??
+      nearestStorage(w, s.owner, s, res) ??
+      nearestStorage(w, s.owner, s));
   if (store) {
     store.inbound[res]++;
     s.tasks = [
@@ -405,6 +424,9 @@ function idle(w: World, s: Settler): void {
 
     case 'thief':
       return thiefIdle(w, s);
+
+    case 'donkey':
+      return donkeyIdle(w, s);
 
     case 'builder': {
       // Prefer sites that have material waiting, then the nearest.

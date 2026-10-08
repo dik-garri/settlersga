@@ -88,7 +88,9 @@ export type BuildingType =
   | 'column'
   | 'statue'
   | 'fountain'
-  | 'obelisk';
+  | 'obelisk'
+  | 'market'
+  | 'donkeyranch';
 
 export type SettlerKind =
   | 'carrier'
@@ -115,7 +117,9 @@ export type SettlerKind =
   | 'hunter'
   | 'digger'
   | 'pioneer'
-  | 'thief';
+  | 'thief'
+  | 'donkeyrancher'
+  | 'donkey';
 
 /** Player ids start at 1; 0 means "nobody" in per-tile ownership. */
 export type PlayerId = number;
@@ -172,6 +176,20 @@ export interface Building {
   attempts?: number;
   /** Warehouse: goods it does not take in (player setting, `World.setAccepts`). */
   refuse?: Resource[];
+  /** Marketplace: where its donkeys take goods, and what (see `trade.ts`). */
+  trade?: TradeRoute;
+}
+
+/**
+ * A marketplace's trade route (player setting, as in Settlers 4's marketplace menu): donkeys carry
+ * the ordered goods from this market to market `to`. `orders[res]` is how many units are still to
+ * go (`ENDLESS` = keep sending); carriers bring them to the market first. `loading[res]` counts units
+ * in the market's input already promised to a donkey on its way to load them.
+ */
+export interface TradeRoute {
+  to: number | null;
+  orders: Partial<Record<Resource, number>>;
+  loading: Partial<Record<Resource, number>>;
 }
 
 export type Task =
@@ -210,7 +228,11 @@ export type Task =
   /** Pioneer moves the border stone onto a neutral tile: after `n` ticks it is the owner's land. */
   | { t: 'claim'; x: number; y: number; n: number }
   /** Thief at a foreign building's door: after `n` ticks he takes one good and carries it home. */
-  | { t: 'steal'; b: number; n: number };
+  | { t: 'steal'; b: number; n: number }
+  /** Donkey at a marketplace loads `n` units of `res` from its input (reserved in `trade.loading`). */
+  | { t: 'load'; b: number; res: Resource; n: number }
+  /** Donkey unloads what it carries onto the output pile of marketplace `b`. */
+  | { t: 'unload'; b: number };
 
 export interface Settler {
   id: number;
@@ -254,4 +276,6 @@ export interface Settler {
    * may still claim), or the building `b` a thief was sent to rob. Absent on everyone else (and on saves made before specialists).
    */
   errand?: { x: number; y: number; b?: number; n?: number } | null;
+  /** Donkey: units of `carrying` in its packs (a carrier always holds one; absent means one). */
+  load?: number;
 }

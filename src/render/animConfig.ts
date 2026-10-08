@@ -100,6 +100,7 @@ const STYLES: Partial<Record<SettlerKind, Partial<SettlerStyle>>> = {
   // Specialists: the pioneer digs border stones in, the thief goes about in a dark hood, hands free.
   pioneer: { tunic: '#a8743a', hat: '#6b4a2a', hatStyle: 'straw', work: 'dig', holds: 'shovel' },
   thief: { tunic: '#2e2a30', hat: '#1e1b20', hatStyle: 'hood', work: 'sow' },
+  donkeyrancher: { tunic: '#7a6a4a', hat: '#4a3a26', hatStyle: 'straw' },
 };
 
 /** Work done on a planting or gathering task overrides the profession's default `work`. */

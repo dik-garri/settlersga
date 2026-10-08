@@ -19,7 +19,7 @@ import {
 import { levelTarget, needsDigger, needsLevelling } from './digging';
 import { dismissSpecialist, sendPioneer, sendThief } from './specialists';
 import { attackStrength } from './strength';
-import { createEconomy, orderTool, orderWorkers, setAccepts, setDistribution, type EconomyState } from './economy';
+import { createEconomy, ENDLESS, orderTool, orderWorkers, setAccepts, setDistribution, type EconomyState } from './economy';
 import { rebuildWorn, updatePaths } from './paths';
 import { dispatch } from './logistics';
 import { createAi, updateAi, type AiState } from './ai';
@@ -49,6 +49,7 @@ import { markWalkable } from './regions';
 import { abort, updateSettler } from './settlers';
 import {
   emptyStock,
+  RESOURCES,
   Terrain,
   type Building,
   type BuildingType,
@@ -138,6 +139,14 @@ export class World {
   buildingsVersion = 0;
   /** Tiles pioneers ever claimed (`map.claimed`; derived, recounted on load) — lets territory skip the pass when 0. */
   pioneerLand = 0;
+  /** Piece of land of every owned tile (`land.ts`; derived from `map.owner`, rebuilt with the territory). */
+  land = new Int32Array(0);
+  landPieces = 0;
+  /** `territoryVersion` that `land` was built for. */
+  landVersion = -1;
+  /** Cache of `land.ts`: pieces holding a warehouse, valid while `buildingsVersion` is `storedPiecesAt`. */
+  storedPieces: Set<number> | null = null;
+  storedPiecesAt = -1;
 
   // Internal state shared by the sim modules.
   readonly rng: Rng;
@@ -386,6 +395,40 @@ export class World {
   /** Player command: whether a warehouse takes in a good. */
   setAccepts(id: number, res: Resource, on: boolean, player: PlayerId = LOCAL_PLAYER): boolean {
     return setAccepts(this, player, id, res, on);
+  }
+
+  /**
+   * Player command: a marketplace's donkeys carry its ordered goods to market `to` (another finished
+   * market of the player), or nowhere (`null`). See `trade.ts`.
+   */
+  setTradeRoute(id: number, to: number | null, player: PlayerId = LOCAL_PLAYER): boolean {
+    const m = this.buildings.get(id);
+    if (!m || m.owner !== player || !BUILDINGS[m.type].market) return false;
+    if (to !== null) {
+      const t = this.buildings.get(to);
+      if (!t || t.id === id || t.owner !== player || !BUILDINGS[t.type].market) return false;
+    }
+    m.trade ??= { to: null, orders: {}, loading: {} };
+    m.trade.to = to;
+    return true;
+  }
+
+  /**
+   * Player command: send `count` more units of `res` from this market along its route — or `ENDLESS`
+   * to keep sending, or 0 to cancel the order.
+   */
+  orderTrade(id: number, res: Resource, count: number, player: PlayerId = LOCAL_PLAYER): boolean {
+    const m = this.buildings.get(id);
+    if (!m || m.owner !== player || !BUILDINGS[m.type].market || !RESOURCES.includes(res)) return false;
+    m.trade ??= { to: null, orders: {}, loading: {} };
+    const now = m.trade.orders[res] ?? 0;
+    if (count === ENDLESS || count === 0) {
+      if (count === 0) delete m.trade.orders[res];
+      else m.trade.orders[res] = ENDLESS;
+    } else if (count > 0 && now !== ENDLESS) {
+      m.trade.orders[res] = now + count;
+    }
+    return true;
   }
 
   /** Player command: serve this building first (materials, inputs, builders). */

@@ -421,7 +421,8 @@ export type Behavior =
   | 'hunt'
   | 'digger'
   | 'pioneer'
-  | 'thief';
+  | 'thief'
+  | 'donkey';
 
 export interface GatherDef {
   res: Resource;
@@ -519,6 +520,8 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
   /** Specialists (`ORDERABLE`, `specialists.ts`). */
   pioneer: { name: 'Первопроходец', behavior: 'pioneer', tool: 'shovel' },
   thief: { name: 'Вор', behavior: 'thief' },
+  donkeyrancher: { name: 'Погонщик', behavior: 'workshop' },
+  donkey: { name: 'Осёл', behavior: 'donkey' },
   recruit: { name: 'Новобранец', behavior: 'workshop' },
   soldier: { name: 'Мечник', behavior: 'soldier', tool: 'sword', hp: 100, combat: { melee: 1, captures: true } },
   archer: {
@@ -550,7 +553,7 @@ export interface Recipe {
 }
 
 /** Build-menu tab. */
-export type Category = 'housing' | 'resources' | 'food' | 'mining' | 'metal' | 'military' | 'decor';
+export type Category = 'housing' | 'resources' | 'food' | 'mining' | 'metal' | 'military' | 'trade' | 'decor';
 
 export const CATEGORIES: Record<Category, string> = {
   housing: 'Поселение',
@@ -559,6 +562,7 @@ export const CATEGORIES: Record<Category, string> = {
   mining: 'Горное дело',
   metal: 'Металл',
   military: 'Военное',
+  trade: 'Торговля',
   decor: 'Украшения',
 };
 
@@ -603,6 +607,10 @@ export interface BuildingDef {
   infirmary?: { beds: number; healEvery: number; range: number };
   /** Eyecatcher (decoration): no worker, no territory; its materials count extra in the owner's settlement value (`STRENGTH`). */
   eyecatcher?: boolean;
+  /** Marketplace: starting point of donkey caravans to another marketplace (`trade.ts`). */
+  market?: boolean;
+  /** Each completed recipe cycle releases one settler of this kind (the donkey ranch breeds donkeys). */
+  breeds?: SettlerKind;
 }
 
 /**
@@ -627,6 +635,14 @@ export interface GarrisonDef {
  * while the tile holds at least `sureAmount`, else with `chancePerUnit` × units left.
  */
 export const MINING = { attempts: { favourite: 10, other: 2 }, sureAmount: 4, chancePerUnit: 0.25 };
+
+/**
+ * Trade over land, after Settlers 4: a donkey carries up to `donkeyLoad` units of one good per trip
+ * from a marketplace to the market its route names; a donkey ranch breeds donkeys while the player
+ * has fewer than `donkeysPerMarket` per finished marketplace. An endless order keeps `stock` units of
+ * the good waiting at the market.
+ */
+export const TRADE = { donkeyLoad: 4, donkeysPerMarket: 3, stock: 8 };
 
 function mine(name: string, res: Resource, favourite: Resource): BuildingDef {
   return {
@@ -786,6 +802,28 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     playerBuildable: true,
     category: 'food',
     recipe: { inputs: { grain: 1, water: 1 }, outputs: { pig: 1 }, ticks: 120 },
+  },
+  // Settlers 4 town buildings: carriers stay on their own land, donkeys carry goods between markets.
+  market: {
+    name: 'Рынок',
+    w: 2,
+    h: 2,
+    cost: { plank: 2, stone: 4 },
+    worker: null,
+    playerBuildable: true,
+    category: 'trade',
+    market: true,
+  },
+  donkeyranch: {
+    name: 'Ослиная ферма',
+    w: 2,
+    h: 2,
+    cost: { plank: 4, stone: 5 },
+    worker: 'donkeyrancher',
+    playerBuildable: true,
+    category: 'trade',
+    recipe: { inputs: { grain: 1, water: 1 }, outputs: {}, ticks: 400 },
+    breeds: 'donkey',
   },
   slaughterhouse: {
     name: 'Бойня',

@@ -1,4 +1,5 @@
 import { BUILDINGS, IDLE, IDLE_GO_HOME_TICKS, TERRAIN } from './config';
+import { landAt, landOf } from './land';
 import { findPath } from './pathfinding';
 import { randInt } from './rng';
 import { move } from './settlers';
@@ -82,7 +83,8 @@ function walk(w: World, s: Settler): void {
 
 function gathers(b: Building): boolean {
   const def = BUILDINGS[b.type];
-  return b.done && IDLE.gatherAt.some((k) => (k === 'storage' ? !!def.storage : !!def.residence));
+  // Marketplaces gather a crowd too (and give a cut-off piece of land its carriers a place to wait).
+  return b.done && (!!def.market || IDLE.gatherAt.some((k) => (k === 'storage' ? !!def.storage : !!def.residence)));
 }
 
 function validAnchor(w: World, s: Settler, id: number | null): boolean {
@@ -99,13 +101,18 @@ function idleAround(w: World, s: Settler, b: Building): number {
   return n;
 }
 
-/** Nearest gathering building, preferring those whose group is not full yet. */
+/**
+ * Nearest gathering building, preferring those on the settler's own piece of land (carriers work
+ * only there, `land.ts`) and then those whose group is not full yet.
+ */
 function chooseAnchor(w: World, s: Settler): number | null {
   let best: Building | undefined;
   let bestScore = Infinity;
+  const piece = landAt(w, s, s.owner);
   for (const b of w.buildings.values()) {
     if (b.owner !== s.owner || !gathers(b)) continue;
-    const d = Math.hypot(s.x - b.door.x, s.y - b.door.y);
+    const away = piece !== 0 && landOf(w, b) !== piece ? 4000 : 0;
+    const d = Math.hypot(s.x - b.door.x, s.y - b.door.y) + away;
     // Cheap test first: a farther building cannot beat the best even with room.
     if (d >= bestScore) continue;
     const score = d + (idleAround(w, s, b) >= IDLE.groupSize ? 1000 : 0);

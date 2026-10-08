@@ -572,6 +572,8 @@ export const BUILDING_CANVAS: Record<BuildingType | 'site2' | 'site3', BuildingC
   goldmine: SMALL,
   stonemine: SMALL,
   warehouse: SMALL,
+  market: SMALL,
+  donkeyranch: SMALL,
   ironsmelter: SMALL,
   goldsmelter: SMALL,
   toolsmith: SMALL,
@@ -1378,6 +1380,9 @@ const STYLES: Partial<Record<BuildingType, Style>> = {
   },
   pigfarm: { hw: 0.6, hh: 0.6, H: 20, wall: '#a07a50', roof: '#c4a35a', rise: 20, doorDx: 0.5, deco: ['pen'] },
   slaughterhouse: { hw: 0.7, hh: 0.7, H: 24, wall: '#c9c0ae', roof: '#7a2e24', rise: 22, doorDx: 0.5, deco: ['meat'] },
+  // Our own trade buildings: an open-sided market hall on posts, a stable with a fenced paddock.
+  market: { hw: 0.65, hh: 0.65, H: 14, wall: '#c9b48a', roof: '#a8432e', rise: 18, doorDx: 0.5, timber: true, deco: ['crates', 'sacks'] },
+  donkeyranch: { hw: 0.65, hh: 0.6, H: 18, wall: '#9a7a55', roof: '#c9a95a', rise: 20, doorDx: 0.5, deco: ['pen', 'hay'] },
   warehouse: {
     hw: 0.65,
     hh: 0.8,
@@ -1637,6 +1642,8 @@ export const BUILDING_PAINTERS: Record<BuildingType | 'site2' | 'site3', (ctx: C
   fountain: paintFountain,
   obelisk: paintObelisk,
   warehouse: styled('warehouse'),
+  market: styled('market'),
+  donkeyranch: styled('donkeyranch'),
   tower: paintTower,
   bigtower: paintBigTower,
   fortress: paintFortress,

@@ -22,6 +22,8 @@ import {
   type SettlerKind,
   type Settler,
 } from './types';
+import { landOf } from './land';
+import { wantsDonkeys } from './trade';
 import type { World } from './world';
 
 /** Door sits in front of the lower-left wall, next to the front corner. */
@@ -124,13 +126,23 @@ export function isReachable(w: World, b: Building): boolean {
   return b.unreachableUntil <= w.tick;
 }
 
-/** Nearest finished, reachable warehouse of the player (that takes `res` in, when given). */
-export function nearestStorage(w: World, owner: PlayerId, near: Point, res?: Resource): Building | undefined {
+/**
+ * Nearest finished, reachable warehouse of the player (that takes `res` in, when given; on that
+ * piece of the player's land, when `piece` is given — see `land.ts`).
+ */
+export function nearestStorage(
+  w: World,
+  owner: PlayerId,
+  near: Point,
+  res?: Resource,
+  piece?: number,
+): Building | undefined {
   let best: Building | undefined;
   let bestD = Infinity;
   for (const b of w.buildings.values()) {
     if (b.owner !== owner || !b.done || !BUILDINGS[b.type].storage || !isReachable(w, b)) continue;
     if (res && b.refuse?.includes(res)) continue;
+    if (piece !== undefined && landOf(w, b) !== piece) continue;
     const d = Math.hypot(b.door.x - near.x, b.door.y - near.y);
     if (d < bestD) {
       best = b;
@@ -307,6 +319,8 @@ export function updateBuilding(w: World, b: Building): void {
   if (!worker || worker.inside !== b.id) return;
   if (def.mine) return runMine(w, b, def, recipe);
   if (!canRunRecipe(b, recipe)) return;
+  // A ranch breeds only while the player's markets want more donkeys (checked as a cycle starts).
+  if (def.breeds && b.timer === 0 && !wantsDonkeys(w, b.owner)) return;
   if (recipe.outputChoice && !chooseOutput(w, b, recipe)) return; // nothing worth making
   if (++b.timer < recipe.ticks) return;
   b.timer = 0;
@@ -321,6 +335,7 @@ export function updateBuilding(w: World, b: Building): void {
     b.output[r] += made;
     w.stats.produced[r] += made;
   }
+  if (def.breeds) spawnSettler(w, def.breeds, b);
   const chosen = recipe.outputChoice ? chooseOutput(w, b, recipe) : null;
   if (chosen) {
     b.output[chosen]++;
