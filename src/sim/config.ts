@@ -193,8 +193,8 @@ export const ORDERABLE: readonly SettlerKind[] = ['builder', 'digger', 'geologis
  * - pioneer: claims neutral passable tiles (S4 `CheckLand`: they need not touch his owner's land — a
  *   new island of land is fine), one every `claimTicks` ticks of work, until none is left in reach;
  *   land a military building claims always wins over his (`recomputeTerritory`). S4 moves a border
- *   stone every 4 s (siedlercommunity), its tile ≈ a ninth of ours: 4 s of work a tile keeps him
- *   slower than S4 per stone and still faster per area;
+ *   stone every 4 s (siedlercommunity) plus a 0.64 s step, ≈ 4.6 s per S4 tile; our tile ≈ nine of
+ *   them, so ≈ 42 s per our tile keeps the same pace per area: 40 s of work plus our ≈ 2 s step;
  * - geologist: puts a sign on every unexamined walkable mountain tile — on any land, his owner's,
  *   neutral or foreign (S4 `CheckPosition` has no owner test) — `ticks` each, until none is left in
  *   reach, so he follows the whole ridge. S4: a sign every 4 s (siedlercommunity), the step to the
@@ -202,7 +202,7 @@ export const ORDERABLE: readonly SettlerKind[] = ['builder', 'digger', 'geologis
  * - thief: robs a foreign building's door pile or stock (`stealTicks` of work, one unit of its most
  *   plentiful good) and carries it home. How intruders are met is `INTRUDERS`.
  */
-export const PIONEER = { reach: 5.3, window: 5, claimTicks: 40 };
+export const PIONEER = { reach: 5.3, window: 5, claimTicks: 400 };
 export const GEOLOGIST = { reach: 10.6, window: 9, ticks: 21 };
 export const THIEF = { stealTicks: 30 };
 

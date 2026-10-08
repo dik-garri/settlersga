@@ -26,8 +26,9 @@ describe('computer player', () => {
     const w = new World(42, { players: 2, ai: [2] });
     const startSettlers = w.settlers.filter((s) => s.owner === 2).length;
     const startLand = w.map.owner.filter((o) => o === 2).length;
-    // Settlers 4's walking pace and costs: about 18 minutes to its twentieth building.
-    run(w, 22 * MINUTE);
+    // Settlers 4's walking pace and costs, and its pioneer claiming at S4's pace per area (≈ 42 s a
+    // tile): about 23 minutes to its twentieth building (18 while he claimed a tile every 6 s).
+    run(w, 27 * MINUTE);
     const own = ownBuildings(w, 2);
     expect(own.filter((b) => b.done).length).toBeGreaterThanOrEqual(20);
     expect(own.filter((b) => b.done && b.garrison.length > 0 && b.type !== 'castle').length).toBeGreaterThanOrEqual(1);

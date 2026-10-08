@@ -74,7 +74,8 @@ describe('pioneer', () => {
     const s = recruit(w, 'pioneer');
     const t = borderTile(w);
     expect(w.sendPioneer(t.x, t.y)).toBe(true);
-    for (let i = 0; i < 60000 && s.errand; i++) w.step();
+    // At Settlers 4's pace per area (≈ 42 s a tile) he works for hours on open land.
+    for (let i = 0; i < 600000 && s.errand; i++) w.step();
     expect(s.errand).toBeNull();
     // Far more than the old cap of 24 tiles an errand.
     expect(w.pioneerLand).toBeGreaterThan(24);
