@@ -1032,6 +1032,8 @@ export const AI = {
   siegeStep: 4,
   /** Siege buildings may take it this far beyond `maxMilitary`, no further. */
   siegeExtra: 8,
+  /** A party is this many times what the target takes (power against defence); the rest stay home. The castle gets everything. */
+  overkill: 2.5,
   /** Target choice: per tile closer to that enemy's castle (progress towards ending the game). */
   depthWeight: 0.6,
   /** Target choice: per other known enemy military building within `ATTACK_RANGE` (it will be retaken from there). */

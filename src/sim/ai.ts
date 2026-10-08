@@ -427,7 +427,14 @@ function attackIfStrong(w: World, ai: AiState): boolean {
     if (score > bestScore) {
       bestScore = score;
       target = b;
-      send = ready.length;
+      // The castle ends the game: everything goes. Anything else gets what it takes with a margin
+      // (`AI.overkill`); the rest stay in their garrisons, where they defend — a party of all spares
+      // leaves its towers at their minimum, and the enemy retakes them at once.
+      const perFighter = power / ready.length;
+      send =
+        castles.get(b.owner) === b
+          ? ready.length
+          : Math.min(ready.length, Math.max(AI.minAttackers, Math.ceil((AI.overkill * (AI.attackRatio * defense + 1)) / perFighter)));
     }
   }
   if (!target) return false;
