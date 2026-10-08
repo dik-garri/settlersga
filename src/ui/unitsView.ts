@@ -1,14 +1,15 @@
 import { PROFESSIONS } from '../sim/config';
-import { maxHp } from '../sim/military';
+import { isFighter, maxHp } from '../sim/military';
+import { isSpecialist } from '../sim/specialists';
 import type { Settler } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { button, el, rowsTable, type View } from './dom';
 import type { GameState } from './state';
 
 /**
- * The selected army units, as in Settlers 4's selection panel: how many of each kind and level, their
- * health, and the orders that need no target (hold, back into a garrison, deselect). Orders with a
- * target are given on the map with a right click (move / attack / go in).
+ * The selected units, as in Settlers 4's selection panel: how many of each kind (fighters by level),
+ * the fighters' health, and the orders that need no target (hold, back into a garrison, dismiss the
+ * specialists, deselect). Orders with a target are given on the map with a right click.
  */
 export class UnitsView implements View {
   readonly el = el('div', 'view units-view');
@@ -31,40 +32,73 @@ export class UnitsView implements View {
 
   update(): void {
     const units = this.units();
+    const fighters = units.filter(isFighter);
+    const specialists = units.filter(isSpecialist);
     const byKind = new Map<string, number>();
     let hp = 0;
     let max = 0;
     let field = 0;
-    for (const s of units) {
+    for (const s of fighters) {
       const k = `${PROFESSIONS[s.kind].name}, ур. ${s.level + 1}`;
       byKind.set(k, (byKind.get(k) ?? 0) + 1);
       hp += Math.max(0, s.hp);
       max += maxHp(s);
       if (s.post) field++;
     }
+    for (const s of specialists) {
+      const k = PROFESSIONS[s.kind].name;
+      byKind.set(k, (byKind.get(k) ?? 0) + 1);
+    }
     const rows: [string, string][] = [['Выбрано', String(units.length)]];
     for (const [k, n] of [...byKind].sort()) rows.push([k, String(n)]);
-    rows.push(['Здоровье', max > 0 ? `${Math.round((100 * hp) / max)}%` : '—']);
-    rows.push(['В поле', String(field)]);
+    if (fighters.length > 0) {
+      rows.push(['Здоровье', max > 0 ? `${Math.round((100 * hp) / max)}%` : '—']);
+      rows.push(['В поле', String(field)]);
+    }
+    if (specialists.length > 0) {
+      const busy = specialists.filter((s) => s.errand || s.tasks.some((t) => t.t === 'prospect')).length;
+      rows.push(['Специалистов за работой', `${busy} из ${specialists.length}`]);
+    }
     const key = JSON.stringify(rows);
     if (key === this.key) return;
     this.key = key;
     this.el.innerHTML = '';
     this.el.append(rowsTable(rows));
-    this.el.append(
-      el(
-        'p',
-        'hint-text',
-        'Правый щелчок: по земле — идти туда, по вражескому военному зданию — атаковать, по своему — войти в него.',
-      ),
-    );
-    const ids = () => this.units().map((s) => s.id);
+    const hints: string[] = [];
+    if (fighters.length > 0) {
+      hints.push('бойцы: по земле — идти туда, по вражескому военному зданию — атаковать, по своему — войти в него');
+    }
+    if (specialists.length > 0) {
+      hints.push(
+        'геолог: по своей горе — разведать руду; первопроходец: по ничейной земле у границы — занять её; ' +
+          'вор: по разведанному вражескому складу — украсть; иначе — идти туда и ждать',
+      );
+    }
+    this.el.append(el('p', 'hint-text', `Правый щелчок: ${hints.join('; ')}.`));
+    const fighterIds = () => this.units().filter(isFighter).map((s) => s.id);
+    const specialistIds = () => this.units().filter(isSpecialist).map((s) => s.id);
     const actions = el('div', 'info-actions');
     actions.append(
-      button('✋ Стоять', 'Остаться на месте', () => this.toast(`Стоят: ${this.world.orderHold(ids())}`)),
-      button('🏰 В гарнизон', 'Каждый в ближайшее своё военное здание со свободным местом', () =>
-        this.toast(`Возвращаются: ${this.world.orderGarrison(ids(), null)}`),
+      button('✋ Стоять', 'Остаться на месте', () =>
+        this.toast(`Стоят: ${this.world.orderHold(fighterIds()) + this.world.holdSpecialists(specialistIds())}`),
       ),
+    );
+    if (fighters.length > 0) {
+      actions.append(
+        button('🏰 В гарнизон', 'Каждый в ближайшее своё военное здание со свободным местом', () =>
+          this.toast(`Возвращаются: ${this.world.orderGarrison(fighterIds(), null)}`),
+        ),
+      );
+    }
+    if (specialists.length > 0) {
+      actions.append(
+        button('↩ Отпустить', 'Специалисты на своей земле снова становятся носильщиками и несут инструмент на склад', () => {
+          const n = this.world.dismissUnits(specialistIds());
+          this.toast(n > 0 ? `Отпущено: ${n}` : 'Отпустить можно только на своей земле');
+        }),
+      );
+    }
+    actions.append(
       button('✕ Снять выбор', 'Esc', () => {
         this.state.selectedUnits = [];
       }),

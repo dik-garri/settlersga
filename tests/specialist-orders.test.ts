@@ -1,0 +1,179 @@
+import { describe, expect, it } from 'vitest';
+import { addBuilding, recomputeTerritory } from '../src/sim/buildings';
+import { PIONEER } from '../src/sim/config';
+import { saveWorld } from '../src/sim/save';
+import { claimable, prospectTiles, SPECIALIST_ORDERS } from '../src/sim/specialists';
+import type { Building, Settler } from '../src/sim/types';
+import { World } from '../src/sim/world';
+
+function run(w: World, ticks: number) {
+  for (let i = 0; i < ticks; i++) w.step();
+}
+
+const owned = (w: World, p: number) => w.map.owner.reduce((n, o) => n + (o === p ? 1 : 0), 0);
+
+/** The player's specialist of `kind`, recruited on order. */
+function recruit(w: World, kind: 'pioneer' | 'thief', p = 1): Settler {
+  w.orderSpecialist(kind, 1, p);
+  for (let i = 0; i < 1500 && !w.settlers.some((s) => s.owner === p && s.kind === kind); i++) w.step();
+  const s = w.settlers.find((o) => o.owner === p && o.kind === kind);
+  expect(s).toBeDefined();
+  run(w, 50);
+  return s!;
+}
+
+/** A neutral tile next to the player's land, nearest the castle. */
+function borderTile(w: World, p = 1): { x: number; y: number } {
+  const c = w.castleOf(p);
+  let best: { x: number; y: number } | null = null;
+  let bestD = Infinity;
+  for (let y = 0; y < w.map.h; y++) {
+    for (let x = 0; x < w.map.w; x++) {
+      if (!claimable(w, x, y, p)) continue;
+      const d = Math.hypot(x - c.x, y - c.y);
+      if (d < bestD) {
+        bestD = d;
+        best = { x, y };
+      }
+    }
+  }
+  return best!;
+}
+
+/** An own walkable grass tile a few steps from the castle door (no action applies there). */
+function plainTile(w: World): { x: number; y: number } {
+  const c = w.castle;
+  for (let r = 3; r < 10; r++) {
+    for (let dx = -r; dx <= r; dx++) {
+      const x = c.door.x + dx;
+      const y = c.door.y + r;
+      const m = w.map;
+      if (!m.inBounds(x, y) || !m.isWalkable(x, y) || m.door[m.idx(x, y)] !== 0) continue;
+      if (!w.owns(x, y) || prospectTiles(w, x, y, 1).length > 0 || claimable(w, x, y, 1)) continue;
+      return { x, y };
+    }
+  }
+  throw new Error('no plain tile');
+}
+
+/** An own mountain tile with something left to prospect. */
+function mountainTile(w: World): { x: number; y: number } {
+  const c = w.castle;
+  let best: { x: number; y: number } | null = null;
+  let bestD = Infinity;
+  for (let y = 0; y < w.map.h; y++) {
+    for (let x = 0; x < w.map.w; x++) {
+      if (prospectTiles(w, x, y, 1).length < 3) continue;
+      const d = Math.hypot(x - c.x, y - c.y);
+      if (d < bestD) {
+        bestD = d;
+        best = { x, y };
+      }
+    }
+  }
+  return best!;
+}
+
+describe('specialists under direct control', () => {
+  it('a specialist ordered to a spot with nothing to do walks there and waits', () => {
+    const w = new World(42);
+    const pioneer = recruit(w, 'pioneer');
+    const t = plainTile(w);
+    expect(w.orderSpecialists([pioneer.id], t.x, t.y)).toBe(1);
+    expect(pioneer.errand).toBeNull();
+    expect(pioneer.post).not.toBeNull();
+    run(w, 600);
+    expect(pioneer.kind).toBe('pioneer');
+    expect(Math.hypot(pioneer.x - pioneer.post!.x, pioneer.y - pioneer.post!.y)).toBeLessThan(2);
+    // Still there a while later: he waits instead of joining the crowd.
+    run(w, 600);
+    expect(Math.hypot(pioneer.x - pioneer.post!.x, pioneer.y - pioneer.post!.y)).toBeLessThan(2);
+  });
+
+  it('a right click on neutral land at the border sends a pioneer to claim it', () => {
+    const w = new World(42);
+    const pioneer = recruit(w, 'pioneer');
+    const before = owned(w, 1);
+    const t = borderTile(w);
+    expect(SPECIALIST_ORDERS.pioneer!.can(w, t.x, t.y, undefined, 1)).toBe(true);
+    expect(w.orderSpecialists([pioneer.id], t.x, t.y)).toBe(1);
+    expect(pioneer.errand).toMatchObject({ x: t.x, y: t.y, n: PIONEER.maxTiles });
+    run(w, 3000);
+    expect(owned(w, 1)).toBeGreaterThan(before + 3);
+  });
+
+  it('a right click on an own mountain sends the selected geologist to prospect there', () => {
+    const w = new World(42);
+    const m = mountainTile(w);
+    expect(w.sendGeologist(m.x, m.y)).toBe(true);
+    const geo = w.settlers.find((s) => s.kind === 'geologist')!;
+    // Sent elsewhere on the mountain mid-errand: his queue becomes the new site's tiles.
+    run(w, 200);
+    const t = plainTile(w);
+    expect(w.orderSpecialists([geo.id], t.x, t.y)).toBe(1);
+    expect(geo.post).not.toBeNull();
+    run(w, 400);
+    expect(geo.kind).toBe('geologist'); // waits at the post instead of going back to carrying
+    expect(w.orderSpecialists([geo.id], m.x, m.y)).toBe(1);
+    expect(geo.post).toBeNull();
+    expect(geo.tasks.some((t) => t.t === 'prospect')).toBe(true);
+    const before = w.stats.prospected;
+    run(w, 2500);
+    expect(w.stats.prospected).toBeGreaterThan(before);
+  });
+
+  it('a right click on an explored enemy warehouse sends the thief to rob it; elsewhere he just walks', () => {
+    const w = new World(42, { players: 2 });
+    const thief = recruit(w, 'thief');
+    const other = w.castleOf(2);
+    let store: Building | null = null;
+    for (let r = 6; r < 14 && !store; r++) {
+      for (let dx = -r; dx <= r && !store; dx++) {
+        if (w.canPlace('warehouse', other.x + dx, other.y + r, 2)) store = addBuilding(w, 'warehouse', other.x + dx, other.y + r, 2, true);
+      }
+    }
+    recomputeTerritory(w);
+    store!.output.iron = 5;
+    // Unexplored: no robbing, he walks there.
+    expect(w.orderSpecialists([thief.id], store!.door.x, store!.door.y, store!.id)).toBe(1);
+    expect(thief.errand).toBeNull();
+    expect(thief.post).not.toBeNull();
+    w.map.explored[w.map.idx(store!.door.x, store!.door.y)] |= 1;
+    expect(w.orderSpecialists([thief.id], store!.door.x, store!.door.y, store!.id)).toBe(1);
+    expect(thief.errand?.b).toBe(store!.id);
+    expect(thief.post).toBeNull();
+  });
+
+  it('a mixed selection: specialists ignore fighters and fighters ignore specialists', () => {
+    const w = new World(42);
+    const pioneer = recruit(w, 'pioneer');
+    const t = plainTile(w);
+    w.releaseFighters(w.castle.id, 2);
+    const fighters = w.settlers.filter((s) => s.post && s.owner === 1 && s.kind !== 'pioneer').map((s) => s.id);
+    expect(fighters.length).toBeGreaterThan(0);
+    const ids = [pioneer.id, ...fighters];
+    expect(w.orderSpecialists(ids, t.x, t.y)).toBe(1);
+    expect(w.orderMove(ids, t.x, t.y)).toBe(fighters.length);
+  });
+
+  it('hold and dismiss work on the selected specialists', () => {
+    const w = new World(42);
+    const pioneer = recruit(w, 'pioneer');
+    expect(w.holdSpecialists([pioneer.id])).toBe(1);
+    expect(pioneer.post).toMatchObject({ x: Math.round(pioneer.x), y: Math.round(pioneer.y) });
+    expect(w.dismissUnits([pioneer.id])).toBe(1);
+    expect(pioneer.kind).toBe('carrier');
+  });
+
+  it('a specialist waiting at his post survives save and load bit-for-bit', () => {
+    const w = new World(42);
+    const pioneer = recruit(w, 'pioneer');
+    const t = plainTile(w);
+    w.orderSpecialists([pioneer.id], t.x, t.y);
+    run(w, 100);
+    const l = World.load(JSON.parse(JSON.stringify(saveWorld(w))));
+    run(w, 800);
+    run(l, 800);
+    expect(saveWorld(l)).toEqual(saveWorld(w));
+  });
+});

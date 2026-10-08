@@ -2,7 +2,7 @@ import type { Camera } from '../render/camera';
 import type { Area, GameRenderer, Ghost } from '../render/renderer';
 import { BUILDINGS, PIONEER, PROSPECT_RADIUS } from '../sim/config';
 import { isFighter, isMilitary } from '../sim/military';
-import { claimable } from '../sim/specialists';
+import { claimable, isSpecialist, SPECIALIST_ORDERS } from '../sim/specialists';
 import { Terrain, type BuildingType } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { isCommand, type GameState, type Placeable } from './state';
@@ -11,7 +11,7 @@ const KEY_PAN_SPEED = 900; // screen px per second
 const EDGE_PAN_SPEED = 700;
 const EDGE = 10;
 const DRAG_THRESHOLD = 5;
-/** Two clicks on a fighter within this many ms: select every own fighter of that kind on screen. */
+/** Two clicks on a unit within this many ms: select every own unit of that kind on screen. */
 const DOUBLE_CLICK_MS = 350;
 
 export interface InputCallbacks {
@@ -28,8 +28,11 @@ export class InputController {
   private pointer: { x: number; y: number } | null = null;
   private drag: { lastX: number; lastY: number; startX: number; startY: number; button: number; moved: boolean } | null =
     null;
-  /** Selection box drawn while dragging with the left button (Settlers 4: drag to select fighters). */
+  /** Selection box drawn while dragging with the left button (Settlers 4: drag to select units). */
   private readonly box: HTMLDivElement;
+  /** What a right click would do for the selection, shown next to the cursor. */
+  private readonly hint: HTMLDivElement;
+  private hintKey = '';
   private lastClick = { at: -Infinity, id: -1 };
 
   constructor(
@@ -44,6 +47,10 @@ export class InputController {
     this.box.className = 'selbox';
     this.box.hidden = true;
     canvas.parentElement?.appendChild(this.box);
+    this.hint = document.createElement('div');
+    this.hint.className = 'order-hint';
+    this.hint.hidden = true;
+    canvas.parentElement?.appendChild(this.hint);
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     canvas.addEventListener('pointerdown', (e) => this.onDown(e));
     canvas.addEventListener('pointermove', (e) => this.onMove(e));
@@ -131,6 +138,76 @@ export class InputController {
     } else {
       this.state.hover = null;
     }
+    this.updateHint();
+  }
+
+  /** Units of the selection still alive and ours, split into fighters and specialists. */
+  private selection(): { fighters: number[]; specialists: number[] } {
+    const fighters: number[] = [];
+    const specialists: number[] = [];
+    for (const id of this.state.selectedUnits) {
+      const s = this.world.getSettler(id);
+      if (!s || this.world.dying.has(id) || s.owner !== LOCAL_PLAYER) continue;
+      if (isFighter(s)) fighters.push(id);
+      else if (isSpecialist(s)) specialists.push(id);
+    }
+    return { fighters, specialists };
+  }
+
+  /** The building under (tx, ty) if the local player may know it is there. */
+  private knownBuildingAt(tx: number, ty: number) {
+    const b = this.world.buildingAt(tx, ty);
+    const known = !this.state.fog || (b !== undefined && b.owner === LOCAL_PLAYER) || this.world.isExplored(tx, ty);
+    return b && known ? b : undefined;
+  }
+
+  /** The fighters' part of a right click there: attack, go in, or move. */
+  private fighterOrderAt(tx: number, ty: number): 'attack' | 'garrison' | 'move' {
+    const b = this.knownBuildingAt(tx, ty);
+    if (b && isMilitary(b) && b.done && b.owner !== LOCAL_PLAYER && !this.world.allied(b.owner, LOCAL_PLAYER)) return 'attack';
+    if (b && isMilitary(b) && b.done && b.owner === LOCAL_PLAYER) return 'garrison';
+    return 'move';
+  }
+
+  /**
+   * The cursor hint, as in Settlers 4: with units selected and nothing being placed, what a right
+   * click on the hovered tile would do (one label per distinct order). Recomputed only when the
+   * hovered tile or the selection changes.
+   */
+  private updateHint(): void {
+    const hover = this.state.hover;
+    const show = this.pointer !== null && hover !== null && !this.state.placing && this.state.selectedUnits.length > 0;
+    if (!show) {
+      this.hint.hidden = true;
+      this.hintKey = '';
+      return;
+    }
+    const key = `${hover.x},${hover.y}|${this.state.selectedUnits.join(',')}`;
+    if (key !== this.hintKey) {
+      this.hintKey = key;
+      const { fighters, specialists } = this.selection();
+      const labels = new Set<string>();
+      if (fighters.length > 0) {
+        const o = this.fighterOrderAt(hover.x, hover.y);
+        labels.add(o === 'attack' ? 'Атаковать' : o === 'garrison' ? 'В гарнизон' : 'Идти сюда');
+      }
+      const b = this.knownBuildingAt(hover.x, hover.y);
+      for (const id of specialists) {
+        const s = this.world.getSettler(id)!;
+        const order = SPECIALIST_ORDERS[s.kind];
+        labels.add(order && order.can(this.world, hover.x, hover.y, b, LOCAL_PLAYER) ? order.label : 'Идти сюда');
+      }
+      this.hint.textContent = [...labels].join(' · ');
+    }
+    if (!this.hint.textContent) {
+      this.hint.hidden = true;
+      return;
+    }
+    const r = this.canvas.getBoundingClientRect();
+    const host = this.hint.parentElement!.getBoundingClientRect();
+    this.hint.style.left = `${this.pointer!.x + r.left - host.left + 16}px`;
+    this.hint.style.top = `${this.pointer!.y + r.top - host.top + 18}px`;
+    this.hint.hidden = false;
   }
 
   private onDown(e: PointerEvent): void {
@@ -165,16 +242,16 @@ export class InputController {
     d.lastY = p.y;
   }
 
-  /** A left-button drag selects fighters unless something is being placed (then it pans). */
+  /** A left-button drag selects units unless something is being placed (then it pans). */
   private selecting(d: { button: number }): boolean {
     return d.button === 0 && !this.state.placing;
   }
 
-  /** The player's own living fighters among settler ids. */
-  private ownFighters(ids: number[]): number[] {
+  /** The player's own living units among settler ids: fighters and specialists (geologists, pioneers, thieves). */
+  private ownUnits(ids: number[]): number[] {
     return ids.filter((id) => {
       const s = this.world.getSettler(id);
-      return !!s && s.owner === LOCAL_PLAYER && isFighter(s);
+      return !!s && s.owner === LOCAL_PLAYER && (isFighter(s) || isSpecialist(s));
     });
   }
 
@@ -186,7 +263,7 @@ export class InputController {
     if (d.moved && this.selecting(d)) {
       this.box.hidden = true;
       const p = this.local(e);
-      const caught = this.ownFighters(this.renderer.settlersInRect(d.startX, d.startY, p.x, p.y));
+      const caught = this.ownUnits(this.renderer.settlersInRect(d.startX, d.startY, p.x, p.y));
       this.state.selectedUnits = e.shiftKey ? [...new Set([...this.state.selectedUnits, ...caught])] : caught;
       if (this.state.selectedUnits.length > 0) {
         this.state.selected = null;
@@ -240,13 +317,14 @@ export class InputController {
     }
     // A figure under the cursor wins over the ground and the building behind it.
     const sid = this.renderer.settlerAt(p.x, p.y);
-    if (sid !== null && this.ownFighters([sid]).length > 0) {
-      // An own fighter: select it for orders (shift adds; a double click takes all of its kind on screen).
+    if (sid !== null && this.ownUnits([sid]).length > 0) {
+      // An own fighter or specialist: select it for orders (shift adds; a double click takes all of its
+      // kind on screen).
       const now = performance.now();
       const kind = this.world.getSettler(sid)!.kind;
       if (this.lastClick.id === sid && now - this.lastClick.at < DOUBLE_CLICK_MS) {
         const [w, h] = this.view;
-        this.state.selectedUnits = this.ownFighters(this.renderer.settlersInRect(0, 0, w, h)).filter(
+        this.state.selectedUnits = this.ownUnits(this.renderer.settlersInRect(0, 0, w, h)).filter(
           (id) => this.world.getSettler(id)!.kind === kind,
         );
       } else if (e.shiftKey) {
@@ -279,28 +357,40 @@ export class InputController {
   }
 
   /**
-   * Right click with fighters selected, as in Settlers 4: on an enemy military building — attack it;
-   * on an own military building — go in; anywhere else — move there.
+   * Right click with units selected, as in Settlers 4. Fighters: on an enemy military building —
+   * attack it; on an own military building — go in; anywhere else — move there. Specialists: their
+   * kind's action where it is possible (`SPECIALIST_ORDERS`: a geologist prospects an own mountain, a
+   * pioneer claims neutral land at the border, a thief robs an explored enemy store), else walk there.
    */
   private order(p: { x: number; y: number }): void {
-    const ids = this.state.selectedUnits;
+    const { fighters, specialists } = this.selection();
     const t = this.tileAt(p.x, p.y);
     const tx = Math.round(t.x);
     const ty = Math.round(t.y);
-    const b = this.world.buildingAt(tx, ty);
-    const known = !this.state.fog || (b !== undefined && b.owner === LOCAL_PLAYER) || this.world.isExplored(tx, ty);
-    if (b && known && isMilitary(b) && b.done && b.owner !== LOCAL_PLAYER && !this.world.allied(b.owner, LOCAL_PLAYER)) {
-      const n = this.world.orderAttack(ids, b.id);
-      this.cb.onMessage(n > 0 ? `В атаку: ${n}` : 'Эти бойцы сейчас не могут атаковать');
-      return;
+    const b = this.knownBuildingAt(tx, ty);
+    const said: string[] = [];
+    if (fighters.length > 0) {
+      const o = this.fighterOrderAt(tx, ty);
+      if (o === 'attack') {
+        const n = this.world.orderAttack(fighters, b!.id);
+        said.push(n > 0 ? `В атаку: ${n}` : 'Эти бойцы сейчас не могут атаковать');
+      } else if (o === 'garrison') {
+        const n = this.world.orderGarrison(fighters, b!.id);
+        said.push(n > 0 ? `В гарнизон: ${n}` : 'В этом здании нет мест для них');
+      } else if (this.world.orderMove(fighters, tx, ty) === 0) {
+        said.push('Туда не пройти');
+      }
     }
-    if (b && isMilitary(b) && b.done && b.owner === LOCAL_PLAYER) {
-      const n = this.world.orderGarrison(ids, b.id);
-      this.cb.onMessage(n > 0 ? `В гарнизон: ${n}` : 'В этом здании нет мест для них');
-      return;
+    if (specialists.length > 0) {
+      const acting = specialists.filter((id) => {
+        const s = this.world.getSettler(id)!;
+        return SPECIALIST_ORDERS[s.kind]?.can(this.world, tx, ty, b, LOCAL_PLAYER) ?? false;
+      }).length;
+      const n = this.world.orderSpecialists(specialists, tx, ty, b ? b.id : null);
+      if (n === 0) said.push('Туда не пройти');
+      else if (acting > 0) said.push(`За работу: ${acting}`);
     }
-    const n = this.world.orderMove(ids, tx, ty);
-    if (n === 0) this.cb.onMessage('Туда не пройти');
+    if (said.length > 0) this.cb.onMessage(said.join(' · '));
   }
 
   private onWheel(e: WheelEvent): void {

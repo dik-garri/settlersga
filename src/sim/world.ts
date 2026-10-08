@@ -9,15 +9,22 @@ import {
   OUTPUT_SHARES,
   SOLDIER_LEVELS,
   PROFESSIONS,
-  PROSPECT_RADIUS,
-  PROSPECT_TICKS,
-  PROSPECT_TILES,
   START_CONDITIONS,
   type StartLevel,
   totalCost,
 } from './config';
 import { levelTarget, needsDigger, needsLevelling } from './digging';
-import { dismissSpecialist, sendPioneer, sendThief } from './specialists';
+import {
+  dismissSpecialist,
+  dismissUnits,
+  geologistErrand,
+  holdSpecialists,
+  orderSpecialists,
+  prospectTiles,
+  sendPioneer,
+  sendThief,
+  toolPileNear,
+} from './specialists';
 import { orderAttack, orderGarrison, orderHold, orderMove, releaseFighters } from './field';
 import { attackStrength } from './strength';
 import { createEconomy, ENDLESS, orderTool, orderWorkers, setAccepts, setDistribution, type EconomyState } from './economy';
@@ -51,7 +58,6 @@ import { abort, updateSettler } from './settlers';
 import {
   emptyStock,
   RESOURCES,
-  Terrain,
   type Building,
   type BuildingType,
   type PlayerId,
@@ -59,7 +65,6 @@ import {
   type Settler,
   type SettlerKind,
   type Stock,
-  type Task,
 } from './types';
 
 export { doorOf } from './buildings';
@@ -564,25 +569,10 @@ export class World {
   }
 
   sendGeologist(x: number, y: number, player: PlayerId = LOCAL_PLAYER): boolean {
-    const m = this.map;
-    if (!this.owns(x, y, player) || m.terrain[m.idx(x, y)] !== Terrain.Mountain) return false;
-    const tiles: { x: number; y: number; d: number }[] = [];
-    for (let ty = y - PROSPECT_RADIUS; ty <= y + PROSPECT_RADIUS; ty++) {
-      for (let tx = x - PROSPECT_RADIUS; tx <= x + PROSPECT_RADIUS; tx++) {
-        const d = Math.hypot(tx - x, ty - y);
-        if (d > PROSPECT_RADIUS || !this.owns(tx, ty, player) || !m.isWalkable(tx, ty)) continue;
-        if (m.terrain[m.idx(tx, ty)] !== Terrain.Mountain || this.isProspected(tx, ty, player)) continue;
-        tiles.push({ x: tx, y: ty, d });
-      }
-    }
-    if (tiles.length === 0) return false;
+    if (prospectTiles(this, x, y, player).length === 0) return false;
     // As in Settlers 4 he needs a hammer: fetched from the pile nearest the site, brought back after.
     const tool = PROFESSIONS.geologist.tool;
-    let from: Building | undefined;
-    for (const b of this.buildings.values()) {
-      if (!tool || b.owner !== player || !b.done || b.output[tool] - b.outReserved[tool] <= 0) continue;
-      if (!from || Math.hypot(b.door.x - x, b.door.y - y) < Math.hypot(from.door.x - x, from.door.y - y)) from = b;
-    }
+    const from = toolPileNear(this, player, x, y);
     if (tool && !from) return false;
     const near = from ? from.door : { x, y };
     let best: Settler | undefined;
@@ -592,21 +582,31 @@ export class World {
     }
     if (!best) return false;
     best.kind = 'geologist';
-    best.tasks = [];
-    if (from && tool) {
-      from.outReserved[tool]++;
-      best.tasks.push({ t: 'goto', x: from.door.x, y: from.door.y }, { t: 'pickup', b: from.id, res: tool });
-    }
-    best.tasks.push(
-      ...tiles
-        .sort((a, b) => a.d - b.d)
-        .slice(0, PROSPECT_TILES)
-        .flatMap((t): Task[] => [
-          { t: 'goto', x: t.x, y: t.y },
-          { t: 'prospect', x: t.x, y: t.y, n: PROSPECT_TICKS },
-        ]),
-    );
-    return true;
+    return geologistErrand(this, best, x, y);
+  }
+
+  /**
+   * Player command: right click with specialists selected (geologists, pioneers, thieves) at (x, y),
+   * on building `targetId` if any: each does his action there if possible, else walks there and waits.
+   */
+  orderSpecialists(
+    ids: readonly number[],
+    x: number,
+    y: number,
+    targetId: number | null = null,
+    player: PlayerId = LOCAL_PLAYER,
+  ): number {
+    return orderSpecialists(this, ids, x, y, targetId, player);
+  }
+
+  /** Player command: the selected specialists stop and wait where they stand. */
+  holdSpecialists(ids: readonly number[], player: PlayerId = LOCAL_PLAYER): number {
+    return holdSpecialists(this, ids, player);
+  }
+
+  /** Player command: the selected specialists on own land turn back into carriers. */
+  dismissUnits(ids: readonly number[], player: PlayerId = LOCAL_PLAYER): number {
+    return dismissUnits(this, ids, player);
   }
 
   /** Player command: lay out a construction site. */

@@ -22,7 +22,7 @@ import { pathSpeed, wearTile } from './paths';
 import { restIdle } from './idle';
 import { landAt } from './land';
 import { donkeyAbort, donkeyIdle, loadTick, releaseLoad, unloadTick } from './trade';
-import { claimTick, pioneerIdle, stealTick, thiefIdle, thiefWatch } from './specialists';
+import { claimTick, pioneerIdle, specialistPostIdle, stealTick, thiefIdle, thiefWatch } from './specialists';
 import { findGame, huntTick, releaseHunt } from './hunting';
 import { RESOURCES, Terrain, type Building, type Point, type Settler, type Task } from './types';
 import type { World } from './world';
@@ -424,9 +424,11 @@ function idle(w: World, s: Settler): void {
       return;
 
     case 'pioneer':
+      if (specialistPostIdle(s)) return;
       return pioneerIdle(w, s);
 
     case 'thief':
+      if (specialistPostIdle(s)) return;
       return thiefIdle(w, s);
 
     case 'donkey':
@@ -498,6 +500,8 @@ function idle(w: World, s: Settler): void {
       return;
 
     case 'prospect': {
+      // Sent somewhere without an errand: wait there (direct control).
+      if (specialistPostIdle(s)) return;
       // Errand finished (or aborted): back to carrying; the tool goes back to a warehouse.
       s.kind = 'carrier';
       const tool = s.carrying;

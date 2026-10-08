@@ -770,3 +770,18 @@ button.wide {
   opacity: 0.8;
   filter: none;
 }
+
+/* What a right click would do for the selected units (input.ts updateHint). */
+.order-hint {
+  position: absolute;
+  z-index: 6;
+  pointer-events: none;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  color: #f3e6c4;
+  background: rgba(30, 20, 10, 0.82);
+  border: 1px solid rgba(201, 160, 82, 0.7);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
