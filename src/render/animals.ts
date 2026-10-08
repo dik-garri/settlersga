@@ -132,6 +132,42 @@ export class AnimalLayer {
     v.root.zIndex = depthOf(x, y) + 0.01;
   }
 
+  /** The view root of a settler drawn as an animal, if it is on screen (for selection markers). */
+  unitRoot(id: number): Container | undefined {
+    const v = this.units.get(id);
+    return v && v.root.parent && v.root.visible ? v.root : undefined;
+  }
+
+  /**
+   * The front-most settler drawn as an animal under a screen point (canvas CSS pixels), with its depth,
+   * or null: a hit test on the animal sprite's bounds (trimmed a little at the edges).
+   */
+  unitAt(sx: number, sy: number): { id: number; z: number } | null {
+    let best: { id: number; z: number } | null = null;
+    for (const [id, v] of this.units) {
+      if (!v.root.parent || !v.root.visible) continue;
+      const b = v.sprite.getBounds();
+      const padX = b.width * 0.18;
+      const padY = b.height * 0.15;
+      if (sx < b.x + padX || sx > b.x + b.width - padX || sy < b.y + padY || sy > b.y + b.height - padY) continue;
+      if (!best || v.root.zIndex > best.z) best = { id, z: v.root.zIndex };
+    }
+    return best;
+  }
+
+  /** Settlers drawn as animals whose feet (on screen) fall inside a rectangle of canvas CSS pixels. */
+  unitsInRect(ax: number, ay: number, bx: number, by: number): number[] {
+    const out: number[] = [];
+    for (const [id, v] of this.units) {
+      if (!v.root.parent || !v.root.visible) continue;
+      const b = v.sprite.getBounds();
+      const fx = b.x + b.width / 2;
+      const fy = b.y + b.height * 0.85;
+      if (fx >= ax && fx <= bx && fy >= ay && fy <= by) out.push(id);
+    }
+    return out;
+  }
+
   /** How many settlers are drawn as animals (for the renderer's check for dead settlers). */
   get unitCount(): number {
     return this.units.size;

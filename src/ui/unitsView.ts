@@ -49,7 +49,17 @@ export class UnitsView implements View {
       const k = PROFESSIONS[s.kind].name;
       byKind.set(k, (byKind.get(k) ?? 0) + 1);
     }
+    // Pack donkeys: selectable to look at, they take no orders.
+    const donkeys = units.filter((s) => !isFighter(s) && !isSpecialist(s));
+    for (const s of donkeys) {
+      const k = PROFESSIONS[s.kind].name;
+      byKind.set(k, (byKind.get(k) ?? 0) + 1);
+    }
     const rows: [string, string][] = [['Выбрано', String(units.length)]];
+    // Control groups the selected units belong to (Ctrl+1…9 stores, 1…9 recalls).
+    const ids = new Set(units.map((s) => s.id));
+    const groups = this.state.groups.map((g, n) => (n > 0 && g.some((id) => ids.has(id)) ? n : 0)).filter((n) => n > 0);
+    rows.push(['Группы', groups.length > 0 ? groups.join(', ') : '— (Ctrl+цифра — запомнить)']);
     for (const [k, n] of [...byKind].sort()) rows.push([k, String(n)]);
     if (fighters.length > 0) {
       rows.push(['Здоровье', max > 0 ? `${Math.round((100 * hp) / max)}%` : '—']);
@@ -58,6 +68,9 @@ export class UnitsView implements View {
     if (specialists.length > 0) {
       const busy = specialists.filter((s) => s.errand || s.tasks.some((t) => t.t === 'prospect')).length;
       rows.push(['Специалистов за работой', `${busy} из ${specialists.length}`]);
+    }
+    if (donkeys.length > 0) {
+      rows.push(['Ослов с грузом', `${donkeys.filter((s) => s.carrying !== null).length} из ${donkeys.length}`]);
     }
     const key = JSON.stringify(rows);
     if (key === this.key) return;
@@ -74,7 +87,8 @@ export class UnitsView implements View {
           'вор: по разведанному вражескому складу — украсть; иначе — идти туда и ждать',
       );
     }
-    this.el.append(el('p', 'hint-text', `Правый щелчок: ${hints.join('; ')}.`));
+    if (donkeys.length > 0) hints.push('ослы приказов не слушают: они ходят по маршрутам рынков');
+    if (hints.length > 0) this.el.append(el('p', 'hint-text', `Правый щелчок: ${hints.join('; ')}.`));
     const fighterIds = () => this.units().filter(isFighter).map((s) => s.id);
     const specialistIds = () => this.units().filter(isSpecialist).map((s) => s.id);
     const actions = el('div', 'info-actions');

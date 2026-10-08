@@ -17,6 +17,11 @@ export interface GameState {
   selectedSettler: number | null;
   /** Own fighters selected for direct orders (box or click, as in Settlers 4); right-click orders them. */
   selectedUnits: number[];
+  /**
+   * Control groups (Ctrl+1…9 stores the selection, 1…9 recalls it), index 1–9: settler ids. UI state
+   * only, not saved; dead or lost units drop out when a group is recalled.
+   */
+  groups: number[][];
   /** Tile under the cursor, if any. */
   hover: { x: number; y: number } | null;
   /** Fog of war shown (`?fog=off` turns it off for debugging). */
@@ -30,6 +35,7 @@ export const createState = (): GameState => ({
   selected: null,
   selectedSettler: null,
   selectedUnits: [],
+  groups: Array.from({ length: 10 }, () => []),
   hover: null,
   fog: true,
 });
