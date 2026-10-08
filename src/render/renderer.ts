@@ -31,7 +31,7 @@ import { AnimalLayer } from './animals';
 import { setFrame, type Settler3d } from './settler3d';
 import { BODY_STAND, BODY_WORK, CARRY_AT } from './settlerArt';
 import { depthOf, HALF_H, HALF_W, toScreen, toTile } from './iso';
-import { ART3D_BANNERS, ART3D_STAGES, ART3D_YARDS, PILE_MAX, SETTLER_3D_SCALE } from './art3d';
+import { ART3D_BANNERS, ART3D_STAGES, ART3D_YARDS, CARRIED_WARE_3D_SCALE, PILE_MAX, SETTLER_3D_SCALE } from './art3d';
 
 /** Goods kinds shown on an open storage yard, and the ring they stand on (screen px from its centre). */
 const YARD_KINDS = 8;
@@ -1726,7 +1726,8 @@ export class GameRenderer {
     const hat = layer(tex.hat.cap[2]);
     const arm = layer(tex.holdArm.none[2][WALK_FRAMES]);
     const ware = new Sprite(this.wareTex.log);
-    ware.scale.set(0.85);
+    // Goods in hand: about as wide as the body (the 3D figure's root is scaled down, see SETTLER_3D_SCALE).
+    ware.scale.set(this.settler3d ? CARRIED_WARE_3D_SCALE : 0.85);
     ware.visible = false;
     const rank = new Sprite(this.atlas.get('chevrons:1'));
     rank.position.set(0, this.settler3d ? this.settler3d.rankY : -40);
