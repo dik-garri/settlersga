@@ -136,6 +136,7 @@ describe('military economy', () => {
       const c = w.castle;
       w.setShare('bow', bow);
       w.setShare('sword', sword);
+      w.setShare('armor', 0); // squad leaders' armour is a third share-controlled output
       expect(w.shareOf('bow')).toBe(bow);
       const smith = placeNear(w, 'weaponsmith', c.x + 5, c.y - 1)!;
       run(w, 1500);

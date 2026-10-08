@@ -36,6 +36,7 @@ import {
   type GarrisonDef,
 } from './config';
 import { randInt } from './rng';
+import { fieldIdle, fieldUnitsNear, moraleOf } from './field';
 import { fieldFactor } from './strength';
 import { abort } from './settlers';
 import type { Building, PlayerId, Point, Resource, Settler, SettlerKind, Task } from './types';
@@ -108,6 +109,7 @@ export function slotsFree(w: World, b: Building, archer: boolean): number {
 export function enterGarrison(w: World, b: Building, s: Settler): void {
   const claimed = claimsTerritory(b);
   b.garrison.push(s.id);
+  s.post = null;
   s.home = b.id;
   s.inside = b.id;
   s.x = s.px = b.door.x;
@@ -267,7 +269,7 @@ function armyRoom(w: World, owner: PlayerId): { archer: number; melee: number; t
     if (s.owner !== owner || w.dying.has(s.id)) continue;
     if (s.kind === 'carrier' && s.tasks.length === 0) out.idle++;
     else if (s.kind === 'recruit' || s.tasks.some((t) => t.t === 'become' && t.kind === 'recruit')) out.training++;
-    else if (isFighter(s) && s.home === null && !s.tasks.some((t) => t.t === 'join' || t.t === 'heal')) {
+    else if (isFighter(s) && s.home === null && !s.post && !s.tasks.some((t) => t.t === 'join' || t.t === 'heal')) {
       if (isArcher(s)) out.archer--;
       else out.melee--;
     }
@@ -275,9 +277,16 @@ function armyRoom(w: World, owner: PlayerId): { archer: number; melee: number; t
   return out;
 }
 
+/** Whether the barracks pile holds the weapon `r` and the rest of its fighter's kit (a leader's sword). */
+function kitReady(b: Building, r: Resource): boolean {
+  if (b.input[r] <= 0) return false;
+  const kit = PROFESSIONS[fighterFor(r)].kit ?? {};
+  return (Object.keys(kit) as Resource[]).every((k) => b.input[k] - (k === r ? 1 : 0) >= (kit[k] ?? 0));
+}
+
 /** Weapons on the barracks pile whose fighters still find a free garrison slot of their kind. */
 function trainable(w: World, b: Building, room = armyRoom(w, b.owner)): Resource[] {
-  return WEAPONS.filter((r) => b.input[r] > 0 && (PROFESSIONS[fighterFor(r)].combat!.ranged ? room.archer : room.melee) > 0);
+  return WEAPONS.filter((r) => kitReady(b, r) && (PROFESSIONS[fighterFor(r)].combat!.ranged ? room.archer : room.melee) > 0);
 }
 
 /**
@@ -319,6 +328,8 @@ export function updateBarracks(w: World, b: Building): void {
   const weapon = mostBehindShare(w, b.owner, ready, WEAPONS, (r) => fightersWith(w, b.owner, r)) ?? ready[0];
   const level = recruitLevelAt(w, b);
   b.input[weapon]--;
+  const kit = PROFESSIONS[fighterFor(weapon)].kit ?? {};
+  for (const k of Object.keys(kit) as Resource[]) b.input[k] -= kit[k] ?? 0;
   b.input[LEVEL_RES] -= SOLDIER_LEVELS[level].cost;
   s.kind = fighterFor(weapon);
   s.level = level;
@@ -370,8 +381,9 @@ export function joinTick(w: World, s: Settler, task: Extract<Task, { t: 'join' }
   enterGarrison(w, b, s);
 }
 
-/** Idle fighter: stay in the home garrison, or look for the nearest own one with room. */
+/** Idle fighter: a field unit keeps its post; otherwise stay in the home garrison, or look for the nearest own one with room. */
 export function soldierIdle(w: World, s: Settler): void {
+  if (s.post) return fieldIdle(w, s);
   const home = s.home !== null ? w.buildings.get(s.home) : undefined;
   if (home && home.owner === s.owner && home.garrison.includes(s.id)) {
     if (s.inside !== home.id) {
@@ -439,8 +451,8 @@ export function attack(w: World, targetId: number, count: number, player: Player
 function blow(w: World, attacker: Settler, defender: Settler, b: Building): void {
   // Fighting strength where each stands (`strength.ts`): the attacker on foreign land at his owner's
   // attack strength, the defender at home at his owner's defence strength.
-  const fa = fieldFactor(w, attacker);
-  const fd = fieldFactor(w, defender);
+  const fa = fieldFactor(w, attacker) * moraleOf(w, attacker);
+  const fd = fieldFactor(w, defender) * moraleOf(w, defender);
   const sa = strength(attacker, null) * fa;
   const sd = strength(defender, b) * fd;
   const hitter = w.rng() < sd / (sa + sd) ? defender : attacker;
@@ -458,7 +470,8 @@ function shoot(w: World, archer: Settler, target: Settler, from: Point): void {
   target.hp -=
     (ranged.damage[0] + randInt(w.rng, ranged.damage[1] - ranged.damage[0] + 1)) *
     SOLDIER_LEVELS[archer.level].damage *
-    fieldFactor(w, archer);
+    fieldFactor(w, archer) *
+    moraleOf(w, archer);
   if (target.hp <= 0) killSettler(w, target);
 }
 
@@ -486,6 +499,8 @@ export function assaultTick(w: World, s: Settler, task: Extract<Task, { t: 'assa
       return;
     }
     s.working = true;
+    // Caught on the way by a field unit (`field.ts`): his `engage` task runs that duel.
+    if (!b.garrison.includes(d.id)) return;
     if (++task.n < FIGHT_EVERY) return;
     task.n = 0;
     blow(w, s, d, b);
@@ -558,7 +573,10 @@ export function updateGarrison(w: World, b: Building, assaults: Map<number, Sett
     if (!ranged) continue;
     if (s.reload > 0) s.reload--;
     if (s.reload <= 0) {
-      const target = assailantsNear(w, b, ranged.range, assaults).sort(
+      const near = assailantsNear(w, b, ranged.range, assaults);
+      // Enemy field units within range are fair game too.
+      for (const f of fieldUnitsNear(w, b, ranged.range)) if (!near.includes(f)) near.push(f);
+      const target = near.sort(
         (p, q) => Math.hypot(p.x - b.door.x, p.y - b.door.y) - Math.hypot(q.x - b.door.x, q.y - b.door.y) || p.id - q.id,
       )[0];
       if (target) shoot(w, s, target, b.door);

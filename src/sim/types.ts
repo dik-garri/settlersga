@@ -28,6 +28,7 @@ export const RESOURCES = [
   'hammer',
   'sword',
   'bow',
+  'armor',
 ] as const;
 export type Resource = (typeof RESOURCES)[number];
 export type Stock = Record<Resource, number>;
@@ -111,6 +112,7 @@ export type SettlerKind =
   | 'weaponsmith'
   | 'soldier'
   | 'archer'
+  | 'leader'
   | 'recruit'
   | 'hunter'
   | 'digger'
@@ -200,6 +202,8 @@ export type Task =
   | { t: 'join'; b: number; archer?: boolean }
   /** Soldier attacks an enemy military building: duel its defenders at the door, take it when empty. */
   | { t: 'assault'; b: number; n: number }
+  /** Field unit closes in on and duels an enemy fighter in the open (`field.ts`); `n` counts to the next blow. */
+  | { t: 'engage'; s: number; n: number }
   /**
    * Hunter shoots a wild animal (`World.animals` id `a`, reserved via `Animal.hunter`): closes in
    * (`chase` approaches so far), aims for `n` ticks once in range, then carries `res`.
@@ -254,4 +258,18 @@ export interface Settler {
    * may still claim), or the building `b` a thief was sent to rob. Absent on everyone else (and on saves made before specialists).
    */
   errand?: { x: number; y: number; b?: number; n?: number } | null;
+  /**
+   * Field unit (`field.ts`, direct army control as in Settlers 4): a fighter ordered out into the open
+   * stays at this post instead of looking for a garrison, and engages enemies that come near. With
+   * `leader`, the post follows that squad leader at offset (`dx`, `dy`). Absent or null otherwise.
+   */
+  post?: FieldPost | null;
+}
+
+export interface FieldPost {
+  x: number;
+  y: number;
+  leader?: number;
+  dx?: number;
+  dy?: number;
 }
