@@ -49,6 +49,7 @@ interface View {
 /** A settler drawn as an animal (`UNIT_ANIMALS`): the animal, its pack saddle and the goods on it. */
 interface UnitView extends View {
   root: Container;
+  owner: number;
   pack: Sprite;
   ware: Sprite;
 }
@@ -95,7 +96,7 @@ export class AnimalLayer {
       ware.position.set(0, -PACK.back * ANIMAL_SCALE[kind] - 4);
       sprite.scale.set(ANIMAL_SCALE[kind]);
       root.addChild(sprite, pack, ware);
-      v = { root, sprite, pack, ware, dir: (s.id * 3) % DIRS.length, walked: 0, lastX: s.x, lastY: s.y };
+      v = { root, sprite, pack, ware, owner: s.owner, dir: (s.id * 3) % DIRS.length, walked: 0, lastX: s.x, lastY: s.y };
       this.units.set(s.id, v);
     }
     const x = s.px + (s.x - s.px) * alpha;
@@ -174,9 +175,10 @@ export class AnimalLayer {
   }
 
   /** Drops the views of animal settlers that are gone (`alive` = the world's settler ids). */
-  pruneUnits(alive: Map<number, unknown>): void {
+  pruneUnits(alive: Map<number, unknown>, gone?: (root: Container, owner: number) => void): void {
     for (const [id, v] of this.units) {
       if (alive.has(id)) continue;
+      gone?.(v.root, v.owner);
       v.root.destroy({ children: true });
       this.units.delete(id);
     }

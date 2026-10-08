@@ -136,6 +136,8 @@ interface SettlerView {
   kind: string;
   /** Work frame last shown, to fire the action's sound once per loop. */
   frame: number;
+  /** Owner, for the colour of the puff that rises when the settler dies. */
+  owner: number;
 }
 
 const toTint = (hex: string) => Number.parseInt(hex.slice(1), 16);
@@ -1654,12 +1656,17 @@ export class GameRenderer {
   private syncSettlers(alpha: number, timeMs: number): void {
     if (this.settlerViews.size + this.animals.unitCount > this.sim.settlers.length) {
       // Some settlers died.
+      // A unit that dies on screen gives up a puff of its owner's colour that rises and fades.
+      const soul = (root: Container, owner: number) => {
+        if (root.parent === this.objects) this.effects.soul(root.x, root.y, this.playerTint[(owner - 1) % this.playerTint.length]);
+      };
       for (const [id, v] of this.settlerViews) {
         if (this.sim.settlerById.has(id)) continue;
+        soul(v.root, v.owner);
         v.root.destroy({ children: true });
         this.settlerViews.delete(id);
       }
-      this.animals.pruneUnits(this.sim.settlerById);
+      this.animals.pruneUnits(this.sim.settlerById, soul);
     }
     for (const s of this.sim.settlers) {
       // Pack donkeys are drawn as animals.
@@ -1914,6 +1921,7 @@ export class GameRenderer {
       hp: s.hp,
       kind: '',
       frame: -1,
+      owner: s.owner,
     };
     this.styleSettler(v, s);
     this.settlerViews.set(s.id, v);

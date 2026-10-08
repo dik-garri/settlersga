@@ -66,7 +66,7 @@ describe('recruit levels (bought at the barracks, as in Settlers 4)', () => {
     run(w, 1500);
     const trained = w.settlers.filter((s) => (s.kind === 'soldier' || s.kind === 'archer') && s.level > 0);
     expect(trained.map((s) => s.level).sort()).toEqual([1, 2]);
-    for (const s of trained) expect(maxHp(s)).toBe(Math.round((s.kind === 'archer' ? 80 : 100) * SOLDIER_LEVELS[s.level].hp));
+    for (const s of trained) expect(maxHp(s)).toBe(Math.round((s.kind === 'archer' ? 75 : 100) * SOLDIER_LEVELS[s.level].hp));
     expect(c.output.gold + barracks.input.gold + barracks.inbound.gold).toBe(0);
     // Levels never change afterwards.
     c.output.gold = 5;

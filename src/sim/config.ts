@@ -67,9 +67,13 @@ export const START_SOLDIERS = 6;
 export const GARRISON_KEEP = 1;
 /** Combat: soldiers within this distance (tiles, building centers) of the target can join an attack. */
 export const ATTACK_RANGE = 30;
-/** Combat: one blow every FIGHT_EVERY ticks; damage per blow is uniform in [min, max]. */
+/**
+ * Combat: one blow every FIGHT_EVERY ticks; damage per blow is uniform in [min, max]. Settlers 4: a
+ * level-1 swordsman has 100 hit points and deals 10 a blow, both fighters striking every 0.92 s, so an
+ * even duel lasts about 9 s; one blow (on either fighter) every 0.6 s at 10 on average gives the same.
+ */
 export const FIGHT_EVERY = 6;
-export const DAMAGE: [number, number] = [12, 24];
+export const DAMAGE: [number, number] = [8, 12];
 /**
  * Fighter levels, as in Settlers 4: chosen when the barracks trains a recruit and fixed for life.
  * Hit points and damage are relative to level 0; `cost` units of `LEVEL_RES` are paid at recruitment
@@ -588,8 +592,9 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
     name: 'Лучник',
     behavior: 'soldier',
     tool: 'bow',
-    hp: 80,
-    combat: { melee: 0.6, ranged: { range: 5, every: 14, damage: [8, 14] } },
+    // Settlers 4: 75 hit points, 4 damage a shot every 1.42 s.
+    hp: 75,
+    combat: { melee: 0.6, ranged: { range: 5, every: 14, damage: [3, 5] } },
   },
   /**
    * Squad leader, as in Settlers 4: made in the barracks from armour and a sword (plus the gold of his
@@ -600,7 +605,7 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
     behavior: 'soldier',
     tool: 'armor',
     kit: { sword: 1 },
-    hp: 130,
+    hp: 215, // Settlers 4
     speed: 9 / 7,
     combat: { melee: 1.25, captures: true, leads: { radius: 6, morale: 1.15 } },
   },

@@ -177,6 +177,19 @@ export class Effects {
     }
   }
 
+  /**
+   * A unit died at the screen point (its feet): a soft cloud of its owner's colour rises from the body
+   * and fades, with two smaller wisps trailing it.
+   */
+  soul(x: number, y: number, tint: number): void {
+    this.emit(this.tex.puff, x, y - 16, 0, -24, 2400, 0.8, 1.7, 1, tint);
+    this.emit(this.tex.puff, x, y - 16, 0, -24, 2400, 0.5, 1.1, 1, tint); // denser core
+    for (let k = 0; k < 2; k++) {
+      const side = k === 0 ? -1 : 1;
+      this.emit(this.tex.puff, x + side * 7, y - 8, side * 5, -18 - Math.random() * 6, 1900, 0.45, 0.9, 0.8, tint);
+    }
+  }
+
   /** Soft puffs of dust or leaves at a screen point. */
   burst(x: number, y: number, tint: number, count: number, spread: number): void {
     for (let k = 0; k < count; k++) {
