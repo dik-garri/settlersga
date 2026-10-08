@@ -2158,6 +2158,193 @@ def build_forester():
     lib.tag(4)
 
 
+# ------------------------------------------------------------------------------------- market (2×2)
+
+def donkey(x, y, a, coat, belly, dark, s=1.0, pack=None):
+    """A small grey donkey standing at (x, y) facing angle `a`: barrel body, neck and head with long
+    ears, four legs; with `pack` (a material) a pair of panniers over its back."""
+    c, si = math.cos(a), math.sin(a)
+    at = lambda f, g, z: (x + (c * f - si * g) * s, y + (si * f + c * g) * s, z * s)
+    body = lib.sphere(at(0, 0, 0.17), 0.1 * s, coat, scale=(1.55, 0.95, 0.9))
+    body.rotation_euler = (0, 0, a)
+    belly_o = lib.sphere(at(0, 0, 0.14), 0.085 * s, belly, scale=(1.3, 0.85, 0.6))
+    belly_o.rotation_euler = (0, 0, a)
+    for f, g in ((0.09, 0.045), (0.09, -0.045), (-0.09, 0.045), (-0.09, -0.045)):
+        lib.cylinder(at(f, g, 0.055), 0.016 * s, 0.11 * s, coat, verts=6)
+        lib.cylinder(at(f, g, 0.008), 0.018 * s, 0.016 * s, dark, verts=6)
+    neck = lib.cylinder(at(0.15, 0, 0.26), 0.035 * s, 0.13 * s, coat, verts=8, rot=(0, 0.7, a))
+    neck.rotation_euler = (0, 0.7, a)
+    head = lib.sphere(at(0.21, 0, 0.31), 0.045 * s, coat, scale=(1.5, 0.8, 0.8))
+    head.rotation_euler = (0, 0.5, a)
+    lib.sphere(at(0.265, 0, 0.29), 0.03 * s, belly, scale=(1.1, 0.9, 0.8))
+    for g in (0.02, -0.02):
+        ear = lib.cylinder(at(0.18, g, 0.38), 0.012 * s, 0.09 * s, coat, verts=6, radius2=0.004 * s)
+        ear.rotation_euler = (0.25 * (1 if g > 0 else -1), -0.3, a)
+    lib.cylinder(at(-0.17, 0, 0.16), 0.008 * s, 0.1 * s, dark, verts=6)  # tail
+    if pack is not None:
+        for g in (0.07, -0.07):
+            p = lib.box(at(0, g, 0.17), (0.12 * s, 0.05 * s, 0.09 * s), pack, bevel=0.012)
+            p.rotation_euler = (0, 0, a)
+
+
+def build_market():
+    """Our marketplace: an open hall of stout timber posts on a flagstone floor under a hipped
+    terracotta roof, its counter piled with crates, sacks and baskets, a striped awning stall with a
+    trestle table in front, barrels and a waiting pack donkey by the door."""
+    rnd = random.Random(221)
+    blocks = block_mats()
+    beam = beam_mat()
+    planks = boards_mats()
+    tc = terracotta_mats('mtc')
+    flag = lib.mat_stones('mflag', (0.7, 0.66, 0.58), (0.52, 0.48, 0.42), (0.34, 0.3, 0.26), scale=5, bump=0.4)
+    cloth_a = lib.mat_grain('mcloth-a', (0.62, 0.12, 0.08), (0.74, 0.2, 0.12), scale=12, stretch=(1, 1, 1), bump=0.2)
+    cloth_b = lib.mat_grain('mcloth-b', (0.86, 0.8, 0.62), (0.94, 0.9, 0.74), scale=12, stretch=(1, 1, 1), bump=0.2)
+    sack = lib.mat_grain('msack', (0.66, 0.56, 0.38), (0.8, 0.7, 0.5), scale=18, stretch=(1, 1, 1), bump=0.5)
+    wicker = lib.mat_grain('mwicker', (0.48, 0.34, 0.16), (0.66, 0.5, 0.26), scale=30, stretch=(1, 4, 1), bump=0.8)
+    apple = lib.mat_flat('mapple', (0.72, 0.12, 0.08), rough=0.4)
+    pear = lib.mat_flat('mpear', (0.72, 0.68, 0.18), rough=0.45)
+    iron = lib.mat_flat('miron', (0.16, 0.16, 0.17), rough=0.5)
+    coat = lib.mat_grain('dcoat', (0.42, 0.4, 0.38), (0.56, 0.54, 0.5), scale=24, stretch=(1, 1, 1), bump=0.3)
+    belly = lib.mat_flat('dbelly', (0.82, 0.78, 0.72))
+    hoof = lib.mat_flat('dhoof', (0.12, 0.1, 0.08))
+    earth_pad((0.05, -0.15, 0), 1.0, 1.08, seed=221)
+    lib.tag(0)
+    corner_stakes(-0.85, 0.85, -0.85, 0.85)
+    lib.tag(0, until=0)
+    # Flagstone floor and the corner posts of the hall (back half of the plot).
+    hx0, hx1, hy0, hy1, H = -0.8, 0.6, -0.15, 0.8, 0.58
+    lib.box(((hx0 + hx1) / 2, (hy0 + hy1) / 2, 0.04), (hx1 - hx0 + 0.08, hy1 - hy0 + 0.08, 0.08), flag, bevel=0.02)
+    posts = [(hx0 + (hx1 - hx0) * k / 3, y) for k in range(4) for y in (hy0, hy1)]
+    for (x, y) in posts:
+        lib.box((x, y, 0.1), (0.1, 0.1, 0.06), blocks[1], bevel=0.01)
+    lib.tag(1)
+    for (x, y) in posts:
+        lib.box((x, y, (0.12 + H) / 2 + 0.02), (0.07, 0.07, H - 0.1), beam, bevel=0.006)
+    for y in (hy0, hy1):
+        lib.box(((hx0 + hx1) / 2, y, H), (hx1 - hx0 + 0.1, 0.08, 0.07), beam)
+    for x in (hx0, hx1):
+        lib.box((x, (hy0 + hy1) / 2, H), (0.08, hy1 - hy0 + 0.1, 0.07), beam)
+    # Back wall of planks, the counter and the goods on it.
+    lib.box(((hx0 + hx1) / 2, hy1 - 0.02, (0.08 + H) / 2), (hx1 - hx0, 0.04, H - 0.08), planks[0], bevel=0.005)
+    lib.box(((hx0 + hx1) / 2, hy0 + 0.22, 0.17), (hx1 - hx0 - 0.2, 0.14, 0.18), planks[1], bevel=0.008)
+    lib.tag(2)
+    for k in range(5):
+        x = hx0 + 0.2 + k * 0.25 + rnd.uniform(-0.03, 0.03)
+        kind = k % 3
+        if kind == 0:
+            lib.box((x, hy0 + 0.22, 0.31), (0.13, 0.11, 0.1), planks[2], bevel=0.008, rot=(0, 0, rnd.uniform(-0.2, 0.2)))
+        elif kind == 1:
+            lib.lumpy((x, hy0 + 0.22, 0.32), 0.07, sack, scale=(1, 0.8, 1.1), strength=0.2, noise=2.0, seed=k, subdiv=2)
+        else:
+            lib.cylinder((x, hy0 + 0.22, 0.3), 0.065, 0.07, wicker, verts=12, radius2=0.08)
+            for j in range(5):
+                lib.sphere((x + rnd.uniform(-0.04, 0.04), hy0 + 0.22 + rnd.uniform(-0.04, 0.04), 0.35), 0.022,
+                           apple if j % 2 else pear, subdiv=2)
+    for k in range(3):  # sacks and crates stacked at the back wall
+        lib.lumpy((hx0 + 0.25 + k * 0.42, hy1 - 0.15, 0.16), 0.08, sack, scale=(1, 0.8, 1.1), strength=0.2, noise=2.0,
+                  seed=10 + k, subdiv=2)
+        lib.box((hx0 + 0.45 + k * 0.42, hy1 - 0.14, 0.15), (0.14, 0.12, 0.14), planks[k % len(planks)], bevel=0.008)
+    lib.tag(None, split=lambda o: 3 if o.location.z > 0.25 else 2)
+    hip_roof((hx0 + hx1) / 2, (hy0 + hy1) / 2, hx1 - hx0, hy1 - hy0, H + 0.03, 0.28, tc,
+             lib.mat_flat('mtc-r', (0.5, 0.2, 0.12)), rnd, overhang=0.07, size=0.12, shape='tile', ridge_frac=0.45)
+    lib.tag(None, split=lambda o: 3 if o.location.x < (hx0 + hx1) / 2 else 4)
+    # Awning stall in front, left of the door path.
+    sx, sy = -0.35, -0.6
+    lib.box((sx, sy, 0.14), (0.46, 0.2, 0.03), planks[1], bevel=0.006)
+    for dx in (-0.2, 0.2):
+        for dy in (-0.08, 0.08):
+            lib.box((sx + dx, sy + dy, 0.07), (0.025, 0.025, 0.14), beam)
+    for dx in (-0.24, 0.24):
+        lib.box((sx + dx, sy + 0.12, 0.25), (0.03, 0.03, 0.5), beam)
+        lib.box((sx + dx, sy - 0.16, 0.2), (0.025, 0.025, 0.4), beam)
+    for k in range(6):  # striped cloth, sloping to the front
+        x = sx - 0.25 + (k + 0.5) * 0.5 / 6
+        lib.box((x, sy - 0.02, 0.45), (0.5 / 6 + 0.002, 0.34, 0.012), cloth_a if k % 2 else cloth_b,
+                rot=(math.atan2(0.1, 0.3), 0, 0))
+    for k in range(3):
+        x = sx - 0.14 + k * 0.14
+        lib.cylinder((x, sy, 0.18), 0.045, 0.05, wicker, verts=10, radius2=0.055)
+        for j in range(3):
+            lib.sphere((x + rnd.uniform(-0.025, 0.025), sy + rnd.uniform(-0.025, 0.025), 0.215), 0.018,
+                       apple if (j + k) % 2 else pear, subdiv=2)
+    # Barrels and a pack donkey waiting by the door.
+    for k, (x, y) in enumerate(((0.75, -0.25), (0.82, -0.05), (-0.75, -0.4))):
+        lib.cylinder((x, y, 0.1), 0.075, 0.2, planks[k % len(planks)], verts=14)
+        for z in (0.04, 0.16):
+            lib.cylinder((x, y, z), 0.078, 0.018, iron, verts=14)
+    donkey(0.0, -0.75, 0.3, coat, belly, hoof, s=0.9, pack=wicker)
+    lib.tag(4)
+
+
+def build_donkeyranch():
+    """Our donkey ranch: a long stable of fieldstone below and boards above under a thatched roof,
+    a stable door and a hay loft hatch; in front a fenced paddock with donkeys, a water trough and
+    a stack of hay."""
+    rnd = random.Random(231)
+    walls = stone_walls()
+    blocks = block_mats()
+    beam = beam_mat()
+    planks = boards_mats()
+    straw = straw_mat('rstraw')
+    dark = lib.mat_flat('dark', (0.05, 0.04, 0.03))
+    door = door_mat()
+    water = lib.mat_flat('rwater', (0.16, 0.34, 0.46), rough=0.15)
+    mud = lib.mat_grain('rmud', (0.3, 0.2, 0.1), (0.46, 0.33, 0.19), scale=14, stretch=(1, 1, 1), bump=0.9)
+    coat = lib.mat_grain('dcoat', (0.42, 0.4, 0.38), (0.56, 0.54, 0.5), scale=24, stretch=(1, 1, 1), bump=0.3)
+    coat2 = lib.mat_grain('dcoat2', (0.36, 0.28, 0.22), (0.5, 0.4, 0.32), scale=24, stretch=(1, 1, 1), bump=0.3)
+    belly = lib.mat_flat('dbelly', (0.82, 0.78, 0.72))
+    hoof = lib.mat_flat('dhoof', (0.12, 0.1, 0.08))
+    earth_pad((0.05, -0.15, 0), 1.0, 1.08, seed=231)
+    lib.tag(0)
+    corner_stakes(-0.85, 0.85, -0.85, 0.85)
+    lib.tag(0, until=0)
+    # The stable along the back, long side to the front.
+    x0, x1, y0, y1, H, rh = -0.85, 0.65, 0.2, 0.8, 0.46, 0.34
+    lib.box(((x0 + x1) / 2, (y0 + y1) / 2, 0.04), (x1 - x0 + 0.06, y1 - y0 + 0.06, 0.08), blocks[2], bevel=0.02)
+    lib.tag(1)
+    stone_house(x0, x1, y0, y1, H * 0.45, rnd, walls, blocks, block=0.17)
+    lib.tag(2)
+    plank_walls(x0, x1, y0, y1, H * 0.45, H, planks, planks[0], beam, rnd)
+    for x in (x0 + 0.02, x1 - 0.02):
+        lib.box((x, y0 - 0.01, H / 2), (0.06, 0.05, H), beam)
+    lib.gable(((x0 + x1) / 2, (y0 + y1) / 2, H), y1 - y0, rh - 0.02, x1 - 0.01, planks[1], along='x')
+    # Stable door (two leaves, the upper one open) and the loft hatch in the gable.
+    dx = 0.25
+    lib.box((dx, y0 - 0.03, 0.12), (0.26, 0.03, 0.2), door, bevel=0.006)
+    lib.box((dx, y0 - 0.02, 0.32), (0.26, 0.02, 0.18), dark)
+    lib.box((dx - 0.2, y0 - 0.12, 0.33), (0.03, 0.2, 0.17), door, bevel=0.006, rot=(0, 0, 0.5))
+    lib.box((x1 + 0.03, (y0 + y1) / 2, H + 0.1), (0.02, 0.14, 0.12), dark)
+    for k in range(2):
+        window(x0 + 0.2 + k * 0.3, y0 - 0.04, 0.33, 0.12, 0.08, beam, dark)
+    lib.tag(None, split=lambda o: 2 if o.location.z < H * 0.6 else 3)
+    # Thatch: two thick slopes meeting at the ridge.
+    run = (y1 - y0) / 2 + 0.12
+    ang = math.atan2(rh, run - 0.12)
+    for side in (-1, 1):
+        lib.box(((x0 + x1) / 2, (y0 + y1) / 2 + side * run / 2, H + rh / 2), (x1 - x0 + 0.2, math.hypot(run, rh) + 0.04, 0.1),
+                straw, rot=(-side * ang, 0, 0), bevel=0.03)
+    lib.cylinder(((x0 + x1) / 2, (y0 + y1) / 2, H + rh + 0.02), 0.05, x1 - x0 + 0.22, straw, rot=(0, math.pi / 2, 0),
+                 verts=10)
+    lib.tag(None, split=lambda o: 3 if o.location.y > (y0 + y1) / 2 else 4)
+    # Paddock in front: muddy ground, a rail fence, a trough, hay and donkeys.
+    lib.pad((-0.15, -0.45, 0.004), 0.6, 0.36, mud, jitter=0.15, seed=232, core=0.8, reach=1.1)
+    fx0, fx1, fy0, fy1 = -0.85, 0.35, -0.9, y0 - 0.05
+    for (xa, ya, xb, yb) in ((fx0, fy0, fx1, fy0), (fx0, fy0, fx0, fy1), (fx1, fy0, fx1, fy1 - 0.25)):
+        n = max(2, int(math.hypot(xb - xa, yb - ya) / 0.22))
+        for k in range(n + 1):
+            t = k / n
+            lib.box((xa + (xb - xa) * t, ya + (yb - ya) * t, 0.11), (0.035, 0.035, 0.22), beam)
+        for z in (0.1, 0.19):
+            rod((xa, ya, z), (xb, yb, z), 0.014, beam, verts=6)
+    lib.box((-0.55, -0.1, 0.06), (0.4, 0.12, 0.1), planks[1], bevel=0.01)
+    lib.box((-0.55, -0.1, 0.105), (0.36, 0.08, 0.01), water)
+    lib.lumpy((0.62, -0.45, 0.14), 0.16, straw, scale=(1, 1, 1.1), strength=0.25, noise=2.5, seed=233, subdiv=2)
+    lib.lumpy((0.72, -0.2, 0.08), 0.1, straw, scale=(1.2, 1, 0.7), strength=0.25, noise=2.5, seed=234, subdiv=2)
+    donkey(-0.35, -0.55, 0.5, coat, belly, hoof)
+    donkey(0.05, -0.3, 2.6, coat2, belly, hoof, s=0.95)
+    lib.tag(4)
+
+
 # ------------------------------------------------------------------------------------- eyecatchers (1×1, fountain 2×2)
 
 def weathered():

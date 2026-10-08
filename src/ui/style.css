@@ -764,3 +764,9 @@ button.wide {
   opacity: 0.8;
   margin: 6px 0;
 }
+
+/* A market's goods grid: every good can be ordered, so none look disabled. */
+.trade .eco-toggle {
+  opacity: 0.8;
+  filter: none;
+}

@@ -288,6 +288,8 @@ SINGLE = {
     'toolsmith': (buildings.build_toolsmith, 150, 140, 75, 100),
     'pigfarm': (buildings.build_pigfarm, 150, 140, 75, 100),
     'forester': (buildings.build_forester, 150, 140, 75, 100),
+    'market': (buildings.build_market, 150, 140, 75, 100),
+    'donkeyranch': (buildings.build_donkeyranch, 150, 140, 75, 100),
     'fisher': (buildings.build_fisher, 150, 140, 75, 100),
     'fountain': (buildings.build_fountain, 150, 140, 75, 100),
     'flowerbed': (buildings.build_flowerbed, 80, 120, 40, 92),

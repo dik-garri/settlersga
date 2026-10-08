@@ -77,6 +77,8 @@ export const ART3D_BUILDINGS: Record<string, { w: number; h: number; ax: number;
   toolsmith: { w: 150, h: 140, ax: 75, ay: 100 },
   pigfarm: { w: 150, h: 140, ax: 75, ay: 100 },
   forester: { w: 150, h: 140, ax: 75, ay: 100 },
+  market: { w: 150, h: 140, ax: 75, ay: 100 },
+  donkeyranch: { w: 150, h: 140, ax: 75, ay: 100 },
   fisher: { w: 150, h: 140, ax: 75, ay: 100 },
   fountain: { w: 150, h: 140, ax: 75, ay: 100 },
   flowerbed: { w: 80, h: 120, ax: 40, ay: 92 },
