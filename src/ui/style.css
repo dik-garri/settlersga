@@ -233,7 +233,7 @@ button {
 }
 
 /* Buttons on parchment: small carved wooden plaques. */
-.view button:not(.gem):not(.build-btn):not(.cat-tab):not(.eco-toggle),
+.view button:not(.gem):not(.build-btn):not(.cat-tab):not(.eco-toggle):not(.accept-item),
 .end-screen button,
 .strip .speed-btn {
   padding: 3px 9px;
@@ -245,7 +245,7 @@ button {
   text-shadow: 0 1px 1px #000;
 }
 
-.view button:not(.gem):not(.build-btn):not(.cat-tab):not(.eco-toggle):hover,
+.view button:not(.gem):not(.build-btn):not(.cat-tab):not(.eco-toggle):not(.accept-item):hover,
 .end-screen button:hover,
 .strip .speed-btn:hover {
   filter: brightness(1.15);
@@ -784,4 +784,83 @@ button.wide {
   background: rgba(30, 20, 10, 0.82);
   border: 1px solid rgba(201, 160, 82, 0.7);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+/* Warehouse: what it takes in and what it does not (Settlers 4's two lists); a click moves a good across. */
+.accepts {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.accept-col {
+  border: 1px solid rgba(94, 66, 25, 0.4);
+  border-radius: 6px;
+  padding: 4px;
+  min-width: 0;
+}
+
+.accept-col.yes {
+  background: rgba(120, 170, 70, 0.16);
+}
+
+.accept-col.no {
+  background: rgba(150, 60, 40, 0.12);
+}
+
+.accept-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: bold;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.view .accept-head button {
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+.accept-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.view button.accept-item {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  padding: 2px;
+  border-radius: 5px;
+  border: 1px solid rgba(94, 66, 25, 0.35);
+  background: rgba(255, 245, 220, 0.45);
+  cursor: pointer;
+}
+
+.view button.accept-item:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.accept-col.no .accept-item canvas {
+  opacity: 0.45;
+  filter: grayscale(0.85);
+}
+
+.acc-count {
+  position: absolute;
+  right: 1px;
+  bottom: 0;
+  font-size: 10px;
+  font-weight: bold;
+  color: #2b1d0c;
+  text-shadow: 0 0 2px #fff4d8, 0 0 2px #fff4d8;
+}
+
+.accept-empty {
+  font-size: 11px;
+  opacity: 0.6;
+  padding: 4px;
 }

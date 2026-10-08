@@ -22,6 +22,8 @@ export interface GameState {
    * only, not saved; dead or lost units drop out when a group is recalled.
    */
   groups: number[][];
+  /** Building whose work-area centre the next left click on the map sets (S4's «move work area»). */
+  movingWorkArea: number | null;
   /** Tile under the cursor, if any. */
   hover: { x: number; y: number } | null;
   /** Fog of war shown (`?fog=off` turns it off for debugging). */
@@ -36,6 +38,7 @@ export const createState = (): GameState => ({
   selectedSettler: null,
   selectedUnits: [],
   groups: Array.from({ length: 10 }, () => []),
+  movingWorkArea: null,
   hover: null,
   fog: true,
 });

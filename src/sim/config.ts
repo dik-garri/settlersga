@@ -158,6 +158,9 @@ export const ORDERABLE: readonly SettlerKind[] = ['builder', 'digger', 'pioneer'
 export const PIONEER = { radius: 4, claimTicks: 40, maxTiles: 24 };
 export const THIEF = { stealTicks: 30 };
 
+/** Work areas (`workArea.ts`): a moved centre may lie at most `maxShift` × the work radius from the door. */
+export const WORK_AREA = { maxShift: 1.5 };
+
 /**
  * Specialists on hostile land, as in Settlers 4 (Settlers United wiki, units/thief: «thieves attract
  * swordsmen upon entering enemy territory, like all specialists do»; «thieves are decloaked if a

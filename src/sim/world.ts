@@ -30,6 +30,7 @@ import { updateIntruders } from './intruders';
 import { attackStrength } from './strength';
 import { createEconomy, ENDLESS, orderTool, orderWorkers, setAccepts, setDistribution, type EconomyState } from './economy';
 import { rebuildWorn, updatePaths } from './paths';
+import { setWorkArea } from './workArea';
 import { dispatch } from './logistics';
 import { createAi, updateAi, type AiState } from './ai';
 import { spawnAnimals, updateAnimals, type Animal } from './animals';
@@ -62,6 +63,7 @@ import {
   type Building,
   type BuildingType,
   type PlayerId,
+  type Point,
   type Resource,
   type Settler,
   type SettlerKind,
@@ -403,6 +405,14 @@ export class World {
   /** Player command: whether a warehouse takes in a good. */
   setAccepts(id: number, res: Resource, on: boolean, player: PlayerId = LOCAL_PLAYER): boolean {
     return setAccepts(this, player, id, res, on);
+  }
+
+  /**
+   * Player command (Settlers 4): centre a gatherer's, planter's or hunter's work area on (x, y) — at
+   * most `WORK_AREA.maxShift` × its radius from the door — or back at the door with null.
+   */
+  setWorkArea(id: number, at: Point | null, player: PlayerId = LOCAL_PLAYER): boolean {
+    return setWorkArea(this, id, at, player);
   }
 
   /**
