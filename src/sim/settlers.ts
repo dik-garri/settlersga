@@ -210,7 +210,8 @@ export function updateSettler(w: World, s: Settler): void {
       if (b.progress >= totalCost(b.type) * BUILD_TICKS_PER_UNIT) {
         b.done = true;
         b.builderId = null;
-        w.buildingsVersion++; // finished: it sees farther, and a warehouse now serves its land
+        // A finished warehouse now serves its piece of land (`land.ts` caches by this version).
+        if (BUILDINGS[b.type].storage) w.buildingsVersion++;
         s.tasks.shift();
         // A worker-less territory building (castle-like) claims land as soon as it stands.
         if (BUILDINGS[b.type].territory && !BUILDINGS[b.type].worker) recomputeTerritory(w);

@@ -38,14 +38,20 @@ export function dispatch(w: World): void {
 function dispatchFor(w: World, owner: PlayerId): void {
   const idle = w.settlers.filter((s) => s.owner === owner && s.kind === 'carrier' && s.tasks.length === 0);
   const pieceOfCarrier = idle.map((s) => landAt(w, s, owner));
+  /** Idle carriers per piece of land, so pieces without any are skipped before searching. */
+  const idleOn = new Map<number, number>();
+  for (const p of pieceOfCarrier) idleOn.set(p, (idleOn.get(p) ?? 0) + 1);
+  const hasIdle = (piece: number) => piece !== 0 && (idleOn.get(piece) ?? 0) > 0;
   const take = (near: Point, piece: number): Settler | undefined => {
+    if (!hasIdle(piece)) return undefined;
     let bestIdx = -1;
     for (let i = 0; i < idle.length; i++) {
-      if (pieceOfCarrier[i] !== piece || piece === 0) continue;
+      if (pieceOfCarrier[i] !== piece) continue;
       if (bestIdx < 0 || dist(idle[i], near) < dist(idle[bestIdx], near)) bestIdx = i;
     }
     if (bestIdx < 0) return undefined;
     pieceOfCarrier.splice(bestIdx, 1);
+    idleOn.set(piece, idleOn.get(piece)! - 1);
     return idle.splice(bestIdx, 1)[0];
   };
   const own = [...w.buildings.values()].filter((b) => b.owner === owner);
@@ -59,6 +65,7 @@ function dispatchFor(w: World, owner: PlayerId): void {
     if (!kind || !b.done || b.workerId !== null || b.workerRequested || !isReachable(w, b)) continue;
     // A barracks calls its next recruit only when there is a weapon for him and room for a new fighter.
     if (BUILDINGS[b.type].barracks && !wantsRecruit(w, b)) continue;
+    if (!hasIdle(pieceOf(b))) continue;
     const tool = PROFESSIONS[kind].tool;
     const from = tool ? nearestSupply(w, own, tool, b, pieceOf) : undefined;
     if (tool && !from) continue; // waits for the toolsmith
@@ -100,16 +107,13 @@ function dispatchFor(w: World, owner: PlayerId): void {
   // shared fairly instead of the oldest building taking it all; for a good the player distributes
   // (`economy.ts`), the consumer type furthest behind its weight goes first, and weight 0 gets none.
   const eco = economyOf(w, owner);
-  /** Pieces of land with no idle carrier left (it only gets fewer during the round). */
-  const idleNone = new Set<number>();
   /** Pieces of land with work but no carrier: one walks over from another piece (`relocate`). */
   const needy = new Set<number>();
   for (const res of RESOURCES) {
-    if (idle.length === 0) return;
+    if (idle.length === 0) break;
     const distributed = eco.distribution[res] !== undefined;
     const key = (b: Building) => (distributed ? distributionKey(eco, res, b) : 0);
-    const wanting = own.filter((b) => demand(w, b, res) > 0 && key(b) < Infinity);
-    const dry = new Set<number>();
+    let wanting = own.filter((b) => demand(w, b, res) > 0 && key(b) < Infinity);
     while (wanting.length > 0) {
       wanting.sort(
         (a, b) =>
@@ -120,25 +124,22 @@ function dispatchFor(w: World, owner: PlayerId): void {
       );
       const b = wanting[0];
       const p = pieceOf(b);
-      // Nothing (or nobody) on its piece of land: this consumer waits, the others still get served;
-      // the pieces found empty are remembered for the round, so the cost stays as before.
-      const from = dry.has(p) || idleNone.has(p) ? undefined : nearestSupply(w, own, res, b, pieceOf);
-      if (!from) dry.add(p);
+      // Nothing (or nobody to carry it) on its piece of land: every consumer there waits this round,
+      // those on other pieces still get served (with one piece this is the old `break`).
+      const from = nearestSupply(w, own, res, b, pieceOf);
+      if (from && !hasIdle(p)) needy.add(p);
       const s = from ? take(from.door, p) : undefined;
-      if (from && !s) {
-        idleNone.add(p);
-        needy.add(p);
-      }
-      if (!from || !s) {
-        wanting.shift();
+      if (!s) {
+        wanting = wanting.filter((c) => pieceOf(c) !== p);
         continue;
       }
-      assignDelivery(s, from, b, res);
+      assignDelivery(s, from!, b, res);
       countDelivery(eco, res, b);
       if (demand(w, b, res) <= 0) wanting.shift();
     }
   }
 
+  if (idle.length === 0) return;
   const stored = new Map<Resource, number>();
   const storedOf = (res: Resource) => {
     let n = stored.get(res);
@@ -154,13 +155,13 @@ function dispatchFor(w: World, owner: PlayerId): void {
     for (const res of RESOURCES) {
       const limit = RESOURCE_INFO[res].storeLimit ?? Infinity;
       while (b.output[res] - b.outReserved[res] > 0 && storedOf(res) < limit) {
-        const store = nearestStorage(w, owner, b.door, res, pieceOf(b));
-        if (!store) break; // every warehouse on its land refuses it (or there is none): it waits at the producer
-        const s = take(b.door, pieceOf(b));
-        if (!s) {
-          needy.add(pieceOf(b));
+        if (!hasIdle(pieceOf(b))) {
+          if (pieceOf(b) !== 0) needy.add(pieceOf(b));
           break;
         }
+        const store = nearestStorage(w, owner, b.door, res, pieceOf(b));
+        if (!store) break; // every warehouse on its land refuses it (or there is none): it waits at the producer
+        const s = take(b.door, pieceOf(b))!;
         assignDelivery(s, b, store, res);
         stored.set(res, storedOf(res) + 1);
       }
