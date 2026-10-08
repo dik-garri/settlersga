@@ -52,7 +52,7 @@ describe('AI assault tactics', () => {
     // 96×96, seed 8: one side stalls with a handful of soldiers; the other only ever sees two of its
     // civil buildings from its towers. It used to sit at its unit cap for the rest of the game.
     const w = new World(8, { size: 96, players: 2, ai: [1, 2] });
-    for (let i = 0; i < 75 * MINUTE && w.outcome(1) === 'playing'; i++) w.step();
+    for (let i = 0; i < 110 * MINUTE && w.outcome(1) === 'playing'; i++) w.step();
     expect(w.isDefeated(1) || w.isDefeated(2)).toBe(true);
   });
 });

@@ -20,9 +20,13 @@ for (const seed of seeds) {
   const w = new World(seed, { size });
   const c = w.castle;
   // Standard opening: wood and stone first, housing, then the food chain around the starting pond.
+  // Three woodcutters for the sawmill, as Settlers 4's pace and costs need (a woodcutter fells a tree
+  // a minute, a sawmill cuts three logs a minute; buildings cost what Roman S4 ones do).
   const plan: [number, BuildingType, number, number][] = [
     [0, 'stonecutter', -5, 3],
     [0, 'woodcutter', 5, -1],
+    [0, 'woodcutter', 6, -6],
+    [3, 'woodcutter', 10, 0],
     [0, 'forester', 5, 3],
     [0, 'sawmill', 1, 5],
     [0, 'house_small', -3, -4],

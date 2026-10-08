@@ -13,11 +13,19 @@ export const TICKS_PER_SECOND = 10;
 export const MAP_SIZE = 64;
 
 /**
- * Tiles per tick on open ground. Settlers 4 (decompiled `ISettlerRole`): every settler takes 9 game
- * ticks per tile at 845 ticks a minute, i.e. 1.56 tiles/s; a settler is about as tall relative to a
- * tile there as here, so the same number of tiles per second (`docs/TIMINGS.md`).
+ * Settlers 4 tiles in one of ours, by length: measured against the settler's height (an S4 settler
+ * stands about two of its tiles tall, ours two thirds of a tile; `docs/PROPORTIONS.md`). Sourced S4
+ * distances are divided by this.
  */
-export const SETTLER_SPEED = 0.156;
+export const S4_TILES_PER_TILE = 3;
+
+/**
+ * Tiles per tick on open ground. Settlers 4 (decompiled `ISettlerRole`): every settler takes 9 game
+ * ticks per S4 tile at 845 ticks a minute, i.e. 1.56 S4 tiles/s — 0.52 of our (three times longer)
+ * tiles a second (0.052 a tick), so a settler covers the same distance relative to his body and the
+ * buildings as in S4 (`docs/TIMINGS.md`, `docs/PROPORTIONS.md`).
+ */
+export const SETTLER_SPEED = 845 / 60 / 9 / S4_TILES_PER_TILE / TICKS_PER_SECOND;
 
 /**
  * Work ticks one builder spends per material unit. Settlers 4 (`CBuildingSiteRole::AddWork`): every
@@ -57,8 +65,11 @@ export const IDLE = {
 /** After a failed route search: how long the settler waits and how long the target building is skipped. */
 export const PATH_FAIL_BACKOFF = 10;
 export const UNREACHABLE_TICKS = 100;
-/** A builder idle this long at a site without material moves to a site with work. */
-export const BUILDER_STALL_TICKS = 40;
+/**
+ * A builder idle this long at a site without material moves to a site with work (our own number, in
+ * proportion to how long carriers take to bring the next unit at the S4 walking pace).
+ */
+export const BUILDER_STALL_TICKS = 120;
 
 export const START_CARRIERS = 12;
 /** Soldiers each player's castle starts with. */
@@ -107,14 +118,19 @@ export const CLEAR_STROKES_PER_TILE = 6;
  */
 export const DIG_STROKES_PER_DIGGER = 32;
 export const MAX_DIGGERS = 8;
-export const START_PLANKS = 20;
-export const START_STONE = 10;
-/** Tools in the castle at the start, enough for the first workplaces. */
-export const START_TOOLS: Partial<Stock> = { axe: 3, saw: 2, pickaxe: 4, shovel: 2, scythe: 2, rod: 2, hammer: 2 };
+/** Settlers 4's medium start for the Romans (`StartResources.txt`, `docs/PROPORTIONS.md`). */
+export const START_PLANKS = 27;
+export const START_STONE = 27;
+/**
+ * Tools in the castle at the start, enough for the first workplaces. Axes, saws and pickaxes are
+ * Settlers 4's medium Roman start (5, 2, 4; Settlers United wiki), the rest ours.
+ */
+export const START_TOOLS: Partial<Stock> = { axe: 5, saw: 2, pickaxe: 4, shovel: 2, scythe: 2, rod: 2, hammer: 2 };
 
 /**
  * Start conditions, chosen before a free game as in Settlers 4 (low, medium or high start goods).
- * `medium` is the classic start above. Amounts approximate the original's proportions: low leaves
+ * `medium` is the classic start above. Planks and stone are Settlers 4's for the Romans (15 / 16,
+ * 27 / 27, 46 / 39, `StartResources.txt`); the rest approximates the original's proportions: low leaves
  * the bare minimum to found an economy, high adds food and metal so mines and smiths run at once.
  */
 export type StartLevel = 'low' | 'medium' | 'high';
@@ -129,7 +145,7 @@ export interface StartDef {
 export const START_CONDITIONS: Record<StartLevel, StartDef> = {
   low: {
     name: 'Мало',
-    goods: { plank: 12, stone: 6, axe: 2, saw: 1, pickaxe: 2, shovel: 1, scythe: 1, rod: 1, hammer: 1 },
+    goods: { plank: 15, stone: 16, axe: 2, saw: 1, pickaxe: 2, shovel: 1, scythe: 1, rod: 1, hammer: 1 },
     carriers: 8,
     builders: 2,
     diggers: 1,
@@ -146,7 +162,7 @@ export const START_CONDITIONS: Record<StartLevel, StartDef> = {
   high: {
     name: 'Много',
     goods: {
-      plank: 45, stone: 30, log: 10,
+      plank: 46, stone: 39, log: 10,
       bread: 10, fish: 10, meat: 10, coal: 12, ironore: 8, iron: 6, gold: 2,
       axe: 5, saw: 3, pickaxe: 6, shovel: 4, scythe: 3, rod: 3, hammer: 4, sword: 4, bow: 2,
     },
@@ -193,9 +209,10 @@ export const WORK_AREA = { maxShift: 1.5 };
  * same pace he otherwise never would be reached); adjacent, the fighter strikes at his own pace
  * (`combat.every`) with ordinary blows (`combat.ts`) — specialists do not fight back — until the intruder dies (his load is
  * lost) or is off that player's land; then the fighter looks for a garrison again. Radii and timings
- * are our approximations: the wiki gives no numbers.
+ * are our approximations: the wiki gives no numbers (`exposedTicks` leaves a responder from
+ * `respondRadius` time to arrive at the S4 walking pace).
  */
-export const INTRUDERS = { scanEvery: 10, decloakRadius: 3, exposedTicks: 300, respondRadius: 12, responders: 1, seizeRadius: 3 };
+export const INTRUDERS = { scanEvery: 10, decloakRadius: 3, exposedTicks: 900, respondRadius: 12, responders: 1, seizeRadius: 3 };
 
 /**
  * Fighting strength, after Settlers 4 (settlers-united wiki, «fighting strength calculation»): a
@@ -205,11 +222,13 @@ export const INTRUDERS = { scanEvery: 10, decloakRadius: 3, exposedTicks: 300, r
  * never below `min`) and rises with value along `steps` (`[up to %, value points per 1 %]`, diminishing
  * returns) up to `max`. Fighters on their own (or an ally's) land always fight at 100 %; on foreign
  * land at the attack strength. Defence equals 100 % until attack strength passes it, then grows at
- * half its pace. Our buildings are much cheaper than S4's, hence `points` above one.
+ * half its pace. Our buildings cost what Roman S4 ones do (but the warehouse and the market);
+ * `points` (and `goldPoints` with it) stay a little above one so the strength curve keeps the pace it
+ * was tuned for (`docs/PROPORTIONS.md`).
  */
 export const STRENGTH = {
-  points: 3,
-  goldPoints: 6,
+  points: 1.75,
+  goldPoints: 3.5,
   eyecatcher: 3,
   start: 55,
   perPlayer: 5,
@@ -406,14 +425,24 @@ export const FOG = {
   /** Buildings see their territory radius plus this, or `buildingRadius` without territory. */
   territoryMargin: 3,
   buildingRadius: 5,
-  settlerRadius: 3,
-  /** Settlers stamp their surroundings every this many ticks; a tile stays visible that long after. */
-  settlerEvery: 5,
+  /**
+   * Settlers see this far (tiles), unless their profession has its own `sight`: Settlers 4 gives
+   * fighters and specialists 15 of its tiles (≈ 5 of ours; the thief 25 ≈ 8).
+   */
+  settlerRadius: 5,
+  /**
+   * Settlers stamp their surroundings every this many ticks; a tile stays visible that long after. At
+   * the S4 walking pace a settler moves under a tile between two stamps.
+   */
+  settlerEvery: 15,
   /** Building vision is rebuilt at most this often, and only when buildings or territory changed. */
   buildingEvery: 10,
 };
-/** Stone units in a deposit tile at generation, inclusive range. */
-export const DEPOSIT_STONE: [number, number] = [4, 8];
+/**
+ * Stone units in a deposit tile at generation, inclusive range. Our own numbers (no S4 source), doubled
+ * with the S4 building costs, which ask about twice the stone ours did (`docs/PROPORTIONS.md`).
+ */
+export const DEPOSIT_STONE: [number, number] = [8, 16];
 /** Grain field stages: 1 sown … CROP_RIPE harvestable. Fields grow every CROP_GROW_EVERY ticks with CROP_GROW_CHANCE. */
 export const CROP_RIPE = 4;
 export const CROP_GROW_EVERY = 10;
@@ -423,8 +452,12 @@ export const ORE_RESOURCES: readonly Resource[] = ['coal', 'ironore', 'goldore',
 export function oreOf(code: number): Resource | null {
   return code > 0 ? ORE_RESOURCES[code - 1] : null;
 }
-/** Ore units per mountain tile at generation, inclusive range. */
-export const ORE_AMOUNT: [number, number] = [6, 14];
+/**
+ * Ore units per mountain tile at generation, inclusive range. A mine reaches a radius of 2 (13 tiles;
+ * Settlers 4: 4 of its tiles) and one of our tiles holds about nine of S4's (1–15 units each), so a
+ * mine's reserve stays about what it was with radius 3 and 6–14 a tile.
+ */
+export const ORE_AMOUNT: [number, number] = [12, 28];
 /** Geologist: how far around the target he looks and how long each tile takes. */
 export const PROSPECT_RADIUS = 3;
 export const PROSPECT_TILES = 8;
@@ -535,6 +568,8 @@ export interface ProfessionDef {
   behavior: Behavior;
   /** Hit points of a specialist (see `INTRUDERS`); fighters' come from `combat.levels` (`hpOf`). */
   hp?: number;
+  /** How far (tiles) a settler of this profession sees outdoors, instead of `FOG.settlerRadius`. */
+  sight?: number;
   /** Disguised on hostile land until a fighter of that land comes close (the thief, `INTRUDERS`). */
   cloaked?: boolean;
   combat?: CombatDef;
@@ -555,33 +590,33 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
   carrier: { name: 'Носильщик', behavior: 'carrier', roads: true },
   builder: { name: 'Строитель', behavior: 'builder', tool: 'hammer' },
   digger: { name: 'Землекоп', behavior: 'digger', tool: 'shovel' },
-  woodcutter: { name: 'Лесоруб', behavior: 'gather', tool: 'axe', gather: { res: 'log', radius: 8, workTicks: 250, restTicks: 300 } },
+  woodcutter: { name: 'Лесоруб', behavior: 'gather', tool: 'axe', gather: { res: 'log', radius: 7, workTicks: 200, restTicks: 230 } },
   stonecutter: {
     name: 'Каменотёс',
     behavior: 'gather',
     tool: 'pickaxe',
-    gather: { res: 'stone', radius: 8, workTicks: 200, restTicks: 150 },
+    gather: { res: 'stone', radius: 7, workTicks: 170, restTicks: 140 },
   },
   forester: {
     name: 'Лесничий',
     behavior: 'plant',
-    plant: { what: 'tree', radius: 6, workTicks: 120, restTicks: 130 },
+    plant: { what: 'tree', radius: 4, workTicks: 60, restTicks: 40 },
   },
-  waterman: { name: 'Водонос', behavior: 'gather', gather: { res: 'water', radius: 7, workTicks: 40, restTicks: 40 } },
-  fisher: { name: 'Рыбак', behavior: 'gather', tool: 'rod', gather: { res: 'fish', radius: 8, workTicks: 150, restTicks: 100 } },
+  waterman: { name: 'Водонос', behavior: 'gather', gather: { res: 'water', radius: 7, workTicks: 30, restTicks: 30 } },
+  fisher: { name: 'Рыбак', behavior: 'gather', tool: 'rod', gather: { res: 'fish', radius: 7, workTicks: 90, restTicks: 70 } },
   farmer: {
     name: 'Фермер',
     behavior: 'farm',
     tool: 'scythe',
-    gather: { res: 'grain', radius: 5, workTicks: 80, restTicks: 70 },
-    plant: { what: 'grain', radius: 5, workTicks: 60, restTicks: 70, maxNearby: 10 },
+    gather: { res: 'grain', radius: 4, workTicks: 50, restTicks: 10 },
+    plant: { what: 'grain', radius: 4, workTicks: 40, restTicks: 10, maxNearby: 10 },
   },
   /** As in Settlers 4 the hunter uses a bow (forged by the weaponsmith). */
   hunter: {
     name: 'Охотник',
     behavior: 'hunt',
     tool: 'bow',
-    hunt: { radius: 12, range: 3.5, workTicks: 40, restTicks: 500, chases: 4 },
+    hunt: { radius: 7, range: 3.5, workTicks: 40, restTicks: 500, chases: 4 },
   },
   sawmiller: { name: 'Пильщик', behavior: 'workshop', tool: 'saw' },
   miller: { name: 'Мельник', behavior: 'workshop' },
@@ -600,8 +635,11 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
   weaponsmith: { name: 'Оружейник', behavior: 'workshop' },
   /** Specialists (`ORDERABLE`, `specialists.ts`). */
   pioneer: { name: 'Первопроходец', behavior: 'pioneer', tool: 'shovel', hp: 20 },
-  /** Disguised: no target on hostile land until a fighter of that land comes close (`INTRUDERS`). */
-  thief: { name: 'Вор', behavior: 'thief', hp: 20, cloaked: true },
+  /**
+   * Disguised: no target on hostile land until a fighter of that land comes close (`INTRUDERS`).
+   * Sees 25 S4 tiles (Settlers United changelog), ≈ 8 of ours.
+   */
+  thief: { name: 'Вор', behavior: 'thief', hp: 20, cloaked: true, sight: 8 },
   donkeyrancher: { name: 'Погонщик', behavior: 'workshop' },
   donkey: { name: 'Осёл', behavior: 'donkey', roads: true },
   recruit: { name: 'Новобранец', behavior: 'workshop' },
@@ -622,9 +660,8 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
   },
   /**
    * Settlers 4: 75 / 120 / 160 hit points, 4 / 6 / 8 a shot every 20 of its ticks; on a tower +1 a
-   * shot, +2 at enemies at its door. Range: S4 says 10 of its tiles, but an S4 tile is about a third
-   * of ours in length (`docs/TIMINGS.md`), so ≈ 3.3 of ours; ours stays 5 until the tile scale is
-   * decided.
+   * shot, +2 at enemies at its door. Range: 10 S4 tiles, a third of ours in length
+   * (`S4_TILES_PER_TILE`): ≈ 3.3 of ours, 3.
    */
   archer: {
     name: 'Лучник',
@@ -637,7 +674,7 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
         { hp: 160, damage: 8 },
       ],
       every: s4Ticks(20),
-      ranged: { range: 5, tower: 1, towerDoor: 2 },
+      ranged: { range: 3, tower: 1, towerDoor: 2 },
     },
   },
   /**
@@ -789,17 +826,19 @@ export const MINING = { attempts: { favourite: 10, other: 2 }, sureAmount: 4, ch
  */
 export const TRADE = { donkeyLoad: 4, donkeysPerMarket: 3, stock: 8 };
 
-function mine(name: string, res: Resource, favourite: Resource): BuildingDef {
+function mine(name: string, res: Resource, favourite: Resource, cost: Partial<Stock> = { plank: 4, stone: 1 }): BuildingDef {
   return {
     name,
     w: 2,
     h: 2,
-    cost: { plank: 3, stone: 1 },
+    cost,
     worker: 'miner',
     playerBuildable: true,
     category: 'mining',
     terrain: 'mountain',
-    mine: { res, radius: 3, favourite },
+    // Settlers 4: the mine's point plus 4 S4 tiles (61–64 of them) ≈ 1.3 of ours; 2 (13 tiles) is the
+    // smallest disc that still covers a guaranteed ore lobe (`ORE_AMOUNT` is richer to match).
+    mine: { res, radius: 2, favourite },
     recipe: { inputs: {}, inputsAnyOf: MINER_FOOD, outputs: { [res]: 1 }, ticks: 80 },
   };
 }
@@ -808,7 +847,9 @@ function mine(name: string, res: Resource, favourite: Resource): BuildingDef {
  * Recipe and gathering times follow Settlers 4 in real seconds at normal speed (10 ticks here = 1 s;
  * the original runs 845 ticks a minute): the Roman buildings' ticks per product, measured by the
  * Settlers United wiki, and the professions' cycles from siedlercommunity.de — table and sources
- * in `docs/TIMINGS.md`.
+ * in `docs/TIMINGS.md`. Costs are the Roman buildings' (the-settlers fandom wiki), except the warehouse
+ * and the market, which stay dearer by choice; territory radii are S4's in our tiles
+ * (`docs/PROPORTIONS.md`).
  */
 export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   castle: {
@@ -819,6 +860,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: null,
     playerBuildable: false,
     storage: true,
+    // As the small tower an S4 player starts with (3500 S4 tiles ≈ 340 of ours; a radius of 10 holds 317).
     territory: 10,
     // The headquarters: the army's reserve (S4 has no such building; 7 swordsmen + 5 archers).
     garrison: { capacity: 12, claimsWhenEmpty: true, keep: 4, archers: 5 },
@@ -828,7 +870,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     name: 'Малый дом',
     w: 2,
     h: 2,
-    cost: { plank: 2, stone: 1 },
+    cost: { plank: 3, stone: 3 },
     worker: null,
     playerBuildable: true,
     category: 'housing',
@@ -838,7 +880,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     name: 'Средний дом',
     w: 2,
     h: 2,
-    cost: { plank: 3, stone: 2 },
+    cost: { plank: 5, stone: 6 },
     worker: null,
     playerBuildable: true,
     category: 'housing',
@@ -848,7 +890,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     name: 'Большой дом',
     w: 3,
     h: 3,
-    cost: { plank: 5, stone: 4 },
+    cost: { plank: 10, stone: 12 },
     worker: null,
     playerBuildable: true,
     category: 'housing',
@@ -870,7 +912,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     name: 'Дом лесоруба',
     w: 2,
     h: 2,
-    cost: { plank: 2 },
+    cost: { plank: 2, stone: 2 },
     worker: 'woodcutter',
     playerBuildable: true,
     category: 'resources',
@@ -879,7 +921,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     name: 'Дом лесничего',
     w: 2,
     h: 2,
-    cost: { plank: 2 },
+    cost: { plank: 3, stone: 1 },
     worker: 'forester',
     playerBuildable: true,
     category: 'resources',
@@ -888,7 +930,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     name: 'Лесопилка',
     w: 2,
     h: 2,
-    cost: { plank: 2, stone: 2 },
+    cost: { plank: 3, stone: 4 },
     worker: 'sawmiller',
     playerBuildable: true,
     category: 'resources',
@@ -898,7 +940,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     name: 'Каменотёс',
     w: 2,
     h: 2,
-    cost: { plank: 2 },
+    cost: { plank: 2, stone: 3 },
     worker: 'stonecutter',
     playerBuildable: true,
     category: 'resources',
@@ -908,18 +950,18 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     name: 'Водокачка',
     w: 2,
     h: 2,
-    cost: { plank: 2 },
+    cost: { plank: 3, stone: 3 },
     worker: 'waterman',
     playerBuildable: true,
     category: 'food',
   },
-  fisher: { name: 'Рыбак', w: 2, h: 2, cost: { plank: 2 }, worker: 'fisher', playerBuildable: true, category: 'food' },
-  hunter: { name: 'Охотник', w: 2, h: 2, cost: { plank: 2 }, worker: 'hunter', playerBuildable: true, category: 'food' },
+  fisher: { name: 'Рыбак', w: 2, h: 2, cost: { plank: 3, stone: 2 }, worker: 'fisher', playerBuildable: true, category: 'food' },
+  hunter: { name: 'Охотник', w: 2, h: 2, cost: { plank: 3, stone: 3 }, worker: 'hunter', playerBuildable: true, category: 'food' },
   farm: {
     name: 'Ферма',
     w: 3,
     h: 3,
-    cost: { plank: 3, stone: 1 },
+    cost: { plank: 6, stone: 6 },
     worker: 'farmer',
     playerBuildable: true,
     category: 'food',
@@ -928,7 +970,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     name: 'Мельница',
     w: 2,
     h: 2,
-    cost: { plank: 3, stone: 2 },
+    cost: { plank: 6, stone: 3 },
     worker: 'miller',
     playerBuildable: true,
     category: 'food',
@@ -938,7 +980,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     name: 'Пекарня',
     w: 2,
     h: 2,
-    cost: { plank: 2, stone: 2 },
+    cost: { plank: 4, stone: 5 },
     worker: 'baker',
     playerBuildable: true,
     category: 'food',
@@ -948,7 +990,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     name: 'Свиноферма',
     w: 2,
     h: 2,
-    cost: { plank: 3, stone: 1 },
+    cost: { plank: 6, stone: 6 },
     worker: 'pigfarmer',
     playerBuildable: true,
     category: 'food',
@@ -969,7 +1011,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     name: 'Ослиная ферма',
     w: 2,
     h: 2,
-    cost: { plank: 4, stone: 5 },
+    cost: { plank: 6, stone: 6 },
     worker: 'donkeyrancher',
     playerBuildable: true,
     category: 'trade',
@@ -980,7 +1022,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     name: 'Бойня',
     w: 2,
     h: 2,
-    cost: { plank: 2, stone: 2 },
+    cost: { plank: 4, stone: 4 },
     worker: 'butcher',
     playerBuildable: true,
     category: 'food',
@@ -990,14 +1032,14 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   // Favourite foods as in Settlers 4: coal and stone bread, iron (and sulfur) meat, gold fish.
   coalmine: mine('Угольная шахта', 'coal', 'bread'),
   ironmine: mine('Железный рудник', 'ironore', 'meat'),
-  goldmine: mine('Золотой рудник', 'goldore', 'fish'),
+  goldmine: mine('Золотой рудник', 'goldore', 'fish', { plank: 5, stone: 1 }),
   stonemine: mine('Каменоломня в горе', 'stone', 'bread'),
 
   ironsmelter: {
     name: 'Плавильня железа',
     w: 2,
     h: 2,
-    cost: { plank: 2, stone: 3 },
+    cost: { plank: 4, stone: 6 },
     worker: 'smelter',
     playerBuildable: true,
     category: 'metal',
@@ -1007,7 +1049,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     name: 'Плавильня золота',
     w: 2,
     h: 2,
-    cost: { plank: 2, stone: 3 },
+    cost: { plank: 4, stone: 6 },
     worker: 'smelter',
     playerBuildable: true,
     category: 'metal',
@@ -1017,7 +1059,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     name: 'Инструментальщик',
     w: 2,
     h: 2,
-    cost: { plank: 3, stone: 2 },
+    cost: { plank: 3, stone: 5 },
     worker: 'toolsmith',
     playerBuildable: true,
     category: 'metal',
@@ -1028,7 +1070,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     name: 'Оружейник',
     w: 2,
     h: 2,
-    cost: { plank: 3, stone: 2 },
+    cost: { plank: 5, stone: 7 },
     worker: 'weaponsmith',
     playerBuildable: true,
     category: 'military',
@@ -1039,11 +1081,12 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     name: 'Сторожевая башня',
     w: 2,
     h: 2,
-    cost: { plank: 2, stone: 3 },
+    cost: { plank: 3, stone: 2 },
     worker: null,
     playerBuildable: true,
     category: 'military',
-    territory: 8,
+    // Settlers 4: the first 3500 S4 tiles of a spiral round the tower, a circle of 31 S4 tiles ≈ 10.4 of ours.
+    territory: 10,
     // As in Settlers 4: 1 swordsman + 2 archers.
     garrison: { capacity: 3, keep: 1, archers: 2 },
   },
@@ -1051,10 +1094,11 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     name: 'Большая башня',
     w: 2,
     h: 2,
-    cost: { plank: 4, stone: 6 },
+    cost: { plank: 7, stone: 7 },
     worker: null,
     playerBuildable: true,
     category: 'military',
+    // Settlers 4: 4000 S4 tiles, a circle of 33 ≈ 11.1 of ours.
     territory: 11,
     // 3 swordsmen + 3 archers.
     garrison: { capacity: 6, keep: 2, archers: 3 },
@@ -1063,7 +1107,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     name: 'Казарма',
     w: 2,
     h: 2,
-    cost: { plank: 4, stone: 3 },
+    cost: { plank: 4, stone: 5 },
     worker: 'recruit',
     playerBuildable: true,
     category: 'military',
@@ -1073,11 +1117,12 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     name: 'Крепость',
     w: 3,
     h: 3,
-    cost: { plank: 6, stone: 10, iron: 2 },
+    cost: { plank: 8, stone: 12 },
     worker: null,
     playerBuildable: true,
     category: 'military',
-    territory: 14,
+    // Settlers 4's castle: 5000 S4 tiles, a circle of 37 ≈ 12.4 of ours.
+    territory: 12,
     // The Settlers 4 castle: 4 swordsmen + 5 archers.
     garrison: { capacity: 9, keep: 3, archers: 5 },
   },
@@ -1085,7 +1130,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     name: 'Смотровая башня',
     w: 2,
     h: 2,
-    cost: { plank: 2, stone: 1 },
+    cost: { plank: 2, stone: 2 },
     worker: null,
     playerBuildable: true,
     category: 'military',
@@ -1095,7 +1140,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     name: 'Лазарет',
     w: 2,
     h: 2,
-    cost: { plank: 3, stone: 2 },
+    cost: { plank: 3, stone: 3 },
     worker: null,
     playerBuildable: true,
     category: 'military',
@@ -1195,13 +1240,16 @@ export const AI_PLAN: readonly { type: BuildingType; count: number; after?: Buil
   { type: 'stonecutter', count: 1 },
   { type: 'sawmill', count: 1 },
   { type: 'forester', count: 1 },
-  { type: 'house_small', count: 1 },
   { type: 'woodcutter', count: 2 },
-  { type: 'tower', count: 1 },
-  // Settlers 4's rates: a woodcutter fells a tree a minute, a sawmill cuts three logs a minute.
+  { type: 'house_small', count: 1 },
+  // Settlers 4's rates: a woodcutter fells a tree a minute, a sawmill cuts three logs a minute; at
+  // S4's building costs planks are what an economy waits for, so wood comes first.
   { type: 'woodcutter', count: 3 },
+  { type: 'tower', count: 1 },
+  { type: 'woodcutter', count: 4 },
   { type: 'farm', count: 1 },
   { type: 'waterworks', count: 1 },
+  { type: 'sawmill', count: 2 },
   { type: 'tower', count: 2 },
   { type: 'mill', count: 1 },
   { type: 'bakery', count: 1 },
@@ -1314,13 +1362,13 @@ export const AI = {
    * Materials it keeps back while nothing of its own still produces them (its stone deposits are
    * worked out): only producers of that material may use the reserve; border-pushing military
    * buildings may use it down to `reserveFloor`, so it can still reach new deposits and always keeps
-   * enough to open a mine of it.
+   * enough to open a quarry of it (a stonecutter's 3 stone).
    */
-  reserve: { stone: 4 } as Partial<Record<Resource, number>>,
-  reserveFloor: { stone: 1 } as Partial<Record<Resource, number>>,
+  reserve: { stone: 9 } as Partial<Record<Resource, number>>,
+  reserveFloor: { stone: 3 } as Partial<Record<Resource, number>>,
   /** At most one eyecatcher per this many own buildings, built only while it holds `decorSpare`. */
   decorEvery: 8,
-  decorSpare: { stone: 12, plank: 10 } as Partial<Record<Resource, number>>,
+  decorSpare: { stone: 26, plank: 14 } as Partial<Record<Resource, number>>,
   /**
    * While it knows no enemy, at most this many military buildings: scouting goes towards the other
    * start positions (public, like the map size) instead of spreading outposts everywhere.
@@ -1366,7 +1414,7 @@ export const AI = {
   stageDistance: 7,
   stageMinWalk: 4,
   stageArrived: 0.8,
-  stageTimeout: 600,
+  stageTimeout: 1800,
   /**
    * Defence: hostile field units on its land (or within `defendMargin` tiles of it), in its buildings'
    * sight, are met by a field squad `defendRatio` times their number, released from its military
@@ -1422,7 +1470,7 @@ export type Habitat = 'meadow' | 'forest' | 'shore';
 export interface AnimalDef {
   name: string;
   habitat: Habitat;
-  /** Tiles per tick while moving. */
+  /** Tiles per tick while moving (they amble: a share of the settlers' `SETTLER_SPEED`; no S4 source). */
   speed: number;
   /** Members per herd, inclusive range. */
   herd: [number, number];
@@ -1441,7 +1489,7 @@ export const ANIMALS = {
   deer: {
     name: 'Олень',
     habitat: 'forest',
-    speed: 0.055,
+    speed: 0.35 * SETTLER_SPEED,
     herd: [2, 4],
     herds: 2,
     roam: 6,
@@ -1449,15 +1497,15 @@ export const ANIMALS = {
     game: 'meat',
     respawnEvery: 1200,
   },
-  donkey: { name: 'Осёл', habitat: 'meadow', speed: 0.03, herd: [1, 3], herds: 1, roam: 5, rest: [60, 200] },
-  duck: { name: 'Утка', habitat: 'shore', speed: 0.025, herd: [2, 5], herds: 2, roam: 4, rest: [20, 90] },
-  chicken: { name: 'Курица', habitat: 'meadow', speed: 0.03, herd: [3, 6], herds: 1, roam: 3, rest: [10, 60] },
+  donkey: { name: 'Осёл', habitat: 'meadow', speed: 0.2 * SETTLER_SPEED, herd: [1, 3], herds: 1, roam: 5, rest: [60, 200] },
+  duck: { name: 'Утка', habitat: 'shore', speed: 0.16 * SETTLER_SPEED, herd: [2, 5], herds: 2, roam: 4, rest: [20, 90] },
+  chicken: { name: 'Курица', habitat: 'meadow', speed: 0.2 * SETTLER_SPEED, herd: [3, 6], herds: 1, roam: 3, rest: [10, 60] },
 } satisfies Record<string, AnimalDef>;
 
 export type AnimalKind = keyof typeof ANIMALS;
 export const ANIMAL_KINDS = Object.keys(ANIMALS) as AnimalKind[];
 /** Herds keep at least this far (tiles) from every start position. */
-export const ANIMAL_START_CLEARANCE = 16;
+export const ANIMAL_START_CLEARANCE = 12;
 
 /** Residents a house releases: its `capacity`, the same on every map size (Settlers 4's 10/20/50). */
 export function residentsOf(def: BuildingDef): number {

@@ -1,5 +1,5 @@
 import { centerOf } from './buildings';
-import { BUILDINGS, FOG } from './config';
+import { BUILDINGS, FOG, PROFESSIONS } from './config';
 import type { PlayerId } from './types';
 import type { World } from './world';
 
@@ -143,7 +143,7 @@ export function updateFog(w: World): void {
     if (s.inside !== null || w.dying.has(s.id)) continue; // inside: the building's vision covers it
     const bit = 1 << (s.owner - 1);
     const seen = f.seenUntil[s.owner - 1];
-    stamp(w, s.x, s.y, FOG.settlerRadius, (i) => {
+    stamp(w, s.x, s.y, PROFESSIONS[s.kind].sight ?? FOG.settlerRadius, (i) => {
       seen[i] = until;
       m.explored[i] |= bit;
     });

@@ -290,6 +290,9 @@ export function buildShowcase(): World {
     w.setTradeRoute(home.id, away.id);
     w.orderTrade(home.id, 'plank', ENDLESS);
     w.orderTrade(home.id, 'stone', ENDLESS);
+    // The first loads already waiting: at the walking pace carriers would take minutes to bring them.
+    home.input.plank += 8;
+    home.input.stone += 8;
     for (let k = 0; k < 3; k++) spawnSettler(w, 'donkey', home);
     const site = placeNear(w, 'woodcutter', away.x + 2, away.y - 3);
     if (site) {

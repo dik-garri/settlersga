@@ -86,7 +86,7 @@ describe('tools', () => {
     expect(c.output.hammer).toBe(4);
     // Ordered five: two carriers take hammers.
     expect(w.orderWorkers('builder', 5)).toBe(true);
-    run(w, 200);
+    run(w, 600);
     expect(builders()).toBe(5);
     expect(c.output.hammer).toBe(2);
     expect(w.orderWorkers('woodcutter', 3)).toBe(false); // only orderable professions

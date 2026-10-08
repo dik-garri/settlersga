@@ -7,12 +7,12 @@ import { AUTO_ID, gameTime, SaveSlots, type KeyValue } from '../src/ui/saves';
 import { defaultSetup, devWorldArgs, launchOf, parseSetup, setupProblem, worldArgs, type GameSetup } from '../src/ui/setup';
 
 describe('game setup', () => {
-  it('the default setup is one medium computer opponent on 64×64, as the browser default was', () => {
+  it('the default setup is one medium computer opponent on 128×128 (a small Settlers 4 map for two)', () => {
     const s = defaultSetup();
     expect(setupProblem(s)).toBeNull();
     const { seed, opts } = worldArgs(s, 99);
     expect(seed).toBe(99);
-    expect(opts).toMatchObject({ size: 64, players: 2, ai: [2], start: 'medium' });
+    expect(opts).toMatchObject({ size: 128, players: 2, ai: [2], start: 'medium' });
     expect(opts.teams).toBeUndefined();
     expect(opts.difficulty).toBeUndefined();
   });
@@ -57,10 +57,10 @@ describe('game setup', () => {
   });
 
   it('reads a setup back from JSON, repairing bad fields', () => {
-    const s = { ...defaultSetup(), seed: 12, size: 128 };
+    const s = { ...defaultSetup(), seed: 12, size: 160 };
     expect(parseSetup(JSON.stringify(s))).toEqual(s);
     const bad = parseSetup(JSON.stringify({ size: 7, seed: -1, start: 'lots', slots: [{ kind: 'x', team: 9, level: 'god' }] }))!;
-    expect(bad.size).toBe(64);
+    expect(bad.size).toBe(128);
     expect(bad.seed).toBeNull();
     expect(bad.start).toBe('medium');
     expect(bad.slots[0]).toEqual({ kind: 'human', team: 1, level: 'medium', race: 'romans' });
@@ -86,6 +86,8 @@ describe('game setup', () => {
     expect(seed).toBe(3);
     expect(opts).toEqual({ size: 96, players: 3, ai: [2, 3], teams: [1, 1, 2], difficulty: ['medium', 'hard', 'easy'], start: 'low' });
     expect(devWorldArgs(new URLSearchParams('?ai=off'), 8).opts.ai).toEqual([]);
+    // Without ?size the development game is as big as a new game from the menu.
+    expect(devWorldArgs(new URLSearchParams('?seed=1'), 8).opts.size).toBe(128);
   });
 });
 
