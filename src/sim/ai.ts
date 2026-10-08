@@ -28,6 +28,7 @@ import {
   AI_LEVELS,
   AI_PLAN,
   ATTACK_RANGE,
+  BUILD_DIG_SLOPE,
   BUILD_MAX_SLOPE,
   BUILDINGS,
   costOf,
@@ -38,7 +39,7 @@ import {
   type AiLevel,
   type BuildingDef,
 } from './config';
-import { defend, stageStrike, sweep, updateStrike } from './aiField';
+import { defend, sendScout, stageStrike, sweep, updateScout, updateStrike } from './aiField';
 import { ENDLESS } from './economy';
 import { inBuildingSight, visionRadius } from './fog';
 import { isCutOff, landAt, landOf } from './land';
@@ -72,6 +73,14 @@ export interface AiState {
   /** A field squad out against hostile field units near its land, and where it was sent. */
   defense?: { ids: number[]; x: number; y: number };
   /**
+   * Since when its siege towards a castle it has not seen finds no spot to push on (forest, water or
+   * swamp in the way); cleared when the siege places a building.
+   */
+  siegeStuck?: number;
+  /** A fighter sent out to find an enemy castle (`sendScout`), and the tick of the next one allowed. */
+  scout?: { id: number; until: number };
+  nextScout?: number;
+  /**
    * Trade with a piece of its land cut off from its warehouses: `anchor` is a workplace on that piece
    * (piece ids are not stable, building ids are), `home`/`away` its markets (0 = none yet), `stuck`
    * the cut-off sites seen at the last check (demolished if still empty at the next).
@@ -85,8 +94,9 @@ export interface AiState {
     demolished: number;
     pioneers: number;
     thieves: number;
-    /** Strikes gathered in the field, defence squads sent out, trade goods ordered. */
+    /** Strikes gathered in the field, defence squads sent out, trade goods ordered, scouts sent. */
     staged?: number;
+    scouts?: number;
     defended?: number;
     traded?: number;
   };
@@ -158,6 +168,7 @@ function think(w: World, ai: AiState): void {
   }
   if (AI.fieldDefense) defend(w, ai, own);
   const attacked = attackIfStrong(w, ai);
+  scoutIfStuck(w, ai, own);
   sweep(w, ai);
   tradeCheck(w, ai, own);
   if (w.tick >= (ai.nextSpecialists ?? 0)) {
@@ -238,7 +249,7 @@ function think(w: World, ai: AiState): void {
     // building it cannot do without (the barracks: no new fighters, so no growth) gets room made.
     if (!mine && !gatheredBy(step.type) && !BUILDINGS[step.type].garrison) {
       ai.crampedUntil = w.tick + AI.crampedTicks;
-      if (AI.makeRoomFor.includes(step.type) && makeRoom(w, ai, own, step.type)) return;
+      if (AI.makeRoomFor.includes(step.type) && makeRoom(ctx, ai, step.type)) return;
     }
     ai.blockedUntil[step.type] = w.tick + RETRY_TICKS;
   }
@@ -286,11 +297,8 @@ function think(w: World, ai: AiState): void {
     const cheapFirst = (a: BuildingType, b: BuildingType) =>
       ctx.short.reduce((n, r) => n + costOf(a)[r] - costOf(b)[r], 0);
     const order = ctx.short.length > 0 ? [...FRONTIER].sort(cheapFirst) : FRONTIER;
-    const type = order.find((t) => ctx.canMan(t) && ctx.affordable(t));
-    if (type) {
-      ctx.frontier = true;
-      if (!tryPlace(ctx, ai, type)) ai.blockedUntil.frontier = w.tick + RETRY_TICKS;
-    }
+    ctx.frontier = true;
+    if (placeMilitary(ctx, ai, order) === undefined) ai.blockedUntil.frontier = w.tick + RETRY_TICKS;
   }
 }
 
@@ -305,6 +313,11 @@ function enemyInReach(w: World, me: PlayerId, military: Building[]): boolean {
     const c = centerOf(b);
     return own.some((o) => Math.hypot(o.x - c.x, o.y - c.y) <= ATTACK_RANGE);
   });
+}
+
+/** A military building that claims land, or a lookout: what pushes or watches the border. */
+function pushesBorder(def: BuildingDef): boolean {
+  return !!((def.garrison && def.territory) || def.vision);
 }
 
 /** Buildings with a sight of their own (lookout towers), for scouting. */
@@ -337,19 +350,25 @@ function tryPlace(ctx: Context, ai: AiState, type: BuildingType): Building | nul
 /** No known ore for a wanted mine: send a geologist to the nearest unexplored mountain we own. */
 /**
  * No room anywhere for a building it cannot do without (`AI.makeRoomFor`): demolishes the least
- * valuable building at least as large — an eyecatcher, else a second (or later) workshop of a type
- * it has several of — so the next think can place it there. One demolition per `RETRY_TICKS`.
+ * valuable building whose ground, together with the free own ground around it, takes the wanted one
+ * (`roomFor`) — an eyecatcher, else a second (or later) finished workshop of a type, so one of that
+ * type still works (it may be what the wanted building waits for) — and places the wanted building at
+ * once, before anything else takes the freed ground. One demolition per `RETRY_TICKS`.
  */
-function makeRoom(w: World, ai: AiState, own: Building[], type: BuildingType): boolean {
+function makeRoom(ctx: Context, ai: AiState, type: BuildingType): boolean {
+  const { w, own } = ctx;
   if ((ai.blockedUntil.room ?? -Infinity) > w.tick) return false;
   ai.blockedUntil.room = w.tick + RETRY_TICKS;
   const need = BUILDINGS[type];
-  const count = (t: BuildingType) => own.filter((b) => b.type === t).length;
+  const count = (t: BuildingType) => own.filter((b) => b.type === t && b.done).length;
   let victim: Building | null = null;
   let worst = Infinity;
   for (const b of own) {
     const def = BUILDINGS[b.type];
-    if (!b.done || def.w < need.w || def.h < need.h || def.garrison || def.storage || def.mine || def.residence) continue;
+    if (!b.done || def.garrison || def.storage || def.mine || def.residence) continue;
+    // A smaller building only helps where free ground next to it makes up the rest (a 3×3 barracks
+    // over a 2×2 workshop and a free strip beside it).
+    if ((def.w < need.w || def.h < need.h) && !roomFor(w, ai.player, b, need)) continue;
     const value = def.eyecatcher ? 0 : count(b.type) > 1 && def.recipe ? 1 : Infinity;
     // Ties: the newest (highest id) first.
     if (value < worst || (value === worst && victim && b.id > victim.id)) {
@@ -363,9 +382,36 @@ function makeRoom(w: World, ai: AiState, own: Building[], type: BuildingType): b
   ai.stats.demolished++;
   // The plan would rebuild the demolished type on the freed spot first: hold it back for a while.
   ai.blockedUntil[victimType] = w.tick + RETRY_TICKS * 4;
-  // Retry the wanted building right away on the next think.
-  delete ai.blockedUntil[type];
+  if (!tryPlace(ctx, ai, type)) delete ai.blockedUntil[type];
   return true;
+}
+
+/**
+ * Whether a building of `need`'s footprint would fit over `victim` once it is demolished: some
+ * placement overlapping its footprint on own buildable ground (or the victim's own tiles and door),
+ * level enough, with a free own door. Cheap, like `Context.fits`; `canPlace` decides later.
+ */
+function roomFor(w: World, me: PlayerId, victim: Building, need: BuildingDef): boolean {
+  const m = w.map;
+  const vdef = BUILDINGS[victim.type];
+  const freed = (x: number, y: number) => {
+    if (!m.inBounds(x, y) || m.owner[m.idx(x, y)] !== me) return false;
+    const i = m.idx(x, y);
+    return m.building[i] === victim.id || m.door[i] === victim.id || m.isBuildable(x, y);
+  };
+  for (let y = victim.y - need.h + 1; y < victim.y + vdef.h; y++) {
+    for (let x = victim.x - need.w + 1; x < victim.x + vdef.w; x++) {
+      let ok = true;
+      for (let dy = 0; dy < need.h && ok; dy++) for (let dx = 0; dx < need.w && ok; dx++) ok = freed(x + dx, y + dy);
+      if (!ok) continue;
+      const door = doorOf(x, y, need.w, need.h);
+      const di = m.idx(door.x, door.y);
+      if (!m.inBounds(door.x, door.y) || m.owner[di] !== me) continue;
+      if (!(m.building[di] === victim.id || (m.isWalkable(door.x, door.y) && (m.door[di] === 0 || m.door[di] === victim.id)))) continue;
+      if (m.heightRange(x, y, x + need.w - 1, y + need.h) <= BUILD_MAX_SLOPE) return true;
+    }
+  }
+  return false;
 }
 
 const MARKETS = (Object.keys(BUILDINGS) as BuildingType[]).filter((t) => BUILDINGS[t].market && BUILDINGS[t].playerBuildable);
@@ -719,22 +765,69 @@ function siege(ctx: Context, ai: AiState): boolean {
   });
   if (!goal.seen && !lookoutAtEdge && (ai.blockedUntil.siegeLookout ?? -Infinity) <= w.tick) {
     const lookout = LOOKOUTS.find((t) => ctx.affordable(t));
-    if (lookout) {
-      ctx.siege = { ...goal, reach: land + 3, land };
+    // Only where its sight takes in the presumed castle (whose door lies a little off the start): a
+    // lookout further out sees no castle and takes the edge spot a tower needs to push on.
+    const reach = lookout ? Math.min(land + 3, (BUILDINGS[lookout].vision ?? 0) - AI.siegeLookoutSight) : -1;
+    if (lookout && reach >= land) {
+      ctx.siege = { ...goal, reach, land };
       const placed = tryPlace(ctx, ai, lookout);
       ctx.siege = null;
-      if (placed) return true;
+      if (placed) {
+        ai.siegeStuck = undefined;
+        return true;
+      }
       ai.blockedUntil.siegeLookout = w.tick + RETRY_TICKS;
     }
   }
-  const type = FRONTIER.find((t) => ctx.canMan(t) && ctx.affordable(t));
-  if (!type) return false;
   // Within striking range of a seen castle if it can; otherwise any spot whose land reaches closer.
   ctx.siege = { ...goal, reach: goal.seen ? ATTACK_RANGE - AI.siegeMargin : -1, land };
-  const placed = tryPlace(ctx, ai, type);
+  const placed = placeMilitary(ctx, ai, FRONTIER);
   ctx.siege = null;
-  if (!placed) ai.blockedUntil.siege = w.tick + RETRY_TICKS;
-  return !!placed;
+  if (placed === null) return false;
+  if (!placed) {
+    ai.blockedUntil.siege = w.tick + RETRY_TICKS;
+    // Nowhere to push on towards a castle it has not seen: a scout goes after a while.
+    if (!goal.seen) ai.siegeStuck ??= w.tick;
+    return false;
+  }
+  ai.siegeStuck = undefined;
+  return true;
+}
+
+/**
+ * Scouting on foot: past the peace, while its siege towards an enemy castle it has not seen has found
+ * no spot to push on for `AI.scoutAfter` ticks, a spare fighter walks to the presumed castle
+ * (`sendScout`) — one at a time, every `AI.scoutEvery` ticks at most, back home after
+ * `AI.scoutTimeout` or as soon as it knows an enemy castle. Only through `releaseFighters`,
+ * `orderMove` and `orderGarrison`; what he sees is the fog's ordinary (saved) explored bits.
+ */
+function scoutIfStuck(w: World, ai: AiState, own: Building[]): void {
+  const me = ai.player;
+  const castle = centerOf(w.castleOf(me));
+  const unseen = siegeGoals(w, me).filter((g) => !g.seen);
+  const goals: Point[] = unseen.length > 0 || knownEnemies(w, me).length > 0 ? unseen : unexploredStarts(w, me);
+  const goal = goals.sort((a, b) => Math.hypot(a.x - castle.x, a.y - castle.y) - Math.hypot(b.x - castle.x, b.y - castle.y))[0];
+  if (updateScout(w, ai, !!goal)) return;
+  if (!goal || ai.siegeStuck === undefined || w.tick - ai.siegeStuck < AI.scoutAfter || w.tick < (ai.nextScout ?? 0)) return;
+  if (!sendScout(w, ai, own, goal)) return;
+  ai.nextScout = w.tick + AI.scoutEvery;
+  ai.stats.scouts = (ai.stats.scouts ?? 0) + 1;
+}
+
+/**
+ * Places the first of `types` (in order) it can pay for and man that finds a spot: a big building
+ * (the 4×4 fortress) often finds no room where a tower still fits, and the push must not stall on
+ * it. Null if it could pay for and man none of them; undefined if none found a spot.
+ */
+function placeMilitary(ctx: Context, ai: AiState, types: readonly BuildingType[]): Building | null | undefined {
+  let any = false;
+  for (const t of types) {
+    if (!ctx.canMan(t) || !ctx.affordable(t)) continue;
+    any = true;
+    const b = tryPlace(ctx, ai, t);
+    if (b) return b;
+  }
+  return any ? undefined : null;
 }
 
 /** Everything a single think needs about the AI's own side, computed once. */
@@ -905,7 +998,10 @@ class Context {
       for (const b of this.own) if (!b.done) committed += Math.max(0, costOf(b.type)[r] - b.delivered[r] - b.inbound[r]);
       const produces = gatheredBy(type)?.res === r || def.mine?.res === r || (def.recipe?.outputs[r] ?? 0) > 0;
       const pushes = !!(def.garrison && def.territory);
-      const keep = !this.short.includes(r) || produces ? 0 : pushes ? (AI.reserveFloor[r] ?? 0) : (AI.reserve[r] ?? 0);
+      // The floor is kept even while it still produces the material: its producers may be lost (land
+      // taken, deposits worked out) with the stock at 0, and a new quarry needs stone itself.
+      const floor = AI.reserveFloor[r] ?? 0;
+      const keep = produces ? 0 : !this.short.includes(r) || pushes ? floor : (AI.reserve[r] ?? 0);
       return available(this.w, this.me, r) - committed - keep >= cost[r];
     });
   }
@@ -951,7 +1047,9 @@ class Context {
       const y = Math.floor(i / w.map.w);
       if (!this.fits(def, x, y)) continue;
       const score = this.score(def, type, x, y);
-      if (score !== null) scored.push({ i, score });
+      if (score === null) continue;
+      const steep = pushesBorder(def) && w.map.heightRange(x, y, x + def.w - 1, y + def.h) > BUILD_MAX_SLOPE;
+      scored.push({ i, score: steep ? score - AI.slopePenalty : score });
     }
     scored.sort((a, b) => b.score - a.score || a.i - b.i);
     for (const { i } of scored.slice(0, AI.placeTries)) {
@@ -980,7 +1078,10 @@ class Context {
     if (!m.isWalkable(door.x, door.y) || m.owner[m.idx(door.x, door.y)] !== this.me) return false;
     const piece = landAt(this.w, door, this.me);
     if (this.onPiece ? piece !== this.onPiece : !this.pieces.has(piece)) return false;
-    return def.terrain === 'mountain' || m.heightRange(x, y, x + def.w - 1, y + def.h) <= BUILD_MAX_SLOPE;
+    if (def.terrain === 'mountain') return true;
+    // Military buildings may need a digger first (`AI.slopePenalty`): the border must move on where
+    // the only ground facing the enemy is a slope; everything else keeps to level ground.
+    return m.heightRange(x, y, x + def.w - 1, y + def.h) <= (pushesBorder(def) ? BUILD_DIG_SLOPE : BUILD_MAX_SLOPE);
   }
 
   /** Desirability of a building with its top tile at (x, y); null = pointless here. */
@@ -1017,9 +1118,11 @@ class Context {
     }
 
     if (def.vision) {
-      // Lookout: as close to the foreign land it sees as possible.
+      // Lookout: as close to the foreign land it sees as possible — and only where its sight reaches
+      // that land: one further back would see nothing new and only use up materials and a site.
       if (this.enemies.length === 0) return null;
-      return -Math.min(...this.enemies.map((e) => Math.hypot(e.x - cx, e.y - cy)));
+      const d = Math.min(...this.enemies.map((e) => Math.hypot(e.x - cx, e.y - cy)));
+      return d <= def.vision ? -d : null;
     }
     if (def.garrison && def.territory) {
       // Towers: push the border outwards, towards enemies and unclaimed resources, apart from each other.
@@ -1038,8 +1141,9 @@ class Context {
       }
       const enemy = Math.min(...this.enemies.map((e) => Math.hypot(e.x - cx, e.y - cy)));
       if (this.frontier) return -enemy;
-      // Scouting for the other starts: a line of towers towards them, not a ring around the castle.
-      if (this.scoutingStarts) return fromCastle * 0.3 - enemy + this.unclaimedResources(cx, cy, reach) * 0.1;
+      // Scouting for the other starts, or towards foreign land it sees but whose buildings it does not
+      // know yet: a line of towers towards them, not a ring around the castle.
+      if (this.scoutingStarts || this.scoutingBorder) return fromCastle * 0.3 - enemy + this.unclaimedResources(cx, cy, reach) * 0.1;
       return fromCastle - enemy * 0.4 + this.unclaimedResources(cx, cy, reach) * 0.15;
     }
 
@@ -1172,8 +1276,13 @@ function useSpecialists(w: World, ai: AiState, own: Building[]): void {
     if (!has('pioneer')) w.orderSpecialist('pioneer', 1, me);
     const free = w.settlers.some((s) => s.owner === me && s.kind === 'pioneer' && s.tasks.length === 0 && !s.errand);
     if (free) {
-      const spot = pioneerSpot(w, me, own);
-      if (spot && w.sendPioneer(spot.x, spot.y, me)) ai.stats.pioneers++;
+      // The best spots first: one he cannot walk to (a pocket behind a forest or across water) is
+      // refused by `sendPioneer`, and the next is tried instead of the same one at every decision.
+      for (const spot of pioneerSpots(w, me, own).slice(0, AI.pioneerTries)) {
+        if (!w.sendPioneer(spot.x, spot.y, me)) continue;
+        ai.stats.pioneers++;
+        break;
+      }
     }
   }
 
@@ -1198,15 +1307,15 @@ function useSpecialists(w: World, ai: AiState, own: Building[]): void {
 }
 
 /**
- * A neutral spot next to its land worth a pioneer: around its military buildings' edges, the most
- * explored unclaimed resources nearby, leaning towards the starts it still scouts for (bounded sample).
+ * Neutral spots next to its land worth a pioneer, best first: around its military buildings' edges,
+ * the most explored unclaimed resources nearby, leaning towards the starts it still scouts for
+ * (bounded sample: 16 per military building; ties by tile index).
  */
-function pioneerSpot(w: World, me: PlayerId, own: Building[]): Point | null {
+function pioneerSpots(w: World, me: PlayerId, own: Building[]): Point[] {
   const m = w.map;
   const castle = centerOf(w.castleOf(me));
   const targets = knownEnemies(w, me).length === 0 ? unexploredStarts(w, me) : [];
-  let best: Point | null = null;
-  let bestScore = -Infinity;
+  const spots: { x: number; y: number; score: number }[] = [];
   for (const b of own) {
     if (!isMilitary(b) || !b.done) continue;
     const c = centerOf(b);
@@ -1227,12 +1336,8 @@ function pioneerSpot(w: World, me: PlayerId, own: Building[]): Point | null {
         }
       }
       const toward = targets.length ? -Math.min(...targets.map((t) => Math.hypot(t.x - x, t.y - y))) * 0.5 : 0;
-      const score = value + toward - Math.hypot(x - castle.x, y - castle.y) * 0.1;
-      if (score > bestScore || (score === bestScore && best && m.idx(x, y) < m.idx(best.x, best.y))) {
-        bestScore = score;
-        best = { x, y };
-      }
+      spots.push({ x, y, score: value + toward - Math.hypot(x - castle.x, y - castle.y) * 0.1 });
     }
   }
-  return best;
+  return spots.sort((a, b) => b.score - a.score || m.idx(a.x, a.y) - m.idx(b.x, b.y));
 }

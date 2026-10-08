@@ -12,6 +12,7 @@ import type { World } from './world';
  *   `updateStrike`) instead of trickling out of several buildings one by one;
  * - hostile field units on or near its land, in its buildings' sight, are met by a field squad
  *   (`defend`);
+ * - a scout walks to an enemy castle its buildings cannot see (`sendScout`, `updateScout`);
  * - fighters left standing in the field when nothing needs them go back into garrisons (`sweep`).
  * Its squads are plain ids in the saved `AiState`; a squad leader comes along when one sits in a
  * building the group comes from (`orderMove` then forms the squad round him).
@@ -209,10 +210,45 @@ export function defend(w: World, ai: AiState, own: Building[]): void {
   ai.defense = { ids, x: c.x, y: c.y };
 }
 
-/** Own fighters idle in the field that no strike or squad of the AI holds go back into garrisons. */
+/**
+ * Sends one spare fighter (above `keepOf`) of the military building nearest `goal` there as a field
+ * unit: a scout. What he sees is explored for good, so a castle forest, water or swamp keeps out of
+ * its buildings' sight is still found. True if one went.
+ */
+export function sendScout(w: World, ai: AiState, own: Building[], goal: Point): boolean {
+  const me = ai.player;
+  const source = own
+    .filter((b) => b.done && isMilitary(b) && b.garrison.length > keepOf(b))
+    .sort((a, b) => dist(a.door, goal) - dist(b.door, goal) || a.id - b.id)[0];
+  if (!source) return false;
+  const ids = release(w, me, new Map([[source.id, 1]]));
+  if (ids.length === 0) return false;
+  if (w.orderMove(ids, Math.round(goal.x), Math.round(goal.y), me) === 0) {
+    w.orderGarrison(ids, null, me);
+    return false;
+  }
+  ai.scout = { id: ids[0], until: w.tick + AI.scoutTimeout };
+  return true;
+}
+
+/**
+ * A scout out: kept in the field while `needed` (no enemy castle known yet) and his time lasts, then
+ * sent back into a garrison. True while he is still out.
+ */
+export function updateScout(w: World, ai: AiState, needed: boolean): boolean {
+  const sc = ai.scout;
+  if (!sc) return false;
+  const [s] = alive(w, ai.player, [sc.id]);
+  if (s && needed && w.tick < sc.until) return true;
+  if (s) w.orderGarrison([s.id], null, ai.player);
+  ai.scout = undefined;
+  return false;
+}
+
+/** Own fighters idle in the field that no strike, squad or scout of the AI holds go back into garrisons. */
 export function sweep(w: World, ai: AiState): void {
   const me = ai.player;
-  const held = new Set([...(ai.strike?.ids ?? []), ...(ai.defense?.ids ?? [])]);
+  const held = new Set([...(ai.strike?.ids ?? []), ...(ai.defense?.ids ?? []), ...(ai.scout ? [ai.scout.id] : [])]);
   const stray: number[] = [];
   for (const s of w.settlers) {
     if (s.owner !== me || !s.post || s.inside !== null || s.tasks.length > 0 || s.opponent !== null) continue;
