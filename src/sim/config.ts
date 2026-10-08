@@ -808,13 +808,14 @@ function mine(name: string, res: Resource, favourite: Resource): BuildingDef {
  * Recipe and gathering times follow Settlers 4 in real seconds at normal speed (10 ticks here = 1 s;
  * the original runs 845 ticks a minute): the Roman buildings' ticks per product, measured by the
  * Settlers United wiki, and the professions' cycles from siedlercommunity.de — table and sources
- * in `docs/TIMINGS.md`.
+ * in `docs/TIMINGS.md`. Footprints follow the original's on-screen widths (barracks, pig farm and
+ * donkey ranch 3×3, castle and fortress 4×4; `docs/PROPORTIONS.md`).
  */
 export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   castle: {
     name: 'Замок',
-    w: 3,
-    h: 3,
+    w: 4,
+    h: 4,
     cost: {},
     worker: null,
     playerBuildable: false,
@@ -946,8 +947,8 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   },
   pigfarm: {
     name: 'Свиноферма',
-    w: 2,
-    h: 2,
+    w: 3,
+    h: 3,
     cost: { plank: 3, stone: 1 },
     worker: 'pigfarmer',
     playerBuildable: true,
@@ -967,8 +968,8 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   },
   donkeyranch: {
     name: 'Ослиная ферма',
-    w: 2,
-    h: 2,
+    w: 3,
+    h: 3,
     cost: { plank: 4, stone: 5 },
     worker: 'donkeyrancher',
     playerBuildable: true,
@@ -1061,8 +1062,8 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   },
   barracks: {
     name: 'Казарма',
-    w: 2,
-    h: 2,
+    w: 3,
+    h: 3,
     cost: { plank: 4, stone: 3 },
     worker: 'recruit',
     playerBuildable: true,
@@ -1071,8 +1072,8 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   },
   fortress: {
     name: 'Крепость',
-    w: 3,
-    h: 3,
+    w: 4,
+    h: 4,
     cost: { plank: 6, stone: 10, iron: 2 },
     worker: null,
     playerBuildable: true,

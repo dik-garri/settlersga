@@ -19,29 +19,32 @@ const ticksPerMinute = TICKS_PER_SECOND * 60;
 for (const seed of seeds) {
   const w = new World(seed, { size });
   const c = w.castle;
+  // Offsets from the start position (the castle's footprint centre, rounded).
+  const cx = Math.round(c.x + (c.w - 1) / 2);
+  const cy = Math.round(c.y + (c.h - 1) / 2);
   // Standard opening: wood and stone first, housing, then the food chain around the starting pond.
   const plan: [number, BuildingType, number, number][] = [
-    [0, 'stonecutter', -5, 3],
-    [0, 'woodcutter', 5, -1],
-    [0, 'forester', 5, 3],
-    [0, 'sawmill', 1, 5],
-    [0, 'house_small', -3, -4],
-    [3, 'house_small', 3, 3],
-    [5, 'waterworks', 0, 8],
-    [5, 'farm', 6, 5],
-    [5, 'mill', 3, -4],
-    [5, 'bakery', -5, -1],
-    [5, 'house_medium', 0, -6],
-    [10, 'tower', -8, -8],
-    [15, 'fisher', -2, 8],
-    [15, 'pigfarm', 7, -4],
-    [15, 'slaughterhouse', -6, 6],
-    [20, 'coalmine', -3, -8],
-    [20, 'ironmine', 0, -8],
-    [20, 'house_medium', 4, 8],
-    [25, 'ironsmelter', -6, -4],
-    [25, 'toolsmith', 6, -6],
-    [25, 'house_medium', -8, 2],
+    [0, 'stonecutter', -6, 2],
+    [0, 'woodcutter', 4, -2],
+    [0, 'forester', 4, 2],
+    [0, 'sawmill', 0, 4],
+    [0, 'house_small', -4, -5],
+    [3, 'house_small', 2, 2],
+    [5, 'waterworks', -1, 7],
+    [5, 'farm', 5, 4],
+    [5, 'mill', 2, -5],
+    [5, 'bakery', -6, -2],
+    [5, 'house_medium', -1, -7],
+    [10, 'tower', -9, -9],
+    [15, 'fisher', -3, 7],
+    [15, 'pigfarm', 6, -5],
+    [15, 'slaughterhouse', -7, 5],
+    [20, 'coalmine', -4, -9],
+    [20, 'ironmine', -1, -9],
+    [20, 'house_medium', 3, 7],
+    [25, 'ironsmelter', -7, -5],
+    [25, 'toolsmith', 5, -7],
+    [25, 'house_medium', -9, 1],
   ];
 
   const pending = [...plan];
@@ -53,7 +56,7 @@ for (const seed of seeds) {
       // Due entries that found no spot (e.g. a mine before the tower widened the border) retry every minute.
       for (let k = 0; k < pending.length; k++) {
         const [minute, type, dx, dy] = pending[k];
-        if (minute * ticksPerMinute <= i - 1 && placeNear(w, type, c.x + dx, c.y + dy)) pending.splice(k--, 1);
+        if (minute * ticksPerMinute <= i - 1 && placeNear(w, type, cx + dx, cy + dy)) pending.splice(k--, 1);
       }
     }
     w.step();

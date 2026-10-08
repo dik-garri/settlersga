@@ -548,10 +548,18 @@ const SMALL: BuildingCanvas = { w: 150, h: 140, ax: 75, ay: 100 };
 const LARGE: BuildingCanvas = { w: 220, h: 190, ax: 110, ay: 135 };
 /** Eyecatchers on one tile: narrow and tall enough for a column or an obelisk. */
 const DECOR: BuildingCanvas = { w: 80, h: 120, ax: 40, ay: 92 };
+/** The 4×4 strongholds (castle, fortress), as tall as two houses. */
+const HUGE: BuildingCanvas = { w: 320, h: 290, ax: 160, ay: 200 };
 
-/** Sprite canvas per building; `site2`/`site3` are construction sites for 2×2 and 3×3 footprints. */
-export const BUILDING_CANVAS: Record<BuildingType | 'site2' | 'site3', BuildingCanvas> = {
-  castle: { w: 220, h: 250, ax: 110, ay: 190 },
+/** Construction-site sprites by footprint side (`site<n>`; 1×1 eyecatchers use the 2×2 one). */
+export type SiteSprite = 'site2' | 'site3' | 'site4';
+export function siteSprite(side: number): SiteSprite {
+  return side >= 4 ? 'site4' : side >= 3 ? 'site3' : 'site2';
+}
+
+/** Sprite canvas per building; `site2`…`site4` are construction sites for 2×2 to 4×4 footprints. */
+export const BUILDING_CANVAS: Record<BuildingType | SiteSprite, BuildingCanvas> = {
+  castle: HUGE,
   house_small: SMALL,
   house_medium: SMALL,
   house_large: LARGE,
@@ -565,7 +573,7 @@ export const BUILDING_CANVAS: Record<BuildingType | 'site2' | 'site3', BuildingC
   farm: LARGE,
   mill: { w: 150, h: 210, ax: 75, ay: 165 },
   bakery: SMALL,
-  pigfarm: SMALL,
+  pigfarm: LARGE,
   slaughterhouse: SMALL,
   coalmine: SMALL,
   ironmine: SMALL,
@@ -573,15 +581,15 @@ export const BUILDING_CANVAS: Record<BuildingType | 'site2' | 'site3', BuildingC
   stonemine: SMALL,
   warehouse: SMALL,
   market: SMALL,
-  donkeyranch: SMALL,
+  donkeyranch: LARGE,
   ironsmelter: SMALL,
   goldsmelter: SMALL,
   toolsmith: SMALL,
   weaponsmith: SMALL,
-  barracks: SMALL,
+  barracks: LARGE,
   tower: { w: 150, h: 210, ax: 75, ay: 170 },
   bigtower: { w: 170, h: 240, ax: 85, ay: 190 },
-  fortress: { w: 230, h: 260, ax: 115, ay: 195 },
+  fortress: HUGE,
   lookout: { w: 150, h: 210, ax: 75, ay: 170 },
   infirmary: SMALL,
   flowerbed: DECOR,
@@ -591,12 +599,14 @@ export const BUILDING_CANVAS: Record<BuildingType | 'site2' | 'site3', BuildingC
   obelisk: DECOR,
   site2: { w: 150, h: 90, ax: 75, ay: 50 },
   site3: { w: 220, h: 120, ax: 110, ay: 65 },
+  site4: { w: 290, h: 160, ax: 145, ay: 85 },
 };
 
 function paintCastle(ctx: Ctx): void {
-  const hw = 1.3;
-  const hh = 1.3;
-  const H = 42;
+  // 4×4: walls round the footprint, the keep in the middle, the gate in front of the door tile.
+  const hw = 1.75;
+  const hh = 1.75;
+  const H = 50;
   const stone = '#a8a294';
   shadow(ctx, hw, hh, 0.5);
   walls(ctx, 0, 0, hw, hh, 0, H, stone);
@@ -612,28 +622,29 @@ function paintCastle(ctx: Ctx): void {
   }
   poly(ctx, [[-hw, -hh, H], [hw, -hh, H], [hw, hh, H], [-hw, hh, H]], shade(stone, 0.9));
   // Back crenellations, then the keep, then front crenellations.
-  const merlon = (cx: number, cy: number) => box(ctx, cx, cy, 0.09, 0.09, H, 7, stone);
-  for (let t = -hw + 0.09; t <= hw; t += 0.36) {
-    merlon(t, -hh + 0.09);
-    merlon(-hw + 0.09, t);
+  const merlon = (cx: number, cy: number) => box(ctx, cx, cy, 0.11, 0.11, H, 8, stone);
+  for (let t = -hw + 0.11; t <= hw; t += 0.4) {
+    merlon(t, -hh + 0.11);
+    merlon(-hw + 0.11, t);
   }
-  const k = 0.6;
-  box(ctx, 0, 0, k, k, H, 46, '#b4ae9f');
-  frontQuad(ctx, k, -0.15, 0.15, H + 26, H + 38, '#3a3430');
-  sideQuad(ctx, k, -0.15, 0.15, H + 26, H + 38, '#2c2724');
-  pyramidRoof(ctx, k + 0.1, H + 46, 42, '#b23a2c');
+  const k = 0.8;
+  box(ctx, 0, 0, k, k, H, 56, '#b4ae9f');
+  frontQuad(ctx, k, -0.2, 0.2, H + 32, H + 46, '#3a3430');
+  sideQuad(ctx, k, -0.2, 0.2, H + 32, H + 46, '#2c2724');
+  pyramidRoof(ctx, k + 0.12, H + 56, 50, '#b23a2c');
   // The banner on the roof tip is a separate per-owner sprite (`BANNERS`).
-  for (let t = -hw + 0.09; t <= hw; t += 0.36) {
-    merlon(t, hh - 0.09);
-    merlon(hw - 0.09, t);
+  for (let t = -hw + 0.11; t <= hw; t += 0.4) {
+    merlon(t, hh - 0.11);
+    merlon(hw - 0.11, t);
   }
-  // Gate in front of the door tile (dx = +1).
-  frontQuad(ctx, hh, 0.72, 1.24, 0, 24, '#3d2a1a');
-  frontQuad(ctx, hh, 0.76, 1.2, 0, 21, '#5a3d22');
-  line(ctx, [0.98, hh, 0], [0.98, hh, 21], '#3d2a1a');
-  frontQuad(ctx, hh, -0.7, -0.5, 22, 30, '#2c2724');
-  sideQuad(ctx, hw, -0.4, -0.2, 22, 30, '#221e1b');
-  sideQuad(ctx, hw, 0.4, 0.6, 22, 30, '#221e1b');
+  // Gate in front of the door tile (dx = +1.5).
+  frontQuad(ctx, hh, 1.2, 1.72, 0, 28, '#3d2a1a');
+  frontQuad(ctx, hh, 1.24, 1.68, 0, 25, '#5a3d22');
+  line(ctx, [1.46, hh, 0], [1.46, hh, 25], '#3d2a1a');
+  frontQuad(ctx, hh, -0.95, -0.7, 26, 36, '#2c2724');
+  frontQuad(ctx, hh, 0.1, 0.35, 26, 36, '#2c2724');
+  sideQuad(ctx, hw, -0.55, -0.3, 26, 36, '#221e1b');
+  sideQuad(ctx, hw, 0.55, 0.8, 26, 36, '#221e1b');
 }
 
 function paintWoodcutter(ctx: Ctx): void {
@@ -949,14 +960,15 @@ function paintBigTower(ctx: Ctx): void {
 
 /** Fortress: a walled square with two corner towers and a central keep. */
 function paintFortress(ctx: Ctx): void {
-  const hw = 1.3;
-  const hh = 1.3;
-  const H = 30;
+  // 4×4, a little lower than the castle: two corner towers, a keep, the gate in front of the door tile.
+  const hw = 1.75;
+  const hh = 1.75;
+  const H = 36;
   const stone = '#a29c8f';
   shadow(ctx, hw, hh, 0.6);
   const tower = (cx: number, cy: number, h: number) => {
-    walls(ctx, cx, cy, 0.32, 0.32, 0, h, '#aaa498');
-    pyramidRoof2(cx, cy, 0.38, h, 24);
+    walls(ctx, cx, cy, 0.4, 0.4, 0, h, '#aaa498');
+    pyramidRoof2(cx, cy, 0.48, h, 30);
   };
   const pyramidRoof2 = (cx: number, cy: number, r: number, z: number, rise: number) => {
     const apex: V3 = [cx, cy, z + rise];
@@ -966,30 +978,30 @@ function paintFortress(ctx: Ctx): void {
     poly(ctx, [[cx + r, cy - r, z], [cx + r, cy + r, z], apex], shade('#8e2e24', 0.75));
   };
   // Back tower, walls, keep, front tower.
-  tower(-hw + 0.25, -hh + 0.25, H + 26);
+  tower(hw - 0.32, -hh + 0.32, H + 32);
   walls(ctx, 0, 0, hw, hh, 0, H, stone);
   for (let z = 7; z < H; z += 7) {
     line(ctx, [-hw, hh, z], [hw, hh, z], shade(stone, 0.82));
     line(ctx, [hw, -hh, z], [hw, hh, z], shade(stone, 0.6));
   }
   poly(ctx, [[-hw, -hh, H], [hw, -hh, H], [hw, hh, H], [-hw, hh, H]], shade(stone, 0.9));
-  const merlon = (cx: number, cy: number) => box(ctx, cx, cy, 0.08, 0.08, H, 6, stone);
-  for (let t = -hw + 0.08; t <= hw; t += 0.33) {
-    merlon(t, -hh + 0.08);
-    merlon(-hw + 0.08, t);
+  const merlon = (cx: number, cy: number) => box(ctx, cx, cy, 0.1, 0.1, H, 7, stone);
+  for (let t = -hw + 0.1; t <= hw; t += 0.38) {
+    merlon(t, -hh + 0.1);
+    merlon(-hw + 0.1, t);
   }
-  box(ctx, 0, 0, 0.55, 0.55, H, 36, '#b0aa9c');
-  frontQuad(ctx, 0.55, -0.12, 0.12, H + 18, H + 28, '#3a3430');
-  sideQuad(ctx, 0.55, -0.12, 0.12, H + 18, H + 28, '#2c2724');
-  pyramidRoof(ctx, 0.62, H + 36, 34, '#8e2e24');
-  for (let t = -hw + 0.08; t <= hw; t += 0.33) {
-    merlon(t, hh - 0.08);
-    merlon(hw - 0.08, t);
+  box(ctx, 0, 0, 0.72, 0.72, H, 44, '#b0aa9c');
+  frontQuad(ctx, 0.72, -0.16, 0.16, H + 22, H + 34, '#3a3430');
+  sideQuad(ctx, 0.72, -0.16, 0.16, H + 22, H + 34, '#2c2724');
+  pyramidRoof(ctx, 0.82, H + 44, 40, '#8e2e24');
+  for (let t = -hw + 0.1; t <= hw; t += 0.38) {
+    merlon(t, hh - 0.1);
+    merlon(hw - 0.1, t);
   }
-  tower(hw - 0.25, hh - 0.25, H + 18);
-  // Gate in front of the door tile (dx = +1).
-  frontQuad(ctx, hh, 0.74, 1.22, 0, 22, '#3d2a1a');
-  frontQuad(ctx, hh, 0.78, 1.18, 0, 19, '#5a3d22');
+  tower(-hw + 0.32, hh - 0.32, H + 22);
+  // Gate in front of the door tile (dx = +1.5).
+  frontQuad(ctx, hh, 1.24, 1.72, 0, 26, '#3d2a1a');
+  frontQuad(ctx, hh, 1.28, 1.68, 0, 23, '#5a3d22');
 }
 
 /**
@@ -997,10 +1009,10 @@ function paintFortress(ctx: Ctx): void {
  * The renderer places the `flag:<owner>` sprite there, so it follows conquests.
  */
 export const BANNERS: Partial<Record<BuildingType, { x: number; y: number }>> = {
-  castle: { x: 0, y: -130 },
+  castle: { x: 0, y: -156 },
   tower: { x: 0, y: -110 },
   bigtower: { x: 0, y: -126 },
-  fortress: { x: 0, y: -100 },
+  fortress: { x: 0, y: -120 },
 };
 
 function paintSite(ctx: Ctx, half: number): void {
@@ -1378,11 +1390,11 @@ const STYLES: Partial<Record<BuildingType, Style>> = {
     timber: true,
     deco: ['oven', 'chimney', 'sacks'],
   },
-  pigfarm: { hw: 0.6, hh: 0.6, H: 20, wall: '#a07a50', roof: '#c4a35a', rise: 20, doorDx: 0.5, deco: ['pen'] },
+  pigfarm: { hw: 1.15, hh: 0.8, H: 24, wall: '#a07a50', roof: '#c4a35a', rise: 24, doorDx: 1, deco: ['pen'] },
   slaughterhouse: { hw: 0.7, hh: 0.7, H: 24, wall: '#c9c0ae', roof: '#7a2e24', rise: 22, doorDx: 0.5, deco: ['meat'] },
   // Our own trade buildings: an open-sided market hall on posts, a stable with a fenced paddock.
   market: { hw: 0.65, hh: 0.65, H: 14, wall: '#c9b48a', roof: '#a8432e', rise: 18, doorDx: 0.5, timber: true, deco: ['crates', 'sacks'] },
-  donkeyranch: { hw: 0.65, hh: 0.6, H: 18, wall: '#9a7a55', roof: '#c9a95a', rise: 20, doorDx: 0.5, deco: ['pen', 'hay'] },
+  donkeyranch: { hw: 1.1, hh: 0.8, H: 22, wall: '#9a7a55', roof: '#c9a95a', rise: 24, doorDx: 1, deco: ['pen', 'hay'] },
   warehouse: {
     hw: 0.65,
     hh: 0.8,
@@ -1411,13 +1423,13 @@ const STYLES: Partial<Record<BuildingType, Style>> = {
   },
   // Long stone drill hall with a red roof; weapons racked by the wall.
   barracks: {
-    hw: 0.8,
-    hh: 0.62,
-    H: 26,
+    hw: 1.2,
+    hh: 1.0,
+    H: 36,
     wall: '#a8a294',
     roof: '#8c2f26',
-    rise: 20,
-    doorDx: 0.5,
+    rise: 26,
+    doorDx: 1,
     floors: 2,
     deco: ['crates'],
   },
@@ -1608,7 +1620,7 @@ export function buildingFxAnchors(type: BuildingType): FxAnchors {
   return a;
 }
 
-export const BUILDING_PAINTERS: Record<BuildingType | 'site2' | 'site3', (ctx: Ctx) => void> = {
+export const BUILDING_PAINTERS: Record<BuildingType | SiteSprite, (ctx: Ctx) => void> = {
   castle: paintCastle,
   house_small: styled('house_small'),
   house_medium: styled('house_medium'),
@@ -1649,6 +1661,7 @@ export const BUILDING_PAINTERS: Record<BuildingType | 'site2' | 'site3', (ctx: C
   fortress: paintFortress,
   site2: (ctx) => paintSite(ctx, 1),
   site3: (ctx) => paintSite(ctx, 1.5),
+  site4: (ctx) => paintSite(ctx, 2),
 };
 
 // -------------------------------------------------------------------- fields

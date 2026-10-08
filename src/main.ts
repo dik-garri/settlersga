@@ -7,6 +7,7 @@ import { toScreen } from './render/iso';
 import { GameRenderer } from './render/renderer';
 import { TICKS_PER_SECOND } from './sim/config';
 import { saveWorld } from './sim/save';
+import { centerOf } from './sim/buildings';
 import { World } from './sim/world';
 import { audioControls } from './ui/audioControls';
 import { el } from './ui/dom';
@@ -176,7 +177,8 @@ function game(
   const renderer = new GameRenderer(app, world, atlas, state.fog);
   const camera = new Camera(renderer.world, renderer.bounds);
   const c = world.castle;
-  const home = toScreen(c.x + 1, c.y + 1);
+  const mid = centerOf(c);
+  const home = toScreen(mid.x, mid.y);
   camera.centerOn(home.x, home.y);
   renderer.onSound = (id, x, y) => audio.at(id, x, y);
 

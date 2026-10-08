@@ -5,6 +5,7 @@ import { Camera } from '../render/camera';
 import { toScreen } from '../render/iso';
 import { GameRenderer } from '../render/renderer';
 import { TICKS_PER_SECOND } from '../sim/config';
+import { centerOf } from '../sim/buildings';
 import { World } from '../sim/world';
 
 /**
@@ -58,7 +59,8 @@ export class TitleScene {
     this.renderer.onSound = (id, x, y) => this.audio.at(id, x, y);
     this.camera = new Camera(this.renderer.world, this.renderer.bounds);
     const c = this.world.castle;
-    this.home = toScreen(c.x + 1, c.y + 1);
+    const mid = centerOf(c);
+    this.home = toScreen(mid.x, mid.y);
     this.camera.centerOn(this.home.x, this.home.y);
     this.camera.zoom = 1.1;
     this.progress = 1;

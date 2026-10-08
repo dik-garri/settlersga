@@ -5,8 +5,12 @@ Each is tagged with construction stages like the woodcutter (`lib.tag`): 0 stake
 a model (the game draws the real piles at the door).
 
 World X is tile x, world Y is minus tile y; a 2×2 footprint spans ±1 around the origin and its door
-tile is at (0.5, −1.5), a 3×3 one spans ±1.5 with the door at (1, −2). The camera sees the −Y and +X
-walls, so doors go on the −Y wall.
+tile is at (0.5, −1.5), a 3×3 one spans ±1.5 with the door at (1, −2), a 4×4 one ±2 with the door at
+(1.5, −2.5). The camera sees the −Y and +X walls, so doors go on the −Y wall.
+
+Heights follow Settlers 4 measured in settler heights (docs/PROPORTIONS.md): the small tower about as
+tall as a small house, the big tower a house plus 10–20 %, the lookout lower than the small tower, the
+castle about two houses.
 
 The shared helpers (log walls, board roofs, stakes, timber frames, materials) live in build.py, the
 script Blender runs; they are reached through `__main__` at call time.
@@ -471,7 +475,8 @@ def rod(a, b, r, mat, verts=10):
 
 
 def build_tower():
-    """After the Settlers 4 small tower: a tall square stone tower (about twice as high as wide),
+    """After the Settlers 4 small tower: a square stone tower a little higher than wide (as tall as the
+    S4 one next to a settler, ≈ 3.8 settler heights with its platform),
     big rugged blocks with staggered quoins, a strapped plank door, a dark lookout opening high on
     the right face; on top an overhanging timber platform with a box railing of thick round beams,
     X-braced on every side. The owner's banner is drawn by the game at ART3D_BANNERS['tower']."""
@@ -487,18 +492,18 @@ def build_tower():
     earth_pad((0.12, -0.18, 0), 0.82, 0.92, seed=21)
     lib.tag(0)
 
-    cx, cy, s0, s1, H = 0.05, 0.05, 1.12, 0.94, 1.15  # base width at the foot and the top, height
+    cx, cy, s0, s1, H = 0.05, 0.05, 1.04, 0.88, 0.9  # base width at the foot and the top, height
     corner_stakes(cx - s0 / 2, cx + s0 / 2, cy - s0 / 2, cy + s0 / 2)
     lib.tag(0, until=0)
 
     lib.box((cx, cy, 0.06), (s0 + 0.1, s0 + 0.1, 0.12), blocks[1], bevel=0.02)
     for x in (cx - s0 / 2 - 0.1, cx + s0 / 2 + 0.1):
         for y in (cy - s0 / 2 - 0.1, cy + s0 / 2 + 0.1):
-            lib.cylinder((x, y, 0.8), 0.025, 1.6, beam, verts=8)
+            lib.cylinder((x, y, 0.65), 0.025, 1.3, beam, verts=8)
     lib.tag(1, until=3)
 
     # The shaft in courses narrowing a little upwards, dressed in big blocks with quoins.
-    courses = 8
+    courses = 6
     for c in range(courses):
         t0, t1 = c / courses, (c + 1) / courses
         z0, z1 = 0.12 + (H - 0.12) * t0, 0.12 + (H - 0.12) * t1
@@ -510,12 +515,12 @@ def build_tower():
     lib.tag(None, split=lambda o: 2 if o.location.z < H * 0.45 else 3)
     # Plank door with iron straps on the front-left face, under a stone lintel.
     fy = cy - s0 / 2 - 0.13
-    dxc, dw, dh = cx - 0.04, 0.38, 0.62
+    dxc, dw, dh = cx - 0.04, 0.36, 0.5
     lib.box((dxc, fy - 0.03, 0.12 + dh / 2), (dw + 0.04, 0.04, dh + 0.02), dark)
     for k in range(4):
         lib.box((dxc - dw / 2 + (k + 0.5) * dw / 4, fy - 0.06, 0.12 + dh / 2), (dw / 4 * 0.92, 0.035, dh), door,
                 bevel=0.006)
-    for z in (0.24, 0.44):
+    for z in (0.22, 0.4):
         lib.box((dxc, fy - 0.085, z), (dw + 0.02, 0.012, 0.035), iron, bevel=0.004)
     lib.box((dxc, fy - 0.09, 0.12 + dh + 0.06), (dw + 0.16, 0.1, 0.12), blocks[2], bevel=0.025)
     # Dark lookout opening high on the right face.
@@ -1770,9 +1775,10 @@ def build_weaponsmith():
 
 # ------------------------------------------------------------------------------------- houses
 
-def scale_scene(k, keep=('ShadowCatcher',)):
-    """Scales every object of the model about the world origin by k (object-space textures shrink with
-    them; construction-stage tags stay on the objects)."""
+def scale_scene(k, keep=('ShadowCatcher',), kz=None):
+    """Scales every object of the model built so far about the world origin by k across and `kz`
+    (default k) in height — object-space textures grow with them; construction-stage tags stay on the
+    objects. Returns the same mapping for world points (banner and effect anchors)."""
     root = bpy.data.objects.new('scale-root', None)
     bpy.context.scene.collection.objects.link(root)
     bpy.context.view_layer.update()
@@ -1782,8 +1788,10 @@ def scale_scene(k, keep=('ShadowCatcher',)):
         world = obj.matrix_world.copy()
         obj.parent = root
         obj.matrix_world = world
-    root.scale = (k, k, k)
+    kz = k if kz is None else kz
+    root.scale = (k, k, kz)
     bpy.context.view_layer.update()
+    return lambda p: (p[0] * k, p[1] * k, p[2] * kz)
 
 
 def build_house_medium():
@@ -1901,7 +1909,8 @@ def build_house_large():
 def build_barracks():
     """Our barracks: a square fieldstone hall under a hipped blue-slate roof with a smaller raised
     storey (pyramid-roofed) on top, a big iron-banded double door; in front a paved drill yard inside
-    a low wall with a wooden pell and a straw target on a stand."""
+    a low wall with a wooden pell and a straw target on a stand. 3×3 as in Settlers 4: modelled at 2×2
+    and scaled ×1.5 (≈ 5 settler heights, a little taller than the large house)."""
     rnd = random.Random(181)
     walls = stone_walls()
     blocks = block_mats()
@@ -1954,6 +1963,7 @@ def build_barracks():
     for k, (rr, m) in enumerate(((0.16, straw), (0.11, red), (0.06, straw), (0.025, red))):
         lib.cylinder((0.78, -0.66 - k * 0.006, 0.36), rr, 0.04, m, rot=(math.pi / 2 - 0.2, 0, -0.5), verts=24)
     lib.tag(4)
+    scale_scene(1.5)
 
 
 # ------------------------------------------------------------------------------------- toolsmith (2×2)
@@ -2035,7 +2045,8 @@ def build_toolsmith():
 def build_pigfarm():
     """Our pig farm: a low half-timbered sty with a deep thatched roof running down to the yard side,
     a small fieldstone house with a wooden-shingle roof and a chimney at its end, and a fenced muddy
-    yard in front with a feeding trough and a few pigs."""
+    yard in front with a feeding trough and a few pigs. 3×3 as the Settlers 4 sheep farm: modelled at
+    2×2 and scaled to 3×3, a little less in height."""
     rnd = random.Random(201)
     walls = stone_walls()
     blocks = block_mats()
@@ -2096,6 +2107,7 @@ def build_pigfarm():
             c, s = math.cos(a), math.sin(a)
             lib.cylinder((x + c * dx - s * dy, y + s * dx + c * dy, 0.025), 0.015, 0.05, pig, verts=6)
     lib.tag(4)
+    scale_scene(1.45, kz=1.3)
 
 
 # ------------------------------------------------------------------------------------- forester (2×2)
@@ -2279,7 +2291,8 @@ def build_market():
 def build_donkeyranch():
     """Our donkey ranch: a long stable of fieldstone below and boards above under a thatched roof,
     a stable door and a hay loft hatch; in front a fenced paddock with donkeys, a water trough and
-    a stack of hay."""
+    a stack of hay. 3×3 as in Settlers 4: modelled at 2×2 and scaled to 3×3, a little less in height;
+    the donkeys are modelled smaller so they keep the size of the game's donkeys."""
     rnd = random.Random(231)
     walls = stone_walls()
     blocks = block_mats()
@@ -2340,9 +2353,10 @@ def build_donkeyranch():
     lib.box((-0.55, -0.1, 0.105), (0.36, 0.08, 0.01), water)
     lib.lumpy((0.62, -0.45, 0.14), 0.16, straw, scale=(1, 1, 1.1), strength=0.25, noise=2.5, seed=233, subdiv=2)
     lib.lumpy((0.72, -0.2, 0.08), 0.1, straw, scale=(1.2, 1, 0.7), strength=0.25, noise=2.5, seed=234, subdiv=2)
-    donkey(-0.35, -0.55, 0.5, coat, belly, hoof)
-    donkey(0.05, -0.3, 2.6, coat2, belly, hoof, s=0.95)
+    donkey(-0.35, -0.55, 0.5, coat, belly, hoof, s=0.72)
+    donkey(0.05, -0.3, 2.6, coat2, belly, hoof, s=0.68)
     lib.tag(4)
+    scale_scene(1.45, kz=1.3)
 
 
 # ------------------------------------------------------------------------------------- eyecatchers (1×1, fountain 2×2)
@@ -2645,9 +2659,10 @@ def scaffold(x0, x1, y0, y1, h, beam):
 
 
 def build_castle():
-    """The player's seat, the biggest building: a curtain wall with four round corner towers under
-    terracotta cones, a gatehouse in the front wall, and a tall square keep under a pyramid roof
-    rising behind; the owner's banner flies from the keep."""
+    """The player's seat, the biggest building (4×4, as the Settlers 4 castle): a curtain wall with four
+    round corner towers under terracotta cones, a gatehouse in the front wall, and a tall square keep
+    under a pyramid roof rising behind; the owner's banner flies from the keep. Modelled at the old 3×3
+    size and scaled up to the 4×4 footprint (a little more in height: ≈ 7.8 settler heights)."""
     rnd = random.Random(81)
     walls, blocks = stone_walls(), block_mats()
     tiles = terracotta_mats('ctc')
@@ -2693,12 +2708,14 @@ def build_castle():
     lib.tag(3)
     hip_roof(kx, ky, ks, ks, KH, 0.62, tiles, ridge, rnd, overhang=0.1, size=0.12, shape='tile', ridge_frac=0.0)
     lib.tag(4)
-    note_banner('castle', (kx, ky, KH + 0.66))
+    at = scale_scene(4 / 3, kz=1.5)
+    note_banner('castle', at((kx, ky, KH + 0.66)))
 
 
 def build_fortress():
-    """A big stone stronghold, smaller than the castle: a square crenellated donjon with two round
-    turrets under slate cones at its front corners, and a low walled forecourt before its gate."""
+    """A big stone stronghold (4×4, the Settlers 4 castle), a little smaller than our castle: a square
+    crenellated donjon with two round turrets under slate cones at its front corners, and a low walled
+    forecourt before its gate. Modelled at 3×3 and scaled up to 4×4 (≈ 7.1 settler heights, as S4's)."""
     rnd = random.Random(91)
     walls, blocks = stone_walls(), block_mats()
     slate = slate_mats('fsl')
@@ -2743,13 +2760,15 @@ def build_fortress():
     for gx in (dx - 0.26, dx + 0.26):
         lib.box((gx, fy, (wh + 0.12) / 2), (0.16, 0.22, wh + 0.12), blocks[rnd.randrange(len(blocks))], bevel=0.02)
     lib.tag(4)
-    note_banner('fortress', (dx, dy, DH + 0.2))
+    at = scale_scene(4 / 3, kz=1.45)
+    note_banner('fortress', at((dx, dy, DH + 0.2)))
 
 
 def build_bigtower():
-    """The big tower: wider and taller than the small tower, all stone — a square shaft with quoins,
-    a strapped door, slits, a corbelled crenellated fighting top with a small slate-roofed watch
-    turret at the back corner. The banner stands in the middle of the top."""
+    """The big tower: wider and a little taller than the small tower, squat as in Settlers 4 (a small
+    house plus 10–20 %, ≈ 4.5 settler heights), all stone — a broad square shaft with quoins, a strapped
+    door, slits, a corbelled crenellated fighting top with a small slate-roofed watch turret at the back
+    corner. The banner stands in the middle of the top."""
     rnd = random.Random(31)
     walls, blocks = stone_walls(), block_mats()
     slate = slate_mats('bsl')
@@ -2757,17 +2776,17 @@ def build_bigtower():
     dark = lib.mat_flat('dark', (0.05, 0.04, 0.03))
     beam = beam_mat()
     plank = lib.mat_grain('bplank', (0.42, 0.26, 0.1), (0.66, 0.46, 0.2), scale=4, stretch=(1, 9, 1), bump=0.7)
-    earth_pad((0.1, -0.2, 0), 0.95, 1.05, seed=31)
+    earth_pad((0.1, -0.2, 0), 1.05, 1.12, seed=31)
     lib.tag(0)
-    corner_stakes(-0.8, 0.8, -0.8, 0.8)
+    corner_stakes(-0.9, 0.9, -0.9, 0.9)
     lib.tag(0, until=0)
 
-    cx, cy, s0, s1, H = 0.05, 0.05, 1.36, 1.18, 1.45
+    cx, cy, s0, s1, H = 0.05, 0.05, 1.6, 1.46, 0.92
     lib.box((cx, cy, 0.06), (s0 + 0.12, s0 + 0.12, 0.12), blocks[1], bevel=0.02)
     lib.tag(1)
-    scaffold(cx - s0 / 2 - 0.1, cx + s0 / 2 + 0.1, cy - s0 / 2 - 0.1, cy + s0 / 2 + 0.1, 2.0, beam)
+    scaffold(cx - s0 / 2 - 0.1, cx + s0 / 2 + 0.1, cy - s0 / 2 - 0.1, cy + s0 / 2 + 0.1, 1.45, beam)
     lib.tag(1, until=3)
-    courses = 9
+    courses = 6
     for c in range(courses):
         t0, t1 = c / courses, (c + 1) / courses
         z0, z1 = 0.12 + (H - 0.12) * t0, 0.12 + (H - 0.12) * t1
@@ -2778,16 +2797,16 @@ def build_bigtower():
         quoins(x0, x1, y0, y1, z0, z1, blocks, rnd)
     lib.tag(None, split=lambda o: 2 if o.location.z < H * 0.45 else 3)
     fy = cy - s0 / 2 - 0.11
-    dxc, dw, dh = cx - 0.05, 0.42, 0.68
+    dxc, dw, dh = cx - 0.12, 0.42, 0.56
     lib.box((dxc, fy - 0.03, 0.12 + dh / 2), (dw + 0.04, 0.04, dh + 0.02), dark)
     for k in range(4):
         lib.box((dxc - dw / 2 + (k + 0.5) * dw / 4, fy - 0.06, 0.12 + dh / 2), (dw / 4 * 0.92, 0.035, dh), door,
                 bevel=0.006)
-    for z in (0.26, 0.5):
+    for z in (0.24, 0.46):
         lib.box((dxc, fy - 0.085, z), (dw + 0.02, 0.012, 0.035), iron, bevel=0.004)
     lib.box((dxc, fy - 0.09, 0.12 + dh + 0.06), (dw + 0.18, 0.1, 0.12), blocks[2], bevel=0.025)
-    for z in (1.2, 1.8):
-        slit(cx + 0.3, cy - (s0 + s1) / 4 - 0.08, z, 'y', dark, blocks[2])
+    for z in (0.66,):
+        slit(cx + 0.42, cy - (s0 + s1) / 4 - 0.08, z, 'y', dark, blocks[2])
         slit(cx + (s0 + s1) / 4 + 0.08, cy - 0.1, z, 'x', dark, blocks[2])
     lib.tag(3)
     # Fighting top: a corbelled parapet a little wider than the shaft, plank floor, merlons.
@@ -2801,18 +2820,18 @@ def build_bigtower():
     lib.box((tx1 - 0.05, cy, H + 0.2), (0.1, ts, 0.2), walls)
     battlements(tx0, tx1, ty0, ty1, H + 0.3, blocks, rnd, size=0.18)
     wx, wy = tx0 + 0.25, ty1 - 0.25
-    lib.box((wx, wy, H + 0.4), (0.4, 0.4, 0.6), walls)
-    stone_course(wx - 0.2, wx + 0.2, wy - 0.2, wy + 0.2, H + 0.12, H + 0.7, blocks, rnd, block=0.16, depth=0.05)
-    hip_roof(wx, wy, 0.4, 0.4, H + 0.7, 0.36, slate, lib.mat_flat('sridge', (0.2, 0.24, 0.3)), rnd,
+    lib.box((wx, wy, H + 0.31), (0.4, 0.4, 0.42), walls)
+    stone_course(wx - 0.2, wx + 0.2, wy - 0.2, wy + 0.2, H + 0.12, H + 0.52, blocks, rnd, block=0.16, depth=0.05)
+    hip_roof(wx, wy, 0.4, 0.4, H + 0.52, 0.3, slate, lib.mat_flat('sridge', (0.2, 0.24, 0.3)), rnd,
              overhang=0.07, size=0.1, shape='scale', ridge_frac=0.0)
     lib.tag(4)
     note_banner('bigtower', (cx + 0.15, cy - 0.12, H + 0.14))
 
 
 def build_lookout():
-    """A tall slim timber watchtower: four splayed legs on stone pads with X-braces in two tiers, a
-    ladder up the front, a plank platform with a rail under a little pyramid roof of shingles.
-    No garrison — vision only."""
+    """A timber watchtower, low as the Settlers 4 one (lower than the small tower, ≈ 3.5 settler
+    heights): four splayed legs on stone pads with X-braces, a ladder up the front, a plank platform
+    with a rail under a little pyramid roof of shingles. No garrison — vision only."""
     rnd = random.Random(41)
     wood = lib.mat_grain('lwood', (0.42, 0.26, 0.1), (0.7, 0.48, 0.22), scale=5, stretch=(1, 1, 8), bump=0.6)
     plank = lib.mat_grain('lplank', (0.46, 0.3, 0.12), (0.72, 0.52, 0.24), scale=4, stretch=(1, 9, 1), bump=0.6)
@@ -2823,7 +2842,7 @@ def build_lookout():
     corner_stakes(-0.6, 0.6, -0.6, 0.6)
     lib.tag(0, until=0)
 
-    H, b0, b1 = 1.3, 0.55, 0.34  # platform height, half-spread at the foot and at the top
+    H, b0, b1 = 0.66, 0.55, 0.38  # platform height, half-spread at the foot and at the top
     feet = [(-b0, -b0), (b0, -b0), (b0, b0), (-b0, b0)]
     heads = [(-b1, -b1), (b1, -b1), (b1, b1), (-b1, b1)]
     for (x, y) in feet:
@@ -2831,7 +2850,7 @@ def build_lookout():
     lib.tag(1)
     for (f, h) in zip(feet, heads):
         rod((f[0], f[1], 0.1), (h[0], h[1], H), 0.055, wood)
-    for (za, zb) in ((0.15, 1.0), (1.0, H)):
+    for (za, zb) in ((0.12, H),):
         ta, tb = za / H, zb / H
         for k in range(4):
             fa, fb = feet[k], feet[(k + 1) % 4]
@@ -2843,13 +2862,13 @@ def build_lookout():
             rod(pa, qb, 0.03, wood)
             rod(pb, qa, 0.03, wood)
             rod(qa, qb, 0.035, wood)
-    lib.tag(None, split=lambda o: 2 if o.location.z < H * 0.5 else 3)
+    lib.tag(None, split=lambda o: 2 if o.location.z < H * 0.62 else 3)  # legs and braces first, then the top rail
     # Ladder up the front (−Y) face.
     la, lb = (0.12, -b0 - 0.1, 0.0), (0.1, -b1 - 0.06, H)
     for side in (-0.1, 0.1):
         rod((la[0] + side, la[1], la[2]), (lb[0] + side, lb[1], lb[2]), 0.02, wood)
-    for k in range(14):
-        t = (k + 0.5) / 14
+    for k in range(8):
+        t = (k + 0.5) / 8
         x, y = la[0] + (lb[0] - la[0]) * t, la[1] + (lb[1] - la[1]) * t
         rod((x - 0.1, y, H * t), (x + 0.1, y, H * t), 0.013, wood)
     lib.tag(3)
@@ -2859,11 +2878,11 @@ def build_lookout():
         lib.box((0, t, H + 0.04), (ps, ps / 7 - 0.012, 0.04), plank, rot=(0, 0, rnd.uniform(-0.015, 0.015)), bevel=0.006)
     corners = [(-ps / 2, -ps / 2), (ps / 2, -ps / 2), (ps / 2, ps / 2), (-ps / 2, ps / 2)]
     for (x, y) in corners:
-        lib.cylinder((x, y, H + 0.42), 0.035, 0.76, wood, verts=8)
+        lib.cylinder((x, y, H + 0.33), 0.035, 0.58, wood, verts=8)
     for k in range(4):
         (xa, ya), (xb, yb) = corners[k], corners[(k + 1) % 4]
-        rod((xa, ya, H + 0.36), (xb, yb, H + 0.36), 0.03, wood)
-    hip_roof(0, 0, ps, ps, H + 0.8, 0.34, shingles, wood, rnd, overhang=0.1, size=0.11, shape='tile', ridge_frac=0.0)
+        rod((xa, ya, H + 0.3), (xb, yb, H + 0.3), 0.03, wood)
+    hip_roof(0, 0, ps, ps, H + 0.62, 0.3, shingles, wood, rnd, overhang=0.1, size=0.11, shape='tile', ridge_frac=0.0)
     lib.tag(4)
 
 

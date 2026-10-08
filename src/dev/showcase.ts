@@ -139,8 +139,9 @@ export function buildShowcase(): World {
   // A second, passive player far away: someone for the thief to rob.
   const w = new World(SHOWCASE_SEED, { size: SIZE, players: 2 });
   const c = w.castle;
-  const cx = c.x + 1;
-  const cy = c.y + 1;
+  // The start position (the castle's footprint centre, rounded).
+  const cx = Math.round(c.x + (c.w - 1) / 2);
+  const cy = Math.round(c.y + (c.h - 1) / 2);
   // Plenty of everything, so every building gets built and staffed.
   for (const r of RESOURCES) c.output[r] += 40;
   c.output.plank += 400;
@@ -290,6 +291,9 @@ export function buildShowcase(): World {
     w.setTradeRoute(home.id, away.id);
     w.orderTrade(home.id, 'plank', ENDLESS);
     w.orderTrade(home.id, 'stone', ENDLESS);
+    // A first load already waiting, so the donkeys are under way when the demo opens.
+    home.input.plank += 4;
+    home.input.stone += 4;
     for (let k = 0; k < 3; k++) spawnSettler(w, 'donkey', home);
     const site = placeNear(w, 'woodcutter', away.x + 2, away.y - 3);
     if (site) {
