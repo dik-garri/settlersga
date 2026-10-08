@@ -211,6 +211,8 @@ export class GameRenderer {
   private readonly ghostLayer = new Container();
   /** Placement hints: a dot on every spot in view where the chosen building fits. */
   private readonly hints = new Graphics();
+  /** Marker over the selected settler, above the objects (it must not hide behind houses). */
+  private readonly settlerMark = new Graphics();
   private hintKey = '';
   private hintAt = 0;
   private readonly ghostSprite: Sprite;
@@ -286,7 +288,7 @@ export class GameRenderer {
     /** Draw the fog of war (`?fog=off` disables it for debugging). */
     private readonly fogOn = true,
   ) {
-    this.world.addChild(this.ground, this.territory, this.marks, this.hints, this.objects, this.shots, this.fog, this.ghostLayer);
+    this.world.addChild(this.ground, this.territory, this.marks, this.hints, this.objects, this.settlerMark, this.shots, this.fog, this.ghostLayer);
     this.settlerTex = atlas.settlerTextures();
     this.animals = new AnimalLayer(sim, this.objects, (n) => atlas.get(n), fogOn);
     this.settler3d = atlas.art3d?.settlers ?? null;
@@ -646,6 +648,7 @@ export class GameRenderer {
     hover: { x: number; y: number } | null,
     area: Area | null = null,
     placing: BuildingType | null = null,
+    selectedSettler: number | null = null,
   ) {
     this.view = view;
     this.nowMs = timeMs;
@@ -663,7 +666,46 @@ export class GameRenderer {
     this.syncFog(timeMs);
     this.drawShots(alpha);
     this.drawMarks(ghost, selected, hover, area);
+    this.markSettler(selectedSettler, timeMs);
     this.drawHints(placing, timeMs);
+  }
+
+  /**
+   * The settler under a screen point (canvas CSS pixels), or null: a hit test on the visible figures'
+   * sprite bounds, trimmed to the body (the frames have transparent margins). The front-most figure
+   * wins. Only settlers drawn on screen count, so the fog of war is respected.
+   */
+  settlerAt(sx: number, sy: number): number | null {
+    let best: number | null = null;
+    let bestZ = -Infinity;
+    for (const [id, v] of this.settlerViews) {
+      if (!v.root.parent || !v.root.visible || !v.body.visible) continue;
+      const b = v.body.getBounds();
+      const cx = b.x + b.width / 2;
+      const halfW = Math.max(6, b.width * 0.22);
+      const top = b.y + b.height * 0.12;
+      const bottom = b.y + b.height * 0.92;
+      if (sx < cx - halfW || sx > cx + halfW || sy < top || sy > bottom) continue;
+      if (v.root.zIndex > bestZ) {
+        bestZ = v.root.zIndex;
+        best = id;
+      }
+    }
+    return best;
+  }
+
+  /** Selected settler: a ring at its feet and a bobbing marker over its head, following it. */
+  private markSettler(id: number | null, timeMs: number): void {
+    const g = this.settlerMark;
+    g.clear();
+    const v = id !== null ? this.settlerViews.get(id) : undefined;
+    if (!v || !v.root.parent || !v.root.visible) return;
+    const { x, y } = v.root.position;
+    const k = Math.abs(v.root.scale.y);
+    g.ellipse(x, y, 11 * k + 3, 5 * k + 1.5).stroke({ width: 2, color: 0xffe066, alpha: 0.95 });
+    const head = y - 46 * k - 6 + Math.sin(timeMs / 180) * 2;
+    g.poly([x - 5, head - 7, x + 5, head - 7, x, head]).fill({ color: 0xffe066, alpha: 0.95 });
+    g.poly([x - 5, head - 7, x + 5, head - 7, x, head]).stroke({ width: 1, color: 0x3a2a08, alpha: 0.9 });
   }
 
   /**

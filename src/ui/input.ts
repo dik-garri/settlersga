@@ -191,6 +191,14 @@ export class InputController {
       if (!e.shiftKey) this.cb.onSelectBuildType(null);
       return;
     }
+    // A figure under the cursor wins over the ground and the building behind it.
+    const sid = this.renderer.settlerAt(p.x, p.y);
+    if (sid !== null) {
+      this.state.selectedSettler = sid;
+      this.state.selected = null;
+      return;
+    }
+    this.state.selectedSettler = null;
     const tx = Math.round(t.x);
     const ty = Math.round(t.y);
     const b = this.world.buildingAt(tx, ty);
@@ -207,7 +215,10 @@ export class InputController {
 
   private cancel(): void {
     if (this.state.placing) this.cb.onSelectBuildType(null);
-    else this.state.selected = null;
+    else {
+      this.state.selected = null;
+      this.state.selectedSettler = null;
+    }
   }
 
   private onKey(e: KeyboardEvent, down: boolean): void {

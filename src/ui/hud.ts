@@ -10,6 +10,7 @@ import { inStorage, GoodsView } from './goodsView';
 import { glyph, type GlyphName } from './icons';
 import { InfoView } from './infoPanel';
 import { OptionsView, SPEEDS } from './optionsView';
+import { SettlerInfoView } from './settlerInfo';
 import { SettlersView } from './settlersView';
 import type { GameState, Placeable } from './state';
 import { StatsView } from './statsView';
@@ -53,6 +54,7 @@ export class Hud {
   private readonly build: BuildView;
   private readonly stats: StatsView;
   private readonly info: InfoView;
+  private readonly settlerInfo: SettlerInfoView;
   private menu: MenuId = 'build';
   private readonly menuButtons = new Map<MenuId, HTMLButtonElement>();
   private readonly title = el('h3', 'content-title');
@@ -81,6 +83,10 @@ export class Hud {
     this.build = new BuildView(world, state, select);
     this.stats = new StatsView(world);
     this.info = new InfoView(world, state, (text) => this.toast(text));
+    this.settlerInfo = new SettlerInfoView(world, state, {
+      place: (p) => select(p),
+      toast: (text) => this.toast(text),
+    });
     this.views = {
       build: this.build,
       goods: new GoodsView(world),
@@ -101,6 +107,7 @@ export class Hud {
       b.append(glyph(m.glyph));
       b.onclick = () => {
         this.state.selected = null;
+        this.state.selectedSettler = null;
         this.showMenu(m.id);
         b.blur();
       };
@@ -184,8 +191,9 @@ export class Hud {
   }
 
   nextTab(): void {
-    if (this.menu !== 'build' || this.state.selected !== null) {
+    if (this.menu !== 'build' || this.state.selected !== null || this.state.selectedSettler !== null) {
       this.state.selected = null;
+      this.state.selectedSettler = null;
       this.showMenu('build');
       return;
     }
@@ -201,7 +209,10 @@ export class Hud {
 
   selectBuildType(type: Placeable | null): void {
     this.state.placing = type;
-    if (type) this.state.selected = null;
+    if (type) {
+      this.state.selected = null;
+      this.state.selectedSettler = null;
+    }
   }
 
   /** A message on the ticker at the bottom of the view; it fades after a few seconds. */
@@ -225,8 +236,12 @@ export class Hud {
     if (state.selected !== null && world.buildings.has(state.selected)) {
       this.mount(this.info, 'Здание');
       for (const b of this.menuButtons.values()) b.classList.remove('active');
+    } else if (state.selectedSettler !== null && world.getSettler(state.selectedSettler)) {
+      this.mount(this.settlerInfo, 'Поселенец');
+      for (const b of this.menuButtons.values()) b.classList.remove('active');
     } else {
       if (state.selected !== null) state.selected = null;
+      if (state.selectedSettler !== null) state.selectedSettler = null;
       this.showMenu(this.menu);
     }
     this.shown?.update(nowMs);
@@ -258,7 +273,7 @@ export class Hud {
             ? 'ЛКМ по разведанному чужому зданию с товарами — послать вора · ПКМ / Esc — отмена'
             : state.placing
               ? 'ЛКМ — поставить (Shift — несколько) · ПКМ / Esc — отмена'
-              : 'Перетаскивание / WASD — камера · колесо — зум · клик по зданию — окно здания';
+              : 'Перетаскивание / WASD — камера · колесо — зум · клик по зданию или поселенцу — его окно';
   }
 
   /** Victory or defeat: time played, a few totals, and a way to start over or keep watching. */
