@@ -2,7 +2,6 @@ import { nearestStorage } from './buildings';
 import { FIELD, ORDERABLE, PIONEER, PROFESSIONS, PROSPECT_RADIUS, PROSPECT_TICKS, PROSPECT_TILES, THIEF } from './config';
 import { workerOrder } from './economy';
 import { restIdle } from './idle';
-import { isFighter, killSettler } from './military';
 import { formationSpots } from './field';
 import { abort } from './settlers';
 import { RESOURCES, Terrain, type Building, type PlayerId, type Resource, type Settler, type SettlerKind, type Task } from './types';
@@ -22,9 +21,8 @@ import type { World } from './world';
  * Thief: `sendThief` points him at a foreign, explored building with goods at its door (or in stock);
  * he walks there unnoticed, takes one unit of its most plentiful good in `THIEF.stealTicks` and carries
  * it to his owner's nearest warehouse, then goes back for more until the building is bare or gone.
- * On hostile land he may be caught (`thiefWatch`): every `THIEF.checkEvery` ticks any hostile fighter
- * outdoors within `THIEF.catchRadius`, or garrisoned hostile building whose door is that close, catches
- * him with `THIEF.catchChance` (world RNG) — he dies, and whatever he carries is lost.
+ * On hostile land every specialist may be cut down by that land's swordsmen, the thief once unmasked
+ * (`intruders.ts`, `INTRUDERS`).
  *
  * Both keep their errand in `Settler.errand` (saved); without one they idle with the crowd.
  * `dismissSpecialist` turns an idle one standing on his owner's land back into a carrier (bringing the
@@ -228,43 +226,6 @@ export function stealTick(w: World, s: Settler, task: Extract<Task, { t: 'steal'
   ];
 }
 
-/**
- * A thief on hostile land may be caught (see the module comment). Called every tick for thieves; the
- * check runs every `THIEF.checkEvery` ticks, staggered by id.
- */
-export function thiefWatch(w: World, s: Settler): void {
-  if (s.inside !== null || (w.tick + s.id) % THIEF.checkEvery !== 0) return;
-  const m = w.map;
-  const x = Math.round(s.x);
-  const y = Math.round(s.y);
-  if (!m.inBounds(x, y)) return;
-  const owner = m.owner[m.idx(x, y)];
-  if (owner === 0 || owner === s.owner || w.allied(owner, s.owner)) return;
-  const r = THIEF.catchRadius;
-  let watched = false;
-  for (const o of w.settlers) {
-    if (o.inside !== null || !isFighter(o) || o.owner === s.owner || w.allied(o.owner, s.owner)) continue;
-    if (Math.hypot(o.x - s.x, o.y - s.y) <= r) {
-      watched = true;
-      break;
-    }
-  }
-  if (!watched) {
-    for (const b of w.buildings.values()) {
-      if (b.garrison.length === 0 || b.owner === s.owner || w.allied(b.owner, s.owner)) continue;
-      if (Math.hypot(b.door.x - s.x, b.door.y - s.y) <= r) {
-        watched = true;
-        break;
-      }
-    }
-  }
-  if (!watched || w.rng() >= THIEF.catchChance) return;
-  if (s.carrying) w.stats.lost[s.carrying]++;
-  s.carrying = null;
-  w.stats.thievesCaught++;
-  killSettler(w, s);
-}
-
 // ---------------------------------------------------------------- geologist
 
 /** Unprospected, walkable mountain tiles of the player's land the geologist examines around (x, y), nearest first. */
@@ -303,6 +264,8 @@ export function toolPileNear(w: World, player: PlayerId, x: number, y: number): 
 export function geologistErrand(w: World, s: Settler, x: number, y: number): boolean {
   const tiles = prospectTiles(w, x, y, s.owner);
   if (tiles.length === 0) return false;
+  // A carrier just made a geologist gets the profession's hit points (`INTRUDERS`).
+  if (s.hp <= 0) s.hp = PROFESSIONS.geologist.hp ?? 0;
   const tool = PROFESSIONS.geologist.tool;
   const tasks: Task[] = [];
   if (tool && s.carrying !== tool) {

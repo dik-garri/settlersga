@@ -14,6 +14,7 @@
  * map. Field units occupy no tiles, like every settler.
  */
 import { DAMAGE, FIELD, FIGHT_EVERY, PROFESSIONS, SOLDIER_LEVELS } from './config';
+import { nearestIntruder } from './intruders';
 import { randInt } from './rng';
 import { fieldFactor } from './strength';
 import { abort } from './settlers';
@@ -263,7 +264,7 @@ export function fieldIdle(w: World, s: Settler): void {
   const ranged = PROFESSIONS[s.kind].combat?.ranged;
   if (ranged) {
     if (s.reload > 0) s.reload--;
-    const target = nearestEnemy(w, s, ranged.range);
+    const target = nearestEnemy(w, s, ranged.range) ?? nearestIntruder(w, s, ranged.range);
     if (target) {
       s.working = true;
       if (s.reload <= 0) shootAt(w, s, target);
@@ -273,6 +274,12 @@ export function fieldIdle(w: World, s: Settler): void {
     const target = nearestEnemy(w, s, FIELD.engageRadius);
     if (target) {
       s.tasks = [{ t: 'engage', s: target.id, n: 0 }];
+      return;
+    }
+    // An intruding specialist on our land (`intruders.ts`): go and cut him down.
+    const intruder = nearestIntruder(w, s, FIELD.engageRadius);
+    if (intruder) {
+      s.tasks = [{ t: 'chase', s: intruder.id, n: 0 }];
       return;
     }
   }

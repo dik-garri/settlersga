@@ -26,6 +26,7 @@ import {
   toolPileNear,
 } from './specialists';
 import { orderAttack, orderGarrison, orderHold, orderMove, releaseFighters } from './field';
+import { updateIntruders } from './intruders';
 import { attackStrength } from './strength';
 import { createEconomy, ENDLESS, orderTool, orderWorkers, setAccepts, setDistribution, type EconomyState } from './economy';
 import { rebuildWorn, updatePaths } from './paths';
@@ -129,14 +130,15 @@ export class World {
     treesPlanted: number;
     prospected: number;
     trained: number;
-    thievesCaught: number;
+    /** Intruding specialists killed on hostile land (`intruders.ts`). */
+    intrudersKilled: number;
   } = {
     produced: emptyStock(),
     lost: emptyStock(),
     treesPlanted: 0,
     prospected: 0,
     trained: 0,
-    thievesCaught: 0,
+    intrudersKilled: 0,
   };
   tick = 0;
   /** Bumped whenever the territory changes, so views can redraw the border. */
@@ -645,6 +647,8 @@ export class World {
       if (b.done && isMilitary(b)) updateGarrison(this, b, assaults);
       if (b.done && BUILDINGS[b.type].barracks) updateBarracks(this, b);
     }
+    // Intruding specialists unmasked and met (`intruders.ts`) before the settlers move this tick.
+    updateIntruders(this);
     for (const s of this.settlers) if (!this.dying.has(s.id)) updateSettler(this, s);
     removeDead(this);
     pruneShots(this);

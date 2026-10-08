@@ -22,7 +22,8 @@ import { pathSpeed, wearTile } from './paths';
 import { restIdle } from './idle';
 import { landAt } from './land';
 import { donkeyAbort, donkeyIdle, loadTick, releaseLoad, unloadTick } from './trade';
-import { claimTick, pioneerIdle, specialistPostIdle, stealTick, thiefIdle, thiefWatch } from './specialists';
+import { claimTick, pioneerIdle, specialistPostIdle, stealTick, thiefIdle } from './specialists';
+import { chaseTick } from './intruders';
 import { findGame, huntTick, releaseHunt } from './hunting';
 import { RESOURCES, Terrain, type Building, type Point, type Settler, type Task } from './types';
 import type { World } from './world';
@@ -34,13 +35,15 @@ type GotoTarget = { x: number; y: number; adj?: boolean };
 /** Runs one tick of the settler's task queue, or its profession's idle behaviour when the queue is empty. */
 export function updateSettler(w: World, s: Settler): void {
   s.working = false;
-  if (s.kind === 'thief') {
-    thiefWatch(w, s);
-    if (w.dying.has(s.id)) return; // caught
+  // An opponent that died or let go no longer holds this settler (a pinned intruder whose pursuer fell).
+  if (s.opponent !== null) {
+    const o = w.getSettler(s.opponent);
+    if (!o || w.dying.has(o.id)) s.opponent = null;
   }
   const task = s.tasks[0];
-  // A defender called out to a duel stands and fights; the attacker's `assault` task resolves it.
-  if (s.opponent !== null && task?.t !== 'assault' && task?.t !== 'engage') {
+  // A defender called out to a duel stands and fights (and a pinned intruder stands); the attacker's
+  // `assault`, `engage` or `chase` task resolves it.
+  if (s.opponent !== null && task?.t !== 'assault' && task?.t !== 'engage' && task?.t !== 'chase') {
     s.working = true;
     return;
   }
@@ -146,6 +149,8 @@ export function updateSettler(w: World, s: Settler): void {
       return joinTick(w, s, task);
     case 'hunt':
       return huntTick(w, s, task);
+    case 'chase':
+      return chaseTick(w, s, task);
     case 'assault':
       return assaultTick(w, s, task);
     case 'engage':
@@ -347,6 +352,13 @@ export function abort(w: World, s: Settler): void {
       case 'load':
         releaseLoad(w, task);
         break;
+      case 'chase': {
+        // Let the pinned intruder go.
+        const e = w.getSettler(task.s);
+        if (e && e.opponent === s.id) e.opponent = null;
+        if (s.opponent === task.s) s.opponent = null;
+        break;
+      }
     }
   }
   s.tasks = [];

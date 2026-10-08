@@ -227,6 +227,8 @@ export type Task =
    * (`chase` approaches so far), aims for `n` ticks once in range, then carries `res`.
    */
   | { t: 'hunt'; a: number; n: number; chase: number; res: Resource }
+  /** A fighter going for an intruding specialist `s` on his owner's land (`intruders.ts`); `n` counts to the next blow. */
+  | { t: 'chase'; s: number; n: number }
   /** Wounded fighter lies in an infirmary until healed (`n` counts ticks to the next hit point). */
   | { t: 'heal'; b: number; n: number }
   /** Pioneer moves the border stone onto a neutral tile: after `n` ticks it is the owner's land. */
@@ -258,8 +260,10 @@ export interface Settler {
   idleTicks: number;
   /** True while doing manual work (chopping, building) — used for animation. */
   working: boolean;
-  /** Hit points; only soldiers have them (0 for everyone else). */
+  /** Hit points: fighters and specialists have them (0 for everyone else). */
   hp: number;
+  /** A disguised specialist (thief) on hostile land is exposed — a valid target — until this tick (`intruders.ts`). */
+  exposedUntil?: number;
   /** Settler this soldier is fighting right now, or null. */
   opponent: number | null;
   /** Military rank, 0-based index into `SOLDIER_LEVELS`; raised with gold. */

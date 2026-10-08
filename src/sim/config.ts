@@ -153,12 +153,29 @@ export const ORDERABLE: readonly SettlerKind[] = ['builder', 'digger', 'pioneer'
  *   every `claimTicks` ticks of work, up to `maxTiles` per errand; land a military building claims
  *   always wins over his (`recomputeTerritory`);
  * - thief: robs a foreign building's door pile or stock (`stealTicks` of work, one unit of its most
- *   plentiful good) and carries it home. On hostile land, every `checkEvery` ticks, any hostile fighter
- *   outdoors within `catchRadius` or garrisoned building whose door is within it catches him with
- *   `catchChance`.
+ *   plentiful good) and carries it home. How intruders are met is `INTRUDERS`.
  */
 export const PIONEER = { radius: 4, claimTicks: 40, maxTiles: 24 };
-export const THIEF = { stealTicks: 30, checkEvery: 10, catchRadius: 4, catchChance: 0.12 };
+export const THIEF = { stealTicks: 30 };
+
+/**
+ * Specialists on hostile land, as in Settlers 4 (Settlers United wiki, units/thief: «thieves attract
+ * swordsmen upon entering enemy territory, like all specialists do»; «thieves are decloaked if a
+ * military unit comes too close»; a thief has 20 HP). `intruders.ts`: every `scanEvery` ticks each
+ * specialist (`SPECIALIST_KINDS`) standing on land of a player who is neither his own nor an ally is
+ * an intruder for that player. A `cloaked` profession (the thief) is no target until an outdoor fighter
+ * of that player — or a garrisoned building of his whose door — is within `decloakRadius`; then he stays
+ * exposed for `exposedTicks`. For each exposed intruder that fewer than `responders` fighters are
+ * already chasing, the nearest own military building whose door is within `respondRadius` sends a melee
+ * fighter it can spare (above `keep`; field units nearby engage on their own, `FIELD.engageRadius`, and
+ * field archers shoot). The responder runs the `chase` task: walks up; within `seizeRadius` the
+ * intruder is caught and stands (`opponent` — a specialist cannot outrun a swordsman, and walking at the
+ * same pace he otherwise never would be reached); adjacent, the fighter strikes every `FIGHT_EVERY`
+ * ticks with ordinary blows — specialists do not fight back — until the intruder dies (his load is
+ * lost) or is off that player's land; then the fighter looks for a garrison again. Radii and timings
+ * are our approximations: the wiki gives no numbers.
+ */
+export const INTRUDERS = { scanEvery: 10, decloakRadius: 3, exposedTicks: 300, respondRadius: 12, responders: 1, seizeRadius: 3 };
 
 /**
  * Fighting strength, after Settlers 4 (settlers-united wiki, «fighting strength calculation»): a
@@ -470,8 +487,10 @@ export interface CombatDef {
 export interface ProfessionDef {
   name: string;
   behavior: Behavior;
-  /** Hit points at level 0 when taking up the profession (soldiers, archers). */
+  /** Hit points at level 0 when taking up the profession (fighters; specialists, see `INTRUDERS`). */
   hp?: number;
+  /** Disguised on hostile land until a fighter of that land comes close (the thief, `INTRUDERS`). */
+  cloaked?: boolean;
   combat?: CombatDef;
   /** Tool a carrier must fetch from storage to take up the profession (it is used up). */
   tool?: Resource;
@@ -522,12 +541,17 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
   miner: { name: 'Шахтёр', behavior: 'workshop', tool: 'pickaxe' },
   smelter: { name: 'Плавильщик', behavior: 'workshop' },
   toolsmith: { name: 'Инструментальщик', behavior: 'workshop' },
-  /** Carries a hammer on his errand and brings it back (see `World.sendGeologist`). */
-  geologist: { name: 'Геолог', behavior: 'prospect', tool: 'hammer' },
+  /**
+   * Carries a hammer on his errand and brings it back (see `World.sendGeologist`). Specialists' `hp`
+   * is on the soldiers' scale (a swordsman 100): the thief's 20 is Settlers 4's; the geologist's and
+   * pioneer's are our approximation (no source gives them).
+   */
+  geologist: { name: 'Геолог', behavior: 'prospect', tool: 'hammer', hp: 20 },
   weaponsmith: { name: 'Оружейник', behavior: 'workshop' },
   /** Specialists (`ORDERABLE`, `specialists.ts`). */
-  pioneer: { name: 'Первопроходец', behavior: 'pioneer', tool: 'shovel' },
-  thief: { name: 'Вор', behavior: 'thief' },
+  pioneer: { name: 'Первопроходец', behavior: 'pioneer', tool: 'shovel', hp: 20 },
+  /** Disguised: no target on hostile land until a fighter of that land comes close (`INTRUDERS`). */
+  thief: { name: 'Вор', behavior: 'thief', hp: 20, cloaked: true },
   donkeyrancher: { name: 'Погонщик', behavior: 'workshop' },
   donkey: { name: 'Осёл', behavior: 'donkey' },
   recruit: { name: 'Новобранец', behavior: 'workshop' },
