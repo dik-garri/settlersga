@@ -45,7 +45,7 @@ import { TradeRouteLayer } from './tradeRoutes';
 import { WorkAreaLayer } from './workArea';
 import { pathLevel } from '../sim/paths';
 import { chatPartner } from '../sim/idle';
-import { BANNERS, EDGE_DIRS, GROUND_PRIORITY, groundVariants, PATH_VARIANTS, PLAYER_COLORS, type GroundKind } from './sprites';
+import { BANNERS, EDGE_DIRS, siteSprite, GROUND_PRIORITY, groundVariants, PATH_VARIANTS, PLAYER_COLORS, type GroundKind } from './sprites';
 
 const TERRAIN_KIND: Record<Terrain, GroundKind> = {
   [Terrain.Water]: 'water',
@@ -1526,7 +1526,7 @@ export class GameRenderer {
     const body = new Container();
     body.position.set(p.x, p.y);
     body.zIndex = depthOf(cx, cy) + 0.25;
-    const site = new Sprite(this.atlas.get(b.w >= 3 ? 'building:site3' : 'building:site2'));
+    const site = new Sprite(this.atlas.get(`building:${siteSprite(b.w)}`));
     const main = new Sprite();
     body.addChild(site, main);
     // The owner's banner over military buildings; a 3D model brings its own pole position.

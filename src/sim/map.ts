@@ -370,6 +370,12 @@ export function guaranteedLobes(starts: readonly Point[], size: number) {
 }
 
 /**
+ * Half size of the levelled meadow cleared round every start: 15×15 tiles, five free tiles on each
+ * side of the 4×4 castle at least (its footprint spans start −2…+1) and room for its door and first huts.
+ */
+const START_MEADOW = 7;
+
+/**
  * Generates terrain, forests and ore. Around every start position (castle center) a meadow is
  * cleared and a grove, a quarry, a coal/iron mountain and a pond are guaranteed.
  */
@@ -440,8 +446,8 @@ export function generateMap(seed: number, size: number, starts: readonly Point[]
 
   const prepareStart = (cx: number, cy: number) => {
     // Clear a meadow for the castle.
-    for (let y = cy - 6; y <= cy + 6; y++) {
-      for (let x = cx - 6; x <= cx + 6; x++) {
+    for (let y = cy - START_MEADOW; y <= cy + START_MEADOW; y++) {
+      for (let x = cx - START_MEADOW; x <= cx + START_MEADOW; x++) {
         if (!map.inBounds(x, y)) continue;
         const i = map.idx(x, y);
         map.terrain[i] = Terrain.Grass;
@@ -519,7 +525,7 @@ export function generateMap(seed: number, size: number, starts: readonly Point[]
   elevate(
     map,
     height,
-    starts.map((st) => ({ cx: st.x, cy: st.y, r: 6 })),
+    starts.map((st) => ({ cx: st.x, cy: st.y, r: START_MEADOW })),
     guaranteedLobes(starts, size),
   );
   return map;

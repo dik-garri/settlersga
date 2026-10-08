@@ -73,12 +73,12 @@ export const ART3D_BUILDINGS: Record<string, { w: number; h: number; ax: number;
   ironsmelter: { w: 150, h: 140, ax: 75, ay: 100 },
   goldsmelter: { w: 150, h: 140, ax: 75, ay: 100 },
   weaponsmith: { w: 150, h: 140, ax: 75, ay: 100 },
-  barracks: { w: 150, h: 140, ax: 75, ay: 100 },
+  barracks: { w: 220, h: 190, ax: 110, ay: 135 },
   toolsmith: { w: 150, h: 140, ax: 75, ay: 100 },
-  pigfarm: { w: 150, h: 140, ax: 75, ay: 100 },
+  pigfarm: { w: 220, h: 190, ax: 110, ay: 135 },
   forester: { w: 150, h: 140, ax: 75, ay: 100 },
   market: { w: 150, h: 140, ax: 75, ay: 100 },
-  donkeyranch: { w: 150, h: 140, ax: 75, ay: 100 },
+  donkeyranch: { w: 220, h: 190, ax: 110, ay: 135 },
   fisher: { w: 150, h: 140, ax: 75, ay: 100 },
   fountain: { w: 150, h: 140, ax: 75, ay: 100 },
   flowerbed: { w: 80, h: 120, ax: 40, ay: 92 },
@@ -90,8 +90,8 @@ export const ART3D_BUILDINGS: Record<string, { w: number; h: number; ax: number;
   bakery: { w: 150, h: 140, ax: 75, ay: 100 },
   waterworks: { w: 150, h: 140, ax: 75, ay: 100 },
   warehouse: { w: 150, h: 140, ax: 75, ay: 100 },
-  castle: { w: 220, h: 250, ax: 110, ay: 190 },
-  fortress: { w: 230, h: 260, ax: 115, ay: 195 },
+  castle: { w: 320, h: 290, ax: 160, ay: 200 },
+  fortress: { w: 320, h: 290, ax: 160, ay: 200 },
   bigtower: { w: 170, h: 240, ax: 85, ay: 190 },
   lookout: { w: 150, h: 210, ax: 75, ay: 170 },
   infirmary: { w: 150, h: 140, ax: 75, ay: 100 },
@@ -105,10 +105,10 @@ export const ART3D_STAGED = Object.keys(ART3D_BUILDINGS);
  * by buildings.py's `note_banner` when it renders); replaces `BANNERS` in `sprites.ts` under `?art=3d`.
  */
 export const ART3D_BANNERS: Record<string, { x: number; y: number }> = {
-  tower: { x: 3.2, y: -49.8 },
-  castle: { x: 1.6, y: -101.7 },
-  fortress: { x: 12.8, y: -67.9 },
-  bigtower: { x: 4.2, y: -58.0 },
+  tower: { x: 3.2, y: -40.0 },
+  castle: { x: 2.1, y: -151.3 },
+  fortress: { x: 17.1, y: -98.0 },
+  bigtower: { x: 4.2, y: -37.2 },
 };
 /**
  * Live-effect anchors of 3D buildings, from the sprite anchor (printed by buildings.py's `note_fx`

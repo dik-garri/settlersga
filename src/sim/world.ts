@@ -209,7 +209,10 @@ export class World {
     const size = opts.size ?? MAP_SIZE;
     const starts = startPositions(size, opts.players ?? 1);
     this.map = generateMap(seed, size, starts);
-    for (const st of starts) this.addPlayer(st.x - 1, st.y - 1, opts.start ?? 'medium');
+    // The castle's footprint centre on the start (a 4×4 one half a tile up-left of it); its door
+    // stays where a 3×3 castle's was, `(st.x + 1, st.y + 2)`.
+    const { w: cw, h: ch } = BUILDINGS.castle;
+    for (const st of starts) this.addPlayer(st.x - Math.floor(cw / 2), st.y - Math.floor(ch / 2), opts.start ?? 'medium');
     opts.teams?.forEach((team, k) => {
       if (this.players[k] && Number.isFinite(team)) this.players[k].team = team;
     });
