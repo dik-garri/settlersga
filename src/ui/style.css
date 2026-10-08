@@ -732,3 +732,29 @@ button.wide {
     height: 32px;
   }
 }
+
+/* Selection box for army units (left drag on the map, as in Settlers 4). */
+.selbox {
+  position: absolute;
+  pointer-events: none;
+  border: 1px solid rgba(160, 255, 140, 0.95);
+  background: rgba(120, 220, 100, 0.12);
+  z-index: 5;
+}
+
+.shares .share-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0;
+}
+
+.shares .share-name {
+  flex: 1;
+}
+
+.units-view .hint-text {
+  font-size: 12px;
+  opacity: 0.8;
+  margin: 6px 0;
+}

@@ -14,6 +14,7 @@ import {
   TERRAIN,
 } from './config';
 import { clearStrokes, levelStep } from './digging';
+import { engageTick } from './field';
 import { assaultTick, healTick, joinTick, releaseJoin, soldierIdle } from './military';
 import { canPlant, findGatherTarget, findPlotFor, harvest, isGatherTarget, plant, type Target } from './nature';
 import { findPath } from './pathfinding';
@@ -39,7 +40,7 @@ export function updateSettler(w: World, s: Settler): void {
   }
   const task = s.tasks[0];
   // A defender called out to a duel stands and fights; the attacker's `assault` task resolves it.
-  if (s.opponent !== null && task?.t !== 'assault') {
+  if (s.opponent !== null && task?.t !== 'assault' && task?.t !== 'engage') {
     s.working = true;
     return;
   }
@@ -147,6 +148,8 @@ export function updateSettler(w: World, s: Settler): void {
       return huntTick(w, s, task);
     case 'assault':
       return assaultTick(w, s, task);
+    case 'engage':
+      return engageTick(w, s, task);
     case 'heal':
       return healTick(w, s, task);
     case 'claim':

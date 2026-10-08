@@ -30,5 +30,11 @@ describe('dev showcase (?demo)', () => {
     expect(w.pioneerLand).toBeGreaterThan(0);
     const thief = w.settlers.find((s) => s.kind === 'thief');
     expect(thief?.errand?.b).toBeDefined();
+    // A field squad stands round its leader (direct army control).
+    const leader = w.settlers.find((s) => s.kind === 'leader' && s.post);
+    expect(leader).toBeDefined();
+    const squad = w.settlers.filter((s) => s.post?.leader === leader!.id);
+    expect(squad.length).toBeGreaterThanOrEqual(4);
+    for (const s of squad) expect(Math.hypot(s.x - leader!.x, s.y - leader!.y)).toBeLessThan(4);
   });
 });

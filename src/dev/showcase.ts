@@ -1,6 +1,7 @@
 import { addBuilding, recomputeTerritory, spawnSettler } from '../sim/buildings';
-import { BUILD_TICKS_PER_UNIT, BUILDINGS, costOf, totalCost } from '../sim/config';
+import { BUILD_TICKS_PER_UNIT, BUILDINGS, costOf, PROFESSIONS, totalCost } from '../sim/config';
 import { clearStrokes } from '../sim/digging';
+import { formationSpots } from '../sim/field';
 import { enterGarrison } from '../sim/military';
 import { RESOURCES, Terrain, type Building, type BuildingType, type Resource } from '../sim/types';
 import { LOCAL_PLAYER, World } from '../sim/world';
@@ -227,6 +228,16 @@ export function buildShowcase(): World {
     thief.inside = null;
     w.sendThief(store.id);
   }
+  // A field squad round its leader (direct army control): it marches out and stands in formation.
+  const squad = (['leader', 'soldier', 'soldier', 'soldier', 'soldier', 'archer', 'archer'] as const).map((kind) => {
+    const s = spawnSettler(w, kind, c);
+    s.hp = PROFESSIONS[kind].hp ?? 100;
+    s.inside = null;
+    s.home = null;
+    return s.id;
+  });
+  const field = formationSpots(w, c.door.x - 5, c.door.y + 5, 1)[0];
+  if (field) w.orderMove(squad, field.x, field.y);
   // A few wounded in the castle: they walk to the infirmary and lie there while the demo opens.
   for (const id of c.garrison.slice(0, 3)) {
     const s = w.getSettler(id);

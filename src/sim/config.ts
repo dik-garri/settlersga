@@ -82,7 +82,7 @@ export const SHOT_TICKS = 5;
  * Default army make-up per player (weights, see `World.setShare`): the weaponsmith forges and the
  * barracks trains towards these proportions of fighters by weapon.
  */
-export const OUTPUT_SHARES: Partial<Record<Resource, number>> = { sword: 60, bow: 40 };
+export const OUTPUT_SHARES: Partial<Record<Resource, number>> = { sword: 60, bow: 40, armor: 8 };
 /** A barracks only takes a recruit while the player keeps at least this many idle carriers. */
 export const BARRACKS_MIN_IDLE = 2;
 export const START_BUILDERS = 3;
@@ -224,6 +224,7 @@ export const RESOURCE_INFO: Record<Resource, { name: string; group: ResourceGrou
   hammer: { name: 'Молотки', group: 'tools' },
   sword: { name: 'Мечи', group: 'military' },
   bow: { name: 'Луки', group: 'military' },
+  armor: { name: 'Доспехи', group: 'military' },
 };
 
 /** Field plantings stored in `map.crop` (stage) with their kind in `map.cropKind` (index here). */
@@ -459,6 +460,11 @@ export interface CombatDef {
   ranged?: { range: number; every: number; damage: [number, number] };
   /** Can take an empty enemy building (in Settlers 4 only swordsmen do; archers support). */
   captures?: boolean;
+  /**
+   * Squad leader (Settlers 4): own fighters within `radius` tiles of him (himself included) fight with
+   * `morale` × chance and damage, and soldiers ordered out with him follow him as a squad (`field.ts`).
+   */
+  leads?: { radius: number; morale: number };
 }
 
 export interface ProfessionDef {
@@ -469,6 +475,8 @@ export interface ProfessionDef {
   combat?: CombatDef;
   /** Tool a carrier must fetch from storage to take up the profession (it is used up). */
   tool?: Resource;
+  /** Further goods a barracks consumes to make this fighter, besides `tool` (the squad leader's sword). */
+  kit?: Partial<Stock>;
   gather?: GatherDef;
   plant?: PlantDef;
   hunt?: HuntDef;
@@ -531,7 +539,27 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
     hp: 80,
     combat: { melee: 0.6, ranged: { range: 5, every: 14, damage: [8, 14] } },
   },
+  /**
+   * Squad leader, as in Settlers 4: made in the barracks from armour and a sword (plus the gold of his
+   * level), a strong swordsman whose presence lifts the fighters around him (`combat.leads`).
+   */
+  leader: {
+    name: 'Командир',
+    behavior: 'soldier',
+    tool: 'armor',
+    kit: { sword: 1 },
+    hp: 130,
+    combat: { melee: 1.25, captures: true, leads: { radius: 6, morale: 1.15 } },
+  },
 };
+
+/**
+ * Field units (direct army control, `field.ts`): a fighter on a field post engages enemy fighters
+ * within `engageRadius` tiles (archers shoot within their range instead), looks around every
+ * `scanEvery` ticks, gives up a chase beyond `chaseLimit` tiles from his post, and walks back to the
+ * post once more than `slack` tiles from it. `formation`: tiles between neighbours of a formation.
+ */
+export const FIELD = { engageRadius: 4, scanEvery: 5, chaseLimit: 7, slack: 1.5, formation: 1 };
 
 // --------------------------------------------------------------- buildings
 
@@ -881,8 +909,8 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: 'weaponsmith',
     playerBuildable: true,
     category: 'military',
-    // Swords and bows, whichever garrisons are waiting for (`waitingFor`), keeping a small stock.
-    recipe: { inputs: { iron: 1, coal: 1 }, outputs: {}, outputChoice: ['sword', 'bow'], keepInStock: 3, ticks: 80 },
+    // Swords, bows and armour (squad leaders), whichever garrisons are waiting for (`waitingFor`), keeping a small stock.
+    recipe: { inputs: { iron: 1, coal: 1 }, outputs: {}, outputChoice: ['sword', 'bow', 'armor'], keepInStock: 3, ticks: 80 },
   },
   tower: {
     name: 'Сторожевая башня',

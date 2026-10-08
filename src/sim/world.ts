@@ -18,6 +18,7 @@ import {
 } from './config';
 import { levelTarget, needsDigger, needsLevelling } from './digging';
 import { dismissSpecialist, sendPioneer, sendThief } from './specialists';
+import { orderAttack, orderGarrison, orderHold, orderMove, releaseFighters } from './field';
 import { attackStrength } from './strength';
 import { createEconomy, ENDLESS, orderTool, orderWorkers, setAccepts, setDistribution, type EconomyState } from './economy';
 import { rebuildWorn, updatePaths } from './paths';
@@ -459,6 +460,33 @@ export class World {
   /** The fighters `attack` would send (up to `count`), for showing the composition before attacking. */
   attackerComposition(targetId: number, count: number, player: PlayerId = LOCAL_PLAYER): Settler[] {
     return attackerComposition(this, targetId, count, player);
+  }
+
+  /**
+   * Direct army control (`field.ts`): move fighters to a point as field units (in formation; with a
+   * squad leader among them the others follow him), let them hold where they stand, attack an enemy
+   * military building from wherever they are, or go into a garrison (`buildingId` null: the nearest
+   * with room). Each returns how many fighters obeyed.
+   */
+  orderMove(ids: readonly number[], x: number, y: number, player: PlayerId = LOCAL_PLAYER): number {
+    return orderMove(this, ids, x, y, player);
+  }
+
+  orderHold(ids: readonly number[], player: PlayerId = LOCAL_PLAYER): number {
+    return orderHold(this, ids, player);
+  }
+
+  orderAttack(ids: readonly number[], targetId: number, player: PlayerId = LOCAL_PLAYER): number {
+    return orderAttack(this, ids, targetId, player);
+  }
+
+  orderGarrison(ids: readonly number[], buildingId: number | null, player: PlayerId = LOCAL_PLAYER): number {
+    return orderGarrison(this, ids, buildingId, player);
+  }
+
+  /** Player command: up to `count` spare fighters of a military building step out as field units. */
+  releaseFighters(buildingId: number, count: number, player: PlayerId = LOCAL_PLAYER): number {
+    return releaseFighters(this, buildingId, count, player);
   }
 
   /** How many soldiers `attack` could send against the target right now. */

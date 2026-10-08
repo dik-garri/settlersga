@@ -4,7 +4,7 @@
  */
 import { BUILDINGS, LEVEL_RES, OUTPUT_SHARES, PROFESSIONS, RESOURCE_INFO, SOLDIER_LEVELS } from '../sim/config';
 import { isArcher, isFighter, slotsFree } from '../sim/military';
-import { RESOURCES, type Building, type Settler } from '../sim/types';
+import { RESOURCES, type Building, type Resource, type Settler } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { button, el, type View } from './dom';
 
@@ -12,6 +12,28 @@ import { button, el, type View } from './dom';
 const OUTPUT_WEAPONS = RESOURCES.filter((r) => OUTPUT_SHARES[r] !== undefined);
 
 export type Rows = [string, string][];
+
+/**
+ * Shares of share-controlled outputs (swords, bows, squad leaders' armour): one line per good with
+ * its percentage and −/+ buttons moving its weight by 10 (0–100). Weights are relative, so the
+ * percentages always add up to 100.
+ */
+export function shareControls(w: World, choices: readonly Resource[], onChange: () => void): HTMLElement {
+  const box = el('div', 'shares');
+  const total = choices.reduce((n, r) => n + w.shareOf(r), 0) || 1;
+  for (const r of choices) {
+    const row = el('div', 'share-row');
+    const pct = Math.round((100 * w.shareOf(r)) / total);
+    row.append(el('span', 'share-name', `${RESOURCE_INFO[r].name} ${pct}%`));
+    const step = (d: number) => () => {
+      w.setShare(r, Math.max(0, Math.min(100, w.shareOf(r) + d)));
+      onChange();
+    };
+    row.append(button('−', `Меньше: ${RESOURCE_INFO[r].name.toLowerCase()}`, step(-10)), button('+', `Больше: ${RESOURCE_INFO[r].name.toLowerCase()}`, step(10)));
+    box.append(row);
+  }
+  return box;
+}
 
 /** «мечники 1/1 · лучники 0/2»: who sits in a military building, by slot kind. */
 export function garrisonSlotRows(w: World, b: Building): Rows {
@@ -120,23 +142,6 @@ export class ArmyView implements View {
     }
     this.el.append(grid);
     this.el.append(el('h4', '', 'Уровень новобранцев'), recruitLevelControls(w, () => (this.key = '')));
-    if (OUTPUT_WEAPONS.length === 2) {
-      const [a, b] = OUTPUT_WEAPONS;
-      const total = shares[0] + shares[1] || 1;
-      this.el.append(el('h4', '', `Оружие: ${RESOURCE_INFO[a].name.toLowerCase()} ${Math.round((100 * shares[0]) / total)}% · ${RESOURCE_INFO[b].name.toLowerCase()} ${Math.round((100 * shares[1]) / total)}%`));
-      const row = el('div', 'info-actions');
-      const shift = (toB: number) => {
-        const t = w.shareOf(a) + w.shareOf(b) || 100;
-        const bw = Math.max(0, Math.min(100, Math.round((100 * w.shareOf(b)) / t) + toB));
-        w.setShare(b, bw);
-        w.setShare(a, 100 - bw);
-        this.update();
-      };
-      row.append(
-        button(`◀ ${RESOURCE_INFO[a].name.toLowerCase()}`, `Больше: ${RESOURCE_INFO[a].name.toLowerCase()}`, () => shift(-10)),
-        button(`${RESOURCE_INFO[b].name.toLowerCase()} ▶`, `Больше: ${RESOURCE_INFO[b].name.toLowerCase()}`, () => shift(10)),
-      );
-      this.el.append(row);
-    }
+    this.el.append(el('h4', '', 'Оружие'), shareControls(w, OUTPUT_WEAPONS, () => (this.key = '')));
   }
 }

@@ -119,7 +119,7 @@ async function main() {
     audio.listen(camera.x, camera.y, view.w / 2, camera.zoom);
     audio.update();
     const placing = state.placing && !isCommand(state.placing) ? state.placing : null;
-    renderer.sync(acc / TICK_MS, now, view, input.ghost(), state.selected, state.hover, input.area(), placing, state.selectedSettler);
+    renderer.sync(acc / TICK_MS, now, view, input.ghost(), state.selected, state.hover, input.area(), placing, state.selectedSettler, state.selectedUnits);
     hud.update(now);
     minimap.update(now, app.screen.width, app.screen.height);
   });

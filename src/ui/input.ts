@@ -1,6 +1,7 @@
 import type { Camera } from '../render/camera';
 import type { Area, GameRenderer, Ghost } from '../render/renderer';
 import { BUILDINGS, PIONEER, PROSPECT_RADIUS } from '../sim/config';
+import { isFighter, isMilitary } from '../sim/military';
 import { claimable } from '../sim/specialists';
 import { Terrain, type BuildingType } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
@@ -10,6 +11,8 @@ const KEY_PAN_SPEED = 900; // screen px per second
 const EDGE_PAN_SPEED = 700;
 const EDGE = 10;
 const DRAG_THRESHOLD = 5;
+/** Two clicks on a fighter within this many ms: select every own fighter of that kind on screen. */
+const DOUBLE_CLICK_MS = 350;
 
 export interface InputCallbacks {
   onSelectBuildType(type: Placeable | null): void;
@@ -25,6 +28,9 @@ export class InputController {
   private pointer: { x: number; y: number } | null = null;
   private drag: { lastX: number; lastY: number; startX: number; startY: number; button: number; moved: boolean } | null =
     null;
+  /** Selection box drawn while dragging with the left button (Settlers 4: drag to select fighters). */
+  private readonly box: HTMLDivElement;
+  private lastClick = { at: -Infinity, id: -1 };
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -34,6 +40,10 @@ export class InputController {
     private readonly state: GameState,
     private readonly cb: InputCallbacks,
   ) {
+    this.box = document.createElement('div');
+    this.box.className = 'selbox';
+    this.box.hidden = true;
+    canvas.parentElement?.appendChild(this.box);
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     canvas.addEventListener('pointerdown', (e) => this.onDown(e));
     canvas.addEventListener('pointermove', (e) => this.onMove(e));
@@ -136,7 +146,18 @@ export class InputController {
     const d = this.drag;
     if (!d) return;
     if (!d.moved && Math.hypot(p.x - d.startX, p.y - d.startY) > DRAG_THRESHOLD) d.moved = true;
-    if (d.moved) {
+    if (d.moved && this.selecting(d)) {
+      // Left drag (not while placing): a selection box, as in Settlers 4.
+      const r = this.canvas.getBoundingClientRect();
+      const host = this.box.parentElement!.getBoundingClientRect();
+      Object.assign(this.box.style, {
+        left: `${Math.min(d.startX, p.x) + r.left - host.left}px`,
+        top: `${Math.min(d.startY, p.y) + r.top - host.top}px`,
+        width: `${Math.abs(p.x - d.startX)}px`,
+        height: `${Math.abs(p.y - d.startY)}px`,
+      });
+      this.box.hidden = false;
+    } else if (d.moved) {
       this.camera.panScreen(p.x - d.lastX, p.y - d.lastY);
       this.canvas.style.cursor = 'grabbing';
     }
@@ -144,13 +165,39 @@ export class InputController {
     d.lastY = p.y;
   }
 
+  /** A left-button drag selects fighters unless something is being placed (then it pans). */
+  private selecting(d: { button: number }): boolean {
+    return d.button === 0 && !this.state.placing;
+  }
+
+  /** The player's own living fighters among settler ids. */
+  private ownFighters(ids: number[]): number[] {
+    return ids.filter((id) => {
+      const s = this.world.getSettler(id);
+      return !!s && s.owner === LOCAL_PLAYER && isFighter(s);
+    });
+  }
+
   private onUp(e: PointerEvent): void {
     const d = this.drag;
     this.drag = null;
     this.canvas.style.cursor = '';
-    if (!d || d.moved) return;
+    if (!d) return;
+    if (d.moved && this.selecting(d)) {
+      this.box.hidden = true;
+      const p = this.local(e);
+      const caught = this.ownFighters(this.renderer.settlersInRect(d.startX, d.startY, p.x, p.y));
+      this.state.selectedUnits = e.shiftKey ? [...new Set([...this.state.selectedUnits, ...caught])] : caught;
+      if (this.state.selectedUnits.length > 0) {
+        this.state.selected = null;
+        this.state.selectedSettler = null;
+      }
+      return;
+    }
+    if (d.moved) return;
     if (d.button === 2) {
-      this.cancel();
+      if (this.state.selectedUnits.length > 0 && !this.state.placing) this.order(this.local(e));
+      else this.cancel();
       return;
     }
     if (d.button !== 0) return;
@@ -193,18 +240,67 @@ export class InputController {
     }
     // A figure under the cursor wins over the ground and the building behind it.
     const sid = this.renderer.settlerAt(p.x, p.y);
-    if (sid !== null) {
-      this.state.selectedSettler = sid;
+    if (sid !== null && this.ownFighters([sid]).length > 0) {
+      // An own fighter: select it for orders (shift adds; a double click takes all of its kind on screen).
+      const now = performance.now();
+      const kind = this.world.getSettler(sid)!.kind;
+      if (this.lastClick.id === sid && now - this.lastClick.at < DOUBLE_CLICK_MS) {
+        const [w, h] = this.view;
+        this.state.selectedUnits = this.ownFighters(this.renderer.settlersInRect(0, 0, w, h)).filter(
+          (id) => this.world.getSettler(id)!.kind === kind,
+        );
+      } else if (e.shiftKey) {
+        const set = new Set(this.state.selectedUnits);
+        if (set.has(sid)) set.delete(sid);
+        else set.add(sid);
+        this.state.selectedUnits = [...set];
+      } else {
+        this.state.selectedUnits = [sid];
+      }
+      this.lastClick = { at: now, id: sid };
+      this.state.selectedSettler = null;
       this.state.selected = null;
       return;
     }
+    if (sid !== null) {
+      this.state.selectedSettler = sid;
+      this.state.selected = null;
+      this.state.selectedUnits = [];
+      return;
+    }
     this.state.selectedSettler = null;
+    this.state.selectedUnits = [];
     const tx = Math.round(t.x);
     const ty = Math.round(t.y);
     const b = this.world.buildingAt(tx, ty);
     // Under the fog nothing can be picked: the player does not know what stands there.
     const known = !this.state.fog || (b !== undefined && b.owner === LOCAL_PLAYER) || this.world.isExplored(tx, ty);
     this.state.selected = b && known ? b.id : null;
+  }
+
+  /**
+   * Right click with fighters selected, as in Settlers 4: on an enemy military building — attack it;
+   * on an own military building — go in; anywhere else — move there.
+   */
+  private order(p: { x: number; y: number }): void {
+    const ids = this.state.selectedUnits;
+    const t = this.tileAt(p.x, p.y);
+    const tx = Math.round(t.x);
+    const ty = Math.round(t.y);
+    const b = this.world.buildingAt(tx, ty);
+    const known = !this.state.fog || (b !== undefined && b.owner === LOCAL_PLAYER) || this.world.isExplored(tx, ty);
+    if (b && known && isMilitary(b) && b.done && b.owner !== LOCAL_PLAYER && !this.world.allied(b.owner, LOCAL_PLAYER)) {
+      const n = this.world.orderAttack(ids, b.id);
+      this.cb.onMessage(n > 0 ? `В атаку: ${n}` : 'Эти бойцы сейчас не могут атаковать');
+      return;
+    }
+    if (b && isMilitary(b) && b.done && b.owner === LOCAL_PLAYER) {
+      const n = this.world.orderGarrison(ids, b.id);
+      this.cb.onMessage(n > 0 ? `В гарнизон: ${n}` : 'В этом здании нет мест для них');
+      return;
+    }
+    const n = this.world.orderMove(ids, tx, ty);
+    if (n === 0) this.cb.onMessage('Туда не пройти');
   }
 
   private onWheel(e: WheelEvent): void {
@@ -218,6 +314,7 @@ export class InputController {
     else {
       this.state.selected = null;
       this.state.selectedSettler = null;
+      this.state.selectedUnits = [];
     }
   }
 

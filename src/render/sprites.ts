@@ -1965,6 +1965,18 @@ function paintTool(ctx: Ctx, res: Resource): void {
       ctx.fillStyle = '#8a6a2c';
       ctx.fillRect(-6, 1, 3, 3);
       return;
+    case 'armor':
+      // A breastplate with a raised ridge and leather straps.
+      ctx.fillStyle = '#b9bec4';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 6, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#e4e7ea';
+      ctx.fillRect(-5, -0.5, 10, 1);
+      ctx.fillStyle = '#7a5230';
+      ctx.fillRect(-4, -4, 2, 2);
+      ctx.fillRect(2, -4, 2, 2);
+      return;
   }
 }
 
