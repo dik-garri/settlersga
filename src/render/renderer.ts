@@ -41,6 +41,7 @@ const YARD_KINDS = 8;
 const YARD_RX = 30;
 const YARD_RY = 15;
 import { needsLevelling } from '../sim/digging';
+import { TradeRouteLayer } from './tradeRoutes';
 import { WorkAreaLayer } from './workArea';
 import { pathLevel } from '../sim/paths';
 import { chatPartner } from '../sim/idle';
@@ -219,6 +220,8 @@ export class GameRenderer {
   private readonly hints = new Graphics();
   /** The work area of the building being placed or selected (`workArea.ts`), under the objects. */
   private readonly workArea: WorkAreaLayer;
+  /** Caravan routes of the local player's markets (`tradeRoutes.ts`), under the objects. */
+  private readonly tradeRoutes: TradeRouteLayer;
   /** Set by the input while the player picks a new work-area centre for a building. */
   workAreaPreview: { id: number; x: number; y: number } | null = null;
   /** Marker over the selected settler, above the objects (it must not hide behind houses). */
@@ -304,7 +307,8 @@ export class GameRenderer {
     private readonly fogOn = true,
   ) {
     this.workArea = new WorkAreaLayer(sim, (x, y) => this.diamond(x, y), (vx, vy) => this.corner(vx, vy), (x, y) => this.surface(x, y));
-    this.world.addChild(this.ground, this.territory, this.marks, this.workArea.g, this.hints, this.objects, this.settlerMark, this.badges, this.shots, this.fog, this.ghostLayer);
+    this.tradeRoutes = new TradeRouteLayer(sim, (x, y) => this.surface(x, y), (p) => this.playerTint[(p - 1) % this.playerTint.length]);
+    this.world.addChild(this.ground, this.territory, this.marks, this.workArea.g, this.tradeRoutes.g, this.hints, this.objects, this.settlerMark, this.badges, this.shots, this.fog, this.ghostLayer);
     this.settlerTex = atlas.settlerTextures();
     this.animals = new AnimalLayer(sim, this.objects, (n) => atlas.get(n), fogOn, this.wareTex);
     this.settler3d = atlas.art3d?.settlers ?? null;
@@ -741,6 +745,7 @@ export class GameRenderer {
     this.markUnits(selectedUnits, groups, selectedSettler);
     this.drawHints(placing, timeMs);
     this.drawWorkArea(ghost, selected);
+    this.tradeRoutes.update(selected);
   }
 
   /** The work area: a centre being chosen, else the building being placed, else the selected one. */

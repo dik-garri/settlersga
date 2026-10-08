@@ -1,5 +1,7 @@
 import { BUILDINGS, ORDERABLE, START_CONDITIONS, type StartLevel } from './config';
-import { RESOURCES, type Building, type BuildingType, type PlayerId, type Resource, type SettlerKind } from './types';
+import { nearestStorage } from './buildings';
+import { landOf } from './land';
+import { RESOURCES, type Building, type BuildingType, type PlayerId, type Resource, type SettlerKind, type Task } from './types';
 import type { World } from './world';
 
 /**
@@ -194,5 +196,37 @@ export function setAccepts(w: World, player: PlayerId, id: number, res: Resource
   else refuse.add(res);
   b.refuse = RESOURCES.filter((r) => refuse.has(r));
   if (b.refuse.length === 0) delete b.refuse;
+  if (!on) redirectDeliveries(w, b, res);
   return true;
+}
+
+/**
+ * Carriers already bringing `res` to a warehouse that has just stopped accepting it turn to the
+ * nearest warehouse on the same land piece that takes it (reservations move with them). With no such
+ * warehouse they finish the trip: the good is stored there rather than lost.
+ */
+function redirectDeliveries(w: World, b: Building, res: Resource): void {
+  for (const s of w.settlers) {
+    if (s.owner !== b.owner) continue;
+    const k = s.tasks.findIndex((t) => t.t === 'drop' && t.b === b.id && t.res === res);
+    if (k < 0) continue;
+    const piece = landOf(w, b);
+    const to = nearestStorage(w, s.owner, s, res, piece);
+    if (!to || to === b) continue;
+    const drop = s.tasks[k] as Extract<Task, { t: 'drop' }>;
+    b.inbound[res]--;
+    to.inbound[res]++;
+    drop.b = to.id;
+    // The walk that leads to the old door now leads to the new one.
+    const walk = s.tasks[k - 1];
+    if (walk?.t === 'goto' && walk.x === b.door.x && walk.y === b.door.y) {
+      walk.x = to.door.x;
+      walk.y = to.door.y;
+      if (k - 1 === 0) s.path = [];
+    } else {
+      // Already at the old door (or the drop came without its walk): walk to the new one first.
+      s.tasks.splice(k, 0, { t: 'goto', x: to.door.x, y: to.door.y });
+      if (k === 0) s.path = [];
+    }
+  }
 }

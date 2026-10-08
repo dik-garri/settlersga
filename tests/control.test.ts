@@ -25,6 +25,33 @@ describe('warehouses', () => {
     expect(store.done && hut.done).toBe(true);
     expect(store.output.log).toBeGreaterThan(0);
   });
+
+  it('turn carriers already on their way back when a warehouse stops taking the good', () => {
+    const w = richWorld();
+    const c = w.castle;
+    const store = placeNear(w, 'warehouse', c.x + 8, c.y - 3)!;
+    placeNear(w, 'woodcutter', c.x + 8, c.y - 6);
+    const enRoute = () =>
+      w.settlers.filter((s) => s.tasks.some((t) => t.t === 'drop' && t.b === store.id && t.res === 'log'));
+    let i = 0;
+    while (enRoute().length === 0 && i++ < 12000) w.step();
+    const carriers = enRoute();
+    expect(carriers.length).toBeGreaterThan(0);
+    const held = store.output.log;
+    const castleBefore = c.output.log;
+    expect(w.setAccepts(store.id, 'log', false)).toBe(true);
+    // Every one of them now heads for the castle, and the reservations moved with them.
+    expect(enRoute()).toHaveLength(0);
+    expect(store.inbound.log).toBe(0);
+    for (const s of carriers) {
+      expect(s.tasks.some((t) => t.t === 'drop' && t.b === c.id && t.res === 'log')).toBe(true);
+    }
+    run(w, 1500);
+    expect(store.output.log).toBeLessThanOrEqual(held);
+    expect(c.output.log).toBeGreaterThan(castleBefore);
+    expect(w.stats.lost.log).toBe(0);
+    for (const b of w.buildings.values()) expect(b.inbound.log).toBeGreaterThanOrEqual(0);
+  });
 });
 
 describe('priority', () => {

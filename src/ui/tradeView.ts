@@ -32,7 +32,18 @@ function donkeys(world: World, owner: number): { all: number; idle: number } {
   return { all, idle };
 }
 
-const where = (m: Building) => `${m.door.x}, ${m.door.y}`;
+/**
+ * A market's name for the player: «Рынок №k», numbered by building id among the owner's markets
+ * (sites included), so a number never changes while that market stands.
+ */
+export function marketName(world: World, m: Building): string {
+  let k = 1;
+  for (const o of world.buildings.values()) if (o.owner === m.owner && BUILDINGS[o.type].market && o.id < m.id) k++;
+  return `Рынок №${k}`;
+}
+
+/** Straight-line distance between two buildings' doors, in tiles. */
+const tilesBetween = (a: Building, b: Building) => Math.round(Math.hypot(a.door.x - b.door.x, a.door.y - b.door.y));
 
 /** Whether the market has an order (finite or endless) for the good. */
 const carried = (b: Building, r: Resource) => b.trade?.orders[r] !== undefined;
@@ -49,7 +60,8 @@ export function tradeRows(world: World, b: Building): [string, string][] {
   if (!b.done) return rows;
   if (def.market) {
     const to = routeTarget(world, b);
-    rows.push(['Маршрут', to ? `к рынку (${where(to)})` : 'не задан']);
+    rows.push(['Название', marketName(world, b)]);
+    rows.push(['Маршрут', to ? `→ ${marketName(world, to)}, ${tilesBetween(b, to)} кл.` : 'не задан']);
     const d = donkeys(world, b.owner);
     rows.push(['Ослы', `${d.all} (свободны ${d.idle})`]);
     for (const r of RESOURCES) if (b.output[r] > 0) rows.push([`${nameOf(r)} (прибыло)`, String(b.output[r])]);
@@ -85,7 +97,12 @@ export function tradeControls(world: World, b: Building): HTMLElement | null {
   const routes = el('div', 'info-actions');
   for (const m of markets) {
     routes.append(
-      button(`→ (${where(m)})`, 'Ослы повезут товары к этому рынку', () => world.setTradeRoute(b.id, m.id), m.id === to ? 'active' : ''),
+      button(
+        `→ ${marketName(world, m)} · ${tilesBetween(b, m)} кл.`,
+        'Ослы повезут товары к этому рынку (маршрут виден на карте пунктиром)',
+        () => world.setTradeRoute(b.id, m.id),
+        m.id === to ? 'active' : '',
+      ),
     );
   }
   if (to !== null) routes.append(button('✕', 'Снять маршрут', () => world.setTradeRoute(b.id, null)));
