@@ -47,7 +47,7 @@ export class BuildView implements View {
     MENU.forEach(({ category, types }, t) => {
       const tab = el('button', 'cat-tab');
       tab.title = `${CATEGORIES[category]} (Tab — следующая)`;
-      if (types[0]) tab.append(buildingIcon(types[0], 34));
+      if (types[0]) tab.append(buildingIcon(types[0], 28));
       tab.onclick = () => {
         this.showTab(t);
         tab.blur();

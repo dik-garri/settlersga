@@ -291,11 +291,6 @@ button.wide {
   place-items: center;
 }
 
-.cat-tab canvas {
-  width: 28px !important;
-  height: 28px !important;
-}
-
 .cat-tab:hover {
   background: rgba(255, 245, 220, 0.5);
 }

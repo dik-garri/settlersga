@@ -374,15 +374,17 @@ export class SpriteAtlas {
   }
 }
 
-/** Standalone ware icon for HTML UI, drawn by the same painter as goods on the map. */
 /** The 3D art the HTML icons use too (`?art=3d`), set by the `SpriteAtlas`. */
 let iconArt: Art3d | null = null;
-/** Opaque bounds of each 3D image, so icons are cropped to what is drawn. */
-const opaqueBounds = new Map<HTMLImageElement, { x: number; y: number; w: number; h: number }>();
+type Bounds = { x: number; y: number; w: number; h: number };
+/** Opaque bounds of each 3D image (or frame of one), so icons are cropped to what is drawn. */
+const opaqueBounds = new Map<HTMLImageElement, Map<string, Bounds>>();
 
-function boundsOf(img: HTMLImageElement, sx = 0, sy = 0, sw = img.width, sh = img.height) {
-  const key = img;
-  const cached = sx === 0 && sy === 0 && sw === img.width ? opaqueBounds.get(key) : undefined;
+function boundsOf(img: HTMLImageElement, sx = 0, sy = 0, sw = img.width, sh = img.height): Bounds {
+  let perImage = opaqueBounds.get(img);
+  if (!perImage) opaqueBounds.set(img, (perImage = new Map()));
+  const key = `${sx},${sy},${sw},${sh}`;
+  const cached = perImage.get(key);
   if (cached) return cached;
   const c = document.createElement('canvas');
   c.width = sw;
@@ -404,30 +406,81 @@ function boundsOf(img: HTMLImageElement, sx = 0, sy = 0, sw = img.width, sh = im
     }
   }
   const b = x1 < 0 ? { x: sx, y: sy, w: sw, h: sh } : { x: sx + x0, y: sy + y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
-  if (sx === 0 && sy === 0 && sw === img.width) opaqueBounds.set(key, b);
+  perImage.set(key, b);
   return b;
 }
 
-/** A square HTML icon canvas showing (part of) an image, cropped to its opaque pixels and centred. */
-function imageIcon(img: HTMLImageElement, size: number, className: string, frame?: [number, number, number, number]) {
+/** A canvas of `size` CSS px backed by `size` × devicePixelRatio device pixels, so CSS never scales it. */
+function iconCanvas(size: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; px: number } {
   const canvas = document.createElement('canvas');
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = size * dpr;
-  canvas.height = size * dpr;
+  const px = Math.round(size * (window.devicePixelRatio || 1));
+  canvas.width = px;
+  canvas.height = px;
   canvas.style.width = `${size}px`;
   canvas.style.height = `${size}px`;
+  return { canvas, ctx: canvas.getContext('2d')!, px };
+}
+
+/**
+ * Draws a source rectangle scaled down into a destination one. A single large reduction skips
+ * source pixels (the browser filter looks at only a few around each sample) and comes out grainy,
+ * so the image is first halved step by step, each step a clean 2:1 average, as mipmaps do.
+ */
+function drawReduced(ctx: CanvasRenderingContext2D, src: CanvasImageSource, b: Bounds, dx: number, dy: number, dw: number, dh: number) {
+  let img: CanvasImageSource = src;
+  let { x, y, w, h } = b;
+  while (w > dw * 2 && h > dh * 2) {
+    const c = document.createElement('canvas');
+    c.width = Math.ceil(w / 2);
+    c.height = Math.ceil(h / 2);
+    const g = c.getContext('2d')!;
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(img, x, y, w, h, 0, 0, c.width, c.height);
+    img = c;
+    x = 0;
+    y = 0;
+    w = c.width;
+    h = c.height;
+  }
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, x, y, w, h, dx, dy, dw, dh);
+}
+
+/**
+ * A square HTML icon canvas showing (part of) an image, cropped to its opaque pixels, centred and
+ * drawn at device resolution on whole pixels. `maxScale` caps enlargement (1 = never upscale: an
+ * image smaller than the icon stays sharp and leaves a margin instead of going soft).
+ */
+function imageIcon(
+  img: HTMLImageElement,
+  size: number,
+  className: string,
+  frame?: [number, number, number, number],
+  maxScale = Infinity,
+) {
+  const { canvas, ctx, px } = iconCanvas(size);
   if (className) canvas.className = className;
   const b = frame ? boundsOf(img, ...frame) : boundsOf(img);
-  const k = (size * dpr) / Math.max(b.w, b.h);
-  const w = b.w * k;
-  const h = b.h * k;
-  const ctx = canvas.getContext('2d')!;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(img, b.x, b.y, b.w, b.h, (size * dpr - w) / 2, (size * dpr - h) / 2, w, h);
+  const k = Math.min(px / Math.max(b.w, b.h), maxScale);
+  const w = Math.max(1, Math.round(b.w * k));
+  const h = Math.max(1, Math.round(b.h * k));
+  drawReduced(ctx, img, b, Math.floor((px - w) / 2), Math.floor((px - h) / 2), w, h);
   return canvas;
 }
 
+/**
+ * Standalone ware icon for HTML UI: the resource's menu icon (`icons.png`, rendered large for the
+ * menus), else the carried ware (art without icons), else the same painter as goods on the map.
+ */
 export function wareIcon(res: Resource, size = 18): HTMLCanvasElement {
+  const icons = iconArt?.images.get('icons');
+  const meta = iconArt?.icons;
+  const i = meta ? meta.order.indexOf(res) : -1;
+  if (icons && meta && i >= 0) {
+    const n = icons.width / meta.columns; // = meta.size unless the sheet was saved at another scale
+    const frame: [number, number, number, number] = [(i % meta.columns) * n, Math.floor(i / meta.columns) * n, n, n];
+    return imageIcon(icons, size, 'ware-icon', frame);
+  }
   const wares = iconArt?.images.get('wares');
   const k = iconArt ? iconArt.wares.order.indexOf(res) : -1;
   if (wares && iconArt && k >= 0) {
@@ -435,16 +488,10 @@ export function wareIcon(res: Resource, size = 18): HTMLCanvasElement {
     const r = wares.height / h;
     return imageIcon(wares, size, 'ware-icon', [k * w * r, 0, w * r, h * r]);
   }
-  const canvas = document.createElement('canvas');
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = size * dpr;
-  canvas.height = size * dpr;
-  canvas.style.width = `${size}px`;
-  canvas.style.height = `${size}px`;
+  const { canvas, ctx, px } = iconCanvas(size);
   canvas.className = 'ware-icon';
-  const ctx = canvas.getContext('2d')!;
-  const scale = size / 16;
-  ctx.scale(dpr * scale, dpr * scale);
+  const scale = px / 16;
+  ctx.scale(scale, scale);
   ctx.translate(0, 3);
   paintWare(ctx, res);
   return canvas;
@@ -458,18 +505,12 @@ export function settlerIcon(kind: SettlerKind, size = 56): HTMLCanvasElement {
     // Standing with the profession's tool, facing south-east.
     const st3 = styleOf(kind);
     const { page, rect } = iconArt.settlers.portrait(st3.holds, 1, st3.outfit);
-    return imageIcon(page, size, '', rect);
+    return imageIcon(page, size, '', rect, 1);
   }
-  const canvas = document.createElement('canvas');
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = size * dpr;
-  canvas.height = size * dpr;
-  canvas.style.width = `${size}px`;
-  canvas.style.height = `${size}px`;
-  const ctx = canvas.getContext('2d')!;
-  const scale = (size / SETTLER_H) * 1.05;
-  ctx.scale(dpr * scale, dpr * scale);
-  ctx.translate((size / scale - SETTLER_W) / 2, -1);
+  const { canvas, ctx, px } = iconCanvas(size);
+  const scale = (px / SETTLER_H) * 1.05;
+  ctx.scale(scale, scale);
+  ctx.translate((px / scale - SETTLER_W) / 2, -1);
   const st = styleOf(kind);
   // Facing south-east, mid-swing of the profession's work.
   paintSettlerPortrait(ctx, 1, st.fighter ? PLAYER_COLORS[0] : st.tunic, st.hat, st.hatStyle, st.work, 1);
@@ -479,41 +520,33 @@ export function settlerIcon(kind: SettlerKind, size = 56): HTMLCanvasElement {
 /** An animal standing, facing south-east (the pack donkey's portrait): the Blender sheet or the painter. */
 function animalIcon(kind: AnimalKind, size: number): HTMLCanvasElement {
   const c = ANIMAL_CELLS[kind];
-  const canvas = document.createElement('canvas');
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = size * dpr;
-  canvas.height = size * dpr;
-  canvas.style.width = `${size}px`;
-  canvas.style.height = `${size}px`;
-  const ctx = canvas.getContext('2d')!;
-  const scale = (size / Math.max(c.w, c.h)) * dpr;
-  ctx.scale(scale, scale);
-  ctx.translate((Math.max(c.w, c.h) - c.w) / 2, (Math.max(c.w, c.h) - c.h) / 2);
+  // The large portrait render (animals.py `portraits`), cropped and never enlarged.
+  const portrait = iconArt?.images.get(`animal-${kind}-portrait`);
+  if (portrait) return imageIcon(portrait, size, '', undefined, 1);
   const sheet = iconArt?.images.get(`animal-${kind}`);
   const dir = 1;
   if (sheet) {
+    // The standing frame of the sheet, cropped to the animal (small: enlarged to fit).
     const r = sheet.width / (c.w * ANIMAL_COLUMNS);
-    ctx.drawImage(sheet, ANIMAL_STAND * c.w * r, dir * c.h * r, c.w * r, c.h * r, 0, 0, c.w, c.h);
-  } else paintAnimal(ctx, kind, dir, ANIMAL_STAND);
+    return imageIcon(sheet, size, '', [ANIMAL_STAND * c.w * r, dir * c.h * r, c.w * r, c.h * r]);
+  }
+  const { canvas, ctx, px } = iconCanvas(size);
+  const scale = px / Math.max(c.w, c.h);
+  ctx.scale(scale, scale);
+  ctx.translate((Math.max(c.w, c.h) - c.w) / 2, (Math.max(c.w, c.h) - c.h) / 2);
+  paintAnimal(ctx, kind, dir, ANIMAL_STAND);
   return canvas;
 }
 
 /** Standalone icon canvas for HTML UI. */
 export function buildingIcon(type: BuildingType, size = 56): HTMLCanvasElement {
   const img3d = iconArt?.images.get(type);
-  if (img3d) return imageIcon(img3d, size, '');
+  if (img3d) return imageIcon(img3d, size, '', undefined, 1);
   const c = BUILDING_CANVAS[type];
-  const canvas = document.createElement('canvas');
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = size * dpr;
-  canvas.height = size * dpr;
-  canvas.style.width = `${size}px`;
-  canvas.style.height = `${size}px`;
-  const ctx = canvas.getContext('2d')!;
-  const scale = size / Math.max(c.w, c.h);
-  ctx.scale(dpr, dpr);
+  const { canvas, ctx, px } = iconCanvas(size);
+  const scale = px / Math.max(c.w, c.h);
   // Painters draw around the footprint center; shift so the whole sprite fits.
-  ctx.translate(size / 2, (c.ay / c.h) * size);
+  ctx.translate(px / 2, (c.ay / c.h) * px);
   ctx.scale(scale, scale);
   BUILDING_PAINTERS[type](ctx);
   return canvas;

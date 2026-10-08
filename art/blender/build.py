@@ -2,7 +2,7 @@
 
     blender -b --factory-startup -P art/blender/build.py -- [names...]
 
-Names: settlers (every figure, see figures.py), woodcutter, sawmill, stonecutter, tower, house_large, tree, deposit, piles (or piles:fish,coal), wares (default: all). Every sprite keeps the size and anchor
+Names: settlers (every figure, see figures.py), woodcutter, sawmill, stonecutter, tower, house_large, tree, deposit, piles (or piles:fish,coal), wares, icons (or icons:axe,saw: the menu icons) (default: all). Every sprite keeps the size and anchor
 of the procedural sprite it replaces (src/render/sprites.ts, settlerArt.ts), so the game can swap
 them in without other changes.
 """
@@ -314,7 +314,7 @@ STAGES = 4
 
 def main():
     args = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
-    names = args or ['settlers', 'piles', 'wares', 'millsails', *SINGLE]
+    names = args or ['settlers', 'piles', 'wares', 'icons', 'millsails', *SINGLE]
     os.makedirs(OUT, exist_ok=True)
     os.makedirs(TMP, exist_ok=True)
     for name in names:
@@ -339,6 +339,10 @@ def main():
                 continue
             if n == 'wares':
                 goods.render_wares(OUT, TMP)
+                continue
+            if n == 'icons' or n.startswith('icons:'):
+                # `icons` renders every resource's menu icon, `icons:axe,saw` only those.
+                goods.render_icons(OUT, TMP, n.split(':', 1)[1].split(',') if ':' in n else None)
                 continue
             build, w, h, ax, ay = SINGLE[n]
             lib.setup_camera(scene, w, h, ax, ay)

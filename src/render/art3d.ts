@@ -7,6 +7,7 @@
  * sheets (`animal-<kind>.png`, see `animalArt.ts`) are loaded here too.
  */
 import { ANIMAL_KINDS } from '../sim/config';
+import { UNIT_ANIMALS } from './animalArt';
 import { RESOURCES, type Resource } from '../sim/types';
 import { buildSettler3d, type Settler3d, type SettlersMeta } from './settler3d';
 
@@ -33,12 +34,24 @@ export interface WaresMeta {
   order: string[];
 }
 
+/**
+ * `icons.json` written by `art/blender/goods.py`: the menu icons of every resource, one `size`²
+ * square each, `columns` a row of `icons.png`, in `order`.
+ */
+export interface IconsMeta {
+  size: number;
+  columns: number;
+  order: string[];
+}
+
 export interface Art3d {
   images: Map<string, HTMLImageElement>;
   /** Settler and soldier figures (`settlers.json` + pages). */
   settlers: Settler3d;
   ground: GroundMeta;
   wares: WaresMeta;
+  /** Menu icons (`icons.png`, in `images` as `icons`); optional: without them the UI uses `wares`. */
+  icons?: IconsMeta;
 }
 
 /** Frames of the 3D mill sails over a quarter turn (`SAIL_FRAMES` in buildings.py); same canvas as the mill. */
@@ -203,5 +216,23 @@ export async function loadArt3d(): Promise<Art3d> {
       ),
     ),
   );
-  return { images, settlers, ground, wares };
+  // Large portraits of the animals that are units (the pack donkey's window), optional as well.
+  await Promise.all(
+    [...new Set(Object.values(UNIT_ANIMALS))].map((k) =>
+      loadImage(`${base}animal-${k}-portrait.png`).then(
+        (img) => images.set(`animal-${k}-portrait`, img),
+        () => undefined,
+      ),
+    ),
+  );
+  // Menu icons are optional too: without them the HTML icons fall back to the carried wares.
+  const icons = await fetch(`${base}icons.json`)
+    .then((r) => (r.ok ? (r.json() as Promise<IconsMeta>) : undefined))
+    .then(async (meta) => {
+      if (!meta) return undefined;
+      images.set('icons', await loadImage(`${base}icons.png`));
+      return meta;
+    })
+    .catch(() => undefined);
+  return { images, settlers, ground, wares, icons };
 }
