@@ -1234,6 +1234,31 @@ export const AI = {
   tradeEvery: 300,
 };
 
+/**
+ * Computer player difficulty, chosen per opponent in the game setup (`WorldOptions.difficulty`,
+ * kept in the saved `AiState.level`). A level scales the `AI` tuning, so `medium` is exactly the `AI`
+ * table (what `sim:ai` measures): `think` multiplies `AI.thinkEvery` (how often it decides), `attack`
+ * the `AI.attackRatio` it wants over the defenders, `peace` `AI.peaceTicks` (no attacks before),
+ * `cooldown` `AI.attackCooldown`; `sites` is added to `AI.maxOpenSites`; `bonus` goods start in its
+ * castle on top of the start level's.
+ */
+export type AiLevel = 'easy' | 'medium' | 'hard';
+export interface AiLevelDef {
+  name: string;
+  think: number;
+  attack: number;
+  peace: number;
+  cooldown: number;
+  sites: number;
+  bonus: Partial<Stock>;
+}
+export const AI_LEVELS: Record<AiLevel, AiLevelDef> = {
+  easy: { name: 'Лёгкий', think: 2, attack: 1.6, peace: 1.6, cooldown: 2, sites: -1, bonus: {} },
+  medium: { name: 'Средний', think: 1, attack: 1, peace: 1, cooldown: 1, sites: 0, bonus: {} },
+  hard: { name: 'Тяжёлый', think: 0.6, attack: 0.85, peace: 0.7, cooldown: 0.75, sites: 1, bonus: { plank: 12, stone: 8, fish: 6, bread: 6 } },
+};
+export const AI_LEVEL_IDS = Object.keys(AI_LEVELS) as AiLevel[];
+
 // ---------------------------------------------------------------- wild animals
 
 /** Where an animal lives: open grass, grass at a forest's edge, or water edges (shallow water too). */
