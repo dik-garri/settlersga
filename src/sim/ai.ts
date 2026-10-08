@@ -44,7 +44,7 @@ import { defend, sendScout, stageStrike, sweep, updateScout, updateStrike } from
 import { ENDLESS } from './economy';
 import { inBuildingSight, visionRadius } from './fog';
 import { isCutOff, landAt, landOf } from './land';
-import { claimable, robbable } from './specialists';
+import { claimable, isFreeSpecialist, robbable } from './specialists';
 import { FIGHTERS, isFighter, isMilitary, keepOf } from './military';
 import { hasGatherTargetNear, isGatherTarget } from './nature';
 import { RESOURCES, Terrain, type Building, type BuildingType, type PlayerId, type Point, type Resource } from './types';
@@ -601,9 +601,10 @@ function placeTrade(ctx: Context, ai: AiState): boolean {
 
 function prospect(ctx: Context, ai: AiState): void {
   const { w, me } = ctx;
-  // One errand at a time: a geologist out (or a carrier on his way to become one) is enough.
+  // One errand at a time: a geologist out (or a carrier on his way to become one) is enough. One who
+  // finished stays where he worked, free (`isFreeSpecialist`): `sendGeologist` sends him again.
   const out = (s: (typeof w.settlers)[number]) =>
-    s.kind === 'geologist' ? s.tasks.length > 0 || !!s.errand : s.tasks.some((t) => t.t === 'retool' && t.kind === 'geologist');
+    s.kind === 'geologist' ? !isFreeSpecialist(s) : s.tasks.some((t) => t.t === 'retool' && t.kind === 'geologist');
   if (w.settlers.some((s) => s.owner === me && out(s))) return;
   const home = w.homeOf(me);
   let best: Point | null = null;
@@ -1349,7 +1350,7 @@ function useSpecialists(w: World, ai: AiState, own: Building[]): void {
   // Pioneer: only with shovels to spare (diggers and foresters need them).
   if (available(w, me, 'shovel') >= AI.pioneerShovels || has('pioneer')) {
     if (!has('pioneer')) w.orderSpecialist('pioneer', 1, me);
-    const free = w.settlers.some((s) => s.owner === me && s.kind === 'pioneer' && s.tasks.length === 0 && !s.errand);
+    const free = w.settlers.some((s) => s.owner === me && s.kind === 'pioneer' && isFreeSpecialist(s));
     if (free) {
       // The best spots first: one he cannot walk to (a pocket behind a forest or across water) is
       // refused by `sendPioneer`, and the next is tried instead of the same one at every decision.

@@ -4,12 +4,12 @@ import { AI_LEVELS, BUILDINGS, GROUND, OUTPUT_CAP, START_CONDITIONS, startGoods,
 import { workerOrder, workersOf } from '../src/sim/economy';
 import { saveWorld } from '../src/sim/save';
 import { abort } from '../src/sim/settlers';
-import { prospectTiles } from '../src/sim/specialists';
+import { canProspect } from '../src/sim/specialists';
 import { pilesUsed, storageRoom } from '../src/sim/storage';
-import { RESOURCES, type Building, type Resource } from '../src/sim/types';
+import { RESOURCES, Terrain, type Building } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { placeNear } from '../tools/scenario';
-import { base, depot, goodsInWorld, groundUnits } from './helpers';
+import { base, depot, goodsInWorld, groundUnits, startTower } from './helpers';
 
 function run(w: World, ticks: number) {
   for (let i = 0; i < ticks; i++) w.step();
@@ -46,7 +46,7 @@ function mountainTile(w: World): { x: number; y: number } {
   let bestD = Infinity;
   for (let y = 0; y < w.map.h; y++) {
     for (let x = 0; x < w.map.w; x++) {
-      if (prospectTiles(w, x, y, 1).length < 3) continue;
+      if (!w.owns(x, y) || w.map.terrain[w.map.idx(x, y)] !== Terrain.Mountain || !canProspect(w, x, y, 1)) continue;
       const d = Math.hypot(x - c.x, y - c.y);
       if (d < bestD) {
         bestD = d;
@@ -189,13 +189,17 @@ describe('geologists are ordered (Settlers 4 settlers menu)', () => {
     expect(w.sendGeologist(m.x, m.y)).toBe(true);
     expect(geo.errand).toMatchObject({ x: m.x, y: m.y });
     expect(w.settlers.some((s) => s.tasks.some((t) => t.t === 'retool'))).toBe(false);
-    run(w, 2500);
+    for (let i = 0; i < 40000 && geo.errand; i++) w.step();
     expect(w.stats.prospected).toBeGreaterThan(2);
-    // Errand done: still a geologist, waiting with the idle crowd, hammer not given back.
+    // Errand done: still a geologist, standing where he finished, hammer not given back.
     expect(geo.kind).toBe('geologist');
-    expect(geo.tasks.length).toBe(0);
+    expect(geo.errand).toBeNull();
+    expect(geo.post).not.toBeNull();
     expect(goodsInWorld(w, 'hammer')).toBe(hammers - 1);
-    // Dismissed: a carrier again, the hammer falls on the ground by him (S4) and the order drops.
+    // Called home (direct control), then dismissed on his own land.
+    expect(w.orderSpecialists([geo.id], startTower(w).door.x, startTower(w).door.y + 2)).toBe(1);
+    run(w, 1500);
+    // Dismissed: a carrier again, the hammer goes home and the order drops.
     expect(w.dismissSpecialist('geologist')).toBe(true);
     expect(geo.kind).toBe('carrier');
     expect(workerOrder(w, 1, 'geologist')).toBe(0);
@@ -204,7 +208,7 @@ describe('geologists are ordered (Settlers 4 settlers menu)', () => {
     expect(lost(w)).toBe(0);
   });
 
-  it('busy ordered geologists: sending makes another on the spot, who turns back into a carrier after', () => {
+  it('busy ordered geologists: sending makes another on the spot, the order grows, both stay geologists', () => {
     const w = new World(42);
     const hammers = goodsInWorld(w, 'hammer');
     w.orderSpecialist('geologist', 1);
@@ -214,9 +218,10 @@ describe('geologists are ordered (Settlers 4 settlers menu)', () => {
     expect(w.sendGeologist(m.x, m.y)).toBe(true); // the ordered one
     expect(w.sendGeologist(m.x, m.y)).toBe(true); // a second, made on the spot
     expect(workersOf(w, 1, 'geologist')).toBe(2);
+    expect(workerOrder(w, 1, 'geologist')).toBe(2);
     run(w, 4000);
-    // Back to what was ordered: one geologist, one hammer in him, the other back on the ground.
-    expect(w.settlers.filter((s) => s.kind === 'geologist').length).toBe(1);
-    expect(goodsInWorld(w, 'hammer')).toBe(hammers - 1);
+    // Neither goes home: two geologists, two hammers used up.
+    expect(w.settlers.filter((s) => s.kind === 'geologist').length).toBe(2);
+    expect(goodsInWorld(w, 'hammer')).toBe(hammers - 2);
   });
 });

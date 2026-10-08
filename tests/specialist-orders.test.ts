@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { addBuilding, recomputeTerritory } from '../src/sim/buildings';
-import { PIONEER } from '../src/sim/config';
 import { saveWorld } from '../src/sim/save';
-import { claimable, prospectTiles, SPECIALIST_ORDERS } from '../src/sim/specialists';
-import type { Building, Settler } from '../src/sim/types';
+import { canProspect, claimable, SPECIALIST_ORDERS } from '../src/sim/specialists';
+import { Terrain, type Building, type Settler } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { base, startTower } from './helpers';
 
@@ -41,20 +40,23 @@ function borderTile(w: World, p = 1): { x: number; y: number } {
   return best!;
 }
 
-/** An own walkable grass tile a few steps from the start tower's door (no action applies there). */
+/** An own walkable tile a few steps from the start tower's door where no specialist's action applies. */
 function plainTile(w: World): { x: number; y: number } {
   const c = startTower(w);
-  for (let r = 3; r < 10; r++) {
-    for (let dx = -r; dx <= r; dx++) {
-      const x = c.door.x + dx;
-      const y = c.door.y + r;
-      const m = w.map;
-      if (!m.inBounds(x, y) || !m.isWalkable(x, y) || m.door[m.idx(x, y)] !== 0) continue;
-      if (!w.owns(x, y) || prospectTiles(w, x, y, 1).length > 0 || claimable(w, x, y, 1)) continue;
-      return { x, y };
+  const m = w.map;
+  let best: { x: number; y: number } | null = null;
+  let bestD = Infinity;
+  for (let y = 0; y < m.h; y++) {
+    for (let x = 0; x < m.w; x++) {
+      const d = Math.hypot(x - c.door.x, y - c.door.y);
+      if (d < 3 || d >= bestD || !m.isWalkable(x, y) || m.door[m.idx(x, y)] !== 0 || !w.owns(x, y)) continue;
+      if (SPECIALIST_ORDERS.geologist!.can(w, x, y, undefined, 1) || SPECIALIST_ORDERS.pioneer!.can(w, x, y, undefined, 1)) continue;
+      best = { x, y };
+      bestD = d;
     }
   }
-  throw new Error('no plain tile');
+  if (!best) throw new Error('no plain tile');
+  return best;
 }
 
 /** An own mountain tile with something left to prospect. */
@@ -64,7 +66,7 @@ function mountainTile(w: World): { x: number; y: number } {
   let bestD = Infinity;
   for (let y = 0; y < w.map.h; y++) {
     for (let x = 0; x < w.map.w; x++) {
-      if (prospectTiles(w, x, y, 1).length < 3) continue;
+      if (!w.owns(x, y) || w.map.terrain[w.map.idx(x, y)] !== Terrain.Mountain || !canProspect(w, x, y, 1)) continue;
       const d = Math.hypot(x - c.x, y - c.y);
       if (d < bestD) {
         bestD = d;
@@ -91,19 +93,19 @@ describe('specialists under direct control', () => {
     expect(Math.hypot(pioneer.x - pioneer.post!.x, pioneer.y - pioneer.post!.y)).toBeLessThan(2);
   });
 
-  it('a right click on neutral land at the border sends a pioneer to claim it', () => {
+  it('a right click on neutral land sends a pioneer to claim it', () => {
     const w = new World(42);
     const pioneer = recruit(w, 'pioneer');
     const before = owned(w, 1);
     const t = borderTile(w);
     expect(SPECIALIST_ORDERS.pioneer!.can(w, t.x, t.y, undefined, 1)).toBe(true);
     expect(w.orderSpecialists([pioneer.id], t.x, t.y)).toBe(1);
-    expect(pioneer.errand).toMatchObject({ x: t.x, y: t.y, n: PIONEER.maxTiles });
+    expect(pioneer.errand).toMatchObject({ x: t.x, y: t.y });
     run(w, 3000);
     expect(owned(w, 1)).toBeGreaterThan(before + 3);
   });
 
-  it('a right click on an own mountain sends the selected geologist to prospect there', () => {
+  it('a right click on a mountain sends the selected geologist to prospect there', () => {
     const w = new World(42);
     const m = mountainTile(w);
     expect(w.sendGeologist(m.x, m.y)).toBe(true);

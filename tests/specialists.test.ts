@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { addBuilding, available, recomputeTerritory, spawnSettler } from '../src/sim/buildings';
-import { BUILDINGS, PIONEER, STRENGTH } from '../src/sim/config';
+import { BUILDINGS, GEOLOGIST, PIONEER, PROFESSIONS, STRENGTH } from '../src/sim/config';
 import { killSettler } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
-import { claimable } from '../src/sim/specialists';
+import { sameRegion } from '../src/sim/regions';
+import { canProspect, claimable, isFreeSpecialist, prospectable } from '../src/sim/specialists';
 import { attackStrength, defenceStrength, settlementValue, strengthFor } from '../src/sim/strength';
-import type { Building, Settler } from '../src/sim/types';
+import { Terrain, type Building, type Settler } from '../src/sim/types';
 import { World } from '../src/sim/world';
-import { base, depot, startTower } from './helpers';
+import { base, depot, groundUnits, startTower } from './helpers';
 
 function run(w: World, ticks: number) {
   for (let i = 0; i < ticks; i++) w.step();
@@ -64,11 +65,41 @@ describe('pioneer', () => {
     run(w, 3000);
     const gained = owned(w, 1) - before;
     expect(gained).toBeGreaterThan(5);
-    expect(gained).toBeLessThanOrEqual(PIONEER.maxTiles);
     expect(w.pioneerLand).toBe(gained);
     // Recomputing the territory keeps the claims.
     recomputeTerritory(w);
     expect(owned(w, 1) - before).toBe(gained);
+  });
+
+  it('keeps claiming until no neutral land is left within his reach, then stays there (Settlers 4)', () => {
+    const w = new World(42);
+    const s = recruit(w, 'pioneer');
+    const t = borderTile(w);
+    expect(w.sendPioneer(t.x, t.y)).toBe(true);
+    // At Settlers 4's pace per area (≈ 42 s a tile) he works for hours on open land.
+    for (let i = 0; i < 600000 && s.errand; i++) w.step();
+    expect(s.errand).toBeNull();
+    // Far more than the old cap of 24 tiles an errand.
+    expect(w.pioneerLand).toBeGreaterThan(24);
+    // Nothing he could still walk to is left within his reach.
+    const m = w.map;
+    const at = m.idx(Math.round(s.x), Math.round(s.y));
+    const r = Math.ceil(PIONEER.reach);
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const x = Math.round(s.x) + dx;
+        const y = Math.round(s.y) + dy;
+        if (Math.hypot(dx, dy) > PIONEER.reach || !claimable(w, x, y, 1)) continue;
+        expect(sameRegion(m, at, m.idx(x, y))).toBe(false);
+      }
+    }
+    // He stays where he finished, a pioneer, waiting for orders.
+    const post = { ...s.post! };
+    run(w, 1200);
+    expect(s.kind).toBe('pioneer');
+    expect(Math.hypot(s.x - post.x, s.y - post.y)).toBeLessThan(2);
+    // Free for the next errand.
+    expect(isFreeSpecialist(s)).toBe(true);
   });
 
   it('cannot be sent into the middle of his own land, and a military claim wins over his', () => {
@@ -147,6 +178,21 @@ describe('thief', () => {
     expect(thief.kind).toBe('thief');
   });
 
+  it('with no warehouse at home taking the loot, puts it down on his own land as goods on the ground', () => {
+    const { w, store, thief } = target();
+    for (const s of w.settlers.filter((o) => o.owner === 2 && o.inside === null && (o.kind === 'soldier' || o.kind === 'archer'))) {
+      killSettler(w, s);
+    }
+    explore(w, store);
+    const before = groundUnits(w, 'iron', 1);
+    expect(w.sendThief(store.id)).toBe(true);
+    run(w, 6000);
+    expect(store.output.iron).toBeLessThan(5);
+    expect(groundUnits(w, 'iron', 1)).toBeGreaterThan(before);
+    expect(Object.values(w.stats.lost).every((n) => n === 0)).toBe(true);
+    expect(thief.kind).toBe('thief');
+  });
+
   it('is unmasked and cut down by guards standing near the building he robs', () => {
     const { w, store, thief } = target();
     explore(w, store);
@@ -218,5 +264,106 @@ describe('fighting strength', () => {
     const a = attackStrength(w, 1);
     expect(a).toBeGreaterThan(100);
     expect(defenceStrength(w, 1)).toBeCloseTo(100 + (a - 100) / 2, 5);
+  });
+});
+
+describe('geologist (Settlers 4: the whole ridge, then he stays)', () => {
+  /** An ordered geologist, waiting for an errand. */
+  function geologist(w: World): Settler {
+    w.orderSpecialist('geologist', 1);
+    for (let i = 0; i < 1500 && !w.settlers.some((s) => s.kind === 'geologist'); i++) w.step();
+    run(w, 300);
+    return w.settlers.find((s) => s.kind === 'geologist')!;
+  }
+
+  /** A walkable mountain tile with something to examine, owned by player 1 or not, nearest the start. */
+  function mountain(w: World, own: boolean): { x: number; y: number } | null {
+    const c = startTower(w);
+    let best: { x: number; y: number } | null = null;
+    let bestD = Infinity;
+    for (let y = 0; y < w.map.h; y++) {
+      for (let x = 0; x < w.map.w; x++) {
+        if (w.owns(x, y) !== own || !prospectable(w, x, y, 1)) continue;
+        const d = Math.hypot(x - c.x, y - c.y);
+        if (d < bestD) {
+          bestD = d;
+          best = { x, y };
+        }
+      }
+    }
+    return best;
+  }
+
+  it('examines every mountain tile within his reach as he goes, then stays where he finished', () => {
+    const w = new World(123);
+    const geo = geologist(w);
+    const spot = mountain(w, true)!;
+    expect(w.sendGeologist(spot.x, spot.y)).toBe(true);
+    for (let i = 0; i < 60000 && geo.errand; i++) w.step();
+    expect(geo.errand).toBeNull();
+    // The ridge, not just a handful of tiles around the spot (the old errand stopped at 8).
+    expect(w.stats.prospected).toBeGreaterThan(40);
+    // Nothing he could walk to is left unexamined within his reach.
+    const m = w.map;
+    const at = m.idx(Math.round(geo.x), Math.round(geo.y));
+    const r = Math.ceil(GEOLOGIST.reach);
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const x = Math.round(geo.x) + dx;
+        const y = Math.round(geo.y) + dy;
+        if (Math.hypot(dx, dy) > GEOLOGIST.reach || !prospectable(w, x, y, 1)) continue;
+        expect(sameRegion(m, at, m.idx(x, y))).toBe(false);
+      }
+    }
+    // Some of it beyond his owner's border.
+    let outside = 0;
+    for (let i = 0; i < m.w * m.h; i++) if (m.prospected[i] & 1 && m.owner[i] !== 1) outside++;
+    expect(outside).toBeGreaterThan(0);
+    // He stays there, a geologist, instead of walking home.
+    const post = { ...geo.post! };
+    run(w, 1200);
+    expect(geo.kind).toBe('geologist');
+    expect(Math.hypot(geo.x - post.x, geo.y - post.y)).toBeLessThan(2);
+    // And can be sent again from where he stands.
+    const next = mountain(w, true) ?? mountain(w, false);
+    if (next) {
+      expect(w.sendGeologist(next.x, next.y)).toBe(true);
+      expect(geo.errand).toMatchObject(next);
+    }
+  });
+
+  it('may be sent to a mountain outside the border', () => {
+    const w = new World(7);
+    const geo = geologist(w);
+    const spot = mountain(w, false)!;
+    expect(spot).not.toBeNull();
+    expect(w.map.terrain[w.map.idx(spot.x, spot.y)]).toBe(Terrain.Mountain);
+    expect(canProspect(w, spot.x, spot.y, 1)).toBe(true);
+    expect(w.sendGeologist(spot.x, spot.y)).toBe(true);
+    for (let i = 0; i < 20000 && !w.isProspected(spot.x, spot.y); i++) w.step();
+    expect(w.isProspected(spot.x, spot.y)).toBe(true);
+    expect(geo.kind).toBe('geologist');
+  });
+
+  it('survives save and load mid-ridge bit-for-bit', () => {
+    const w = new World(123);
+    geologist(w);
+    const spot = mountain(w, true)!;
+    w.sendGeologist(spot.x, spot.y);
+    run(w, 900);
+    const l = World.load(JSON.parse(JSON.stringify(saveWorld(w))));
+    run(w, 1500);
+    run(l, 1500);
+    expect(saveWorld(l)).toEqual(saveWorld(w));
+  });
+});
+
+describe("specialists' health (Settlers 4)", () => {
+  it("geologist and pioneer 25, thief 20, on the scale of a swordsman's 100", () => {
+    expect(PROFESSIONS.geologist.hp).toBe(25);
+    expect(PROFESSIONS.pioneer.hp).toBe(25);
+    expect(PROFESSIONS.thief.hp).toBe(20);
+    const w = new World(42);
+    expect(recruit(w, 'pioneer').hp).toBe(25);
   });
 });

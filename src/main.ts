@@ -16,7 +16,7 @@ import { Intro } from './ui/intro';
 import { MainMenu } from './ui/menu';
 import { Minimap } from './ui/minimap';
 import { PauseMenu } from './ui/pauseMenu';
-import { readPrefs, writePrefs } from './ui/prefs';
+import { readPrefs } from './ui/prefs';
 import { AUTO_ID, browserSlots, type SlotMeta } from './ui/saves';
 import { devWorldArgs, launchOf, worldArgs, type GameSetup } from './ui/setup';
 import { createState, isCommand } from './ui/state';
@@ -30,7 +30,7 @@ const AUTOSAVE_MINUTES = 5;
 const randomSeed = () => Math.floor(Math.random() * 1e9);
 
 /**
- * Start-up, as in Settlers 4: the intro (first visit, or when asked for), then the main menu over a
+ * Start-up, as in Settlers 4: the intro (every normal start, unless turned off in the settings), then the main menu over a
  * live scene; a game starts from the menu without reloading the page. A development address
  * (`?seed`, `?size`, `?demo`, `?load`… — see `launchOf`) starts its game at once.
  */
@@ -58,8 +58,19 @@ async function main() {
   const art3d = params.has('art') ? params.get('art') !== 'classic' : prefs.art === '3d';
   const atlas = (async () => new SpriteAtlas(art3d ? await loadArt3d() : null))();
 
-  // Back from a game (?menu) the intro is not shown again; ?menu=new opens the setup screen.
-  if (launch.kind === 'menu') return title(app, atlas, audio, { setup: params.get('menu') === 'new', intro: !params.has('menu') });
+  // Every normal start plays the intro before the menu. Back from a game (?menu, «Выход») the menu opens
+  // at once, and ?menu=new opens the setup screen; the parameter is dropped from the address right
+  // away, so reloading that page is a normal start again (intro first).
+  if (launch.kind === 'menu') {
+    const fromGame = params.has('menu');
+    const setup = params.get('menu') === 'new';
+    if (fromGame || params.has('game')) {
+      params.delete('menu');
+      params.delete('game');
+      history.replaceState(null, '', `${location.pathname}${params.size ? `?${params}` : ''}`);
+    }
+    return title(app, atlas, audio, { setup, intro: !fromGame });
+  }
 
   // One-shot parameters: a refresh should not silently load a slot again.
   if (launch.kind === 'load') {
@@ -150,15 +161,20 @@ async function title(
   );
   const playIntro = async () => {
     menu.el.hidden = true;
-    await intro.play(root);
-    writePrefs({ introSeen: true });
-    menu.el.hidden = false;
-    menu.show('main');
+    try {
+      await intro.play(root);
+    } catch (e) {
+      // Whatever went wrong, the menu still comes up.
+      console.error(e);
+      intro.el.remove();
+    } finally {
+      menu.el.hidden = false;
+      menu.show('main');
+    }
   };
   root.append(menu.el);
   menu.say(opts.notice ?? '');
-  const prefs = readPrefs();
-  if (opts.intro && (!prefs.introSeen || prefs.intro)) await playIntro();
+  if (opts.intro && readPrefs().showIntro) await playIntro();
   else menu.show(opts.setup ? 'new' : 'main');
   Object.assign(window, { scene, menu });
 }

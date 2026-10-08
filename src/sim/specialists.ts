@@ -1,5 +1,5 @@
 import { nearestStorage } from './buildings';
-import { FIELD, ORDERABLE, PIONEER, PROFESSIONS, PROSPECT_RADIUS, PROSPECT_TICKS, PROSPECT_TILES, THIEF } from './config';
+import { FIELD, GEOLOGIST, ORDERABLE, PIONEER, PROFESSIONS, THIEF } from './config';
 import { recountWorkers, workerOrder, workersOf } from './economy';
 import { restIdle } from './idle';
 import { formationSpots } from './field';
@@ -11,14 +11,23 @@ import type { World } from './world';
 
 /**
  * Specialists, as in Settlers 4: made from free carriers on the player's order (`ORDERABLE`, like
- * builders), then sent on errands.
+ * builders), then sent on errands. None is bound to his owner's land (S4 manual §10: «not limited by
+ * your settlement's boundaries»).
  *
- * Pioneer: `sendPioneer` points him at neutral land next to his owner's; there he claims tiles one by
- * one — each a neutral, passable tile 4-adjacent to the owner's land within `PIONEER.radius` of the
- * spot, the nearest first — until `PIONEER.maxTiles` are his or none is left. A claim is recorded in
+ * Pioneer and geologist work an errand the way S4's `CPioneerRole`/`CGeologistRole` do: he walks to
+ * the spot he was sent to, then keeps picking the next tile out from where he stands (`searchTile`:
+ * the nearest window of a distance-sorted spiral that holds any, there the tile closest to the spot,
+ * himself weighing three times as much), works it, and picks again — until nothing is left within
+ * `reach` of him. Then the errand is over and he stays standing where he is (`Settler.post`), waiting
+ * for orders; nobody walks home. Tiles he finds no route to are skipped (`errand.skip`).
+ *
+ * Pioneer: claims neutral passable tiles (`claimable`), one per `claim` task. A claim is recorded in
  * `map.claimed` (saved) and the tile's `map.owner` is set at once; `recomputeTerritory` keeps giving
  * claimed tiles to their claimant wherever no military building claims them, so land a tower or castle
  * claims always wins, and the claim comes back if that building goes. Pioneers never claim owned land.
+ *
+ * Geologist: leaves a sign (`map.prospected`, per player) on every unexamined walkable mountain tile
+ * (`prospectable`), his owner's, neutral or foreign, one per `prospect` task — the whole ridge.
  *
  * Thief: `sendThief` points him at a foreign, explored building with goods at its door (or in stock);
  * he walks there unnoticed, takes one unit of its most plentiful good in `THIEF.stealTicks` and carries
@@ -26,60 +35,161 @@ import type { World } from './world';
  * On hostile land every specialist may be cut down by that land's swordsmen, the thief once unmasked
  * (`intruders.ts`, `INTRUDERS`).
  *
- * Geologist: `sendGeologist` points him at a mountain of his owner's; he examines up to
- * `PROSPECT_TILES` unexamined tiles around the spot and leaves a sign on each (`map.prospected`).
- *
- * All keep their errand in `Settler.errand` (saved); without one they idle with the crowd.
- * `dismissSpecialist` turns an idle one standing on his owner's land back into a carrier (bringing the
+ * All keep their errand in `Settler.errand` (saved); without one or a post they idle with the crowd.
+ * `dismissSpecialist` turns a free one standing on his owner's land back into a carrier (bringing the
  * tool back to a warehouse) and lowers the order.
  */
 
-const N4: readonly [number, number][] = [
-  [1, 0],
-  [-1, 0],
-  [0, 1],
-  [0, -1],
-];
+/** Whether a pioneer of `player` may claim the tile: neutral and passable (S4 `CPioneerRole::CheckLand`). */
+export function claimable(w: World, x: number, y: number, _player: PlayerId): boolean {
+  const m = w.map;
+  return m.inBounds(x, y) && m.owner[m.idx(x, y)] === 0 && m.isWalkable(x, y);
+}
 
-/** Whether a pioneer of `player` may claim the tile: neutral, passable, next to the player's land. */
-export function claimable(w: World, x: number, y: number, player: PlayerId): boolean {
+/** Whether a geologist of `player` may examine the tile: walkable mountain without his sign, on any land. */
+export function prospectable(w: World, x: number, y: number, player: PlayerId): boolean {
   const m = w.map;
   if (!m.inBounds(x, y)) return false;
-  const i = m.idx(x, y);
-  if (m.owner[i] !== 0 || !m.isWalkable(x, y)) return false;
-  return N4.some(([dx, dy]) => m.inBounds(x + dx, y + dy) && m.owner[m.idx(x + dx, y + dy)] === player);
+  return m.terrain[m.idx(x, y)] === Terrain.Mountain && m.isWalkable(x, y) && !w.isProspected(x, y, player);
+}
+
+// ---------------------------------------------------------------- the search (S4 SearchPosition)
+
+/** Offsets within `reach`, sorted by distance (ties: row, then column) — S4's `CSpiralOffsets`. */
+const spirals = new Map<number, Int16Array>();
+
+function spiral(reach: number): Int16Array {
+  let out = spirals.get(reach);
+  if (out) return out;
+  const r = Math.ceil(reach);
+  const pts: [number, number][] = [];
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (dx * dx + dy * dy <= reach * reach) pts.push([dx, dy]);
+  pts.sort((a, b) => a[0] * a[0] + a[1] * a[1] - (b[0] * b[0] + b[1] * b[1]) || a[1] - b[1] || a[0] - b[0]);
+  out = new Int16Array(pts.length * 2);
+  pts.forEach(([dx, dy], k) => {
+    out![k * 2] = dx;
+    out![k * 2 + 1] = dy;
+  });
+  spirals.set(reach, out);
+  return out;
+}
+
+interface Search {
+  /** Where he searches from: where he stands (or the spot, before his first tile). */
+  ox: number;
+  oy: number;
+  /** The spot he was sent to: the search leans towards it. */
+  tx: number;
+  ty: number;
+  /** His tile, for the reachability test (`sameRegion`); −1 skips it. */
+  at: number;
+  reach: number;
+  window: number;
+  ok: (i: number, x: number, y: number) => boolean;
 }
 
 /**
- * The claimable tile within `PIONEER.radius` of (cx, cy) nearest to the pioneer `from` (ties: lowest
- * index), among those he can walk to (`sameRegion`, O(1)): a tile across a lake or a swamp would send
- * him into a failed route and a back-off, then to the same tile again, for ever.
+ * The next tile to work: windows of `window` spiral offsets from (ox, oy) outwards, the first holding
+ * any tile that passes `ok` decides; among its tiles the least d²(spot) + 3·d²(origin), ties to the
+ * first in spiral order. Null when nothing within `reach` passes. O(reach²).
  */
-function nextClaim(w: World, cx: number, cy: number, player: PlayerId, from: { x: number; y: number }) {
-  let best: { x: number; y: number } | null = null;
-  let bestD = Infinity;
-  const r = PIONEER.radius;
+function searchTile(w: World, q: Search): { x: number; y: number } | null {
   const m = w.map;
-  const at = m.idx(Math.round(from.x), Math.round(from.y));
-  for (let y = cy - r; y <= cy + r; y++) {
-    for (let x = cx - r; x <= cx + r; x++) {
-      if (Math.hypot(x - cx, y - cy) > r || !claimable(w, x, y, player) || !sameRegion(m, at, m.idx(x, y))) continue;
-      const d = Math.hypot(x - from.x, y - from.y);
-      if (d < bestD) {
-        bestD = d;
-        best = { x, y };
-      }
+  const offs = spiral(q.reach);
+  let best: { x: number; y: number } | null = null;
+  let bestScore = Infinity;
+  let hit = -1;
+  for (let k = 0; k < offs.length / 2; k++) {
+    const win = Math.floor(k / q.window);
+    if (hit >= 0 && win > hit) break;
+    const x = q.ox + offs[k * 2];
+    const y = q.oy + offs[k * 2 + 1];
+    if (!m.inBounds(x, y)) continue;
+    const i = m.idx(x, y);
+    if (!q.ok(i, x, y) || (q.at >= 0 && !sameRegion(m, q.at, i))) continue;
+    hit = win;
+    const score = (x - q.tx) ** 2 + (y - q.ty) ** 2 + 3 * ((x - q.ox) ** 2 + (y - q.oy) ** 2);
+    if (score < bestScore) {
+      bestScore = score;
+      best = { x, y };
     }
   }
   return best;
 }
 
-/** The player's idle specialist of `kind` nearest to (x, y). */
+/** Tiles other specialists of the player are already heading for with a task of type `t`. */
+function takenBy(w: World, s: Settler, t: 'prospect' | 'claim'): Set<number> {
+  const taken = new Set<number>();
+  for (const o of w.settlers) {
+    if (o === s || o.owner !== s.owner || o.kind !== s.kind) continue;
+    for (const task of o.tasks) if (task.t === t) taken.add(w.map.idx(task.x, task.y));
+  }
+  return taken;
+}
+
+type Errand = NonNullable<Settler['errand']>;
+
+/** The next tile of the specialist's errand passing `ok`, searched as S4 does (`searchTile`). */
+function nextTile(
+  w: World,
+  s: Settler,
+  e: Errand,
+  def: { reach: number; window: number },
+  ok: (i: number, x: number, y: number) => boolean,
+): { x: number; y: number } | null {
+  const m = w.map;
+  const sx = Math.round(s.x);
+  const sy = Math.round(s.y);
+  const fromSpot = e.n === undefined;
+  const skip = e.skip;
+  return searchTile(w, {
+    ox: fromSpot ? e.x : sx,
+    oy: fromSpot ? e.y : sy,
+    tx: e.x,
+    ty: e.y,
+    at: m.idx(sx, sy),
+    reach: def.reach,
+    window: def.window,
+    ok: skip?.length ? (i, x, y) => !skip.includes(i) && ok(i, x, y) : ok,
+  });
+}
+
+/** Whether a specialist sent to (x, y) would find any tile passing `ok` there (no route test). */
+function anyAround(w: World, x: number, y: number, def: { reach: number; window: number }, ok: (i: number, x: number, y: number) => boolean) {
+  return searchTile(w, { ox: x, oy: y, tx: x, ty: y, at: -1, reach: def.reach, window: def.window, ok }) !== null;
+}
+
+/** The errand is over: he stays standing where he is, waiting for orders (`specialistPostIdle`). */
+function finishErrand(s: Settler): void {
+  s.errand = null;
+  s.post = { x: Math.round(s.x), y: Math.round(s.y) };
+}
+
+/** A path to the errand's next tile failed: skip that tile from now on (bounded list). */
+export function skipErrandTile(w: World, s: Settler, x: number, y: number): void {
+  const e = s.errand;
+  if (!e) return;
+  const skip = (e.skip ??= []);
+  if (skip.length >= 64) skip.shift();
+  skip.push(w.map.idx(x, y));
+}
+
+/**
+ * Free for a new errand: none running, nothing to do but wait — idle, or standing at his post
+ * (`specialistPostIdle` keeps him there with `wait`/`goto` tasks).
+ */
+export function isFreeSpecialist(s: Settler): boolean {
+  if (s.errand) return false;
+  if (s.tasks.length === 0) return true;
+  return !!s.post && s.tasks.every((t) => t.t === 'wait' || t.t === 'goto');
+}
+
+/** The player's free specialist of `kind` nearest to (x, y). */
 function idleSpecialist(w: World, player: PlayerId, kind: SettlerKind, x: number, y: number): Settler | undefined {
   let best: Settler | undefined;
   let bestD = Infinity;
   for (const s of w.settlers) {
-    if (s.owner !== player || s.kind !== kind || s.tasks.length > 0 || s.errand || w.dying.has(s.id)) continue;
+    if (s.owner !== player || s.kind !== kind || s.inside !== null || !isFreeSpecialist(s) || w.dying.has(s.id)) continue;
     const d = Math.hypot(s.x - x, s.y - y);
     if (d < bestD) {
       bestD = d;
@@ -89,13 +199,63 @@ function idleSpecialist(w: World, player: PlayerId, kind: SettlerKind, x: number
   return best;
 }
 
-/** Player command: send an idle pioneer to push the border around (x, y). */
+// ---------------------------------------------------------------- pioneer
+
+/** Whether a pioneer sent to (x, y) would find land to claim there. */
+export function pioneerSpot(w: World, x: number, y: number, player: PlayerId): boolean {
+  return anyAround(w, x, y, PIONEER, (_i, tx, ty) => claimable(w, tx, ty, player));
+}
+
+/** Player command: send the nearest free pioneer to claim land around (x, y). */
 export function sendPioneer(w: World, x: number, y: number, player: PlayerId): boolean {
+  if (!w.map.inBounds(x, y)) return false;
   const s = idleSpecialist(w, player, 'pioneer', x, y);
-  if (!s || !nextClaim(w, x, y, player, s)) return false;
-  s.errand = { x, y, n: PIONEER.maxTiles };
+  if (!s) return false;
+  // He must be able to walk to some of it: a spot across a lake or a swamp would send him into a
+  // failed route for nothing.
+  const at = w.map.idx(Math.round(s.x), Math.round(s.y));
+  const ok = (i: number, tx: number, ty: number) => claimable(w, tx, ty, player) && sameRegion(w.map, at, i);
+  if (!anyAround(w, x, y, PIONEER, ok)) return false;
+  clearSpecialist(w, s);
+  s.errand = { x, y };
   return true;
 }
+
+/** Idle pioneer: claim the next tile of the errand; with none left in reach, stay where he stands. */
+export function pioneerIdle(w: World, s: Settler): void {
+  const e = s.errand;
+  if (e) {
+    const taken = takenBy(w, s, 'claim');
+    const t = nextTile(w, s, e, PIONEER, (i, x, y) => !taken.has(i) && claimable(w, x, y, s.owner));
+    if (t) {
+      e.n ??= 0;
+      s.tasks = [
+        { t: 'goto', x: t.x, y: t.y },
+        { t: 'claim', x: t.x, y: t.y, n: PIONEER.claimTicks },
+      ];
+      return;
+    }
+    return finishErrand(s);
+  }
+  restIdle(w, s);
+}
+
+/** `claim` task: work the border stone, then the tile is the owner's (if still claimable). */
+export function claimTick(w: World, s: Settler, task: Extract<Task, { t: 'claim' }>): void {
+  s.working = true;
+  if (--task.n > 0) return;
+  s.tasks.shift();
+  if (!claimable(w, task.x, task.y, s.owner)) return;
+  const m = w.map;
+  const i = m.idx(task.x, task.y);
+  m.claimed[i] = s.owner;
+  m.owner[i] = s.owner;
+  w.pioneerLand++;
+  w.territoryVersion++;
+  if (s.errand) s.errand.n = (s.errand.n ?? 0) + 1;
+}
+
+// ---------------------------------------------------------------- thief
 
 /** Whether a thief of `player` may be sent to rob `b`: foreign, not allied, explored, with goods. */
 export function robbable(w: World, b: Building, player: PlayerId): boolean {
@@ -118,19 +278,102 @@ function lootOf(b: Building): Resource | null {
   return best;
 }
 
-/** Player command: send an idle thief to rob building `targetId`. */
+/** Player command: send the nearest free thief to rob building `targetId`. */
 export function sendThief(w: World, targetId: number, player: PlayerId): boolean {
   const b = w.buildings.get(targetId);
   if (!b || !robbable(w, b, player)) return false;
   const s = idleSpecialist(w, player, 'thief', b.door.x, b.door.y);
   if (!s) return false;
+  clearSpecialist(w, s);
   s.errand = { x: b.door.x, y: b.door.y, b: b.id };
   return true;
 }
 
+/** Idle thief: (back) to the building he was sent to rob, while there is loot; else hang about. */
+export function thiefIdle(w: World, s: Settler): void {
+  // Loot no warehouse at home takes in: put down on his own land, where his carriers can use it.
+  if (s.carrying) {
+    const m = w.map;
+    const x = Math.round(s.x);
+    const y = Math.round(s.y);
+    if (m.inBounds(x, y) && m.owner[m.idx(x, y)] === s.owner) {
+      carryBack(w, s, s.carrying);
+    } else {
+      const to = homeLand(w, s);
+      if (to) {
+        s.tasks = [{ t: 'goto', x: to.x, y: to.y }];
+        return;
+      }
+      carryBack(w, s, s.carrying);
+    }
+  }
+  const e = s.errand;
+  const b = e?.b !== undefined ? w.buildings.get(e.b) : undefined;
+  if (b && robbable(w, b, s.owner)) {
+    s.tasks = [
+      { t: 'goto', x: b.door.x, y: b.door.y },
+      { t: 'steal', b: b.id, n: THIEF.stealTicks },
+    ];
+    return;
+  }
+  s.errand = null;
+  restIdle(w, s);
+}
+
+/** Where a thief takes loot no warehouse takes in: his player's home, else his nearest own building's door. */
+function homeLand(w: World, s: Settler): Point | null {
+  const m = w.map;
+  const home = w.homeOf(s.owner);
+  if (m.inBounds(home.x, home.y) && m.owner[m.idx(home.x, home.y)] === s.owner) return home;
+  let best: Point | null = null;
+  let bestD = Infinity;
+  for (const b of w.buildings.values()) {
+    if (b.owner !== s.owner || m.owner[m.idx(b.door.x, b.door.y)] !== s.owner) continue;
+    const d = Math.hypot(b.door.x - s.x, b.door.y - s.y);
+    if (d < bestD) {
+      best = b.door;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
 /**
- * Player command: one idle specialist (or other orderable worker) of `kind` on his owner's land goes
- * back to being a carrier, bringing his tool back to a warehouse; the order drops by one.
+ * `steal` task: after `n` ticks at the door, take one good and carry it to a warehouse at home that
+ * takes it in; with none, he carries it onto his own land and puts it down there (`thiefIdle`), as
+ * goods on the ground (`ground.ts`) his carriers then use like any pile.
+ */
+export function stealTick(w: World, s: Settler, task: Extract<Task, { t: 'steal' }>): void {
+  const b = w.buildings.get(task.b);
+  if (!b || b.owner === s.owner || w.allied(b.owner, s.owner)) {
+    s.tasks.shift();
+    return;
+  }
+  s.working = true;
+  if (--task.n > 0) return;
+  s.tasks.shift();
+  const res = lootOf(b);
+  if (!res) return;
+  const store = nearestStorage(w, s.owner, s, res);
+  b.output[res]--;
+  s.carrying = res;
+  if (!store) {
+    const to = homeLand(w, s);
+    s.tasks = to ? [{ t: 'goto', x: to.x, y: to.y }] : [];
+    return;
+  }
+  store.inbound[res]++;
+  s.tasks = [
+    { t: 'goto', x: store.door.x, y: store.door.y },
+    { t: 'drop', b: store.id, res },
+  ];
+}
+
+// ---------------------------------------------------------------- dismissal
+
+/**
+ * Player command: one free specialist (or other orderable worker) of `kind` on his owner's land goes
+ * back to being a carrier, putting his tool down on the ground; the order drops by one.
  */
 export function dismissSpecialist(w: World, kind: Settler['kind'], player: PlayerId): boolean {
   const m = w.map;
@@ -138,12 +381,14 @@ export function dismissSpecialist(w: World, kind: Settler['kind'], player: Playe
     (o) =>
       o.owner === player &&
       o.kind === kind &&
-      o.tasks.length === 0 &&
-      !o.errand &&
+      isFreeSpecialist(o) &&
       o.inside === null &&
+      !w.dying.has(o.id) &&
       m.owner[m.idx(Math.round(o.x), Math.round(o.y))] === player,
   );
   if (!s) return false;
+  clearSpecialist(w, s);
+  if (s.carrying !== null && s.carrying === PROFESSIONS[s.kind].tool) s.carrying = null;
   toCarrier(w, s, player);
   return true;
 }
@@ -151,7 +396,7 @@ export function dismissSpecialist(w: World, kind: Settler['kind'], player: Playe
 /**
  * An orderable worker (geologist, pioneer, thief…) turns back into a carrier and puts his tool down on
  * the ground next to him (`carryBack`, Settlers 4's `CSettler::ChangeType`); the order drops by one
- * unless `lowerOrder` is false (a geologist sent without one ordered, `geologistIdle`).
+ * unless `lowerOrder` is false (a geologist over the order, `geologistIdle`).
  */
 function toCarrier(w: World, s: Settler, player: PlayerId, lowerOrder = true): void {
   const kind = s.kind;
@@ -170,92 +415,11 @@ function toCarrier(w: World, s: Settler, player: PlayerId, lowerOrder = true): v
   }
 }
 
-/** Idle pioneer: claim the next tile of the errand, or hang about once it is done. */
-export function pioneerIdle(w: World, s: Settler): void {
-  const e = s.errand;
-  if (e && (e.n ?? 0) > 0) {
-    const t = nextClaim(w, e.x, e.y, s.owner, s);
-    if (t) {
-      s.tasks = [
-        { t: 'goto', x: t.x, y: t.y },
-        { t: 'claim', x: t.x, y: t.y, n: PIONEER.claimTicks },
-      ];
-      return;
-    }
-  }
-  s.errand = null;
-  restIdle(w, s);
-}
-
-/** `claim` task: work the border stone, then the tile is the owner's (if still claimable). */
-export function claimTick(w: World, s: Settler, task: Extract<Task, { t: 'claim' }>): void {
-  s.working = true;
-  if (--task.n > 0) return;
-  s.tasks.shift();
-  if (!claimable(w, task.x, task.y, s.owner)) return;
-  const m = w.map;
-  const i = m.idx(task.x, task.y);
-  m.claimed[i] = s.owner;
-  m.owner[i] = s.owner;
-  w.pioneerLand++;
-  w.territoryVersion++;
-  if (s.errand && s.errand.n !== undefined) s.errand.n--;
-}
-
-/** Idle thief: (back) to the building he was sent to rob, while there is loot; else hang about. */
-export function thiefIdle(w: World, s: Settler): void {
-  const e = s.errand;
-  const b = e?.b !== undefined ? w.buildings.get(e.b) : undefined;
-  if (b && robbable(w, b, s.owner)) {
-    s.tasks = [
-      { t: 'goto', x: b.door.x, y: b.door.y },
-      { t: 'steal', b: b.id, n: THIEF.stealTicks },
-    ];
-    return;
-  }
-  s.errand = null;
-  restIdle(w, s);
-}
-
-/** `steal` task: after `n` ticks at the door, take one good and carry it to a warehouse at home. */
-export function stealTick(w: World, s: Settler, task: Extract<Task, { t: 'steal' }>): void {
-  const b = w.buildings.get(task.b);
-  if (!b || b.owner === s.owner || w.allied(b.owner, s.owner)) {
-    s.tasks.shift();
-    return;
-  }
-  s.working = true;
-  if (--task.n > 0) return;
-  s.tasks.shift();
-  const res = lootOf(b);
-  if (!res) return;
-  const store = nearestStorage(w, s.owner, s, res);
-  if (!store) return;
-  b.output[res]--;
-  s.carrying = res;
-  store.inbound[res]++;
-  s.tasks = [
-    { t: 'goto', x: store.door.x, y: store.door.y },
-    { t: 'drop', b: store.id, res },
-  ];
-}
-
 // ---------------------------------------------------------------- geologist
 
-/** Unprospected, walkable mountain tiles of the player's land the geologist examines around (x, y), nearest first. */
-export function prospectTiles(w: World, x: number, y: number, player: PlayerId): { x: number; y: number; d: number }[] {
-  const m = w.map;
-  if (!m.inBounds(x, y) || !w.owns(x, y, player) || m.terrain[m.idx(x, y)] !== Terrain.Mountain) return [];
-  const tiles: { x: number; y: number; d: number }[] = [];
-  for (let ty = y - PROSPECT_RADIUS; ty <= y + PROSPECT_RADIUS; ty++) {
-    for (let tx = x - PROSPECT_RADIUS; tx <= x + PROSPECT_RADIUS; tx++) {
-      const d = Math.hypot(tx - x, ty - y);
-      if (d > PROSPECT_RADIUS || !w.owns(tx, ty, player) || !m.isWalkable(tx, ty)) continue;
-      if (m.terrain[m.idx(tx, ty)] !== Terrain.Mountain || w.isProspected(tx, ty, player)) continue;
-      tiles.push({ x: tx, y: ty, d });
-    }
-  }
-  return tiles.sort((a, b) => a.d - b.d).slice(0, PROSPECT_TILES);
+/** Whether a geologist of `player` sent to (x, y) would find anything to examine there. */
+export function canProspect(w: World, x: number, y: number, player: PlayerId): boolean {
+  return anyAround(w, x, y, GEOLOGIST, (_i, tx, ty) => prospectable(w, tx, ty, player));
 }
 
 /**
@@ -288,24 +452,25 @@ export function toolPileNear(w: World, player: PlayerId, x: number, y: number): 
   return from;
 }
 
-/** The player's idle geologist nearest to (x, y), one waiting for an errand (`sendGeologist`). */
+/** The player's free geologist nearest to (x, y), one waiting for an errand (`sendGeologist`). */
 export function idleGeologist(w: World, player: PlayerId, x: number, y: number): Settler | undefined {
   return idleSpecialist(w, player, 'geologist', x, y);
 }
 
 /**
- * Player command: prospect the mountain around (x, y). As in Settlers 4 geologists are ordered in the
- * settlers menu (`ORDERABLE`) and wait for errands: the nearest idle one goes. With none waiting, the
- * free carrier nearest to the hammer pile nearest the site takes up a hammer (a geologist on the spot,
- * as if ordered and sent in one go); after the errand he turns back into a carrier unless the player
- * has ordered that many geologists by then (`geologistIdle`). False if there is nothing to examine
- * there, or nobody and no hammer to send.
+ * Player command: prospect the mountain around (x, y) — any mountain, his owner's or not. As in
+ * Settlers 4 geologists are ordered in the settlers menu (`ORDERABLE`) and wait for errands: the
+ * nearest free one goes. With none waiting, the free carrier nearest to the hammer pile nearest the
+ * site takes up a hammer (a geologist on the spot, as if ordered and sent in one go: the order grows by
+ * one, so he stays a geologist afterwards). False if there is nothing to examine there, or nobody and
+ * no hammer to send.
  */
 export function sendGeologist(w: World, x: number, y: number, player: PlayerId): boolean {
-  if (prospectTiles(w, x, y, player).length === 0) return false;
+  const m = w.map;
+  if (!m.inBounds(x, y) || m.terrain[m.idx(x, y)] !== Terrain.Mountain || !canProspect(w, x, y, player)) return false;
   const waiting = idleGeologist(w, player, x, y);
   if (waiting) {
-    waiting.post = null;
+    clearSpecialist(w, waiting);
     waiting.errand = { x, y };
     return true;
   }
@@ -332,32 +497,52 @@ export function sendGeologist(w: World, x: number, y: number, player: PlayerId):
   }
   best.tasks.push({ t: 'retool', kind: 'geologist', errand: { x, y } });
   recountWorkers(w);
+  const count = workersOf(w, player, 'geologist');
+  if (count > workerOrder(w, player, 'geologist')) w.orderWorkers('geologist', count, player);
   return true;
 }
 
 /**
- * Idle geologist (the `prospect` behaviour): with an errand, walk the unexamined mountain tiles around
- * it (up to `PROSPECT_TILES`, nearest first); with none, wait among the idle crowd for the next one —
- * or, when the player has more geologists than ordered (one sent without an order), turn back into a
- * carrier and bring the hammer home.
+ * Idle geologist (the `prospect` behaviour): with an errand, examine the next tile of it (`nextTile`);
+ * with none left in reach the errand is over and he stays standing there. Without an errand he waits
+ * among the idle crowd for the next one — or, when the player has lowered the order below the
+ * geologists he has, turns back into a carrier and brings the hammer home.
  */
 export function geologistIdle(w: World, s: Settler): void {
   const e = s.errand;
   if (e) {
-    s.errand = null;
-    const tiles = prospectTiles(w, e.x, e.y, s.owner);
-    if (tiles.length > 0) {
-      s.tasks = tiles.flatMap((t): Task[] => [
+    const taken = takenBy(w, s, 'prospect');
+    const t = nextTile(w, s, e, GEOLOGIST, (i, x, y) => !taken.has(i) && prospectable(w, x, y, s.owner));
+    if (t) {
+      e.n ??= 0;
+      s.tasks = [
         { t: 'goto', x: t.x, y: t.y },
-        { t: 'prospect', x: t.x, y: t.y, n: PROSPECT_TICKS },
-      ]);
+        { t: 'prospect', x: t.x, y: t.y, n: GEOLOGIST.ticks },
+      ];
       return;
     }
+    finishErrand(s);
   }
   if (workersOf(w, s.owner, s.kind) > workerOrder(w, s.owner, s.kind)) return toCarrier(w, s, s.owner, false);
   // A geologist of an old save still holding his hammer: it is his profession's tool now.
   if (s.carrying !== null && s.carrying === PROFESSIONS[s.kind].tool) s.carrying = null;
+  if (specialistPostIdle(s)) return;
   restIdle(w, s);
+}
+
+/** `prospect` task: after `n` ticks of hammering, the tile carries the owner's sign. */
+export function prospectTick(w: World, s: Settler, task: Extract<Task, { t: 'prospect' }>): void {
+  s.working = true;
+  if (--task.n > 0) return;
+  const i = w.map.idx(task.x, task.y);
+  const bit = 1 << (s.owner - 1);
+  if (!(w.map.prospected[i] & bit)) {
+    w.map.prospected[i] |= bit;
+    w.map.touch(i);
+    w.stats.prospected++;
+  }
+  if (s.errand) s.errand.n = (s.errand.n ?? 0) + 1;
+  s.tasks.shift();
 }
 
 // ---------------------------------------------------------------- direct control
@@ -385,7 +570,7 @@ export interface SpecialistOrder {
 export const SPECIALIST_ORDERS: Partial<Record<SettlerKind, SpecialistOrder>> = {
   geologist: {
     label: 'Разведать руду',
-    can: (w, x, y, _b, player) => prospectTiles(w, x, y, player).length > 0,
+    can: (w, x, y, _b, player) => w.map.terrain[w.map.idx(x, y)] === Terrain.Mountain && canProspect(w, x, y, player),
     apply: (_w, s, x, y) => {
       s.errand = { x, y };
       return true;
@@ -393,9 +578,9 @@ export const SPECIALIST_ORDERS: Partial<Record<SettlerKind, SpecialistOrder>> = 
   },
   pioneer: {
     label: 'Занять землю',
-    can: (w, x, y, _b, player) => nextClaim(w, x, y, player, { x, y }) !== null,
+    can: (w, x, y, _b, player) => pioneerSpot(w, x, y, player),
     apply: (_w, s, x, y) => {
-      s.errand = { x, y, n: PIONEER.maxTiles };
+      s.errand = { x, y };
       return true;
     },
   },

@@ -629,7 +629,10 @@ export class World {
     return orderWorkers(this, player, kind, count);
   }
 
-  /** Player command: send an idle pioneer to push the border around (x, y) (`specialists.ts`). */
+  /**
+   * Player command: the nearest free pioneer claims neutral land around (x, y), tile after tile, until
+   * none is left within his reach, and then stays there (`specialists.ts`).
+   */
   sendPioneer(x: number, y: number, player: PlayerId = LOCAL_PLAYER): boolean {
     return sendPioneer(this, x, y, player);
   }
@@ -650,9 +653,10 @@ export class World {
   }
 
   /**
-   * Player command: the nearest idle (ordered) geologist examines up to `PROSPECT_TILES` unexplored
-   * mountain tiles around (x, y); with none waiting, a free carrier takes up a hammer and goes, and
-   * turns back into a carrier afterwards unless ordered (`specialists.ts`). False if impossible.
+   * Player command: the nearest free (ordered) geologist examines the mountain around (x, y) — any
+   * land — tile after tile until no unexamined mountain tile is left within his reach (the whole
+   * ridge), and then stays there; with none waiting, a free carrier takes up a hammer and goes, the
+   * order growing by one (`specialists.ts`). False if impossible.
    */
   sendGeologist(x: number, y: number, player: PlayerId = LOCAL_PLAYER): boolean {
     return sendGeologist(this, x, y, player);

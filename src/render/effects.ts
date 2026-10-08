@@ -15,10 +15,24 @@ const SMOKE_EVERY_MS = 170;
 const DUST_EVERY_MS = 220;
 const FALL_MS = 750;
 const FADE_MS = 350;
+/** Death puff (`soul`): how long it stays in the air, how fast it rises (px/s), how late it fades. */
+const SOUL_MS = 3800;
+const SOUL_RISE = 14;
+const SOUL_FADE = 3;
 /** A working building's ambient sound (saw, anvil, furnace) repeats this often. */
 const AMBIENT_EVERY_MS = 1300;
 
 type Point = { x: number; y: number };
+
+/** `a` moved towards `b` by `t` (0..1), per channel: lighter shades of a player's colour. */
+function mixTint(a: number, b: number, t: number): number {
+  const ch = (shift: number) => {
+    const ca = (a >> shift) & 0xff;
+    const cb = (b >> shift) & 0xff;
+    return Math.round(ca + (cb - ca) * t) << shift;
+  };
+  return ch(16) | ch(8) | ch(0);
+}
 
 interface BuildingFxView {
   b: Building;
@@ -70,6 +84,8 @@ export class Effects {
   private readonly s0 = new Float32Array(MAX_PARTICLES);
   private readonly s1 = new Float32Array(MAX_PARTICLES);
   private readonly a0 = new Float32Array(MAX_PARTICLES);
+  /** Fade-out curve: alpha × (1 − k^fade) over the life k (1 = linear; higher holds longer, then goes). */
+  private readonly fade = new Float32Array(MAX_PARTICLES);
   /** Round-robin slot for the next particle (recycles the oldest). */
   private next = 0;
 
@@ -124,6 +140,8 @@ export class Effects {
     scale1: number,
     alpha: number,
     tint: number,
+    fade = 1,
+    add = false,
   ): void {
     const i = this.next;
     this.next = (this.next + 1) % MAX_PARTICLES;
@@ -131,7 +149,7 @@ export class Effects {
     s.texture = tex;
     s.anchor.set(0.5);
     s.tint = tint;
-    s.blendMode = tex === this.tex.spark || tex === this.tex.flash ? 'add' : 'normal';
+    s.blendMode = add || tex === this.tex.spark || tex === this.tex.flash ? 'add' : 'normal';
     s.visible = true;
     this.px[i] = x;
     this.py[i] = y;
@@ -142,6 +160,7 @@ export class Effects {
     this.s0[i] = scale0;
     this.s1[i] = scale1;
     this.a0[i] = alpha;
+    this.fade[i] = fade;
     s.position.set(x, y);
     s.scale.set(scale0);
     s.alpha = alpha;
@@ -163,7 +182,8 @@ export class Effects {
       s.position.set(this.px[i], this.py[i]);
       s.scale.set(this.s0[i] + (this.s1[i] - this.s0[i]) * k);
       // Fade in quickly, out slowly.
-      s.alpha = this.a0[i] * Math.min(1, k * 6) * (1 - k);
+      const f = this.fade[i];
+      s.alpha = this.a0[i] * Math.min(1, k * 6) * (1 - (f === 1 ? k : k ** f));
     }
   }
 
@@ -178,15 +198,18 @@ export class Effects {
   }
 
   /**
-   * A unit died at the screen point (its feet): a soft cloud of its owner's colour rises from the body
-   * and fades, with two smaller wisps trailing it.
+   * A unit died at the screen point (its feet): a cloud of its owner's colour with a bright core rises
+   * slowly from the body, stays clearly visible for most of its `SOUL_MS` and only then fades, with two
+   * smaller wisps trailing it.
    */
   soul(x: number, y: number, tint: number): void {
-    this.emit(this.tex.puff, x, y - 16, 0, -24, 2400, 0.8, 1.7, 1, tint);
-    this.emit(this.tex.puff, x, y - 16, 0, -24, 2400, 0.5, 1.1, 1, tint); // denser core
+    const light = mixTint(tint, 0xffffff, 0.55);
+    this.emit(this.tex.puff, x, y - 16, 0, -SOUL_RISE, SOUL_MS, 0.9, 2.0, 1, tint, SOUL_FADE);
+    this.emit(this.tex.puff, x, y - 16, 0, -SOUL_RISE, SOUL_MS, 0.6, 1.3, 1, mixTint(tint, 0xffffff, 0.2), SOUL_FADE); // denser body
+    this.emit(this.tex.puff, x, y - 17, 0, -SOUL_RISE, SOUL_MS * 0.9, 0.45, 0.9, 0.75, light, SOUL_FADE, true); // light core
     for (let k = 0; k < 2; k++) {
       const side = k === 0 ? -1 : 1;
-      this.emit(this.tex.puff, x + side * 7, y - 8, side * 5, -18 - Math.random() * 6, 1900, 0.45, 0.9, 0.8, tint);
+      this.emit(this.tex.puff, x + side * 8, y - 8, side * 4, -SOUL_RISE * 0.75 - Math.random() * 4, SOUL_MS * 0.8, 0.5, 1.0, 0.9, tint, SOUL_FADE);
     }
   }
 
