@@ -500,7 +500,12 @@ function siege(ctx: Context, ai: AiState): boolean {
   if (military.length === 0 || military.length >= AI.maxMilitary + AI.siegeExtra) return false;
   let goal: (Point & { seen: boolean; owner: PlayerId }) | null = null;
   let closest = Infinity;
-  for (const c of siegeGoals(w, me)) {
+  // No enemy building known at all: its towers may never reach foreign land (the scouting cap stops
+  // them first). The start positions are public, so the siege pushes towards the nearest one it has
+  // not explored — where an enemy castle most likely stands — until something of the enemy is seen.
+  const known = siegeGoals(w, me);
+  const goals = known.length > 0 ? known : unexploredStarts(w, me).map((st) => ({ ...st, seen: false, owner: 0 as PlayerId }));
+  for (const c of goals) {
     const dist = (b: Building) => Math.hypot(centerOf(b).x - c.x, centerOf(b).y - c.y);
     // A castle in sight needs a strike force staged round it; one still unseen needs sight first, so
     // the siege keeps pushing until the castle is explored (buildings see little beyond their land).
@@ -515,8 +520,15 @@ function siege(ctx: Context, ai: AiState): boolean {
   // How close its land already comes to the goal: a new building must bring it closer.
   const m = w.map;
   const land = Math.min(...ctx.tiles.map((i) => Math.hypot((i % m.w) - goal.x, Math.floor(i / m.w) - goal.y)));
-  // A castle not yet in sight: a lookout as near it as its land allows sees furthest, cheaply.
-  if (!goal.seen && (ai.blockedUntil.siegeLookout ?? -Infinity) <= w.tick) {
+  // A castle not yet in sight: a lookout as near it as its land allows sees furthest, cheaply — one
+  // per edge: a lookout it already has (or is building) at the edge of its land nearest the goal sees
+  // all another one there would, and more of them would only take the spots a tower needs to push on.
+  const lookoutAtEdge = ctx.own.some((b) => {
+    if (!BUILDINGS[b.type].vision) return false;
+    const c = centerOf(b);
+    return Math.hypot(c.x - goal.x, c.y - goal.y) <= land + AI.siegeLookoutSlack;
+  });
+  if (!goal.seen && !lookoutAtEdge && (ai.blockedUntil.siegeLookout ?? -Infinity) <= w.tick) {
     const lookout = LOOKOUTS.find((t) => ctx.affordable(t));
     if (lookout) {
       ctx.siege = { ...goal, reach: land + 3, land };
@@ -791,18 +803,20 @@ class Context {
       return ore > 0 ? ore - fromCastle * 0.5 : null;
     }
 
-    if (def.vision) {
-      // Lookout: as close to the foreign land it sees as possible.
-      if (this.enemies.length === 0) return null;
-      return -Math.min(...this.enemies.map((e) => Math.hypot(e.x - cx, e.y - cy)));
-    }
-
+    // Siege first: a siege lookout too must stand within reach of the goal (at the edge of its land
+    // nearest it), never anywhere else it happens to fit.
     if (this.siege && (def.vision || (def.garrison && def.territory))) {
       const d = Math.hypot(this.siege.x - cx, this.siege.y - cy);
       if (d <= this.siege.reach) return 1000 - d;
       // Out of reach: worth it only if its land brings the border on towards the goal.
       const claims = d - (def.territory ?? 0);
       return def.territory && claims <= this.siege.land - AI.siegeStep ? -claims : null;
+    }
+
+    if (def.vision) {
+      // Lookout: as close to the foreign land it sees as possible.
+      if (this.enemies.length === 0) return null;
+      return -Math.min(...this.enemies.map((e) => Math.hypot(e.x - cx, e.y - cy)));
     }
     if (def.garrison && def.territory) {
       // Towers: push the border outwards, towards enemies and unclaimed resources, apart from each other.

@@ -1095,6 +1095,8 @@ export const AI = {
   siegeMargin: 3,
   /** Out of striking range, a siege building's land must reach at least this much closer to the castle than its land does. */
   siegeStep: 4,
+  /** A siege lookout this close (tiles) beyond its land's nearest point to the goal already watches that edge: no second one there. */
+  siegeLookoutSlack: 6,
   /** Siege buildings may take it this far beyond `maxMilitary`, no further. */
   siegeExtra: 8,
   /** A party is this many times what the target takes (power against defence); the rest stay home. The castle gets everything. */
