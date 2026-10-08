@@ -1,4 +1,4 @@
-import { BUILDINGS, HANDLE_TICKS, PROFESSIONS, TRADE } from './config';
+import { BUILDINGS, costOf, HANDLE_TICKS, PROFESSIONS, TRADE } from './config';
 import { ENDLESS } from './economy';
 import { RESOURCES, type Building, type PlayerId, type Point, type Resource, type Settler, type Task } from './types';
 import type { World } from './world';
@@ -18,12 +18,16 @@ const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
 const isMarket = (b: Building | undefined): b is Building => !!b && !!BUILDINGS[b.type].market;
 const isDonkey = (s: Settler) => PROFESSIONS[s.kind].behavior === 'donkey';
 
-/** The market's destination, if it is still a finished market of the same player. */
+/**
+ * The market's destination, if it is still a market of the same player — finished, or a site:
+ * donkeys bring a market site on a cut-off piece its own materials (`unloadTick`), since no carrier
+ * of that piece has a warehouse to take them from.
+ */
 export function routeTarget(w: World, m: Building): Building | undefined {
   const to = m.trade?.to;
   if (to === null || to === undefined || to === m.id) return undefined;
   const t = w.buildings.get(to);
-  return isMarket(t) && t.done && t.owner === m.owner ? t : undefined;
+  return isMarket(t) && t.owner === m.owner ? t : undefined;
 }
 
 /** Units of `res` a market still wants its carriers to bring for its route (part of `demand`). */
@@ -125,11 +129,24 @@ export function loadTick(w: World, s: Settler, task: Extract<Task, { t: 'load' }
   return true;
 }
 
-/** The donkey puts its packs onto the destination market's output pile. */
+/**
+ * The donkey puts its packs onto the destination market's output pile; a market still under
+ * construction first takes what its site lacks as delivered material, the rest waits on its pile.
+ */
 export function unloadTick(w: World, s: Settler, task: Extract<Task, { t: 'unload' }>): boolean {
   const m = w.buildings.get(task.b);
   if (!isMarket(m) || m.owner !== s.owner) return false;
-  if (s.carrying) m.output[s.carrying] += s.load ?? 1;
+  const res = s.carrying;
+  if (res) {
+    let n = s.load ?? 1;
+    if (!m.done) {
+      const lacking = Math.max(0, (costOf(m.type)[res] ?? 0) - m.delivered[res] - m.inbound[res]);
+      const used = Math.min(n, lacking);
+      m.delivered[res] += used;
+      n -= used;
+    }
+    m.output[res] += n;
+  }
   s.carrying = null;
   delete s.load;
   s.tasks.shift();

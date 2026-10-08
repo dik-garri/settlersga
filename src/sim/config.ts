@@ -1197,6 +1197,33 @@ export const AI = {
   /** Sends a thief only with at least this many idle carriers and a known enemy store this close (tiles). */
   thiefIdle: 8,
   thiefRange: 40,
+  /**
+   * Field orders (`aiField.ts`). A strike group is released from its garrisons and gathered in the
+   * field `stageDistance` tiles short of the target's door (beyond the garrison archers' range), then
+   * attacks together once `stageArrived` of it stands there or after `stageTimeout` ticks. Parties
+   * that start closer than `stageDistance + stageMinWalk` attack straight from their buildings
+   * (`World.attack`, also the fallback when `stageStrike` is off).
+   */
+  stageStrike: true,
+  stageDistance: 7,
+  stageMinWalk: 4,
+  stageArrived: 0.8,
+  stageTimeout: 600,
+  /**
+   * Defence: hostile field units on or within `defendMargin` tiles of its land, in its buildings'
+   * sight, are met by a field squad `defendRatio` times their number, released from its military
+   * buildings within `defendRange` of them; when none are left the squad goes back into garrisons.
+   */
+  defendMargin: 3,
+  defendRatio: 1.5,
+  defendRange: 16,
+  /**
+   * Trade (`AiState.trade`): every `tradeEvery` ticks it checks for own workplaces on land cut off
+   * from its warehouses; for the first such piece it builds a market there and one at home, a donkey
+   * ranch, and sends by donkey what the piece's sites and workplaces lack. Cut-off sites nothing was
+   * delivered to yet are demolished instead (a stuck site holds one of `maxOpenSites`).
+   */
+  tradeEvery: 300,
 };
 
 // ---------------------------------------------------------------- wild animals

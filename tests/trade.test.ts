@@ -121,6 +121,18 @@ describe('donkeys and marketplaces', () => {
     expect(site.delivered.plank + (site.done ? 99 : 0)).toBeGreaterThan(0);
   });
 
+  it('donkeys bring a market site on a cut-off piece its materials, so it gets built', () => {
+    const { w, home, away } = caravan();
+    away.done = false;
+    away.levelled = true;
+    expect(w.setTradeRoute(home.id, away.id)).toBe(true);
+    w.orderTrade(home.id, 'plank', 2);
+    w.orderTrade(home.id, 'stone', 4);
+    run(w, 9000);
+    expect(away.done).toBe(true);
+    expect(Object.values(w.stats.lost).every((n) => n === 0)).toBe(true);
+  });
+
   it('a donkey ranch breeds only while the markets want more donkeys', () => {
     const w = new World(42);
     const ranch = placeNear(w, 'donkeyranch', w.castle.x + 5, w.castle.y + 3)!;

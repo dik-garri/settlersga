@@ -4,7 +4,7 @@
  *
  *   npm run sim:ai -- --seeds=42,7 --minutes=60 --players=2 --passive=0
  */
-import { TICKS_PER_SECOND } from '../src/sim/config';
+import { PROFESSIONS, TICKS_PER_SECOND } from '../src/sim/config';
 import { isArcher, isFighter } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
 import { World } from '../src/sim/world';
@@ -39,11 +39,12 @@ for (const seed of seeds) {
         const fighters = people.filter((s) => isFighter(s));
         const archers = fighters.filter((s) => isArcher(s)).length;
         const ranked = fighters.filter((s) => s.level > 0).length;
-        const soldiers = `${fighters.length} (archers ${archers}, ranked ${ranked})`;
+        const leaders = fighters.filter((s) => PROFESSIONS[s.kind].combat?.leads).length;
+        const soldiers = `${fighters.length} (archers ${archers}, ranked ${ranked}, leaders ${leaders})`;
         let land = 0;
         for (const o of w.map.owner) if (o === p.id) land++;
         const st = w.ai.find((a) => a.player === p.id)?.stats;
-        const ai = st ? ` · placed ${st.placed} attacks ${st.attacks} (sent ${st.soldiersSent}) geo ${st.geologists}` : '';
+        const ai = st ? ` · placed ${st.placed} attacks ${st.attacks} (sent ${st.soldiersSent}) geo ${st.geologists} staged ${st.staged ?? 0} defended ${st.defended ?? 0} traded ${st.traded ?? 0}` : '';
         const out = w.isDefeated(p.id) ? ' DEFEATED' : '';
         return `  p${p.id}: buildings ${done}/${own.length} · settlers ${people.length} · soldiers ${soldiers} · land ${land}${ai}${out}`;
       });

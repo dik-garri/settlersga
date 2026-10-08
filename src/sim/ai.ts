@@ -36,7 +36,10 @@ import {
   PROFESSIONS,
   type BuildingDef,
 } from './config';
+import { defend, stageStrike, sweep, updateStrike } from './aiField';
+import { ENDLESS } from './economy';
 import { inBuildingSight, visionRadius } from './fog';
+import { isCutOff, landAt, landOf } from './land';
 import { claimable, robbable } from './specialists';
 import { FIGHTERS, isFighter, isMilitary, keepOf } from './military';
 import { hasGatherTargetNear, isGatherTarget } from './nature';
@@ -49,7 +52,7 @@ export interface AiState {
   nextThink: number;
   lastAttack: number;
   /** Building type (or 'frontier') → tick before which the AI does not look for a spot again. */
-  blockedUntil: Partial<Record<BuildingType | 'frontier' | 'decor' | 'room' | 'siege' | 'siegeLookout', number>>;
+  blockedUntil: Partial<Record<BuildingType | 'frontier' | 'decor' | 'room' | 'siege' | 'siegeLookout' | 'tradeAway', number>>;
   /** Ore it wants a mine for but knows no deposit of: towers then favour mountains, geologists go out. */
   wantOre: Resource | null;
   /** Its weapon shares have been set (once, through `setShare`). */
@@ -60,6 +63,16 @@ export interface AiState {
   nextSpecialists: number;
   /** The building its last attack went for (0 = none): taken by now, it follows up sooner. */
   lastTarget?: number;
+  /** A strike group gathering in the field before its attack (`aiField.ts`). */
+  strike?: { target: number; ids: number[]; until: number };
+  /** A field squad out against hostile field units near its land, and where it was sent. */
+  defense?: { ids: number[]; x: number; y: number };
+  /**
+   * Trade with a piece of its land cut off from its warehouses: `anchor` is a workplace on that piece
+   * (piece ids are not stable, building ids are), `home`/`away` its markets (0 = none yet), `stuck`
+   * the cut-off sites seen at the last check (demolished if still empty at the next).
+   */
+  trade?: { anchor: number; home: number; away: number; nextCheck: number; stuck: number[] };
   stats: {
     placed: number;
     attacks: number;
@@ -68,6 +81,10 @@ export interface AiState {
     demolished: number;
     pioneers: number;
     thieves: number;
+    /** Strikes gathered in the field, defence squads sent out, trade goods ordered. */
+    staged?: number;
+    defended?: number;
+    traded?: number;
   };
 }
 
@@ -119,7 +136,10 @@ function think(w: World, ai: AiState): void {
       ai.stats.demolished++;
     }
   }
+  defend(w, ai, own);
   const attacked = attackIfStrong(w, ai);
+  sweep(w, ai);
+  tradeCheck(w, ai, own);
   if (w.tick >= (ai.nextSpecialists ?? 0)) {
     ai.nextSpecialists = w.tick + AI.specialistEvery;
     useSpecialists(w, ai, own);
@@ -128,6 +148,7 @@ function think(w: World, ai: AiState): void {
   const sites = own.filter((b) => !b.done);
   if (sites.length >= AI.maxOpenSites) return;
   const ctx = new Context(w, me, own, ai.wantOre);
+  if (placeTrade(ctx, ai)) return;
   if (siege(ctx, ai)) return;
 
   // Scouting: foreign land in sight but no enemy building known — a lookout tower at that border
@@ -278,7 +299,7 @@ const FRONTIER = (Object.keys(BUILDINGS) as BuildingType[])
   .filter((t) => BUILDINGS[t].garrison && BUILDINGS[t].playerBuildable && BUILDINGS[t].territory)
   .sort((a, b) => BUILDINGS[b].garrison!.capacity - BUILDINGS[a].garrison!.capacity);
 
-function tryPlace(ctx: Context, ai: AiState, type: BuildingType): boolean {
+function tryPlace(ctx: Context, ai: AiState, type: BuildingType): Building | null {
   // The border band is a preference: with no room in the core, a workshop may still go there —
   // houses and eyecatchers may not (more of them can wait until the border has moved out).
   let spot = ctx.bestSpot(type);
@@ -288,9 +309,9 @@ function tryPlace(ctx: Context, ai: AiState, type: BuildingType): boolean {
     spot = ctx.bestSpot(type);
     ctx.reserveBand = true;
   }
-  if (!spot) return false;
+  if (!spot) return null;
   ai.stats.placed++;
-  return true;
+  return spot;
 }
 
 /** No known ore for a wanted mine: send a geologist to the nearest unexplored mountain we own. */
@@ -325,6 +346,150 @@ function makeRoom(w: World, ai: AiState, own: Building[], type: BuildingType): b
   // Retry the wanted building right away on the next think.
   delete ai.blockedUntil[type];
   return true;
+}
+
+const MARKETS = (Object.keys(BUILDINGS) as BuildingType[]).filter((t) => BUILDINGS[t].market && BUILDINGS[t].playerBuildable);
+const RANCHES = (Object.keys(BUILDINGS) as BuildingType[]).filter((t) => BUILDINGS[t].breeds && BUILDINGS[t].playerBuildable);
+/** Units of each input it keeps a cut-off workplace stocked with by donkey. */
+const TRADE_INPUTS = 4;
+
+/**
+ * Land cut off from its warehouses (`land.ts`: a captured tower deep in enemy land, a pioneer's
+ * patch, land split by a lost tower), every `AI.tradeEvery` ticks:
+ * - a site there nothing was delivered to is demolished if it still is at the next check (it holds
+ *   one of `AI.maxOpenSites` for good otherwise);
+ * - the first piece with a workplace (or a site with materials) becomes `trade.anchor`'s piece, which
+ *   `placeTrade` gives a market (plus one at home and a donkey ranch);
+ * - once both markets stand, the home market sends by donkey what that piece's sites and workplaces
+ *   lack (minus what is ordered, on its way or waiting there), and the far market sends home what the
+ *   piece produces and does not use itself.
+ * Only through `demolish`, `setTradeRoute` and `orderTrade`; O(own buildings + settlers).
+ */
+function tradeCheck(w: World, ai: AiState, own: Building[]): void {
+  const t = (ai.trade ??= { anchor: 0, home: 0, away: 0, nextCheck: 0, stuck: [] });
+  if (w.tick < t.nextCheck || MARKETS.length === 0) return;
+  t.nextCheck = w.tick + AI.tradeEvery;
+  const me = ai.player;
+  const mine = (id: number) => {
+    const b = w.buildings.get(id);
+    return b && b.owner === me ? b : undefined;
+  };
+  let home = mine(t.home);
+  if (home && (!BUILDINGS[home.type].market || isCutOff(w, home))) home = undefined;
+  let away = mine(t.away);
+  if (away && (!BUILDINGS[away.type].market || !isCutOff(w, away))) away = undefined;
+  t.home = home?.id ?? 0;
+  t.away = away?.id ?? 0;
+  const awayPiece = away ? landOf(w, away) : 0;
+
+  const stuck: number[] = [];
+  const worth: Building[] = [];
+  for (const b of own) {
+    if (b === away || b === home || !isCutOff(w, b) || landOf(w, b) === 0) continue;
+    const def = BUILDINGS[b.type];
+    const served = landOf(w, b) === awayPiece;
+    if (!b.done && !served && RESOURCES.every((r) => b.delivered[r] + b.inbound[r] === 0)) {
+      if (t.stuck.includes(b.id) && w.demolish(b.id, me)) ai.stats.demolished++;
+      else stuck.push(b.id);
+      continue;
+    }
+    if (!b.done || (def.worker && !def.garrison)) worth.push(b);
+  }
+  t.stuck = stuck;
+
+  let anchor = mine(t.anchor);
+  if (!anchor || !isCutOff(w, anchor) || landOf(w, anchor) === 0) anchor = away ?? worth[0];
+  t.anchor = anchor?.id ?? 0;
+  if (!anchor || (away && landOf(w, anchor) !== awayPiece)) {
+    // Nothing to supply (any more), or the far market is on another piece: no route for now.
+    if (home?.trade?.to) w.setTradeRoute(home.id, null, me);
+    if (!anchor) t.away = 0;
+    return;
+  }
+  if (!home || !away) return;
+  if (home.trade?.to !== away.id) w.setTradeRoute(home.id, away.id, me);
+
+  // What the piece lacks, and what it makes for nobody there.
+  const need: Partial<Record<Resource, number>> = {};
+  const add = (r: Resource, n: number) => {
+    if (n > 0) need[r] = (need[r] ?? 0) + n;
+  };
+  const made = new Set<Resource>();
+  for (const b of own) {
+    if (landOf(w, b) !== awayPiece) continue;
+    const def = BUILDINGS[b.type];
+    if (!b.done) {
+      const cost = costOf(b.type);
+      for (const r of RESOURCES) add(r, cost[r] - b.delivered[r] - b.inbound[r]);
+      continue;
+    }
+    if (b === away || def.storage || def.garrison) continue;
+    const recipe = def.recipe;
+    if (recipe && b.workerId !== null) {
+      for (const r of Object.keys(recipe.inputs) as Resource[]) add(r, TRADE_INPUTS - b.input[r] - b.inbound[r]);
+      const food = def.mine?.favourite ?? recipe.inputsAnyOf?.[0];
+      if (food) add(food, TRADE_INPUTS - b.input[food] - b.inbound[food]);
+    }
+    for (const r of RESOURCES) if (b.output[r] > 0) made.add(r);
+  }
+  // Already on its way: ordered, in donkeys' packs towards the far market, or waiting there.
+  for (const r of Object.keys(need) as Resource[]) {
+    const ordered = home.trade?.orders[r] ?? 0;
+    if (ordered === ENDLESS) continue;
+    let pending = ordered + away.output[r] - away.outReserved[r];
+    for (const s of w.settlers) {
+      if (s.owner === me && s.carrying === r && PROFESSIONS[s.kind].behavior === 'donkey' && s.tasks.some((k) => k.t === 'unload' && k.b === away.id)) {
+        pending += s.load ?? 1;
+      }
+    }
+    const more = need[r]! - pending;
+    if (more > 0 && w.orderTrade(home.id, r, more, me)) ai.stats.traded = (ai.stats.traded ?? 0) + more;
+  }
+  // Exports: back home, unless the piece needs it itself.
+  if (!away.done) return;
+  if (away.trade?.to !== home.id) w.setTradeRoute(away.id, home.id, me);
+  for (const r of RESOURCES) {
+    const sending = away.trade?.orders[r] === ENDLESS;
+    if (made.has(r) && !need[r] && !sending) w.orderTrade(away.id, r, ENDLESS, me);
+    else if (sending && need[r]) w.orderTrade(away.id, r, 0, me);
+  }
+}
+
+/**
+ * The markets and the donkey ranch the trade with a cut-off piece needs (`tradeCheck`), one per
+ * think: a market at home, a ranch, then a market on that piece. True if it placed one.
+ */
+function placeTrade(ctx: Context, ai: AiState): boolean {
+  const t = ai.trade;
+  const { w, me } = ctx;
+  const anchor = t?.anchor ? w.buildings.get(t.anchor) : undefined;
+  if (!t || !anchor || anchor.owner !== me || !isCutOff(w, anchor)) return false;
+  const piece = landOf(w, anchor);
+  if (piece === 0) return false;
+  const place = (type: BuildingType | undefined, key: BuildingType | 'tradeAway'): Building | null => {
+    if (!type || (ai.blockedUntil[key] ?? -Infinity) > w.tick || !ctx.affordable(type)) return null;
+    const b = tryPlace(ctx, ai, type);
+    if (!b) ai.blockedUntil[key] = w.tick + RETRY_TICKS;
+    return b;
+  };
+  if (!t.home) {
+    const b = place(MARKETS[0], MARKETS[0]);
+    if (b) t.home = b.id;
+    return !!b;
+  }
+  if (RANCHES.length > 0 && !ctx.own.some((b) => RANCHES.includes(b.type))) return !!place(RANCHES[0], RANCHES[0]);
+  if (!t.away) {
+    ctx.onPiece = piece;
+    const b = place(MARKETS[0], 'tradeAway');
+    ctx.onPiece = 0;
+    if (!b) return false;
+    t.away = b.id;
+    // Its own materials go by donkey: route and orders at the next think.
+    w.setTradeRoute(t.home, b.id, me);
+    t.nextCheck = w.tick;
+    return true;
+  }
+  return false;
 }
 
 function prospect(ctx: Context, ai: AiState): void {
@@ -398,6 +563,7 @@ function attackIfStrong(w: World, ai: AiState): boolean {
   const me = ai.player;
   const last = ai.lastTarget ? w.buildings.get(ai.lastTarget) : undefined;
   const pressing = !!last && last.owner === me;
+  if (updateStrike(w, ai)) return true;
   if (w.tick - ai.lastAttack < (pressing ? AI.followUpCooldown : AI.attackCooldown)) return true;
   // No rush: the early game is for building up.
   if (w.tick < AI.peaceTicks) return false;
@@ -443,7 +609,9 @@ function attackIfStrong(w: World, ai: AiState): boolean {
     }
   }
   if (!target) return false;
-  const sent = w.attack(target.id, send, me);
+  // Gathered in the field first, the party strikes together; from close by it goes straight in.
+  const staged = AI.stageStrike ? stageStrike(w, ai, target, send) : 0;
+  const sent = staged || w.attack(target.id, send, me);
   if (sent === 0) return false;
   ai.lastAttack = w.tick;
   ai.lastTarget = target.id;
@@ -545,7 +713,7 @@ function siege(ctx: Context, ai: AiState): boolean {
   const placed = tryPlace(ctx, ai, type);
   ctx.siege = null;
   if (!placed) ai.blockedUntil.siege = w.tick + RETRY_TICKS;
-  return placed;
+  return !!placed;
 }
 
 /** Everything a single think needs about the AI's own side, computed once. */
@@ -581,6 +749,13 @@ class Context {
   private readonly band: Set<number>;
   /** Whether workshops and houses keep off the band (cleared for a retry when nothing else fits). */
   reserveBand = true;
+  /**
+   * Pieces of its land it builds on (`land.ts`): those with a finished warehouse, and those a market
+   * route of its own serves — elsewhere no carrier would ever bring a site its materials.
+   */
+  private readonly pieces: Set<number>;
+  /** Set while placing a market on a cut-off piece: only that piece then. */
+  onPiece = 0;
 
   constructor(
     readonly w: World,
@@ -601,6 +776,11 @@ class Context {
     this.tiles = this.territory();
     this.band = this.borderBand();
     this.short = (Object.keys(AI.reserve) as Resource[]).filter((r) => !this.producing(r));
+    this.pieces = new Set();
+    const served = new Set(own.map((b) => b.trade?.to).filter((to) => typeof to === 'number'));
+    for (const b of own) {
+      if (b.done && (BUILDINGS[b.type].storage || (BUILDINGS[b.type].market && served.has(b.id)))) this.pieces.add(landOf(w, b));
+    }
   }
 
   /** Some enemy point (known building, foreign land in sight, or a start it scouts for) within `r` of `p`. */
@@ -777,6 +957,8 @@ class Context {
     }
     const door = doorOf(x, y, def.w, def.h);
     if (!m.isWalkable(door.x, door.y) || m.owner[m.idx(door.x, door.y)] !== this.me) return false;
+    const piece = landAt(this.w, door, this.me);
+    if (this.onPiece ? piece !== this.onPiece : !this.pieces.has(piece)) return false;
     return def.terrain === 'mountain' || m.heightRange(x, y, x + def.w - 1, y + def.h) <= BUILD_MAX_SLOPE;
   }
 

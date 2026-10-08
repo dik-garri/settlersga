@@ -406,8 +406,8 @@ export class World {
   }
 
   /**
-   * Player command: a marketplace's donkeys carry its ordered goods to market `to` (another finished
-   * market of the player), or nowhere (`null`). See `trade.ts`.
+   * Player command: a marketplace's donkeys carry its ordered goods to market `to` (another
+   * market of the player, also a site), or nowhere (`null`). See `trade.ts`.
    */
   setTradeRoute(id: number, to: number | null, player: PlayerId = LOCAL_PLAYER): boolean {
     const m = this.buildings.get(id);
