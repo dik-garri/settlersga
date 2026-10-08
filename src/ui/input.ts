@@ -2,7 +2,7 @@ import type { Camera } from '../render/camera';
 import type { Area, GameRenderer, Ghost } from '../render/renderer';
 import { BUILDINGS, PIONEER, PROSPECT_RADIUS } from '../sim/config';
 import { isFighter, isMilitary } from '../sim/military';
-import { claimable, isSpecialist, SPECIALIST_ORDERS } from '../sim/specialists';
+import { claimable, isSpecialist, prospectTiles, SPECIALIST_ORDERS, toolPileNear } from '../sim/specialists';
 import { toScreen } from '../render/iso';
 import { Terrain, type BuildingType } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
@@ -85,6 +85,16 @@ export class InputController {
   }
 
   /** Where the building's top tile goes so the footprint is centered on the cursor. */
+  /** Why `sendGeologist` refused (x, y): the first of its conditions that fails, in words. */
+  private geologistBlocker(x: number, y: number): string {
+    const w = this.world;
+    if (!w.map.inBounds(x, y) || w.map.terrain[w.map.idx(x, y)] !== Terrain.Mountain) return 'Геолог разведывает только горы: щёлкните по склону горы';
+    if (!w.owns(x, y)) return 'Гора должна быть на своей земле';
+    if (prospectTiles(w, x, y, LOCAL_PLAYER).length === 0) return 'Здесь всё уже разведано';
+    if (!toolPileNear(w, LOCAL_PLAYER, x, y)) return 'Нет свободного молотка: геолог берёт его со склада (молотки делает инструментальщик, их берут и строители)';
+    return 'Нет свободного носильщика';
+  }
+
   private anchorFor(type: BuildingType, fx: number, fy: number): { x: number; y: number } {
     const def = BUILDINGS[type];
     return { x: Math.round(fx - (def.w - 1) / 2), y: Math.round(fy - (def.h - 1) / 2) };
@@ -331,8 +341,10 @@ export class InputController {
       return;
     }
     if (placing === 'geologist') {
-      const ok = this.world.sendGeologist(Math.round(t.x), Math.round(t.y));
-      this.cb.onMessage(ok ? 'Геолог отправлен' : 'Нужна неразведанная гора на своей земле и свободный носильщик');
+      const gx = Math.round(t.x);
+      const gy = Math.round(t.y);
+      const ok = this.world.sendGeologist(gx, gy);
+      this.cb.onMessage(ok ? 'Геолог отправлен' : this.geologistBlocker(gx, gy));
       if (ok && !e.shiftKey) this.cb.onSelectBuildType(null);
       return;
     }
