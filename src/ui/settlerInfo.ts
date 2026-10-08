@@ -115,7 +115,7 @@ export class SettlerInfoView implements View {
     switch (t.t) {
       case 'goto':
         if (next?.t === 'pickup') return `идёт за товаром: ${res(next.res)}`;
-        if (next?.t === 'drop') return `несёт ${res(next.res)}: ${at(next.b)}`;
+        if (next?.t === 'drop') return `несёт груз (${res(next.res).toLowerCase()}) → ${at(next.b)}`;
         if (next?.t === 'build') return `идёт на стройку: ${at(next.b)}`;
         if (next?.t === 'dig') return `идёт расчищать: ${at(next.b)}`;
         if (next?.t === 'join') return `идёт в гарнизон: ${at(next.b)}`;
