@@ -20,6 +20,7 @@
  * buildings and, when it wants to build, scores the tiles of its own territory (sampled more sparsely
  * on large territories) and tries `canPlace` on the best `AI.placeTries` spots only.
  */
+import { duelWorth } from './combat';
 import { attackStrength } from './strength';
 import { available, centerOf, claimsTerritory, doorOf, oreLeft, waitingFor } from './buildings';
 import {
@@ -28,7 +29,6 @@ import {
   AI_PLAN,
   ATTACK_RANGE,
   BUILD_MAX_SLOPE,
-  SOLDIER_LEVELS,
   BUILDINGS,
   costOf,
   totalCost,
@@ -594,9 +594,10 @@ function attackIfStrong(w: World, ai: AiState): boolean {
   const goals = new Map<PlayerId, Point>();
   for (const g of siegeGoals(w, me)) goals.set(g.owner, g);
   // Its fighters fight on foreign land at its attack strength (its own settlement value, which it
-  // knows); the defenders' strength it cannot know, so it assumes the base 100 %. Strength scales both
-  // the chance to land a blow and its damage (`blow`), so it counts squared.
-  const field = (attackStrength(w, me) / 100) ** 2;
+  // knows), which scales their damage (`combat.ts`). One-on-one duels trade hit points × damage per
+  // second (`duelWorth`), so the party's worth is the sum of its fighters'; the defenders' make-up
+  // and strength it cannot know, so each counts as a level-1 swordsman at the base 100 %.
+  const field = attackStrength(w, me) / 100;
   let target: Building | null = null;
   let send = 0;
   let bestScore = -Infinity;
@@ -605,9 +606,8 @@ function attackIfStrong(w: World, ai: AiState): boolean {
     const ready = w.attackerComposition(b.id, Infinity, me);
     // Only swordsmen take a building: a party without one could only kill, never conquer.
     if (!ready.some((s) => PROFESSIONS[s.kind].combat?.captures)) continue;
-    const power =
-      ready.reduce((n, s) => n + SOLDIER_LEVELS[s.level].damage * (PROFESSIONS[s.kind].combat?.melee ?? 1), 0) * field;
-    const defense = defenders * (BUILDINGS[b.type].garrison!.defense ?? 1);
+    const power = ready.reduce((n, s) => n + duelWorth(s.kind, s.level, field), 0);
+    const defense = defenders;
     if (ready.length < AI.minAttackers || power < t.attackRatio * defense + 1) continue;
     const c = centerOf(b);
     const goal = goals.get(b.owner);

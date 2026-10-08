@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { knownEnemies } from '../src/sim/ai';
 import { centerOf, spawnSettler } from '../src/sim/buildings';
-import { BUILDINGS, FOG, SOLDIER_LEVELS } from '../src/sim/config';
+import { BUILDINGS, FOG, PROFESSIONS, SOLDIER_LEVELS } from '../src/sim/config';
 import { enterGarrison, isArcher, killSettler, maxHp, slotsFree } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
 import type { Building, Settler } from '../src/sim/types';
@@ -66,7 +66,7 @@ describe('recruit levels (bought at the barracks, as in Settlers 4)', () => {
     run(w, 1500);
     const trained = w.settlers.filter((s) => (s.kind === 'soldier' || s.kind === 'archer') && s.level > 0);
     expect(trained.map((s) => s.level).sort()).toEqual([1, 2]);
-    for (const s of trained) expect(maxHp(s)).toBe(Math.round((s.kind === 'archer' ? 75 : 100) * SOLDIER_LEVELS[s.level].hp));
+    for (const s of trained) expect(maxHp(s)).toBe(PROFESSIONS[s.kind].combat!.levels[s.level].hp);
     expect(c.output.gold + barracks.input.gold + barracks.inbound.gold).toBe(0);
     // Levels never change afterwards.
     c.output.gold = 5;

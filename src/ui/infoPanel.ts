@@ -100,9 +100,6 @@ export class InfoView implements View {
       if (!sighted) rows.push(['Обзор', 'нет — подойдите ближе']);
       if (def.garrison && b.done) {
         rows.push(['Защитников', sighted ? String(b.garrison.length) : '?']);
-        if (def.garrison.defense && def.garrison.defense > 1) {
-          rows.push(['Бонус обороны', `+${Math.round((def.garrison.defense - 1) * 100)}%`]);
-        }
         rows.push(['Можно послать', String(canSend)]);
         this.attackCount = Math.max(1, Math.min(this.attackCount, canSend));
         rows.push(['Отправить', String(this.attackCount)]);

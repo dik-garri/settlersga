@@ -1,5 +1,5 @@
 import { addBuilding, recomputeTerritory, spawnSettler } from '../sim/buildings';
-import { BUILD_TICKS_PER_UNIT, BUILDINGS, costOf, PROFESSIONS, totalCost } from '../sim/config';
+import { BUILD_TICKS_PER_UNIT, BUILDINGS, costOf, hpOf, totalCost } from '../sim/config';
 import { clearStrokes } from '../sim/digging';
 import { ENDLESS } from '../sim/economy';
 import { formationSpots } from '../sim/field';
@@ -300,7 +300,7 @@ export function buildShowcase(): World {
   // A field squad round its leader (direct army control): it marches out and stands in formation.
   const squad = (['leader', 'soldier', 'soldier', 'soldier', 'soldier', 'archer', 'archer'] as const).map((kind) => {
     const s = spawnSettler(w, kind, c);
-    s.hp = PROFESSIONS[kind].hp ?? 100;
+    s.hp = hpOf(kind);
     s.inside = null;
     s.home = null;
     return s.id;

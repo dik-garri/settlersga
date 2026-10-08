@@ -8,12 +8,11 @@
  * and military buildings are looked at per exposed intruder), so it follows the number of intruders,
  * not the map.
  */
-import { DAMAGE, FIGHT_EVERY, INTRUDERS, PROFESSIONS, SOLDIER_LEVELS } from './config';
-import { moraleOf, outdoorFighters } from './field';
-import { isArcher, isFighter, isMilitary, keepOf, killSettler, leaveGarrison } from './military';
-import { randInt } from './rng';
+import { combatOf, duelTick } from './combat';
+import { INTRUDERS, PROFESSIONS } from './config';
+import { outdoorFighters } from './field';
+import { isArcher, isFighter, isMilitary, keepOf, leaveGarrison } from './military';
 import { SPECIALIST_KINDS } from './specialists';
-import { fieldFactor } from './strength';
 import type { Building, PlayerId, Point, Settler, Task } from './types';
 import type { World } from './world';
 
@@ -104,8 +103,6 @@ export function updateIntruders(w: World): void {
   }
 }
 
-const meleeOf = (s: Settler) => SOLDIER_LEVELS[s.level].damage * (PROFESSIONS[s.kind].combat?.melee ?? 1);
-
 /** Lets go of the intruder and gives up the chase. */
 function quit(s: Settler, e: Settler | undefined): void {
   if (s.opponent !== null && s.opponent === e?.id) s.opponent = null;
@@ -115,8 +112,9 @@ function quit(s: Settler, e: Settler | undefined): void {
 
 /**
  * `chase` task: walk up to the intruder (a `goto` inserted towards where he is); within
- * `INTRUDERS.seizeRadius` pin him (`opponent`: he stands, `updateSettler`); adjacent, strike every
- * `FIGHT_EVERY` ticks — he does not fight back. Ends when he is dead, gone, indoors, disguised again or
+ * `INTRUDERS.seizeRadius` pin him (`opponent`: he stands, `updateSettler`); adjacent, strike at the
+ * fighter's own pace with ordinary blows (`combat.ts`) — he does not fight back; what he carried is
+ * lost with him (`killSettler`). Ends when he is dead, gone, indoors, disguised again or
  * off this fighter's land.
  */
 export function chaseTick(w: World, s: Settler, task: Extract<Task, { t: 'chase' }>): void {
@@ -131,17 +129,15 @@ export function chaseTick(w: World, s: Settler, task: Extract<Task, { t: 'chase'
     s.tasks.unshift({ t: 'goto', x: Math.round(e.x), y: Math.round(e.y) });
     return;
   }
-  s.opponent = e.id;
+  if (s.opponent !== e.id) {
+    // Just reached him: the first blow comes after a random part of the fighter's cadence.
+    s.opponent = e.id;
+    s.reload = w.rng() * (combatOf(s)?.every ?? 1);
+  }
   s.working = true;
-  if (++task.n < FIGHT_EVERY) return;
-  task.n = 0;
-  const base = DAMAGE[0] + randInt(w.rng, DAMAGE[1] - DAMAGE[0] + 1);
-  e.hp -= base * meleeOf(s) * fieldFactor(w, s) * moraleOf(w, s);
-  if (e.hp > 0) return;
-  if (e.carrying) w.stats.lost[e.carrying]++;
-  e.carrying = null;
+  duelTick(w, s, e, false);
+  if (!w.dying.has(e.id)) return;
   w.stats.intrudersKilled++;
-  killSettler(w, e);
   quit(s, undefined);
 }
 

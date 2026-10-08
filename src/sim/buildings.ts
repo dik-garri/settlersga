@@ -1,5 +1,6 @@
 import {
   BUILDINGS,
+  hpOf,
   MINING,
   ORDERABLE,
   OUTPUT_CAP,
@@ -108,7 +109,7 @@ export function spawnSettler(w: World, kind: SettlerKind, at: Building): Settler
     home: null,
     idleTicks: 0,
     working: false,
-    hp: PROFESSIONS[kind].hp ?? 0,
+    hp: hpOf(kind),
     opponent: null,
     level: 0,
     reload: 0,
