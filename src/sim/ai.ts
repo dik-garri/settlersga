@@ -49,7 +49,7 @@ export interface AiState {
   nextThink: number;
   lastAttack: number;
   /** Building type (or 'frontier') → tick before which the AI does not look for a spot again. */
-  blockedUntil: Partial<Record<BuildingType | 'frontier' | 'decor' | 'room', number>>;
+  blockedUntil: Partial<Record<BuildingType | 'frontier' | 'decor' | 'room' | 'siege' | 'siegeLookout', number>>;
   /** Ore it wants a mine for but knows no deposit of: towers then favour mountains, geologists go out. */
   wantOre: Resource | null;
   /** Its weapon shares have been set (once, through `setShare`). */
@@ -58,6 +58,8 @@ export interface AiState {
   crampedUntil: number;
   /** Tick of its next pioneer/thief decision. */
   nextSpecialists: number;
+  /** The building its last attack went for (0 = none): taken by now, it follows up sooner. */
+  lastTarget?: number;
   stats: {
     placed: number;
     attacks: number;
@@ -126,6 +128,7 @@ function think(w: World, ai: AiState): void {
   const sites = own.filter((b) => !b.done);
   if (sites.length >= AI.maxOpenSites) return;
   const ctx = new Context(w, me, own, ai.wantOre);
+  if (siege(ctx, ai)) return;
 
   // Scouting: foreign land in sight but no enemy building known — a lookout tower at that border
   // sees much further than a tower (whose land stops at the other's border).
@@ -361,38 +364,68 @@ export function knownEnemies(w: World, me: PlayerId): { b: Building; defenders: 
 }
 
 /**
- * Sends every spare soldier in range against the known enemy military building it most clearly
- * outnumbers. True if it attacked (or is still cooling down from an attack).
+ * The castle of each enemy it knows, by owner: the building that ends the game, so the target its
+ * attacks work towards and its siege buildings gather around.
+ */
+function knownCastles(w: World, me: PlayerId): Map<PlayerId, Building> {
+  const out = new Map<PlayerId, Building>();
+  for (const { b } of knownEnemies(w, me)) {
+    if (b.done && w.castleOf(b.owner) === b) out.set(b.owner, b);
+  }
+  return out;
+}
+
+/**
+ * Sends every spare soldier in range against the best known enemy military building: one it clearly
+ * outnumbers (party strength against what it can see of the defence), preferring the castle, then
+ * targets that bring it closer to an enemy castle (its siege buildings are staged there), then ones
+ * the enemy cannot easily retake from neighbouring buildings. After a capture it follows up sooner
+ * (`AI.followUpCooldown`). True if it attacked (or is still cooling down from an attack).
  */
 function attackIfStrong(w: World, ai: AiState): boolean {
-  if (w.tick - ai.lastAttack < AI.attackCooldown) return true;
   const me = ai.player;
+  const last = ai.lastTarget ? w.buildings.get(ai.lastTarget) : undefined;
+  const pressing = !!last && last.owner === me;
+  if (w.tick - ai.lastAttack < (pressing ? AI.followUpCooldown : AI.attackCooldown)) return true;
   // No rush: the early game is for building up.
   if (w.tick < AI.peaceTicks) return false;
+  const known = knownEnemies(w, me);
+  const castles = knownCastles(w, me);
+  // Where each enemy's castle is (or presumably is): attacks work towards it.
+  const goals = new Map<PlayerId, Point>();
+  for (const g of siegeGoals(w, me)) goals.set(g.owner, g);
+  // Its fighters fight on foreign land at its attack strength (its own settlement value, which it
+  // knows); the defenders' strength it cannot know, so it assumes the base 100 %. Strength scales both
+  // the chance to land a blow and its damage (`blow`), so it counts squared.
+  const field = (attackStrength(w, me) / 100) ** 2;
   let target: Building | null = null;
   let send = 0;
-  let bestMargin = -Infinity;
-  for (const { b, defenders } of knownEnemies(w, me)) {
+  let bestScore = -Infinity;
+  for (const { b, defenders } of known) {
     if (!b.done || !isMilitary(b)) continue;
-    // Own fighters' strength (ranks and professions known) against what it can see of the target:
-    // the defenders it counts and the kind of building (its defense bonus).
     const ready = w.attackerComposition(b.id, Infinity, me);
     // Only swordsmen take a building: a party without one could only kill, never conquer.
     if (!ready.some((s) => PROFESSIONS[s.kind].combat?.captures)) continue;
-    // Its fighters fight there at its attack strength (its own settlement value, which it knows);
-    // the defenders' strength it cannot know, so it assumes the base 100 %.
-    // Strength scales both the chance to land a blow and its damage (`blow`), so it counts squared.
-    const field = attackStrength(w, me) / 100;
     const power =
-      ready.reduce((n, s) => n + SOLDIER_LEVELS[s.level].damage * (PROFESSIONS[s.kind].combat?.melee ?? 1), 0) *
-      field *
-      field;
+      ready.reduce((n, s) => n + SOLDIER_LEVELS[s.level].damage * (PROFESSIONS[s.kind].combat?.melee ?? 1), 0) * field;
     const defense = defenders * (BUILDINGS[b.type].garrison!.defense ?? 1);
     if (ready.length < AI.minAttackers || power < AI.attackRatio * defense + 1) continue;
-    // Prefer the castle (it ends the game), then the largest margin.
-    const margin = power - AI.attackRatio * defense + (w.castleOf(b.owner) === b ? 100 : 0);
-    if (margin > bestMargin) {
-      bestMargin = margin;
+    const c = centerOf(b);
+    const goal = goals.get(b.owner);
+    let score = power - AI.attackRatio * defense;
+    if (castles.get(b.owner) === b) score += 100;
+    else if (goal) score -= Math.hypot(goal.x - c.x, goal.y - c.y) * AI.depthWeight;
+    // Neighbours of the same owner it knows of: they will send fighters to retake it.
+    const helpers = known.filter(
+      (e) =>
+        e.b !== b &&
+        e.b.owner === b.owner &&
+        isMilitary(e.b) &&
+        Math.hypot(centerOf(e.b).x - c.x, centerOf(e.b).y - c.y) <= ATTACK_RANGE,
+    ).length;
+    score -= helpers * AI.reinforceWeight;
+    if (score > bestScore) {
+      bestScore = score;
       target = b;
       send = ready.length;
     }
@@ -401,9 +434,94 @@ function attackIfStrong(w: World, ai: AiState): boolean {
   const sent = w.attack(target.id, send, me);
   if (sent === 0) return false;
   ai.lastAttack = w.tick;
+  ai.lastTarget = target.id;
   ai.stats.attacks++;
   ai.stats.soldiersSent += sent;
   return true;
+}
+
+/**
+ * Where it besieges each enemy it knows of: that enemy's castle once explored, else the castle's
+ * presumed place — the start position (public, like the map size) nearest to the enemy buildings it
+ * knows. The siege then pushes towards it until the castle comes into sight.
+ */
+function siegeGoals(w: World, me: PlayerId): (Point & { seen: boolean; owner: PlayerId })[] {
+  const known = knownEnemies(w, me);
+  const castles = knownCastles(w, me);
+  const starts = startPositions(w.map.w, w.players.length);
+  const owners = [...new Set(known.map((e) => e.b.owner))].sort((a, b) => a - b);
+  const goals: (Point & { seen: boolean; owner: PlayerId })[] = [];
+  for (const o of owners) {
+    const castle = castles.get(o);
+    if (castle) {
+      goals.push({ ...centerOf(castle), seen: true, owner: o });
+      continue;
+    }
+    const theirs = known.filter((e) => e.b.owner === o).map((e) => centerOf(e.b));
+    let best: Point | null = null;
+    let bestD = Infinity;
+    for (const st of starts) {
+      const d = Math.min(...theirs.map((t) => Math.hypot(t.x - st.x, t.y - st.y)));
+      if (d < bestD) {
+        bestD = d;
+        best = st;
+      }
+    }
+    if (best) goals.push({ ...best, seen: false, owner: o });
+  }
+  return goals;
+}
+
+/**
+ * Siege: too few of its military buildings stand within `ATTACK_RANGE` of an enemy castle (known, or
+ * presumed — `siegeGoals`) for a strike force big enough to gather there (only fighters of buildings
+ * in range join an attack). Puts up the largest military building it can pay for and man as near
+ * that castle as its land allows — within `ATTACK_RANGE − AI.siegeMargin` if it can, else just closer
+ * than any it has, which pushes its land (and sight) on towards it — even with enemies in reach and
+ * beyond `AI.maxMilitary`. True if it placed one.
+ */
+function siege(ctx: Context, ai: AiState): boolean {
+  const { w, me } = ctx;
+  if (w.tick < AI.peaceTicks || (ai.blockedUntil.siege ?? -Infinity) > w.tick) return false;
+  const military = ctx.own.filter((b) => isMilitary(b));
+  // Bounded: a siege whose new land keeps being taken by closer enemy buildings must not build forever.
+  if (military.length === 0 || military.length >= AI.maxMilitary + AI.siegeExtra) return false;
+  let goal: (Point & { seen: boolean; owner: PlayerId }) | null = null;
+  let closest = Infinity;
+  for (const c of siegeGoals(w, me)) {
+    const dist = (b: Building) => Math.hypot(centerOf(b).x - c.x, centerOf(b).y - c.y);
+    // A castle in sight needs a strike force staged round it; one still unseen needs sight first, so
+    // the siege keeps pushing until the castle is explored (buildings see little beyond their land).
+    if (c.seen && military.filter((b) => dist(b) <= ATTACK_RANGE).length >= AI.siegeBuildings) continue;
+    const d = Math.min(...military.map(dist));
+    if (d < closest) {
+      closest = d;
+      goal = c;
+    }
+  }
+  if (!goal) return false;
+  // How close its land already comes to the goal: a new building must bring it closer.
+  const m = w.map;
+  const land = Math.min(...ctx.tiles.map((i) => Math.hypot((i % m.w) - goal.x, Math.floor(i / m.w) - goal.y)));
+  // A castle not yet in sight: a lookout as near it as its land allows sees furthest, cheaply.
+  if (!goal.seen && (ai.blockedUntil.siegeLookout ?? -Infinity) <= w.tick) {
+    const lookout = LOOKOUTS.find((t) => ctx.affordable(t));
+    if (lookout) {
+      ctx.siege = { ...goal, reach: land + 3, land };
+      const placed = tryPlace(ctx, ai, lookout);
+      ctx.siege = null;
+      if (placed) return true;
+      ai.blockedUntil.siegeLookout = w.tick + RETRY_TICKS;
+    }
+  }
+  const type = FRONTIER.find((t) => ctx.canMan(t) && ctx.affordable(t));
+  if (!type) return false;
+  // Within striking range of a seen castle if it can; otherwise any spot whose land reaches closer.
+  ctx.siege = { ...goal, reach: goal.seen ? ATTACK_RANGE - AI.siegeMargin : -1, land };
+  const placed = tryPlace(ctx, ai, type);
+  ctx.siege = null;
+  if (!placed) ai.blockedUntil.siege = w.tick + RETRY_TICKS;
+  return placed;
 }
 
 /** Everything a single think needs about the AI's own side, computed once. */
@@ -412,6 +530,12 @@ class Context {
   readonly tiles: number[];
   /** Military buildings go as close to the nearest enemy as possible (instead of claiming resources). */
   frontier = false;
+  /**
+   * Siege: a military building goes within `reach` of this enemy castle (as close as possible), or
+   * else where its land would reach closer to it than its land does now (`land`, tiles); a lookout
+   * goes within `reach`.
+   */
+  siege: (Point & { reach: number; land: number }) | null = null;
   /** Reserved materials (`AI.reserve`) nothing of its own produces any more: towers lean towards them. */
   readonly short: Resource[];
   private readonly castle: Point;
@@ -661,6 +785,13 @@ class Context {
       return -Math.min(...this.enemies.map((e) => Math.hypot(e.x - cx, e.y - cy)));
     }
 
+    if (this.siege && (def.vision || (def.garrison && def.territory))) {
+      const d = Math.hypot(this.siege.x - cx, this.siege.y - cy);
+      if (d <= this.siege.reach) return 1000 - d;
+      // Out of reach: worth it only if its land brings the border on towards the goal.
+      const claims = d - (def.territory ?? 0);
+      return def.territory && claims <= this.siege.land - AI.siegeStep ? -claims : null;
+    }
     if (def.garrison && def.territory) {
       // Towers: push the border outwards, towards enemies and unclaimed resources, apart from each other.
       const nearestOwnMilitary = Math.min(

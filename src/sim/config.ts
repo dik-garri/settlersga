@@ -1016,6 +1016,26 @@ export const AI = {
   peaceTicks: 25 * 60 * TICKS_PER_SECOND,
   /** Ticks between attacks. */
   attackCooldown: 1200,
+  /**
+   * After an attack that took its target, the next one comes this soon: it presses on while the
+   * enemy is still reeling, instead of giving it the same two minutes to retake what it lost.
+   */
+  followUpCooldown: 300,
+  /**
+   * Siege: once it knows an enemy castle (the building that ends the game), it stages this many own
+   * military buildings within `ATTACK_RANGE − siegeMargin` of it — even with enemies in reach — so a
+   * strike force large enough for the castle can gather there (towers further back cannot join it).
+   */
+  siegeBuildings: 3,
+  siegeMargin: 3,
+  /** Out of striking range, a siege building's land must reach at least this much closer to the castle than its land does. */
+  siegeStep: 4,
+  /** Siege buildings may take it this far beyond `maxMilitary`, no further. */
+  siegeExtra: 8,
+  /** Target choice: per tile closer to that enemy's castle (progress towards ending the game). */
+  depthWeight: 0.6,
+  /** Target choice: per other known enemy military building within `ATTACK_RANGE` (it will be retaken from there). */
+  reinforceWeight: 1.5,
   /** With at least this many soldiers and no enemy in reach, build military buildings towards the enemy… */
   frontierSoldiers: 8,
   /**
