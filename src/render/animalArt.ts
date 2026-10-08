@@ -20,6 +20,12 @@ export const ANIMAL_CELLS: Record<AnimalKind, { w: number; h: number; ax: number
   chicken: { w: 22, h: 22, ax: 11, ay: 17 },
 };
 
+/**
+ * Drawn size per kind relative to its cell, so animals keep Settlers 4 proportions next to the (scaled)
+ * settlers and buildings: deer and donkeys come up to about a settler's shoulder, poultry to his knee.
+ */
+export const ANIMAL_SCALE: Record<AnimalKind, number> = { deer: 1.1, donkey: 1.0, duck: 0.62, chicken: 0.58 };
+
 /** Tiles walked per full walk cycle (drives the walk frame, so feet do not slide). */
 export const ANIMAL_STRIDE: Record<AnimalKind, number> = { deer: 0.9, donkey: 0.7, duck: 0.35, chicken: 0.35 };
 

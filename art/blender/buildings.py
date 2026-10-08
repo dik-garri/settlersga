@@ -2541,11 +2541,20 @@ def build_fortress():
     lib.tag(3)
     for (tx, ty) in ((x0, y0), (x1, y0)):
         cone_tiles(tx, ty, DH + 0.35, 0.34, 0.6, slate, rnd, size=0.11, shape='scale')
-    # A low forecourt wall in front, open at the gate.
-    fy = y0 - 0.5
-    for (a, b) in ((x0 - 0.05, dx - 0.3), (dx + 0.3, x1 + 0.05)):
-        stone_house(a, b, fy - 0.08, fy + 0.08, 0.36, rnd, walls, blocks, z0=0.0, block=0.15)
-        battlements(a, b, fy - 0.1, fy + 0.08, 0.36, blocks, rnd, size=0.13, faces=('y0',))
+    # A walled forecourt before the gate: a front wall with an opening in line with the gate, and
+    # side walls back to the donjon, crenellated, high enough to read at game scale.
+    fy, wh, t = y0 - 0.62, 0.5, 0.09
+    fx0, fx1 = x0 - 0.22, x1 + 0.22
+    for (a, b) in ((fx0, dx - 0.26), (dx + 0.26, fx1)):
+        stone_house(a, b, fy - t, fy + t, wh, rnd, walls, blocks, z0=0.0, block=0.15)
+        battlements(a, b, fy - t - 0.02, fy + t, wh, blocks, rnd, size=0.13, faces=('y0',))
+    for wx in (fx0, fx1):
+        stone_house(wx - t, wx + t, fy - t, y0, wh, rnd, walls, blocks, z0=0.0, block=0.15)
+        battlements(wx - t - 0.02, wx + t + 0.02, fy - t, y0, wh, blocks, rnd, size=0.13,
+                    faces=('x1',) if wx > dx else ('x0',))
+    # Gate piers at the opening, a little higher than the wall.
+    for gx in (dx - 0.26, dx + 0.26):
+        lib.box((gx, fy, (wh + 0.12) / 2), (0.16, 0.22, wh + 0.12), blocks[rnd.randrange(len(blocks))], bevel=0.02)
     lib.tag(4)
     note_banner('fortress', (dx, dy, DH + 0.2))
 

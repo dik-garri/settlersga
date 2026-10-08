@@ -383,6 +383,66 @@ def render_mask(scene, path, mask_mat):
     return read_png(path)
 
 
+def build_hat_proxy(fig):
+    """The space any hat may take (the union of the hat styles, a little generous): hidden in the
+    normal passes, a holdout in the arm-over-hat pass. Built in figure space like the hats."""
+    scale = fig.root.scale.copy()
+    fig.root.scale = (1, 1, 1)
+    fig.root.rotation_euler = (0, 0, 0)
+    bpy.context.view_layer.update()
+    z = 0.76
+    objs = [
+        lib.sphere((-0.01, 0, z + 0.06), 0.16, None, scale=(1.05, 1.05, 0.85)),
+        lib.cylinder((0, 0, z + 0.07), 0.25, 0.03, None, verts=24),
+        lib.cylinder((-0.01, 0, z + 0.16), 0.15, 0.26, None, verts=18),
+        lib.cylinder((-0.02, 0, z - 0.1), 0.17, 0.1, None, verts=18),
+    ]
+    for o in objs:
+        fig.attach(o, fig.root)
+        o.hide_render = True
+    fig.root.scale = scale
+    bpy.context.view_layer.update()
+    return objs
+
+
+def arm_parts(fig):
+    """Every mesh hanging from the shoulders: sleeves, arms, hands, and the tools at the grips."""
+    parts = []
+    for p in fig.arms:
+        parts += [o for o in p.children_recursive if o.type == 'MESH']
+    return parts
+
+
+def render_over(scene, path, fig, proxy, neck_y):
+    """Arm-over-hat pass for work poses: only the arms and tools render, everything else (the body,
+    head and the hat proxy) is a holdout, so what remains is the arm and tool where they pass in front
+    of the head and any hat. Rows below the neck are cleared (no hat there to cover), so frames with
+    the arms down come out empty. The game draws it above the hat layer."""
+    arms = set(arm_parts(fig))
+    catcher = bpy.data.objects['ShadowCatcher']
+    changed = []
+    for o in scene.objects:
+        if o.type != 'MESH' or o is catcher or o.hide_render and o not in proxy:
+            continue
+        if o not in arms:
+            changed.append(o)
+            o.is_holdout = True
+    for o in proxy:
+        o.hide_render = False
+    samples, denoise = scene.cycles.samples, scene.cycles.use_denoising
+    scene.cycles.samples, scene.cycles.use_denoising = 10, False
+    catcher.hide_render = True
+    px = render_full(scene, path)
+    catcher.hide_render = False
+    scene.cycles.samples, scene.cycles.use_denoising = samples, denoise
+    for o in proxy:
+        o.hide_render = True
+    for o in changed:
+        o.is_holdout = False
+    px[int(neck_y):, :, 3] = 0
+    return px
+
+
 class Packer:
     """Trims frames to their opaque pixels and shelf-packs them into PAGE×PAGE pages."""
 
@@ -451,6 +511,11 @@ def build_settlers(out, tmp, only=None, hats=None):
     cache = os.path.join(tmp, 'settlers-cache')
     os.makedirs(cache, exist_ok=True)
     fig = Figure()
+    proxy = build_hat_proxy(fig)
+    # Rows below the head (render pixels): the arm-over-hat pass keeps only what is above.
+    fig.pose(0.0)
+    _, neck = lib.screen_point(scene, fig.root.matrix_world @ Vector((0, 0, 0.66)))
+    neck_y = neck * lib.RESOLUTION
     mask_mat = mask_material()
     pack = Packer()
     meta = {
@@ -460,6 +525,7 @@ def build_settlers(out, tmp, only=None, hats=None):
     }
     path = os.path.join(tmp, 'fig.png')
     mpath = os.path.join(tmp, 'fig-mask.png')
+    opath = os.path.join(tmp, 'fig-over.png')
     yaws = []
     for d in range(DIRS):
         gx, gy = lib.ground_dir(d * math.pi / 4)
@@ -468,7 +534,9 @@ def build_settlers(out, tmp, only=None, hats=None):
         if only and key not in only:
             continue
         # Each group is cached (uint8) once rendered, so an interrupted run resumes where it stopped.
-        cached = os.path.join(cache, key.replace(':', '-') + f'-{DIRS}.npz')
+        work = key.startswith('work:')
+        per = 3 if work else 2  # work poses add the arm-over-hat pass
+        cached = os.path.join(cache, key.replace(':', '-') + f'-{DIRS}-{per}.npz')
         if os.path.exists(cached):
             data = np.load(cached)['frames'].astype(np.float32) / 255
         else:
@@ -482,6 +550,8 @@ def build_settlers(out, tmp, only=None, hats=None):
                     tint = full.copy()
                     tint[..., 3] = full[..., 3] * np.clip(mask, 0, 1)
                     data += [full, tint]
+                    if work:
+                        data.append(render_over(scene, opath, fig, proxy, neck_y))
             data = np.stack(data)
             np.savez_compressed(cached, frames=np.round(np.clip(data, 0, 1) * 255).astype(np.uint8))
         rows = []
@@ -489,8 +559,8 @@ def build_settlers(out, tmp, only=None, hats=None):
         for d in range(DIRS):
             row = []
             for _ in frames:
-                row.append([pack.add(data[k]), pack.add(data[k + 1])])
-                k += 2
+                row.append([pack.add(data[k + j]) for j in range(per)])
+                k += per
             rows.append(row)
         meta['groups'][key] = rows
         print('settlers: rendered', key, flush=True)

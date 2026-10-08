@@ -3,7 +3,7 @@ import { ANIMAL_KINDS, type AnimalKind } from '../sim/config';
 import type { Animal } from '../sim/animals';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { dirFromTileVelocity, DIRS } from './anim';
-import { ANIMAL_CELLS, ANIMAL_COLUMNS, ANIMAL_GRAZE, ANIMAL_STAND, ANIMAL_STRIDE, ANIMAL_WALK, paintAnimal } from './animalArt';
+import { ANIMAL_CELLS, ANIMAL_COLUMNS, ANIMAL_GRAZE, ANIMAL_SCALE, ANIMAL_STAND, ANIMAL_STRIDE, ANIMAL_WALK, paintAnimal } from './animalArt';
 import type { Art3d } from './art3d';
 import { depthOf, HALF_H, HALF_W } from './iso';
 
@@ -61,6 +61,7 @@ export class AnimalLayer {
       let v = this.views.get(a.id);
       if (!v) {
         v = { sprite: new Sprite(), dir: (a.id * 3) % DIRS.length, walked: 0, lastX: a.x, lastY: a.y };
+        v.sprite.scale.set(ANIMAL_SCALE[a.kind]);
         this.views.set(a.id, v);
       }
       const x = a.px + (a.x - a.px) * alpha;

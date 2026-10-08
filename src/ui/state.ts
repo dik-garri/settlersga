@@ -13,6 +13,8 @@ export interface GameState {
   paused: boolean;
   placing: Placeable | null;
   selected: number | null;
+  /** Settler whose window is shown (a click on a figure); exclusive with `selected`. */
+  selectedSettler: number | null;
   /** Tile under the cursor, if any. */
   hover: { x: number; y: number } | null;
   /** Fog of war shown (`?fog=off` turns it off for debugging). */
@@ -24,6 +26,7 @@ export const createState = (): GameState => ({
   paused: false,
   placing: null,
   selected: null,
+  selectedSettler: null,
   hover: null,
   fog: true,
 });

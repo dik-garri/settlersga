@@ -1,5 +1,5 @@
 import { CanvasSource, Container, Graphics, MeshSimple, Sprite, Texture, type Application } from 'pixi.js';
-import { BUILD_TICKS_PER_UNIT, BUILDINGS, CROP_KINDS, SHOT_TICKS, TREE_MATURE } from '../sim/config';
+import { BUILD_TICKS_PER_UNIT, BUILDINGS, CROP_KINDS, SHOT_TICKS, TERRAIN, TREE_MATURE } from '../sim/config';
 import { RESOURCES, Terrain, type Building, type BuildingType, type Resource, type Settler } from '../sim/types';
 import { CHUNK } from '../sim/map';
 import { LOCAL_PLAYER, type World } from '../sim/world';
@@ -211,6 +211,8 @@ export class GameRenderer {
   private readonly ghostLayer = new Container();
   /** Placement hints: a dot on every spot in view where the chosen building fits. */
   private readonly hints = new Graphics();
+  /** Marker over the selected settler, above the objects (it must not hide behind houses). */
+  private readonly settlerMark = new Graphics();
   private hintKey = '';
   private hintAt = 0;
   private readonly ghostSprite: Sprite;
@@ -286,7 +288,7 @@ export class GameRenderer {
     /** Draw the fog of war (`?fog=off` disables it for debugging). */
     private readonly fogOn = true,
   ) {
-    this.world.addChild(this.ground, this.territory, this.marks, this.hints, this.objects, this.shots, this.fog, this.ghostLayer);
+    this.world.addChild(this.ground, this.territory, this.marks, this.hints, this.objects, this.settlerMark, this.shots, this.fog, this.ghostLayer);
     this.settlerTex = atlas.settlerTextures();
     this.animals = new AnimalLayer(sim, this.objects, (n) => atlas.get(n), fogOn);
     this.settler3d = atlas.art3d?.settlers ?? null;
@@ -526,6 +528,7 @@ export class GameRenderer {
       shade,
     );
     this.scatterProps(layer, x0, y0, x1, y1);
+    this.streamBanks(layer, x0, y0, x1, y1);
     // The ground layer stays below the chunk's field decals.
     disposeLayer(this.groundLayers[c]);
     this.groundLayers[c] = layer;
@@ -559,6 +562,58 @@ export class GameRenderer {
         layer.addChild(s);
       }
     }
+  }
+
+  /**
+   * Narrow water — streams and the narrow stretches of rivers (water with land on two opposite sides,
+   * or with little water around) — gets pebbly banks: small stones of mixed greys along every edge it
+   * shares with land, on the land side, placed by tile hash. Render-only, part of the chunk's ground
+   * layer (both art modes), so it unloads with it.
+   */
+  private streamBanks(layer: Container, x0: number, y0: number, x1: number, y1: number): void {
+    const { map } = this.sim;
+    const water = (x: number, y: number) =>
+      !map.inBounds(x, y) || TERRAIN[map.terrain[map.idx(x, y)] as Terrain].water;
+    let g: Graphics | null = null;
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        if (!water(x, y)) continue;
+        const across = (!water(x - 1, y) && !water(x + 1, y)) || (!water(x, y - 1) && !water(x, y + 1));
+        if (!across) {
+          let wet = 0;
+          for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if (water(x + dx, y + dy)) wet++;
+          if (wet > 11) continue;
+        }
+        // Each land edge: corners of the shared side, and the step from the water onto the land.
+        const edges: [number, number, number, number, number, number][] = [
+          [1, 0, x + 1, y, x + 1, y + 1],
+          [-1, 0, x, y, x, y + 1],
+          [0, 1, x, y + 1, x + 1, y + 1],
+          [0, -1, x, y, x + 1, y],
+        ];
+        for (const [dx, dy, ax, ay, bx, by] of edges) {
+          // No pebbles where the bank is swamp: reeds and mud there.
+          if (water(x + dx, y + dy) || map.terrain[map.idx(x + dx, y + dy)] === Terrain.Swamp) continue;
+          g ??= new Graphics();
+          const i = map.idx(x, y);
+          for (let k = 0; k < 11; k++) {
+            const h = hash(i * 97 + (dx + 2) * 13 + (dy + 2) * 7 + k * 101);
+            const t = (k + ((h >>> 3) % 90) / 100) / 11;
+            // Mostly on the bank, some in the shallows.
+            const into = -0.07 + ((h >>> 9) % 24) / 100;
+            const tx = ax - 0.5 + (bx - ax) * t + dx * into;
+            const ty = ay - 0.5 + (by - ay) * t + dy * into;
+            const p = this.surface(tx, ty);
+            const r = 0.8 + ((h >>> 15) % 12) / 10;
+            const grey = 0x8a8f94 + (((h >>> 20) % 5) - 2) * 0x0d0d0d;
+            g.ellipse(p.x + 0.6, p.y + 0.8, r * 1.2, r * 0.7).fill({ color: 0x20262a, alpha: 0.45 });
+            g.ellipse(p.x, p.y, r * 1.2, r * 0.75).fill({ color: grey });
+            g.ellipse(p.x - r * 0.35, p.y - r * 0.25, r * 0.45, r * 0.25).fill({ color: 0xe8ecef, alpha: 0.7 });
+          }
+        }
+      }
+    }
+    if (g) layer.addChild(g);
   }
 
   /**
@@ -646,6 +701,7 @@ export class GameRenderer {
     hover: { x: number; y: number } | null,
     area: Area | null = null,
     placing: BuildingType | null = null,
+    selectedSettler: number | null = null,
   ) {
     this.view = view;
     this.nowMs = timeMs;
@@ -663,7 +719,46 @@ export class GameRenderer {
     this.syncFog(timeMs);
     this.drawShots(alpha);
     this.drawMarks(ghost, selected, hover, area);
+    this.markSettler(selectedSettler, timeMs);
     this.drawHints(placing, timeMs);
+  }
+
+  /**
+   * The settler under a screen point (canvas CSS pixels), or null: a hit test on the visible figures'
+   * sprite bounds, trimmed to the body (the frames have transparent margins). The front-most figure
+   * wins. Only settlers drawn on screen count, so the fog of war is respected.
+   */
+  settlerAt(sx: number, sy: number): number | null {
+    let best: number | null = null;
+    let bestZ = -Infinity;
+    for (const [id, v] of this.settlerViews) {
+      if (!v.root.parent || !v.root.visible || !v.body.visible) continue;
+      const b = v.body.getBounds();
+      const cx = b.x + b.width / 2;
+      const halfW = Math.max(6, b.width * 0.22);
+      const top = b.y + b.height * 0.12;
+      const bottom = b.y + b.height * 0.92;
+      if (sx < cx - halfW || sx > cx + halfW || sy < top || sy > bottom) continue;
+      if (v.root.zIndex > bestZ) {
+        bestZ = v.root.zIndex;
+        best = id;
+      }
+    }
+    return best;
+  }
+
+  /** Selected settler: a ring at its feet and a bobbing marker over its head, following it. */
+  private markSettler(id: number | null, timeMs: number): void {
+    const g = this.settlerMark;
+    g.clear();
+    const v = id !== null ? this.settlerViews.get(id) : undefined;
+    if (!v || !v.root.parent || !v.root.visible) return;
+    const { x, y } = v.root.position;
+    const k = Math.abs(v.root.scale.y);
+    g.ellipse(x, y, 11 * k + 3, 5 * k + 1.5).stroke({ width: 2, color: 0xffe066, alpha: 0.95 });
+    const head = y - 46 * k - 6 + Math.sin(timeMs / 180) * 2;
+    g.poly([x - 5, head - 7, x + 5, head - 7, x, head]).fill({ color: 0xffe066, alpha: 0.95 });
+    g.poly([x - 5, head - 7, x + 5, head - 7, x, head]).stroke({ width: 1, color: 0x3a2a08, alpha: 0.9 });
   }
 
   /**
@@ -1504,7 +1599,10 @@ export class GameRenderer {
         const hat = s3d.hats[style.hatStyle][shown];
         v.hat.visible = hat !== null;
         if (hat) setFrame(v.hat, hat);
-        v.head.visible = v.arm.visible = false;
+        v.head.visible = false;
+        // Arms and tool passing in front of the face are drawn again above the hat.
+        v.arm.visible = fr.over !== null && hat !== null;
+        if (fr.over && hat) setFrame(v.arm, fr.over);
         // The 3D figure is rendered large for detail; shrunk to Settlers 4 proportions next to buildings.
         v.root.scale.set(SETTLER_3D_SCALE, SETTLER_3D_SCALE);
         const away = s3d.carryBehind[shown];
