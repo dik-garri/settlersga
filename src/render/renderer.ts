@@ -40,6 +40,7 @@ const YARD_KINDS = 8;
 const YARD_RX = 30;
 const YARD_RY = 15;
 import { needsLevelling } from '../sim/digging';
+import { WorkAreaLayer } from './workArea';
 import { pathLevel } from '../sim/paths';
 import { chatPartner } from '../sim/idle';
 import { BANNERS, EDGE_DIRS, GROUND_PRIORITY, groundVariants, PATH_VARIANTS, PLAYER_COLORS, type GroundKind } from './sprites';
@@ -215,6 +216,10 @@ export class GameRenderer {
   private readonly ghostLayer = new Container();
   /** Placement hints: a dot on every spot in view where the chosen building fits. */
   private readonly hints = new Graphics();
+  /** The work area of the building being placed or selected (`workArea.ts`), under the objects. */
+  private readonly workArea: WorkAreaLayer;
+  /** Set by the input while the player picks a new work-area centre for a building. */
+  workAreaPreview: { id: number; x: number; y: number } | null = null;
   /** Marker over the selected settler, above the objects (it must not hide behind houses). */
   private readonly settlerMark = new Graphics();
   /** Control-group numbers over selected units (pooled texts, see `markUnits`). */
@@ -295,7 +300,8 @@ export class GameRenderer {
     /** Draw the fog of war (`?fog=off` disables it for debugging). */
     private readonly fogOn = true,
   ) {
-    this.world.addChild(this.ground, this.territory, this.marks, this.hints, this.objects, this.settlerMark, this.badges, this.shots, this.fog, this.ghostLayer);
+    this.workArea = new WorkAreaLayer(sim, (x, y) => this.diamond(x, y), (vx, vy) => this.corner(vx, vy), (x, y) => this.surface(x, y));
+    this.world.addChild(this.ground, this.territory, this.marks, this.workArea.g, this.hints, this.objects, this.settlerMark, this.badges, this.shots, this.fog, this.ghostLayer);
     this.settlerTex = atlas.settlerTextures();
     this.animals = new AnimalLayer(sim, this.objects, (n) => atlas.get(n), fogOn, this.wareTex);
     this.settler3d = atlas.art3d?.settlers ?? null;
@@ -731,6 +737,20 @@ export class GameRenderer {
     this.markSettler(selectedSettler, timeMs);
     this.markUnits(selectedUnits, groups);
     this.drawHints(placing, timeMs);
+    this.drawWorkArea(ghost, selected);
+  }
+
+  /** The work area: a centre being chosen, else the building being placed, else the selected one. */
+  private drawWorkArea(ghost: Ghost | null, selected: number | null): void {
+    const p = this.workAreaPreview;
+    const moving = p ? this.workArea.forBuilding(p.id) : null;
+    this.workArea.update(
+      moving && p
+        ? { ...moving, centre: { x: p.x, y: p.y }, preview: true }
+        : ghost
+          ? WorkAreaLayer.forPlan(ghost.type, ghost.x, ghost.y)
+          : this.workArea.forBuilding(selected),
+    );
   }
 
   /**

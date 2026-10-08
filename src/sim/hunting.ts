@@ -4,6 +4,7 @@ import { findPath } from './pathfinding';
 import type { Building, Point, Resource, Settler, Task } from './types';
 import type { World } from './world';
 import { abort } from './settlers';
+import { workCentre } from './workArea';
 
 /**
  * Hunting (as in Settlers 4): a hunter from his lodge stalks the nearest unclaimed game animal
@@ -23,13 +24,14 @@ export interface Prey {
 
 /** The nearest reachable unclaimed game within `radius` of the lodge whose meat fits its pile. */
 export function findGame(w: World, s: Settler, home: Building, radius: number): Prey | null {
+  const c = workCentre(home);
   let best: Animal | null = null;
   let bestD = Infinity;
   for (const a of w.animals) {
     const def: AnimalDef = ANIMALS[a.kind];
     const game = def.game;
     if (!game || a.hunter != null || home.output[game] >= OUTPUT_CAP) continue;
-    const d = Math.hypot(a.x - home.door.x, a.y - home.door.y);
+    const d = Math.hypot(a.x - c.x, a.y - c.y);
     if (d > radius || d >= bestD) continue;
     best = a;
     bestD = d;

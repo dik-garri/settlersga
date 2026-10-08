@@ -178,6 +178,8 @@ export interface Building {
   attempts?: number;
   /** Warehouse: goods it does not take in (player setting, `World.setAccepts`). */
   refuse?: Resource[];
+  /** Gatherer/planter/hunter: where its work area is centred, if the player moved it (`World.setWorkArea`). */
+  workAt?: Point | null;
   /** Marketplace: where its donkeys take goods, and what (see `trade.ts`). */
   trade?: TradeRoute;
 }

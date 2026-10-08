@@ -13,6 +13,7 @@ import {
 import type { GameMap } from './map';
 import { findPath, staysConnected } from './pathfinding';
 import { markWalkable } from './regions';
+import { workCentre } from './workArea';
 import { randInt } from './rng';
 import { Terrain, type Building, type PlantKind, type PlayerId, type Point, type Resource, type Settler } from './types';
 import type { World } from './world';
@@ -124,16 +125,17 @@ export function findGatherTarget(w: World, s: Settler, home: Building, def: Gath
   const m = w.map;
   const candidates: Point[] = [];
   const r = def.radius;
-  for (let y = home.door.y - r; y <= home.door.y + r; y++) {
-    for (let x = home.door.x - r; x <= home.door.x + r; x++) {
+  const c = workCentre(home);
+  for (let y = c.y - r; y <= c.y + r; y++) {
+    for (let x = c.x - r; x <= c.x + r; x++) {
       if (!m.inBounds(x, y)) continue;
       const i = m.idx(x, y);
       if (!isGatherTarget(w, def.res, i, s.owner) || w.reservedTargets.has(i)) continue;
-      if (dist({ x, y }, home.door) > r) continue;
+      if (dist({ x, y }, c) > r) continue;
       candidates.push({ x, y });
     }
   }
-  candidates.sort((a, b) => dist(a, home.door) - dist(b, home.door));
+  candidates.sort((a, b) => dist(a, c) - dist(b, c));
   for (const c of candidates.slice(0, 6)) {
     const path = findPath(m, Math.round(s.x), Math.round(s.y), c.x, c.y, true);
     if (path) return { ...c, path };
@@ -144,9 +146,10 @@ export function findGatherTarget(w: World, s: Settler, home: Building, def: Gath
 /** Whether anything the gatherer could work exists within its radius (ignores reservations and routes). */
 export function hasGatherTargetNear(w: World, home: Building, def: GatherDef): boolean {
   const m = w.map;
-  for (let y = home.door.y - def.radius; y <= home.door.y + def.radius; y++) {
-    for (let x = home.door.x - def.radius; x <= home.door.x + def.radius; x++) {
-      if (!m.inBounds(x, y) || dist({ x, y }, home.door) > def.radius) continue;
+  const c = workCentre(home);
+  for (let y = c.y - def.radius; y <= c.y + def.radius; y++) {
+    for (let x = c.x - def.radius; x <= c.x + def.radius; x++) {
+      if (!m.inBounds(x, y) || dist({ x, y }, c) > def.radius) continue;
       if (isGatherTarget(w, def.res, m.idx(x, y), home.owner)) return true;
     }
   }
@@ -193,9 +196,10 @@ function plantingsNear(w: World, home: Building, def: PlantDef): number {
   const m = w.map;
   const rule = PLANT_RULES[def.what];
   let n = 0;
-  for (let y = home.door.y - def.radius; y <= home.door.y + def.radius; y++) {
-    for (let x = home.door.x - def.radius; x <= home.door.x + def.radius; x++) {
-      if (m.inBounds(x, y) && dist({ x, y }, home.door) <= def.radius && rule.counts(m, m.idx(x, y))) n++;
+  const c = workCentre(home);
+  for (let y = c.y - def.radius; y <= c.y + def.radius; y++) {
+    for (let x = c.x - def.radius; x <= c.x + def.radius; x++) {
+      if (m.inBounds(x, y) && dist({ x, y }, c) <= def.radius && rule.counts(m, m.idx(x, y))) n++;
     }
   }
   return n;
@@ -206,9 +210,10 @@ export function findPlotFor(w: World, s: Settler, home: Building, def: PlantDef)
   if (def.maxNearby !== undefined && plantingsNear(w, home, def) >= def.maxNearby) return null;
   const candidates: Point[] = [];
   const r = def.radius;
-  for (let y = home.door.y - r; y <= home.door.y + r; y++) {
-    for (let x = home.door.x - r; x <= home.door.x + r; x++) {
-      const d = dist({ x, y }, home.door);
+  const c = workCentre(home);
+  for (let y = c.y - r; y <= c.y + r; y++) {
+    for (let x = c.x - r; x <= c.x + r; x++) {
+      const d = dist({ x, y }, c);
       if (d < 2 || d > r || !plotLooksFree(w, x, y, s.owner, false)) continue;
       if (def.what === 'tree' && treesAround(w.map, x, y) >= 4) continue;
       candidates.push({ x, y });

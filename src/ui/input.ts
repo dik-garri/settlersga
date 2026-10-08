@@ -144,6 +144,10 @@ export class InputController {
     } else {
       this.state.hover = null;
     }
+    // Choosing a new work-area centre: the renderer previews it under the cursor.
+    const moving = this.state.movingWorkArea;
+    const h = this.state.hover;
+    this.renderer.workAreaPreview = moving !== null && h ? { id: moving, x: h.x, y: h.y } : null;
     this.updateHint();
   }
 
@@ -304,6 +308,12 @@ export class InputController {
     const p = this.local(e);
     const t = this.tileAt(p.x, p.y);
     const { placing } = this.state;
+    if (this.state.movingWorkArea !== null) {
+      const ok = this.world.setWorkArea(this.state.movingWorkArea, { x: Math.round(t.x), y: Math.round(t.y) });
+      this.cb.onMessage(ok ? 'Зона работы перенесена' : 'Слишком далеко от здания');
+      if (ok) this.state.movingWorkArea = null;
+      return;
+    }
     if (placing === 'pioneer') {
       const ok = this.world.sendPioneer(Math.round(t.x), Math.round(t.y));
       this.cb.onMessage(ok ? 'Первопроходец отправлен' : 'Нужна ничейная земля у своей границы и свободный первопроходец (заказ — в ⚙)');
@@ -426,7 +436,8 @@ export class InputController {
   }
 
   private cancel(): void {
-    if (this.state.placing) this.cb.onSelectBuildType(null);
+    if (this.state.movingWorkArea !== null) this.state.movingWorkArea = null;
+    else if (this.state.placing) this.cb.onSelectBuildType(null);
     else {
       this.state.selected = null;
       this.state.selectedSettler = null;

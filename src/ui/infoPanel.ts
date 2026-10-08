@@ -16,7 +16,8 @@ import { RESOURCES, type Building, type BuildingType, type Resource, type Settle
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { barracksRows, garrisonSlotRows, recruitLevelControls, shareControls, supportRows } from './armyPanel';
 import { el, rowsTable, type View } from './dom';
-import { economyKey, economyRows, toolOrderControls, warehouseControls } from './economyPanel';
+import { economyKey, economyRows, refreshStockCounts, toolOrderControls, warehouseControls } from './economyPanel';
+import { movableWorkArea, workRadius } from '../sim/workArea';
 import { glyph } from './icons';
 import { tradeControls, tradeKey, tradeRows } from './tradeView';
 import type { GameState } from './state';
@@ -76,6 +77,8 @@ export class InfoView implements View {
 
   update(): void {
     this.renderInfo();
+    const b = this.state.selected !== null ? this.world.buildings.get(this.state.selected) : undefined;
+    if (b && BUILDINGS[b.type].storage) refreshStockCounts(this.el, b);
   }
 
   private renderInfo(): void {
@@ -180,12 +183,17 @@ export class InfoView implements View {
       if (def.territory) rows.push(['Радиус земли', `${def.territory} клеток`]);
     }
     if (!enemy && b.done) rows.push(...economyRows(b));
+    const radius = workRadius(b.type);
+    if (!enemy && radius !== null) {
+      rows.push(['Зона работы', `${radius} клеток${b.workAt ? ', перенесена' : ''}`]);
+    }
     rows.push(...tradeRows(this.world, b));
     if (b.priority) rows.push(['Приоритет', 'да']);
     const key = JSON.stringify([
       b.id,
       rows,
       this.confirmDemolish === b.id,
+      this.state.movingWorkArea === b.id,
       economyKey(this.world, b),
       tradeKey(this.world, b, this.tradePick),
     ]);
@@ -212,6 +220,28 @@ export class InfoView implements View {
       };
       out.append(go);
       this.el.append(out);
+    }
+    if (movableWorkArea(b.type)) {
+      // Settlers 4: the work area can be moved — choose a new centre with a click on the map.
+      const area = el('div', 'info-actions');
+      const move = el('button', this.state.movingWorkArea === b.id ? 'active' : '', '🎯 Перенести зону работы');
+      move.title = 'Затем щёлкните по карте — там будет центр зоны (Esc — отмена)';
+      move.onclick = () => {
+        this.state.movingWorkArea = b.id;
+        this.toast('Щёлкните по карте — новый центр зоны работы (Esc — отмена)');
+        move.blur();
+      };
+      area.append(move);
+      if (b.workAt) {
+        const back = el('button', '', '↺ К дому');
+        back.title = 'Вернуть зону работы к дому';
+        back.onclick = () => {
+          this.world.setWorkArea(b.id, null);
+          back.blur();
+        };
+        area.append(back);
+      }
+      this.el.append(area);
     }
     const warehouse = warehouseControls(this.world, b);
     if (warehouse) this.el.append(warehouse);
