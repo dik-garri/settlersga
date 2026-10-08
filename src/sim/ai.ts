@@ -367,6 +367,18 @@ export function knownEnemies(w: World, me: PlayerId): { b: Building; defenders: 
  * The castle of each enemy it knows, by owner: the building that ends the game, so the target its
  * attacks work towards and its siege buildings gather around.
  */
+/**
+ * How many of `ready` fighters (party `power`, against a defence of `defense`) to send. The castle
+ * ends the game: everything goes. Anything else gets what it takes with a margin (`AI.overkill`); the
+ * rest stay in their garrisons, where they defend — a party of all spares leaves its towers at their
+ * minimum, and the enemy retakes them at once.
+ */
+export function partySize(ready: number, power: number, defense: number, castle: boolean): number {
+  if (castle || ready === 0) return ready;
+  const perFighter = power / ready;
+  return Math.min(ready, Math.max(AI.minAttackers, Math.ceil((AI.overkill * (AI.attackRatio * defense + 1)) / perFighter)));
+}
+
 function knownCastles(w: World, me: PlayerId): Map<PlayerId, Building> {
   const out = new Map<PlayerId, Building>();
   for (const { b } of knownEnemies(w, me)) {
@@ -427,14 +439,7 @@ function attackIfStrong(w: World, ai: AiState): boolean {
     if (score > bestScore) {
       bestScore = score;
       target = b;
-      // The castle ends the game: everything goes. Anything else gets what it takes with a margin
-      // (`AI.overkill`); the rest stay in their garrisons, where they defend — a party of all spares
-      // leaves its towers at their minimum, and the enemy retakes them at once.
-      const perFighter = power / ready.length;
-      send =
-        castles.get(b.owner) === b
-          ? ready.length
-          : Math.min(ready.length, Math.max(AI.minAttackers, Math.ceil((AI.overkill * (AI.attackRatio * defense + 1)) / perFighter)));
+      send = partySize(ready.length, power, defense, castles.get(b.owner) === b);
     }
   }
   if (!target) return false;
@@ -452,7 +457,7 @@ function attackIfStrong(w: World, ai: AiState): boolean {
  * presumed place — the start position (public, like the map size) nearest to the enemy buildings it
  * knows. The siege then pushes towards it until the castle comes into sight.
  */
-function siegeGoals(w: World, me: PlayerId): (Point & { seen: boolean; owner: PlayerId })[] {
+export function siegeGoals(w: World, me: PlayerId): (Point & { seen: boolean; owner: PlayerId })[] {
   const known = knownEnemies(w, me);
   const castles = knownCastles(w, me);
   const starts = startPositions(w.map.w, w.players.length);
