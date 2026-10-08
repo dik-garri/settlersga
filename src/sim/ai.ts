@@ -136,7 +136,7 @@ function think(w: World, ai: AiState): void {
       ai.stats.demolished++;
     }
   }
-  defend(w, ai, own);
+  if (AI.fieldDefense) defend(w, ai, own);
   const attacked = attackIfStrong(w, ai);
   sweep(w, ai);
   tradeCheck(w, ai, own);

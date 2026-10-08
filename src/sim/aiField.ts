@@ -57,8 +57,9 @@ function release(w: World, me: PlayerId, counts: Map<number, number>): number[] 
 
 /**
  * Starts a staged strike against `target` with the party `World.attack` would send (`send` fighters):
- * they leave their garrisons and gather `AI.stageDistance` tiles short of the target's door, on the
- * side they come from. Returns how many came out; 0 = not staged (the party starts too close, or
+ * they leave their garrisons and gather on the line from the target's door back towards their
+ * buildings — on the first tile of their own land at least `AI.stageDistance` from the door, else at
+ * that distance. Returns how many came out; 0 = not staged (the party starts too close, or
  * nobody could leave), and the caller attacks from the buildings instead.
  */
 export function stageStrike(w: World, ai: AiState, target: Building, send: number): number {
@@ -88,9 +89,22 @@ export function stageStrike(w: World, ai: AiState, target: Building, send: numbe
       break;
     }
   }
+  // On its own land if the line back towards its buildings reaches it (out there the enemy meets the
+  // group at home strength), else `AI.stageDistance` short of the door.
   const m = w.map;
-  const x = Math.min(m.w - 1, Math.max(0, Math.round(t.x + ((from.x - t.x) / far) * AI.stageDistance)));
-  const y = Math.min(m.h - 1, Math.max(0, Math.round(t.y + ((from.y - t.y) / far) * AI.stageDistance)));
+  const at = (d: number) => ({
+    x: Math.min(m.w - 1, Math.max(0, Math.round(t.x + ((from.x - t.x) / far) * d))),
+    y: Math.min(m.h - 1, Math.max(0, Math.round(t.y + ((from.y - t.y) / far) * d))),
+  });
+  let { x, y } = at(AI.stageDistance);
+  for (let d = AI.stageDistance; d < far - 1; d++) {
+    const p = at(d);
+    const i = m.idx(p.x, p.y);
+    if (m.owner[i] === me && m.isWalkable(p.x, p.y)) {
+      ({ x, y } = p);
+      break;
+    }
+  }
   const ids = release(w, me, counts);
   if (ids.length === 0) return 0;
   if (w.orderMove(ids, x, y, me) === 0) {

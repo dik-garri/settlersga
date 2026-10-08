@@ -1199,7 +1199,8 @@ export const AI = {
   thiefRange: 40,
   /**
    * Field orders (`aiField.ts`). A strike group is released from its garrisons and gathered in the
-   * field `stageDistance` tiles short of the target's door (beyond the garrison archers' range), then
+   * field on its own land (else `stageDistance` tiles short of the target's door: beyond the garrison
+   * archers' range) on the line back towards its buildings, then
    * attacks together once `stageArrived` of it stands there or after `stageTimeout` ticks. Parties
    * that start closer than `stageDistance + stageMinWalk` attack straight from their buildings
    * (`World.attack`, also the fallback when `stageStrike` is off).
@@ -1210,11 +1211,12 @@ export const AI = {
   stageArrived: 0.8,
   stageTimeout: 600,
   /**
-   * Defence: hostile field units on or within `defendMargin` tiles of its land, in its buildings'
+   * Defence: hostile field units on its land (or within `defendMargin` tiles of it), in its buildings'
    * sight, are met by a field squad `defendRatio` times their number, released from its military
    * buildings within `defendRange` of them; when none are left the squad goes back into garrisons.
    */
-  defendMargin: 3,
+  fieldDefense: true,
+  defendMargin: 0,
   defendRatio: 1.5,
   defendRange: 16,
   /**
