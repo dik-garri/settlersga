@@ -11,6 +11,7 @@ import {
 } from '../sim/economy';
 import type { Building, Resource } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
+import { storageFill } from '../sim/storage';
 import { button, el, type View } from './dom';
 import { goodsLists } from './goodsLists';
 
@@ -111,8 +112,34 @@ export function economyRows(b: Building): [string, string][] {
     rows.push(['Любимая еда', nameOf(def.mine.favourite).toLowerCase()]);
     rows.push(['Попыток в запасе', String(b.attempts ?? 0)]);
   }
+  if (def.storage) rows.push(...storageRows(b));
   if (def.storage && b.refuse?.length) rows.push(['Не принимает', b.refuse.map((r) => nameOf(r).toLowerCase()).join(', ')]);
   return rows;
+}
+
+/** How full a warehouse is (Settlers 4: piles of 8, a good may take several; `sim/storage.ts`). */
+export function storageRows(b: Building): [string, string][] {
+  const def = BUILDINGS[b.type].storage;
+  if (!def || !b.done) return [];
+  const fill = storageFill(b);
+  if (fill.capacity === Infinity) return [['Вместимость', 'без предела']];
+  const rows: [string, string][] = [['Заполнено', `${fill.units} / ${fill.capacity}`]];
+  if (fill.maxPiles !== undefined) rows.push(['Стопки', `${fill.piles} из ${fill.maxPiles} (по ${def.perPile} шт.)`]);
+  const full = fill.units >= fill.capacity || (fill.maxPiles !== undefined && (fill.piles ?? 0) >= fill.maxPiles);
+  if (full) rows.push(['Статус', 'полон: новые товары ждут у производителей']);
+  return rows;
+}
+
+/** A good's count in a warehouse window, with the piles it takes when the warehouse stacks in piles. */
+export function stockText(b: Building, res: Resource): string {
+  const n = b.output[res];
+  const per = BUILDINGS[b.type].storage?.perPile;
+  if (!per || n <= 0) return String(n);
+  const piles = Math.ceil(n / per);
+  const ten = piles % 10;
+  const teen = piles % 100 >= 11 && piles % 100 <= 14;
+  const word = ten === 1 && !teen ? 'стопка' : ten >= 2 && ten <= 4 && !teen ? 'стопки' : 'стопок';
+  return `${n} · ${piles} ${word}`;
 }
 
 /** A string that changes whenever the economy controls of this building must be redrawn. */

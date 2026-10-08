@@ -99,7 +99,7 @@ export class SettlerInfoView implements View {
     if (place) {
       box.append(button('Послать…', 'Указать цель щелчком по карте', () => this.actions.place(place)));
     }
-    if (s.kind === 'pioneer' || s.kind === 'thief') {
+    if (SENDABLE[s.kind]) {
       box.append(
         button('↩ Отпустить', 'Снова сделать носильщиком (на своей земле, без дела)', () => {
           const ok = this.world.dismissSpecialist(s.kind);
@@ -122,12 +122,13 @@ export class SettlerInfoView implements View {
     const next = s.tasks.find((x) => x.t !== 'goto');
     if (!t) {
       if (s.inside !== null) return `внутри: ${at(s.inside)}`;
-      if (s.errand) return s.kind === 'pioneer' ? 'идёт к границе' : 'идёт на дело';
-      return s.stroll ? 'прогуливается' : s.chatWith !== null ? 'беседует' : 'без дела';
+      if (s.errand) return s.kind === 'pioneer' ? 'идёт к границе' : s.kind === 'geologist' ? 'идёт к горе' : 'идёт на дело';
+      const idle = s.stroll ? 'прогуливается' : s.chatWith !== null ? 'беседует' : 'без дела';
+      return SENDABLE[s.kind] ? `${idle}, ждёт приказа` : idle;
     }
     switch (t.t) {
       case 'goto':
-        if (next?.t === 'pickup') return `идёт за товаром: ${res(next.res)}`;
+        if (next?.t === 'pickup') return s.tasks.some((x) => x.t === 'retool') ? `идёт за инструментом: ${res(next.res)}` : `идёт за товаром: ${res(next.res)}`;
         if (next?.t === 'drop') return `несёт груз (${res(next.res).toLowerCase()}) → ${at(next.b)}`;
         if (next?.t === 'build') return `идёт на стройку: ${at(next.b)}`;
         if (next?.t === 'dig') return `идёт расчищать: ${at(next.b)}`;

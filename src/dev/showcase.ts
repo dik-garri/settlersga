@@ -206,14 +206,16 @@ export function buildShowcase(): World {
     if (row >= 3) break;
   }
 
-  // A storage yard with stock on it (the 3D yard shows its goods on the platform); frozen so the
-  // stock is not hauled away.
+  // A full storage yard (Settlers 4: 8 piles of 8; the 3D yard shows its piles on the platform),
+  // coal on two of them; frozen so the stock is not hauled away.
   const yard = [...w.buildings.values()].find((b) => b.type === 'warehouse' && b.done);
   if (yard) {
     yard.unreachableUntil = FROZEN;
-    (['log', 'plank', 'stone', 'grain', 'flour', 'bread', 'coal', 'iron'] as Resource[]).forEach((r, k) => {
-      yard.output[r] += 3 + k;
+    for (const r of RESOURCES) yard.output[r] = 0;
+    (['log', 'plank', 'stone', 'grain', 'flour', 'bread'] as Resource[]).forEach((r, k) => {
+      yard.output[r] = 3 + k;
     });
+    yard.output.coal = 16;
   }
 
   // Goods piles of every resource: frozen finished huts with four kinds each at their doors,

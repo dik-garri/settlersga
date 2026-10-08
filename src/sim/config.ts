@@ -37,6 +37,8 @@ export const HANDLE_TICKS = 3;
 
 /** Pile limits at a workplace door, per resource: every good a building uses or makes, up to this many units each. */
 export const OUTPUT_CAP = 8;
+/** Units on one warehouse pile (`StorageDef.perPile`): 8, as every pile in Settlers 4. */
+export const STORE_PILE = 8;
 export const INPUT_CAP = 8;
 
 export const DISPATCH_EVERY = 5;
@@ -178,7 +180,7 @@ export const START_CONDITIONS: Record<StartLevel, StartDef> = {
  * a tool, only as many as ordered); the defaults equal the start's, so nothing is recruited unasked.
  * `World.orderWorkers` changes them.
  */
-export const ORDERABLE: readonly SettlerKind[] = ['builder', 'digger', 'pioneer', 'thief'];
+export const ORDERABLE: readonly SettlerKind[] = ['builder', 'digger', 'geologist', 'pioneer', 'thief'];
 
 /**
  * Specialists (Settlers 4), ordered like workers and sent on errands (`specialists.ts`):
@@ -480,7 +482,8 @@ export const FISH_RESTOCK = 2;
  * - farm: harvests ripe plantings like a gatherer, otherwise plants new ones;
  * - workshop: stays inside and runs the building's recipe;
  * - garrison: stays inside so the building claims territory;
- * - prospect: a carrier on a geologist errand; turns back into a carrier once the errand is done;
+ * - prospect: the geologist: examines mountain tiles on an errand, then waits with the idle crowd for
+ *   the next one — or turns back into a carrier if there are more geologists than the player ordered;
  * - soldier: lives in a military building's garrison; looks for a free one when homeless;
  * - digger: levels sloped construction sites before the builders start.
  */
@@ -627,7 +630,8 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
   smelter: { name: 'Плавильщик', behavior: 'workshop' },
   toolsmith: { name: 'Инструментальщик', behavior: 'workshop' },
   /**
-   * Carries a hammer on his errand and brings it back (see `World.sendGeologist`). Specialists' `hp`
+   * Ordered like the pioneer and the thief (`ORDERABLE`): a carrier takes up a hammer (used up, given
+   * back on dismissal) and waits for errands (`World.sendGeologist`). Specialists' `hp`
    * is on the soldiers' scale (a swordsman 100): the thief's 20 is Settlers 4's; the geologist's and
    * pioneer's are our approximation (no source gives them).
    */
@@ -751,6 +755,16 @@ export const CATEGORIES: Record<Category, string> = {
   decor: 'Украшения',
 };
 
+/**
+ * A warehouse's capacity (`storage.ts`): `piles` piles of up to `perPile` units of one good each (a
+ * good may fill several), and/or at most `units` units in all; neither = no limit.
+ */
+export interface StorageDef {
+  piles?: number;
+  perPile?: number;
+  units?: number;
+}
+
 export interface BuildingDef {
   name: string;
   w: number;
@@ -760,8 +774,8 @@ export interface BuildingDef {
   worker: SettlerKind | null;
   playerBuildable: boolean;
   category?: Category;
-  /** Warehouse: accepts any goods and supplies them back. */
-  storage?: boolean;
+  /** Warehouse: accepts goods (as the player allows, up to its capacity) and supplies them back. */
+  storage?: StorageDef;
   recipe?: Recipe;
   /** Territory radius (tiles from the building center); claimed once staffed, or when done if no worker. */
   territory?: number;
@@ -860,7 +874,10 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     cost: {},
     worker: null,
     playerBuildable: false,
-    storage: true,
+    // S4 has no headquarters: its castle stores nothing, the start goods lie on the ground in piles of
+    // up to 8 (11 / 22 / 35 piles at a low / medium / high Roman start, `StartResources.txt`). Ours
+    // stands for that tower and those piles together: 40 piles of 8, room for every start (`docs/S4-PARITY.md`).
+    storage: { piles: 40, perPile: STORE_PILE },
     // As the small tower an S4 player starts with (3500 S4 tiles ≈ 340 of ours; a radius of 10 holds 317).
     territory: 10,
     // The headquarters: the army's reserve (S4 has no such building; 7 swordsmen + 5 archers).
@@ -906,7 +923,9 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: null,
     playerBuildable: true,
     category: 'housing',
-    storage: true,
+    // Settlers 4's storage area: 8 piles of 8 units, a good may fill several (siedlercommunity.de,
+    // S4Forge.RE `CStorageBuildingRole`).
+    storage: { piles: 8, perPile: STORE_PILE },
   },
 
   woodcutter: {
@@ -1387,6 +1406,14 @@ export const AI = {
    */
   reserve: { stone: 9 } as Partial<Record<Resource, number>>,
   reserveFloor: { stone: 3 } as Partial<Record<Resource, number>>,
+  /**
+   * Warehouses hold only so much (`StorageDef`, `storage.ts`): with fewer than `storeFreePiles` free
+   * piles left in its finished ones it builds another, up to `maxStores` in all (the castle counts),
+   * once it has a `storeAfter` and room to spare — before that a full castle only pauses producers.
+   */
+  storeFreePiles: 6,
+  maxStores: 3,
+  storeAfter: 'barracks' as BuildingType,
   /** At most one eyecatcher per this many own buildings, built only while it holds `decorSpare`. */
   decorEvery: 8,
   decorSpare: { stone: 26, plank: 14 } as Partial<Record<Resource, number>>,

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BUILDINGS, MINING, oreOf } from '../src/sim/config';
+import { available } from '../src/sim/buildings';
+import { workersOf } from '../src/sim/economy';
 import { saveWorld } from '../src/sim/save';
 import { Terrain } from '../src/sim/types';
 import { World } from '../src/sim/world';
@@ -118,9 +120,16 @@ describe('mines', () => {
       const y = Math.floor(i / w.map.w);
       if (oreOf(w.map.ore[i]) === 'ironore' && Math.hypot(x - cx, y - cy) <= r) reachable += w.map.oreAmount[i];
     }
-    w.castle.output.meat = reachable + 20;
-    run(w, 1500 + reachable * 400);
-    expect(w.stats.produced.ironore).toBe(reachable);
+    // The whole deposit has to go somewhere: the castle's limit (`storage.ts`) is not what this tests.
+    const limit = BUILDINGS.castle.storage;
+    BUILDINGS.castle.storage = {};
+    try {
+      w.castle.output.meat = reachable + 20;
+      run(w, 1500 + reachable * 400);
+      expect(w.stats.produced.ironore).toBe(reachable);
+    } finally {
+      BUILDINGS.castle.storage = limit;
+    }
   });
 });
 
@@ -129,12 +138,17 @@ describe('geologist', () => {
     const w = richWorld();
     const [spot] = ownedOre(w, 'coal');
     const carriersBefore = w.settlers.filter((s) => s.kind === 'carrier').length;
+    const hammers = available(w, 1, 'hammer');
     expect(w.sendGeologist(spot.x, spot.y)).toBe(true);
-    expect(w.settlers.some((s) => s.kind === 'geologist')).toBe(true);
+    // None ordered: a carrier takes up a hammer on the spot (counted as a geologist on his way).
+    expect(workersOf(w, 1, 'geologist')).toBe(1);
     run(w, 1500);
     expect(w.isProspected(spot.x, spot.y)).toBe(true);
     expect(w.stats.prospected).toBeGreaterThan(3);
     expect(w.settlers.filter((s) => s.kind === 'carrier').length).toBe(carriersBefore);
+    // Not ordered, so he went back to carrying and brought the hammer home.
+    run(w, 600);
+    expect(available(w, 1, 'hammer')).toBe(hammers);
     // Not on grass.
     const c = w.castle;
     expect(w.sendGeologist(c.door.x, c.door.y + 1)).toBe(false);

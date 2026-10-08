@@ -1,10 +1,10 @@
 import { nearestStorage } from './buildings';
-import { FIELD, hpOf, ORDERABLE, PIONEER, PROFESSIONS, PROSPECT_RADIUS, PROSPECT_TICKS, PROSPECT_TILES, THIEF } from './config';
-import { workerOrder } from './economy';
+import { FIELD, ORDERABLE, PIONEER, PROFESSIONS, PROSPECT_RADIUS, PROSPECT_TICKS, PROSPECT_TILES, THIEF } from './config';
+import { recountWorkers, workerOrder, workersOf } from './economy';
 import { restIdle } from './idle';
 import { formationSpots } from './field';
 import { sameRegion } from './regions';
-import { abort } from './settlers';
+import { abort, carryBack } from './settlers';
 import { RESOURCES, Terrain, type Building, type PlayerId, type Resource, type Settler, type SettlerKind, type Task } from './types';
 import type { World } from './world';
 
@@ -25,7 +25,10 @@ import type { World } from './world';
  * On hostile land every specialist may be cut down by that land's swordsmen, the thief once unmasked
  * (`intruders.ts`, `INTRUDERS`).
  *
- * Both keep their errand in `Settler.errand` (saved); without one they idle with the crowd.
+ * Geologist: `sendGeologist` points him at a mountain of his owner's; he examines up to
+ * `PROSPECT_TILES` unexamined tiles around the spot and leaves a sign on each (`map.prospected`).
+ *
+ * All keep their errand in `Settler.errand` (saved); without one they idle with the crowd.
  * `dismissSpecialist` turns an idle one standing on his owner's land back into a carrier (bringing the
  * tool back to a warehouse) and lowers the order.
  */
@@ -71,11 +74,11 @@ function nextClaim(w: World, cx: number, cy: number, player: PlayerId, from: { x
 }
 
 /** The player's idle specialist of `kind` nearest to (x, y). */
-function idleSpecialist(w: World, player: PlayerId, kind: 'pioneer' | 'thief', x: number, y: number): Settler | undefined {
+function idleSpecialist(w: World, player: PlayerId, kind: SettlerKind, x: number, y: number): Settler | undefined {
   let best: Settler | undefined;
   let bestD = Infinity;
   for (const s of w.settlers) {
-    if (s.owner !== player || s.kind !== kind || s.tasks.length > 0 || s.errand) continue;
+    if (s.owner !== player || s.kind !== kind || s.tasks.length > 0 || s.errand || w.dying.has(s.id)) continue;
     const d = Math.hypot(s.x - x, s.y - y);
     if (d < bestD) {
       bestD = d;
@@ -144,21 +147,25 @@ export function dismissSpecialist(w: World, kind: Settler['kind'], player: Playe
   return true;
 }
 
-/** An orderable worker (pioneer, thief…) turns back into a carrier: the order drops, the tool goes home. */
-function toCarrier(w: World, s: Settler, player: PlayerId): void {
+/**
+ * An orderable worker (geologist, pioneer, thief…) turns back into a carrier and brings his tool back to
+ * a warehouse (`carryBack`); the order drops by one unless `lowerOrder` is false (a geologist sent
+ * without one ordered, `geologistIdle`).
+ */
+function toCarrier(w: World, s: Settler, player: PlayerId, lowerOrder = true): void {
   const kind = s.kind;
-  w.orderWorkers(kind, Math.max(0, workerOrder(w, player, kind) - 1), player);
+  if (lowerOrder) w.orderWorkers(kind, Math.max(0, workerOrder(w, player, kind) - 1), player);
   s.kind = 'carrier';
   s.hp = 0;
+  s.errand = null;
+  s.post = null;
+  recountWorkers(w);
   const tool = PROFESSIONS[kind].tool;
-  const store = tool ? nearestStorage(w, player, s) : undefined;
-  if (tool && store) {
+  // The tool was used up when he took up the profession (`retool`); an old save's geologist may still
+  // hold it in hand — either way one unit goes back.
+  if (tool && (s.carrying === null || s.carrying === tool)) {
     s.carrying = tool;
-    store.inbound[tool]++;
-    s.tasks = [
-      { t: 'goto', x: store.door.x, y: store.door.y },
-      { t: 'drop', b: store.id, res: tool, back: true },
-    ];
+    carryBack(w, s, tool);
   }
 }
 
@@ -262,33 +269,70 @@ export function toolPileNear(w: World, player: PlayerId, x: number, y: number): 
   return from;
 }
 
+/** The player's idle geologist nearest to (x, y), one waiting for an errand (`sendGeologist`). */
+export function idleGeologist(w: World, player: PlayerId, x: number, y: number): Settler | undefined {
+  return idleSpecialist(w, player, 'geologist', x, y);
+}
+
 /**
- * Gives geologist `s` the errand of prospecting around (x, y): fetch the hammer first if he has none
- * in hand (as in Settlers 4 he needs one), then walk the tiles. False when there is nothing to examine
- * there or no hammer to be had.
+ * Player command: prospect the mountain around (x, y). As in Settlers 4 geologists are ordered in the
+ * settlers menu (`ORDERABLE`) and wait for errands: the nearest idle one goes. With none waiting, the
+ * free carrier nearest to the hammer pile nearest the site takes up a hammer (a geologist on the spot,
+ * as if ordered and sent in one go); after the errand he turns back into a carrier unless the player
+ * has ordered that many geologists by then (`geologistIdle`). False if there is nothing to examine
+ * there, or nobody and no hammer to send.
  */
-export function geologistErrand(w: World, s: Settler, x: number, y: number): boolean {
-  const tiles = prospectTiles(w, x, y, s.owner);
-  if (tiles.length === 0) return false;
-  // A carrier just made a geologist gets the profession's hit points (`INTRUDERS`).
-  if (s.hp <= 0) s.hp = hpOf('geologist');
-  const tool = PROFESSIONS.geologist.tool;
-  const tasks: Task[] = [];
-  if (tool && s.carrying !== tool) {
-    if (s.carrying) return false;
-    const from = toolPileNear(w, s.owner, x, y);
-    if (!from) return false;
-    from.outReserved[tool]++;
-    tasks.push({ t: 'goto', x: from.door.x, y: from.door.y }, { t: 'pickup', b: from.id, res: tool });
+export function sendGeologist(w: World, x: number, y: number, player: PlayerId): boolean {
+  if (prospectTiles(w, x, y, player).length === 0) return false;
+  const waiting = idleGeologist(w, player, x, y);
+  if (waiting) {
+    waiting.post = null;
+    waiting.errand = { x, y };
+    return true;
   }
-  s.tasks = [
-    ...tasks,
-    ...tiles.flatMap((t): Task[] => [
-      { t: 'goto', x: t.x, y: t.y },
-      { t: 'prospect', x: t.x, y: t.y, n: PROSPECT_TICKS },
-    ]),
-  ];
+  const tool = PROFESSIONS.geologist.tool;
+  const from = tool ? toolPileNear(w, player, x, y) : undefined;
+  if (tool && !from) return false;
+  const near = from ? from.door : { x, y };
+  let best: Settler | undefined;
+  for (const s of w.settlers) {
+    if (s.owner !== player || s.kind !== 'carrier' || s.tasks.length > 0 || w.dying.has(s.id)) continue;
+    if (!best || Math.hypot(s.x - near.x, s.y - near.y) < Math.hypot(best.x - near.x, best.y - near.y)) best = s;
+  }
+  if (!best) return false;
+  best.tasks = [];
+  if (from && tool) {
+    from.outReserved[tool]++;
+    best.tasks.push({ t: 'goto', x: from.door.x, y: from.door.y }, { t: 'pickup', b: from.id, res: tool });
+  }
+  best.tasks.push({ t: 'retool', kind: 'geologist', errand: { x, y } });
+  recountWorkers(w);
   return true;
+}
+
+/**
+ * Idle geologist (the `prospect` behaviour): with an errand, walk the unexamined mountain tiles around
+ * it (up to `PROSPECT_TILES`, nearest first); with none, wait among the idle crowd for the next one —
+ * or, when the player has more geologists than ordered (one sent without an order), turn back into a
+ * carrier and bring the hammer home.
+ */
+export function geologistIdle(w: World, s: Settler): void {
+  const e = s.errand;
+  if (e) {
+    s.errand = null;
+    const tiles = prospectTiles(w, e.x, e.y, s.owner);
+    if (tiles.length > 0) {
+      s.tasks = tiles.flatMap((t): Task[] => [
+        { t: 'goto', x: t.x, y: t.y },
+        { t: 'prospect', x: t.x, y: t.y, n: PROSPECT_TICKS },
+      ]);
+      return;
+    }
+  }
+  if (workersOf(w, s.owner, s.kind) > workerOrder(w, s.owner, s.kind)) return toCarrier(w, s, s.owner, false);
+  // A geologist of an old save still holding his hammer: it is his profession's tool now.
+  if (s.carrying !== null && s.carrying === PROFESSIONS[s.kind].tool) s.carrying = null;
+  restIdle(w, s);
 }
 
 // ---------------------------------------------------------------- direct control
@@ -317,7 +361,10 @@ export const SPECIALIST_ORDERS: Partial<Record<SettlerKind, SpecialistOrder>> = 
   geologist: {
     label: 'Разведать руду',
     can: (w, x, y, _b, player) => prospectTiles(w, x, y, player).length > 0,
-    apply: (w, s, x, y) => geologistErrand(w, s, x, y),
+    apply: (_w, s, x, y) => {
+      s.errand = { x, y };
+      return true;
+    },
   },
   pioneer: {
     label: 'Занять землю',
@@ -409,8 +456,7 @@ export function holdSpecialists(w: World, ids: readonly number[], player: Player
 
 /**
  * Player command: the selected specialists standing on their owner's land go back to being carriers
- * (orderable ones lower the order and bring their tool home; a geologist turns back on his next idle
- * tick and brings his hammer home). Returns how many.
+ * (the order drops by one and the tool goes back to a warehouse). Returns how many.
  */
 export function dismissUnits(w: World, ids: readonly number[], player: PlayerId): number {
   const m = w.map;
