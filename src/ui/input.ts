@@ -25,6 +25,8 @@ export interface InputCallbacks {
   onHotkey(n: number): void;
   onNextTab(): void;
   onMessage(text: string): void;
+  /** Esc with nothing to cancel: the game menu (pause). */
+  onMenu(): void;
 }
 
 /** Mouse and keyboard: camera control, placement and selection. */
@@ -120,6 +122,7 @@ export class InputController {
   }
 
   update(dtMs: number): void {
+    if (this.state.menu) return;
     const dt = dtMs / 1000;
     let dx = 0;
     let dy = 0;
@@ -435,24 +438,32 @@ export class InputController {
     this.camera.zoomAt(Math.exp(-e.deltaY * 0.0015), p.x, p.y, ...this.view);
   }
 
-  private cancel(): void {
-    if (this.state.movingWorkArea !== null) this.state.movingWorkArea = null;
-    else if (this.state.placing) this.cb.onSelectBuildType(null);
-    else {
-      this.state.selected = null;
-      this.state.selectedSettler = null;
-      this.state.selectedUnits = [];
-    }
+  /** Cancels what is being placed or selected; false if there was nothing to cancel. */
+  private cancel(): boolean {
+    const s = this.state;
+    if (s.movingWorkArea !== null) s.movingWorkArea = null;
+    else if (s.placing) this.cb.onSelectBuildType(null);
+    else if (s.selected !== null || s.selectedSettler !== null || s.selectedUnits.length > 0) {
+      s.selected = null;
+      s.selectedSettler = null;
+      s.selectedUnits = [];
+    } else return false;
+    return true;
   }
 
   private onKey(e: KeyboardEvent, down: boolean): void {
     if (e.target instanceof HTMLInputElement) return;
+    // The game menu has the keyboard while it is open.
+    if (this.state.menu) {
+      this.keys.clear();
+      return;
+    }
     if (down) this.keys.add(e.code);
     else this.keys.delete(e.code);
     if (!down) return;
     switch (e.code) {
       case 'Escape':
-        this.cancel();
+        if (!this.cancel()) this.cb.onMenu();
         break;
       case 'Space':
         e.preventDefault();

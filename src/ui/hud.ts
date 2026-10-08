@@ -9,7 +9,7 @@ import { button, el, rowsTable, type View } from './dom';
 import { inStorage, GoodsView } from './goodsView';
 import { glyph, type GlyphName } from './icons';
 import { InfoView } from './infoPanel';
-import { OptionsView, SPEEDS } from './optionsView';
+import { OptionsView, SPEEDS, type GameActions } from './optionsView';
 import { SettlerInfoView } from './settlerInfo';
 import { UnitsView } from './unitsView';
 import { SettlersView } from './settlersView';
@@ -43,7 +43,6 @@ const PINNED: readonly Resource[] = ['plank', 'stone', 'log', 'bread', 'fish', '
 const MESSAGE_MS = 6000;
 
 export interface HudOptions {
-  params: URLSearchParams;
   /** The minimap canvas, framed at the top of the panel. */
   minimap: HTMLElement;
   /** Sound controls for the options menu. */
@@ -78,7 +77,7 @@ export class Hud {
     root: HTMLElement,
     private readonly world: World,
     private readonly state: GameState,
-    actions: { onSave(): void; onLoad(): void },
+    actions: GameActions,
     opts: HudOptions,
   ) {
     const select = (type: Placeable | null) => this.selectBuildType(type);
@@ -96,7 +95,7 @@ export class Hud {
       settlers: new SettlersView(world, state, select),
       stats: this.stats,
       army: new ArmyView(world),
-      options: new OptionsView(state, actions, opts.params, opts.sound),
+      options: new OptionsView(state, actions, opts.sound),
     };
 
     const side = el('aside', 'side');
@@ -312,12 +311,8 @@ export class Hud {
     );
     const actions = el('div', 'info-actions');
     const again = el('button', 'active', 'Новая игра');
-    again.onclick = () => {
-      const params = new URLSearchParams(location.search);
-      params.set('seed', String(Math.floor(Math.random() * 1e9)));
-      params.delete('load');
-      location.search = `?${params}`;
-    };
+    // The setup screen of the main menu, with the last game's settings.
+    again.onclick = () => (location.href = `${location.pathname}?menu=new`);
     const watch = el('button', '', 'Смотреть дальше');
     watch.onclick = () => (this.endEl.hidden = true);
     actions.append(again, watch);

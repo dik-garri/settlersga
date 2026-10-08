@@ -6,22 +6,40 @@ import { Camera } from './render/camera';
 import { toScreen } from './render/iso';
 import { GameRenderer } from './render/renderer';
 import { TICKS_PER_SECOND } from './sim/config';
+import { saveWorld } from './sim/save';
 import { World } from './sim/world';
 import { audioControls } from './ui/audioControls';
+import { el } from './ui/dom';
 import { Hud } from './ui/hud';
 import { InputController } from './ui/input';
+import { Intro } from './ui/intro';
+import { MainMenu } from './ui/menu';
 import { Minimap } from './ui/minimap';
+import { PauseMenu } from './ui/pauseMenu';
+import { readPrefs, writePrefs } from './ui/prefs';
+import { AUTO_ID, browserSlots, type SlotMeta } from './ui/saves';
+import { devWorldArgs, launchOf, worldArgs, type GameSetup } from './ui/setup';
 import { createState, isCommand } from './ui/state';
-import { readStartLevel } from './ui/startMenu';
-import { hasSave, readSave, storeSave } from './ui/storage';
+import { TitleScene } from './ui/titleScene';
 
 const TICK_MS = 1000 / TICKS_PER_SECOND;
 const MAX_TICKS_PER_FRAME = 20;
+/** The autosave slot is rewritten every this many game minutes. */
+const AUTOSAVE_MINUTES = 5;
 
+const randomSeed = () => Math.floor(Math.random() * 1e9);
+
+/**
+ * Start-up, as in Settlers 4: the intro (first visit, or when asked for), then the main menu over a
+ * live scene; a game starts from the menu without reloading the page. A development address
+ * (`?seed`, `?size`, `?demo`, `?load`… — see `launchOf`) starts its game at once.
+ */
 async function main() {
+  const params = new URLSearchParams(location.search);
+  const launch = launchOf(params);
+  const prefs = readPrefs();
   const app = new Application();
   await app.init({
-    // The game view starts right of the side panel (#game is sized by CSS).
     resizeTo: document.getElementById('game')!,
     background: '#1d2b3a',
     antialias: true,
@@ -30,46 +48,146 @@ async function main() {
   });
   document.getElementById('game')!.appendChild(app.canvas);
 
-  const params = new URLSearchParams(location.search);
-  const seed = params.has('seed') ? Number(params.get('seed')) : Math.floor(Math.random() * 1e9);
-  const size = params.has('size') ? Number(params.get('size')) : undefined;
-  const save = params.has('load') ? readSave() : null;
-  if (params.has('load')) {
-    // Loading is one-shot: a later refresh should not silently reload the slot.
+  // Sound starts on the first gesture.
+  const audio = new AudioEngine();
+  const unlock = () => audio.unlock();
+  window.addEventListener('pointerdown', unlock, true);
+  window.addEventListener('keydown', unlock, true);
+
+  // The pre-rendered 3D art is the default; the settings (or ?art=classic) pick the procedural painters.
+  const art3d = params.has('art') ? params.get('art') !== 'classic' : prefs.art === '3d';
+  const atlas = (async () => new SpriteAtlas(art3d ? await loadArt3d() : null))();
+
+  // Back from a game (?menu) the intro is not shown again; ?menu=new opens the setup screen.
+  if (launch.kind === 'menu') return title(app, atlas, audio, { setup: params.get('menu') === 'new', intro: !params.has('menu') });
+
+  // One-shot parameters: a refresh should not silently load a slot again.
+  if (launch.kind === 'load') {
     params.delete('load');
     history.replaceState(null, '', `${location.pathname}${params.size ? `?${params}` : ''}`);
   }
-  // The local player and one computer opponent unless ?players= says otherwise; ?ai=off keeps the
-  // opponents passive.
-  const players = params.has('players') ? Number(params.get('players')) : 2;
-  const ai = params.get('ai') === 'off' ? [] : Array.from({ length: players - 1 }, (_, k) => k + 2);
-  // ?teams=1,1,2,2: team per player (allies never fight and win together).
-  const teams = params.get('teams')?.split(',').map(Number);
-  // ?demo: a development showcase that builds itself up to show everything at once (src/dev).
-  const demo = params.has('demo');
-  const world = save
-    ? World.load(save)
-    : demo
-      ? (await import('./dev/showcase')).buildShowcase()
-      : new World(seed, { size, players, ai, teams, start: readStartLevel(params) });
+  let world: World;
+  let seed = 0;
+  if (launch.kind === 'load') {
+    const slots = browserSlots();
+    const id = launch.slot ?? slots.latest()?.id;
+    const data = id ? await slots.read(id) : null;
+    if (!data) return title(app, atlas, audio, { setup: false, intro: false, notice: 'Сохранение не найдено' });
+    world = World.load(data);
+  } else if (launch.kind === 'demo') {
+    // A development showcase that builds itself up to show everything at once (src/dev).
+    world = (await import('./dev/showcase')).buildShowcase();
+  } else if (launch.kind === 'setup') {
+    const args = worldArgs(launch.setup, randomSeed());
+    seed = args.seed;
+    world = new World(args.seed, args.opts);
+  } else {
+    const args = devWorldArgs(params, randomSeed());
+    seed = args.seed;
+    world = new World(args.seed, args.opts);
+  }
+  // The demo shows no fog unless asked (?fog=on).
+  const fog =
+    launch.kind === 'setup' ? launch.setup.fog : launch.kind === 'demo' ? params.get('fog') === 'on' : params.get('fog') !== 'off';
+  game(app, await atlas, audio, world, { fog, seed, autosave: launch.kind !== 'demo' });
+}
+
+/** The intro (when due) and the main menu over the title scene, until a game starts. */
+async function title(
+  app: Application,
+  atlas: Promise<SpriteAtlas>,
+  audio: AudioEngine,
+  opts: { setup: boolean; intro: boolean; notice?: string },
+) {
+  document.body.classList.add('title-mode');
+  app.resize();
+  const root = el('div', 'title-root');
+  root.append(el('div', 'title-vignette'));
+  document.body.append(root);
+  const scene = new TitleScene(app, atlas, audio);
+  const intro = new Intro(scene, audio);
+
+  const begin = async (make: () => Promise<World | null>, fog: boolean, seed: number) => {
+    menu.el.classList.add('busy');
+    menu.say('Подготовка карты…');
+    // Let the notice paint before the map is generated.
+    await new Promise((r) => setTimeout(r, 30));
+    let world: World | null = null;
+    try {
+      world = await make();
+    } catch (e) {
+      console.error(e);
+    }
+    if (!world) {
+      menu.el.classList.remove('busy');
+      menu.say('Не удалось открыть игру');
+      return;
+    }
+    const a = await atlas;
+    scene.dispose();
+    root.remove();
+    document.body.classList.remove('title-mode');
+    app.resize();
+    // A refresh during the game returns to the menu, not to a stale ?menu=new.
+    history.replaceState(null, '', location.pathname);
+    game(app, a, audio, world, { fog, seed, autosave: true });
+  };
+  const menu = new MainMenu(
+    {
+      start: (setup: GameSetup) => {
+        const { seed, opts } = worldArgs(setup, randomSeed());
+        void begin(async () => new World(seed, opts), setup.fog, seed);
+      },
+      load: (meta: SlotMeta) =>
+        void begin(async () => {
+          const data = await browserSlots().read(meta.id);
+          return data ? World.load(data) : null;
+        }, true, 0),
+      intro: () => void playIntro(),
+      artChanged: () => location.reload(),
+    },
+    audio,
+  );
+  const playIntro = async () => {
+    menu.el.hidden = true;
+    await intro.play(root);
+    writePrefs({ introSeen: true });
+    menu.el.hidden = false;
+    menu.show('main');
+  };
+  root.append(menu.el);
+  menu.say(opts.notice ?? '');
+  const prefs = readPrefs();
+  if (opts.intro && (!prefs.introSeen || prefs.intro)) await playIntro();
+  else menu.show(opts.setup ? 'new' : 'main');
+  Object.assign(window, { scene, menu });
+}
+
+/** A running game: renderer, side panel, input, the game menu and the fixed-step loop. */
+function game(
+  app: Application,
+  atlas: SpriteAtlas,
+  audio: AudioEngine,
+  world: World,
+  opts: { fog: boolean; seed: number; autosave: boolean },
+) {
   const state = createState();
-  // The pre-rendered 3D art (art/blender, art/textures) is the default; ?art=classic keeps the
-  // procedural painters. The demo shows no fog unless asked (?fog=on).
-  const art3d = params.get('art') !== 'classic';
-  const atlas = new SpriteAtlas(art3d ? await loadArt3d() : null);
-  state.fog = demo ? params.get('fog') === 'on' : params.get('fog') !== 'off';
+  state.fog = opts.fog;
   const renderer = new GameRenderer(app, world, atlas, state.fog);
   const camera = new Camera(renderer.world, renderer.bounds);
   const c = world.castle;
   const home = toScreen(c.x + 1, c.y + 1);
   camera.centerOn(home.x, home.y);
-
-  // Sound: starts on the first gesture; its controls live in the options menu.
-  const audio = new AudioEngine();
-  const unlock = () => audio.unlock();
-  window.addEventListener('pointerdown', unlock, true);
-  window.addEventListener('keydown', unlock, true);
   renderer.onSound = (id, x, y) => audio.at(id, x, y);
+
+  const slots = browserSlots();
+  const save = async (name: string, id?: string) => !!(await slots.write(saveWorld(world), name, Date.now(), id));
+  // Loading or leaving starts the page over: nothing of this game is left behind.
+  const pause = new PauseMenu(world, state, {
+    save,
+    load: (meta) => (location.href = `${location.pathname}?load=${encodeURIComponent(meta.id)}`),
+    quit: () => (location.href = `${location.pathname}?menu`),
+  }, audio);
 
   // The minimap is framed at the top of the side panel, as wide as the panel's inside (--mm-w).
   const hudEl = document.getElementById('hud')!;
@@ -79,15 +197,10 @@ async function main() {
     hudEl,
     world,
     state,
-    {
-      onSave: () => hud.toast(storeSave(world) ? 'Игра сохранена' : 'Не удалось сохранить'),
-      onLoad: () => {
-        if (!hasSave()) return hud.toast('Сохранений нет');
-        location.search = '?load=1';
-      },
-    },
-    { params, minimap: minimap.el, sound: audioControls(audio) },
+    { onSave: () => pause.open('save'), onLoad: () => pause.open('load'), onMenu: () => pause.open('main') },
+    { minimap: minimap.el, sound: audioControls(audio) },
   );
+  hudEl.append(pause.el);
   hudEl.addEventListener('click', (e) => {
     if (e.target instanceof Element && e.target.closest('button')) audio.ui('click');
   });
@@ -96,7 +209,18 @@ async function main() {
     onHotkey: (n) => hud.hotkey(n),
     onNextTab: () => hud.nextTab(),
     onMessage: (text) => hud.toast(text),
+    onMenu: () => pause.open('main'),
   });
+
+  // Autosave: every few game minutes into its own slot (compressed in the background).
+  const autosaveEvery = AUTOSAVE_MINUTES * 60 * TICKS_PER_SECOND;
+  let nextAutosave = world.tick + autosaveEvery;
+  const autosave = () => {
+    nextAutosave = world.tick + autosaveEvery;
+    void slots.write(saveWorld(world), 'Автосохранение', Date.now(), AUTO_ID).then((m) => {
+      if (m) hud.toast('Автосохранение');
+    });
+  };
 
   // Fixed-step simulation, rendering interpolates between the last two ticks.
   let acc = 0;
@@ -112,6 +236,7 @@ async function main() {
         n++;
       }
       if (n === MAX_TICKS_PER_FRAME) acc = 0;
+      if (opts.autosave && world.tick >= nextAutosave && world.outcome(1) === 'playing') autosave();
     }
     camera.apply(app.screen.width, app.screen.height);
     const now = performance.now();
@@ -124,9 +249,9 @@ async function main() {
     minimap.update(now, app.screen.width, app.screen.height);
   });
 
-  Object.assign(window, { world, seed, state, renderer, camera, audio });
-  if (save) console.info(`Loaded save at tick ${world.tick}`);
-  else console.info(`Settlers prototype, seed ${seed} (add ?seed=${seed} to replay this map)`);
+  Object.assign(window, { world, seed: opts.seed, state, renderer, camera, audio, pause });
+  if (opts.seed) console.info(`Settlers prototype, seed ${opts.seed} (add ?seed=${opts.seed} to replay this map)`);
+  else console.info(`Game at tick ${world.tick}`);
 }
 
 main();

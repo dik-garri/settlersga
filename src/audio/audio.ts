@@ -27,6 +27,30 @@ const CHORDS = [
 ];
 const CHORD_S = 8;
 
+/**
+ * The title theme (our own tune, played once by the intro): a horn melody over swelling chords and a
+ * few drum strokes, in the music's G major. Beats at `THEME_BPM`; notes as [Hz, beats], chords and
+ * drums as [beat, …].
+ */
+const THEME_BPM = 72;
+const THEME_MELODY: [number, number][] = [
+  [392.0, 1], [587.33, 1], [493.88, 0.5], [523.25, 0.5], [587.33, 2],
+  [659.25, 1], [587.33, 0.5], [493.88, 0.5], [440.0, 2],
+  [493.88, 1], [523.25, 0.5], [587.33, 0.5], [659.25, 1], [739.99, 1], [783.99, 4],
+];
+const THEME_CHORDS: [number, number, number[]][] = [
+  [0, 5, CHORDS[0]],
+  [5, 2, CHORDS[1]],
+  [7, 2, CHORDS[2]],
+  [9, 3, CHORDS[3]],
+  [12, 6, CHORDS[0]],
+];
+const THEME_DRUMS: [number, number][] = [
+  [0, 1], [5, 0.6], [9, 0.8], [11.5, 0.5], [12, 1],
+];
+/** Length of the theme in beats (the generative music resumes after it). */
+const THEME_BEATS = 18;
+
 function loadSettings(): AudioSettings {
   try {
     return parseAudioSettings(localStorage.getItem(STORAGE_KEY));
@@ -189,16 +213,40 @@ export class AudioEngine {
     }
   }
 
-  private pad(t: number, chord: number[]): void {
+  /**
+   * Plays the title theme once (the intro calls it, after a gesture has unlocked the audio); the
+   * generative music picks up when it ends. Does nothing while muted or with the music off.
+   */
+  theme(): void {
+    const ctx = this.ctx;
+    if (!ctx || ctx.state !== 'running' || this.settings.muted || !this.settings.music) return;
+    const beat = 60 / THEME_BPM;
+    const t0 = ctx.currentTime + 0.15;
+    for (const [b, len, chord] of THEME_CHORDS) this.pad(t0 + b * beat, chord, len * beat, Math.min(1.2, len * beat * 0.4));
+    let b = 0;
+    for (const [f, len] of THEME_MELODY) {
+      this.horn(t0 + b * beat, f, len * beat);
+      b += len;
+    }
+    for (const [at, v] of THEME_DRUMS) this.drum(t0 + at * beat, v);
+    // The title theme stands in front; the background music after it is quieter again.
+    this.music!.gain.setTargetAtTime(MUSIC_LEVEL * 1.8, ctx.currentTime, 0.2);
+    this.music!.gain.setTargetAtTime(MUSIC_LEVEL, t0 + THEME_BEATS * beat, 1.5);
+    this.nextChord = t0 + THEME_BEATS * beat;
+    this.nextNote = this.nextChord + 2;
+    this.chord = 1;
+  }
+
+  private pad(t: number, chord: number[], dur = CHORD_S, attack = 2.5): void {
     const ctx = this.ctx!;
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
     lp.frequency.value = 900;
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.linearRampToValueAtTime(0.22, t + 2.5);
-    g.gain.setValueAtTime(0.22, t + CHORD_S - 1);
-    g.gain.linearRampToValueAtTime(0.0001, t + CHORD_S + 2);
+    g.gain.linearRampToValueAtTime(0.22, t + attack);
+    g.gain.setValueAtTime(0.22, t + Math.max(attack, dur - 1));
+    g.gain.linearRampToValueAtTime(0.0001, t + dur + 2);
     lp.connect(g).connect(this.music!);
     for (const f of chord) {
       for (const detune of [-6, 6]) {
@@ -208,9 +256,61 @@ export class AudioEngine {
         o.detune.value = detune;
         o.connect(lp);
         o.start(t);
-        o.stop(t + CHORD_S + 2.1);
+        o.stop(t + dur + 2.1);
       }
     }
+  }
+
+  /** A soft brass-like note: two detuned saws through a low-pass that opens with the attack, light vibrato. */
+  private horn(t: number, f: number, dur: number): void {
+    const ctx = this.ctx!;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.Q.value = 2;
+    lp.frequency.setValueAtTime(500, t);
+    lp.frequency.linearRampToValueAtTime(1800, t + 0.12);
+    lp.frequency.linearRampToValueAtTime(1100, t + Math.max(0.2, dur));
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.32, t + 0.09);
+    g.gain.setValueAtTime(0.28, t + Math.max(0.1, dur - 0.08));
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.35);
+    lp.connect(g);
+    g.connect(this.music!);
+    g.connect(this.echo!);
+    const vib = ctx.createOscillator();
+    vib.frequency.value = 5.2;
+    const depth = ctx.createGain();
+    depth.gain.value = f * 0.004;
+    vib.connect(depth);
+    for (const detune of [-5, 5]) {
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.value = f / 2;
+      o.detune.value = detune;
+      depth.connect(o.frequency);
+      o.connect(lp);
+      o.start(t);
+      o.stop(t + dur + 0.4);
+    }
+    vib.start(t);
+    vib.stop(t + dur + 0.4);
+  }
+
+  /** A deep drum stroke (a falling sine with a short noise-free click), `v` = 0..1 strength. */
+  private drum(t: number, v: number): void {
+    const ctx = this.ctx!;
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(95, t);
+    o.frequency.exponentialRampToValueAtTime(42, t + 0.5);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.9 * v, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.9);
+    o.connect(g).connect(this.music!);
+    o.start(t);
+    o.stop(t + 1);
   }
 
   private pluck(t: number, f: number): void {
