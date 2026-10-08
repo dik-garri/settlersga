@@ -19,7 +19,7 @@ import { el, rowsTable, type View } from './dom';
 import { economyKey, economyRows, refreshStockCounts, toolOrderControls, warehouseControls } from './economyPanel';
 import { movableWorkArea, workRadius } from '../sim/workArea';
 import { glyph } from './icons';
-import { tradeControls, tradeKey, tradeRows } from './tradeView';
+import { refreshTradeCounts, tradeControls, tradeKey, tradeRows } from './tradeView';
 import type { GameState } from './state';
 
 /**
@@ -66,9 +66,6 @@ export class InfoView implements View {
   private attackCount = 1;
   /** Re-render only when the content changes, so buttons in it stay clickable. */
   private infoKey = '';
-  /** Good chosen in a market's order grid. */
-  private tradePick: Resource = 'plank';
-
   constructor(
     private readonly world: World,
     private readonly state: GameState,
@@ -79,6 +76,7 @@ export class InfoView implements View {
     this.renderInfo();
     const b = this.state.selected !== null ? this.world.buildings.get(this.state.selected) : undefined;
     if (b && BUILDINGS[b.type].storage) refreshStockCounts(this.el, b);
+    if (b && BUILDINGS[b.type].market) refreshTradeCounts(this.el, b);
   }
 
   private renderInfo(): void {
@@ -195,7 +193,7 @@ export class InfoView implements View {
       this.confirmDemolish === b.id,
       this.state.movingWorkArea === b.id,
       economyKey(this.world, b),
-      tradeKey(this.world, b, this.tradePick),
+      tradeKey(this.world, b),
     ]);
     if (key === this.infoKey) return;
     this.infoKey = key;
@@ -245,7 +243,7 @@ export class InfoView implements View {
     }
     const warehouse = warehouseControls(this.world, b);
     if (warehouse) this.el.append(warehouse);
-    const trade = tradeControls(this.world, b, this.tradePick, (r) => (this.tradePick = r));
+    const trade = tradeControls(this.world, b);
     if (trade) this.el.append(trade);
     if (!def.playerBuildable) return;
     const orders = b.done ? toolOrderControls(this.world, b) : null;

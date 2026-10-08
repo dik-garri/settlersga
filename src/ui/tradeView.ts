@@ -8,9 +8,9 @@ import { LOCAL_PLAYER, type World } from '../sim/world';
 import { button, el } from './dom';
 
 /**
- * Trade in the building window, as in Settlers 4: a marketplace's route (the destination market,
- * which goods and how many the donkeys take there), a donkey ranch's herd, and the note on buildings
- * whose land has no warehouse (cut off: carriers cannot reach them, only donkeys).
+ * Trade in the building window, as in Settlers 4: a marketplace's route (the destination market and
+ * which goods the donkeys take there), a donkey ranch's herd, and the note on buildings whose land
+ * has no warehouse (cut off: carriers cannot reach them, only donkeys).
  */
 
 const nameOf = (r: Resource) => RESOURCE_INFO[r].name;
@@ -34,7 +34,13 @@ function donkeys(world: World, owner: number): { all: number; idle: number } {
 
 const where = (m: Building) => `${m.door.x}, ${m.door.y}`;
 
-/** Rows for the building window: route and orders of a market, the herd of a ranch, cut-off land. */
+/** Whether the market has an order (finite or endless) for the good. */
+const carried = (b: Building, r: Resource) => b.trade?.orders[r] !== undefined;
+
+/** Units of the good waiting on the market's input pile, not yet in a donkey's pack. */
+const waitingAt = (b: Building, r: Resource) => b.input[r] - (b.trade?.loading[r] ?? 0);
+
+/** Rows for the building window: route of a market, the herd of a ranch, cut-off land. */
 export function tradeRows(world: World, b: Building): [string, string][] {
   const def = BUILDINGS[b.type];
   const rows: [string, string][] = [];
@@ -46,13 +52,6 @@ export function tradeRows(world: World, b: Building): [string, string][] {
     rows.push(['Маршрут', to ? `к рынку (${where(to)})` : 'не задан']);
     const d = donkeys(world, b.owner);
     rows.push(['Ослы', `${d.all} (свободны ${d.idle})`]);
-    for (const r of RESOURCES) {
-      const order = b.trade?.orders[r];
-      const loading = b.trade?.loading[r] ?? 0;
-      if (!order && b.input[r] === 0 && loading === 0) continue;
-      const left = order === ENDLESS ? '∞' : String(order ?? 0);
-      rows.push([`${nameOf(r)} →`, `осталось ${left} · ждёт ${b.input[r] - loading} · грузят ${loading}`]);
-    }
     for (const r of RESOURCES) if (b.output[r] > 0) rows.push([`${nameOf(r)} (прибыло)`, String(b.output[r])]);
   }
   if (def.breeds) {
@@ -66,16 +65,17 @@ export function tradeRows(world: World, b: Building): [string, string][] {
 }
 
 /** A string that changes whenever the market controls must be redrawn. */
-export function tradeKey(world: World, b: Building, pick: Resource): string {
+export function tradeKey(world: World, b: Building): string {
   if (!BUILDINGS[b.type].market) return '';
-  return JSON.stringify([b.trade?.to ?? null, b.trade?.orders ?? {}, otherMarkets(world, b).map((m) => m.id), pick]);
+  return JSON.stringify([b.trade?.to ?? null, b.trade?.orders ?? {}, otherMarkets(world, b).map((m) => m.id)]);
 }
 
 /**
- * A market's commands: where its donkeys go, and per good how many to send (+1 / +5 / endless /
- * cancel). `pick` is the good chosen in the grid; `onPick` changes it.
+ * A market's commands: where its donkeys go, and — as in the warehouse window — two lists of goods,
+ * carried and not; a click moves a good across. A click starts an endless order (the AI still places
+ * finite ones through `orderTrade`; their remainder shows in the item's corner).
  */
-export function tradeControls(world: World, b: Building, pick: Resource, onPick: (r: Resource) => void): HTMLElement | null {
+export function tradeControls(world: World, b: Building): HTMLElement | null {
   if (!BUILDINGS[b.type].market || b.owner !== LOCAL_PLAYER || !b.done) return null;
   const box = el('div', 'eco-orders trade');
   box.append(el('h4', '', 'Куда'));
@@ -91,26 +91,49 @@ export function tradeControls(world: World, b: Building, pick: Resource, onPick:
   if (to !== null) routes.append(button('✕', 'Снять маршрут', () => world.setTradeRoute(b.id, null)));
   box.append(routes);
 
-  box.append(el('h4', '', 'Что отправлять'));
+  box.append(el('h4', '', 'Что возить'));
   box.append(el('p', 'muted', `Носильщики приносят товар на рынок, ослы берут до ${TRADE.donkeyLoad} штук за раз.`));
-  const grid = el('div', 'eco-accept');
-  for (const res of RESOURCES) {
-    const ordered = !!b.trade?.orders[res];
-    const cls = `eco-toggle${ordered || res === pick ? ' on' : ''}${res === pick ? ' picked' : ''}`;
-    const t = button('', nameOf(res), () => onPick(res), cls);
-    t.append(wareIcon(res, 16));
-    grid.append(t);
-  }
-  box.append(grid);
-  const n = b.trade?.orders[pick];
-  const row = el('div', 'eco-row');
-  row.append(wareIcon(pick, 18), el('span', 'eco-name', nameOf(pick)), el('b', '', n === undefined ? '—' : n === ENDLESS ? '∞' : String(n)));
-  row.append(
-    button('+1', 'Отправить ещё одну штуку', () => world.orderTrade(b.id, pick, 1)),
-    button('+5', 'Отправить ещё пять', () => world.orderTrade(b.id, pick, 5)),
-    button('∞', 'Возить без остановки', () => world.orderTrade(b.id, pick, ENDLESS)),
-    button('✕', 'Отменить: что ждёт на рынке, вернётся на склад', () => world.orderTrade(b.id, pick, 0)),
-  );
-  box.append(row);
+  const wrap = el('div', 'accepts');
+  const column = (title: string, on: boolean) => {
+    const col = el('div', `accept-col ${on ? 'yes' : 'no'}`);
+    const head = el('div', 'accept-head');
+    head.append(el('span', '', `${title} (${RESOURCES.filter((r) => carried(b, r) === on).length})`));
+    const all = button(on ? 'ничего' : 'все', on ? 'Не возить ничего: что ждёт на рынке, вернётся на склад' : 'Возить всё без остановки', () => {
+      for (const r of RESOURCES) world.orderTrade(b.id, r, on ? 0 : ENDLESS);
+    });
+    head.append(all);
+    col.append(head);
+    const list = el('div', 'accept-list');
+    for (const r of RESOURCES) {
+      if (carried(b, r) !== on) continue; // the other column's
+      const item = button(
+        '',
+        `${nameOf(r)}: ${on ? 'возим — нажмите, чтобы перестать (что ждёт на рынке, вернётся на склад)' : 'не возим — нажмите, чтобы возить без остановки'}`,
+        () => world.orderTrade(b.id, r, on ? 0 : ENDLESS),
+        'accept-item',
+      );
+      item.append(wareIcon(r, 34));
+      if (on) {
+        const order = b.trade?.orders[r];
+        if (order !== undefined && order !== ENDLESS) item.append(el('span', 'trade-left', String(order)));
+        const n = el('span', 'acc-count', String(waitingAt(b, r)));
+        n.dataset.tradeRes = r;
+        item.append(n);
+      }
+      list.append(item);
+    }
+    if (!list.firstChild) list.append(el('div', 'accept-empty', on ? 'ничего' : '—'));
+    col.append(list);
+    return col;
+  };
+  wrap.append(column('Возим', true), column('Не возим', false));
+  box.append(wrap);
   return box;
+}
+
+/** Refresh the waiting counts on a market's carried goods in place (no re-render). */
+export function refreshTradeCounts(root: HTMLElement, b: Building): void {
+  for (const n of root.querySelectorAll<HTMLElement>('[data-trade-res]')) {
+    n.textContent = String(waitingAt(b, n.dataset.tradeRes as Resource));
+  }
 }
