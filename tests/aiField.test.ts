@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { addBuilding, recomputeTerritory, spawnSettler } from '../src/sim/buildings';
 import { stageStrike } from '../src/sim/aiField';
 import { AI, BUILDINGS } from '../src/sim/config';
@@ -187,6 +187,12 @@ describe('computer player: field orders', () => {
   });
 
   it('gathers its strike group in the field, then attacks together', { timeout: LONG }, () => {
+    // Staging is off by default (see AI.stageStrike); this checks the mechanism when switched on.
+    const saved = AI.stageStrike;
+    (AI as { stageStrike: boolean }).stageStrike = true;
+    onTestFinished(() => {
+      (AI as { stageStrike: boolean }).stageStrike = saved;
+    });
     const w = new World(7, { players: 2, ai: [2] });
     const attacks: { ids: readonly number[]; target: number; explored: boolean }[] = [];
     const orderAttack = w.orderAttack.bind(w);

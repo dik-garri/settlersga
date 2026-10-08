@@ -1203,9 +1203,12 @@ export const AI = {
    * archers' range) on the line back towards its buildings, then
    * attacks together once `stageArrived` of it stands there or after `stageTimeout` ticks. Parties
    * that start closer than `stageDistance + stageMinWalk` attack straight from their buildings
-   * (`World.attack`, also the fallback when `stageStrike` is off).
+   * (`World.attack`, also the fallback when `stageStrike` is off). Off by default: measured on
+   * 128×128 with 4 AIs (seeds 42, 7, 123, 60 min) staging cut eliminations from 8 to 5–7 in every
+   * tuning tried — the group gathered away from the target and arrived too late — while 64×64 and
+   * 96×96 games are decided either way.
    */
-  stageStrike: true,
+  stageStrike: false,
   stageDistance: 7,
   stageMinWalk: 4,
   stageArrived: 0.8,
