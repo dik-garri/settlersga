@@ -443,6 +443,11 @@ export class World {
     if (count === ENDLESS || count === 0) {
       if (count === 0) {
         delete m.trade.orders[res];
+        // Carriers already bringing the good turn back (their load returns to a warehouse) —
+        // otherwise it would keep arriving and sit on the market with nothing to take it away.
+        for (const s of this.settlers) {
+          if (s.owner === player && s.tasks.some((t) => t.t === 'drop' && t.b === id && t.res === res)) abort(this, s);
+        }
         // What waits for a donkey goes on the output pile, so carriers take it back to a warehouse.
         const spare = m.input[res] - (m.trade.loading[res] ?? 0);
         if (spare > 0) {

@@ -21,11 +21,11 @@ import { findPath } from './pathfinding';
 import { pathSpeed, wearTile } from './paths';
 import { restIdle } from './idle';
 import { landAt } from './land';
-import { donkeyAbort, donkeyIdle, loadTick, releaseLoad, unloadTick } from './trade';
+import { donkeyAbort, donkeyIdle, loadTick, marketOrdered, releaseLoad, unloadTick } from './trade';
 import { claimTick, pioneerIdle, specialistPostIdle, stealTick, thiefIdle } from './specialists';
 import { chaseTick } from './intruders';
 import { findGame, huntTick, releaseHunt } from './hunting';
-import { RESOURCES, Terrain, type Building, type Point, type Settler, type Task } from './types';
+import { RESOURCES, Terrain, type Building, type Point, type Resource, type Settler, type Task } from './types';
 import type { World } from './world';
 
 const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -33,6 +33,15 @@ const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
 type GotoTarget = { x: number; y: number; adj?: boolean };
 
 /** Runs one tick of the settler's task queue, or its profession's idle behaviour when the queue is empty. */
+/**
+ * Whether a finished non-warehouse building still takes `res` as input: a market only for goods it
+ * has an order for — a delivery that arrives after the order was cancelled goes on its output pile,
+ * so carriers take it back to a warehouse instead of it sitting there for good.
+ */
+function wantedAt(b: Building, res: Resource): boolean {
+  return !BUILDINGS[b.type].market || marketOrdered(b, res);
+}
+
 export function updateSettler(w: World, s: Settler): void {
   s.working = false;
   // An opponent that died or let go no longer holds this settler (a pinned intruder whose pursuer fell).
@@ -99,7 +108,7 @@ export function updateSettler(w: World, s: Settler): void {
       const b = w.buildings.get(task.b);
       if (!b) return abort(w, s);
       if (!b.done) b.delivered[task.res]++;
-      else if (BUILDINGS[b.type].storage) b.output[task.res]++;
+      else if (BUILDINGS[b.type].storage || !wantedAt(b, task.res)) b.output[task.res]++;
       else b.input[task.res]++;
       b.inbound[task.res]--;
       s.carrying = null;

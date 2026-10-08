@@ -110,6 +110,44 @@ describe('donkeys and marketplaces', () => {
     for (const s of w.settlers) if (s.kind === 'donkey') expect(s.load ?? 0).toBeLessThanOrEqual(TRADE.donkeyLoad);
   });
 
+  it('a market with every order cancelled moves nothing: deliveries on their way turn back', () => {
+    const { w, home, away } = caravan();
+    w.setTradeRoute(home.id, away.id);
+    w.orderTrade(home.id, 'plank', ENDLESS);
+    w.orderTrade(home.id, 'stone', ENDLESS);
+    // Until carriers are on their way with both goods.
+    for (let i = 0; i < 2000 && (home.inbound.plank === 0 || home.inbound.stone === 0); i++) w.step();
+    expect(home.inbound.plank + home.inbound.stone).toBeGreaterThan(0);
+    for (const res of ['plank', 'stone'] as const) w.orderTrade(home.id, res, 0);
+    expect(home.inbound.plank + home.inbound.stone).toBe(0);
+    const carriersTo = () =>
+      w.settlers.filter((s) => s.kind === 'carrier' && s.tasks.some((t) => t.t === 'drop' && t.b === home.id)).length;
+    const donkeysFrom = () => w.settlers.filter((s) => s.tasks.some((t) => t.t === 'load' && t.b === home.id)).length;
+    for (let i = 0; i < 3000; i++) {
+      w.step();
+      expect(carriersTo()).toBe(0);
+      expect(donkeysFrom()).toBe(0);
+    }
+    // Nothing is left stuck in the market's input; leftovers went back via its output pile.
+    expect(home.input.plank + home.input.stone).toBe(0);
+    expect(Object.values(w.stats.lost).every((n) => n === 0)).toBe(true);
+  });
+
+  it('a delivery arriving at a market without an order goes on its output pile, not its input', () => {
+    const { w, home, away } = caravan();
+    w.setTradeRoute(home.id, away.id);
+    w.orderTrade(home.id, 'plank', ENDLESS);
+    for (let i = 0; i < 2000 && home.inbound.plank === 0; i++) w.step();
+    expect(home.inbound.plank).toBeGreaterThan(0);
+    // Drop the order behind the carrier's back (no cancel command): the safety net still applies.
+    delete home.trade!.orders.plank;
+    for (let i = 0; i < 2000 && home.inbound.plank > 0; i++) {
+      w.step();
+      expect(home.input.plank).toBe(0);
+    }
+    expect(home.inbound.plank).toBe(0);
+  });
+
   it('supplies a site on the cut-off piece with goods the donkeys brought, by a carrier that walked over', () => {
     const { w, t, home, away } = caravan();
     const site = onPiece(w, 'woodcutter', t);

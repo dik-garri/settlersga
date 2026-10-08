@@ -30,6 +30,11 @@ export function routeTarget(w: World, m: Building): Building | undefined {
   return isMarket(t) && t.owner === m.owner ? t : undefined;
 }
 
+/** Whether the market has an order (finite or endless) for the good. */
+export function marketOrdered(b: Building, res: Resource): boolean {
+  return !!b.trade?.orders[res];
+}
+
 /** Units of `res` a market still wants its carriers to bring for its route (part of `demand`). */
 export function marketWants(b: Building, res: Resource): number {
   const order = b.trade?.orders[res];
