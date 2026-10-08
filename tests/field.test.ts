@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { addBuilding, spawnSettler } from '../src/sim/buildings';
-import { PROFESSIONS } from '../src/sim/config';
+import { hpOf, PROFESSIONS } from '../src/sim/config';
 import { fieldUnits, formationSpots, moraleOf } from '../src/sim/field';
 import { enterGarrison } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
@@ -25,7 +25,7 @@ function outOfCastle(w: World, n: number, kind: 'soldier' | 'archer' | 'leader' 
   const made: Settler[] = [];
   for (let i = 0; i < n; i++) {
     const s = spawnSettler(w, kind, c);
-    s.hp = Math.round(PROFESSIONS[kind].hp ?? 100);
+    s.hp = hpOf(kind);
     s.inside = null;
     s.home = null;
     made.push(s);

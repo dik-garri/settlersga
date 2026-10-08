@@ -1,7 +1,7 @@
 import { attackStrength, defenceStrength } from '../src/sim/strength';
 import { describe, expect, it } from 'vitest';
 import { centerOf, spawnSettler } from '../src/sim/buildings';
-import { BUILDINGS, SOLDIER_LEVELS, START_SOLDIERS } from '../src/sim/config';
+import { BUILDINGS, PROFESSIONS, START_SOLDIERS } from '../src/sim/config';
 import { enterGarrison, isFighter, keepOf, killSettler, maxHp } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
 import type { Building, Settler } from '../src/sim/types';
@@ -76,9 +76,9 @@ describe('defence', () => {
     expect(w.attackerComposition(w.castleOf(2).id, 99).filter((s) => s.home === c.id)).toHaveLength(0);
   });
 
-  it('defenders at their own door land more blows than equal attackers', () => {
+  it('in a duel at the door both strike on their own timers, each at his fighting strength', () => {
     const { w, ours, theirs } = frontLine();
-    // One rank-0 swordsman on each side, made unkillable so the duel lasts hundreds of blows.
+    // One level-1 swordsman on each side, made unkillable so the duel lasts hundreds of blows.
     for (const extra of fighters(w, theirs).slice(1)) killSettler(w, extra);
     while (ours.garrison.length < 2) station(w, ours, 'soldier');
     w.step();
@@ -88,19 +88,20 @@ describe('defence', () => {
     const defender = w.getSettler(attacker.opponent!)!;
     expect(defender.owner).toBe(2);
     attacker.hp = defender.hp = 1e9;
-    // Long enough for the ratio to settle (blows are random).
-    run(w, 15000);
+    const ticks = 15000;
+    run(w, ticks);
     const takenByAttacker = 1e9 - attacker.hp;
     const takenByDefender = 1e9 - defender.hp;
-    // Tower defense 1.2, and fighting strength (`strength.ts`): the attacker fights on foreign land
-    // at his owner's attack strength, the defender at home at his defence strength. A side lands
-    // blows in proportion to its strength and each blow hurts in proportion to it too, so the
-    // defender's damage dealt over the attacker's is 1.2 × (fd / fa)².
-    const fa = attackStrength(w, 1) / 100;
-    const fd = defenceStrength(w, 2) / 100;
-    const expected = 1.2 * (fd / fa) ** 2;
-    expect(takenByAttacker / takenByDefender).toBeGreaterThan(expected * 0.85);
-    expect(takenByAttacker / takenByDefender).toBeLessThan(expected * 1.15);
+    // Settlers 4: every blow lands — both strike once per cadence (13 of its ticks), for the level's
+    // 10 × fighting strength, rounded: the attacker on foreign land at his owner's attack strength,
+    // the defender at home at his defence strength. No bonus for the building itself.
+    const { every, levels } = PROFESSIONS.soldier.combat!;
+    const blows = ticks / every;
+    const byAttacker = Math.round(levels[0].damage * (attackStrength(w, 1) / 100));
+    const byDefender = Math.round(levels[0].damage * (defenceStrength(w, 2) / 100));
+    expect(byAttacker).toBeLessThan(byDefender);
+    expect(Math.abs(takenByDefender / byAttacker - blows)).toBeLessThanOrEqual(1);
+    expect(Math.abs(takenByAttacker / byDefender - blows)).toBeLessThanOrEqual(1);
   });
 });
 
@@ -113,7 +114,7 @@ describe('no promotion', () => {
     expect(fighters(w, c).every((s) => s.level === 0)).toBe(true);
     expect(c.output.gold).toBe(4);
     for (const s of fighters(w, c)) expect(s.hp).toBe(maxHp(s));
-    expect(maxHp({ ...fighters(w, c)[0], level: 1 })).toBe(Math.round(100 * SOLDIER_LEVELS[1].hp));
+    expect(maxHp({ ...fighters(w, c)[0], level: 1 })).toBe(150);
   });
 });
 

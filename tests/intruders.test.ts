@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { spawnSettler } from '../src/sim/buildings';
-import { INTRUDERS, PROFESSIONS } from '../src/sim/config';
+import { hpOf, INTRUDERS, PROFESSIONS } from '../src/sim/config';
 import { isTarget } from '../src/sim/intruders';
 import { killSettler } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
@@ -16,7 +16,7 @@ function intruder(w: World, kind: 'pioneer' | 'geologist' | 'thief', off: number
   const s = spawnSettler(w, kind, w.castleOf(2));
   const c = w.castleOf(1);
   s.inside = null;
-  s.hp = PROFESSIONS[kind].hp ?? 0;
+  s.hp = hpOf(kind);
   s.x = s.px = c.door.x + off;
   s.y = s.py = c.door.y + 1;
   // Pinned down by a post on the spot, so he stays on the hostile land for the test.

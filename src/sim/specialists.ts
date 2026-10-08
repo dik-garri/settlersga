@@ -1,5 +1,5 @@
 import { nearestStorage } from './buildings';
-import { FIELD, ORDERABLE, PIONEER, PROFESSIONS, PROSPECT_RADIUS, PROSPECT_TICKS, PROSPECT_TILES, THIEF } from './config';
+import { FIELD, hpOf, ORDERABLE, PIONEER, PROFESSIONS, PROSPECT_RADIUS, PROSPECT_TICKS, PROSPECT_TILES, THIEF } from './config';
 import { workerOrder } from './economy';
 import { restIdle } from './idle';
 import { formationSpots } from './field';
@@ -265,7 +265,7 @@ export function geologistErrand(w: World, s: Settler, x: number, y: number): boo
   const tiles = prospectTiles(w, x, y, s.owner);
   if (tiles.length === 0) return false;
   // A carrier just made a geologist gets the profession's hit points (`INTRUDERS`).
-  if (s.hp <= 0) s.hp = PROFESSIONS.geologist.hp ?? 0;
+  if (s.hp <= 0) s.hp = hpOf('geologist');
   const tool = PROFESSIONS.geologist.tool;
   const tasks: Task[] = [];
   if (tool && s.carrying !== tool) {

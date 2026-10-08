@@ -29,11 +29,12 @@ for (const seed of seeds) {
     `seed ${seed} · ${size}×${size} · players ${players} · AI ${ai.join(',')}${passive ? ' · player 1 passive' : ''}${teams ? ` · teams ${teams.join(',')}` : ''}${difficulty ? ` · levels ${difficulty.join(',')}` : ''}`,
   );
   const t0 = performance.now();
-  let end = '';
+  // Every defeat with its time, in order (the first one is what earlier versions reported).
+  const fallen: string[] = [];
   for (let i = 1; i <= minutes * perMinute; i++) {
     w.step();
-    if (i % (every * perMinute) === 0 || (w.defeated.length > 0 && !end)) {
-      if (w.defeated.length > 0 && !end) end = `player ${w.defeated.join(',')} defeated at ${(i / perMinute).toFixed(1)} min`;
+    if (i % (every * perMinute) === 0 || w.defeated.length > fallen.length) {
+      for (const p of w.defeated.slice(fallen.length)) fallen.push(`player ${p} defeated at ${(i / perMinute).toFixed(1)} min`);
       const rows = w.players.map((p) => {
         const own = [...w.buildings.values()].filter((b) => b.owner === p.id);
         const done = own.filter((b) => b.done).length;
@@ -55,6 +56,8 @@ for (const seed of seeds) {
       if (w.players.some((p) => w.outcome(p.id) === 'won')) break;
     }
   }
+  const winner = w.players.find((p) => w.outcome(p.id) === 'won');
+  const end = fallen.join(', ') + (winner ? ` · player ${winner.id} won at ${(w.tick / perMinute).toFixed(1)} min` : '');
   console.log(`  result: ${end || 'nobody defeated'} · ${((performance.now() - t0) / (w.tick || 1)).toFixed(3)} ms/tick`);
 }
 

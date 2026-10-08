@@ -68,22 +68,19 @@ export const GARRISON_KEEP = 1;
 /** Combat: soldiers within this distance (tiles, building centers) of the target can join an attack. */
 export const ATTACK_RANGE = 30;
 /**
- * Combat: one blow every FIGHT_EVERY ticks; damage per blow is uniform in [min, max]. Settlers 4: a
- * level-1 swordsman has 100 hit points and deals 10 a blow, both fighters striking every 0.92 s, so an
- * even duel lasts about 9 s; one blow (on either fighter) every 0.6 s at 10 on average gives the same.
+ * Settlers 4 game ticks (845 a minute, `docs/TIMINGS.md`) in our ticks: combat cadences are given in
+ * the original's ticks and converted here, so they may be fractional (a fighter's `reload` counts
+ * down by one a tick and carries the remainder over, so the average pace is exact).
  */
-export const FIGHT_EVERY = 6;
-export const DAMAGE: [number, number] = [8, 12];
+export const s4Ticks = (n: number): number => (n * 60 * TICKS_PER_SECOND) / 845;
 /**
  * Fighter levels, as in Settlers 4: chosen when the barracks trains a recruit and fixed for life.
- * Hit points and damage are relative to level 0; `cost` units of `LEVEL_RES` are paid at recruitment
- * on top of the weapon (level 1 is the weapon alone).
+ * `cost` units of `LEVEL_RES` are paid at recruitment on top of the weapon (level 1 is the weapon
+ * alone). Hit points and damage per level are each profession's own (`CombatDef.levels`); a
+ * profession with fewer levels (the squad leader has one) is trained at its highest and pays only
+ * for that.
  */
-export const SOLDIER_LEVELS: readonly { hp: number; damage: number; cost: number }[] = [
-  { hp: 1, damage: 1, cost: 0 },
-  { hp: 1.3, damage: 1.3, cost: 1 },
-  { hp: 1.6, damage: 1.6, cost: 2 },
-];
+export const SOLDIER_LEVELS: readonly { cost: number }[] = [{ cost: 0 }, { cost: 1 }, { cost: 2 }];
 export const LEVEL_RES: Resource = 'gold';
 /** A fighter below this share of his hit points, idle in a garrison, goes to an infirmary if one has a bed. */
 export const WOUNDED_AT = 0.6;
@@ -193,8 +190,8 @@ export const WORK_AREA = { maxShift: 1.5 };
  * fighter it can spare (above `keep`; field units nearby engage on their own, `FIELD.engageRadius`, and
  * field archers shoot). The responder runs the `chase` task: walks up; within `seizeRadius` the
  * intruder is caught and stands (`opponent` — a specialist cannot outrun a swordsman, and walking at the
- * same pace he otherwise never would be reached); adjacent, the fighter strikes every `FIGHT_EVERY`
- * ticks with ordinary blows — specialists do not fight back — until the intruder dies (his load is
+ * same pace he otherwise never would be reached); adjacent, the fighter strikes at his own pace
+ * (`combat.every`) with ordinary blows (`combat.ts`) — specialists do not fight back — until the intruder dies (his load is
  * lost) or is off that player's land; then the fighter looks for a garrison again. Radii and timings
  * are our approximations: the wiki gives no numbers.
  */
@@ -497,17 +494,38 @@ export interface PlantDef {
   maxNearby?: number;
 }
 
-/** Fighting abilities of a military profession. */
+/** Hit points and damage per attack of a fighter at one level (Settlers 4 unit stats). */
+export interface FighterLevel {
+  hp: number;
+  damage: number;
+}
+
+/**
+ * Fighting abilities of a military profession, as in Settlers 4 (Settlers United wiki, «Unit stats»;
+ * decompiled `CSoldierRole::LogicUpdateJob`): every attack lands — no misses — for the level's
+ * `damage` × the owner's fighting strength where the fighter stands (`fieldFactor`), rounded, at
+ * least 1; a squad leader's bonus (`leads.morale`) adds its share on top; the target's `armor` is
+ * subtracted (never below 1 damage). Each fighter attacks on his own timer, every `every` ticks.
+ */
 export interface CombatDef {
-  /** Multiplier on melee strength and damage (archers are poor swordsmen). */
-  melee: number;
-  /** Ranged attack: shoots enemies within `range` tiles every `every` ticks for `damage` (× level). */
-  ranged?: { range: number; every: number; damage: [number, number] };
+  /** Hit points and damage per attack by level (index = `Settler.level`, clamped to the last). */
+  levels: readonly FighterLevel[];
+  /** Ticks between two attacks (`s4Ticks` of the original's cadence). */
+  every: number;
+  /** Subtracted from every hit this fighter takes, never below 1 damage (the squad leader's 2). */
+  armor?: number;
+  /**
+   * Shoots from up to `range` tiles (point-blank too: an archer called out to a duel shoots). In a
+   * garrison his shots deal `tower` more damage, `towerDoor` more at enemies standing at its door
+   * (Settlers 4: the tower bowman's +1, the stone dropper's +2, not scaled by fighting strength).
+   */
+  ranged?: { range: number; tower: number; towerDoor: number };
   /** Can take an empty enemy building (in Settlers 4 only swordsmen do; archers support). */
   captures?: boolean;
   /**
-   * Squad leader (Settlers 4): own fighters within `radius` tiles of him (himself included) fight with
-   * `morale` × chance and damage, and soldiers ordered out with him follow him as a squad (`field.ts`).
+   * Squad leader (Settlers 4): own fighters within `radius` tiles of him (not himself) deal
+   * `morale` × damage, and soldiers ordered out with him follow him as a squad (`field.ts`). In S4 the
+   * bonus belongs to the members of his control group; the radius is our stand-in for that group.
    */
   leads?: { radius: number; morale: number };
 }
@@ -515,7 +533,7 @@ export interface CombatDef {
 export interface ProfessionDef {
   name: string;
   behavior: Behavior;
-  /** Hit points at level 0 when taking up the profession (fighters; specialists, see `INTRUDERS`). */
+  /** Hit points of a specialist (see `INTRUDERS`); fighters' come from `combat.levels` (`hpOf`). */
   hp?: number;
   /** Disguised on hostile land until a fighter of that land comes close (the thief, `INTRUDERS`). */
   cloaked?: boolean;
@@ -587,37 +605,81 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
   donkeyrancher: { name: 'Погонщик', behavior: 'workshop' },
   donkey: { name: 'Осёл', behavior: 'donkey', roads: true },
   recruit: { name: 'Новобранец', behavior: 'workshop' },
-  soldier: { name: 'Мечник', behavior: 'soldier', tool: 'sword', hp: 100, combat: { melee: 1, captures: true } },
+  /** Settlers 4: 100 / 150 / 210 hit points, 10 / 14 / 20 a blow, a blow every 13 of its ticks. */
+  soldier: {
+    name: 'Мечник',
+    behavior: 'soldier',
+    tool: 'sword',
+    combat: {
+      levels: [
+        { hp: 100, damage: 10 },
+        { hp: 150, damage: 14 },
+        { hp: 210, damage: 20 },
+      ],
+      every: s4Ticks(13),
+      captures: true,
+    },
+  },
+  /**
+   * Settlers 4: 75 / 120 / 160 hit points, 4 / 6 / 8 a shot every 20 of its ticks; on a tower +1 a
+   * shot, +2 at enemies at its door. Range: S4 says 10 of its tiles, but an S4 tile is about a third
+   * of ours in length (`docs/TIMINGS.md`), so ≈ 3.3 of ours; ours stays 5 until the tile scale is
+   * decided.
+   */
   archer: {
     name: 'Лучник',
     behavior: 'soldier',
     tool: 'bow',
-    // Settlers 4: 75 hit points, 4 damage a shot every 1.42 s.
-    hp: 75,
-    combat: { melee: 0.6, ranged: { range: 5, every: 14, damage: [3, 5] } },
+    combat: {
+      levels: [
+        { hp: 75, damage: 4 },
+        { hp: 120, damage: 6 },
+        { hp: 160, damage: 8 },
+      ],
+      every: s4Ticks(20),
+      ranged: { range: 5, tower: 1, towerDoor: 2 },
+    },
   },
   /**
-   * Squad leader, as in Settlers 4: made in the barracks from armour and a sword (plus the gold of his
-   * level), a strong swordsman whose presence lifts the fighters around him (`combat.leads`).
+   * Squad leader, as in Settlers 4: made in the barracks from armour and a sword, a strong swordsman
+   * (215 hit points, 21 a blow every 13 ticks, armour 2; one level only) whose presence lifts the
+   * fighters around him (`combat.leads`: +10 % damage).
    */
   leader: {
     name: 'Командир',
     behavior: 'soldier',
     tool: 'armor',
     kit: { sword: 1 },
-    hp: 215, // Settlers 4
     speed: 9 / 7,
-    combat: { melee: 1.25, captures: true, leads: { radius: 6, morale: 1.15 } },
+    combat: {
+      levels: [{ hp: 215, damage: 21 }],
+      every: s4Ticks(13),
+      armor: 2,
+      captures: true,
+      leads: { radius: 6, morale: 1.1 },
+    },
   },
 };
+
+/** A fighter's stats at `level` (clamped to the profession's levels), or undefined for non-fighters. */
+export function fighterLevel(kind: SettlerKind, level: number): FighterLevel | undefined {
+  const levels = PROFESSIONS[kind].combat?.levels;
+  return levels ? levels[Math.max(0, Math.min(level, levels.length - 1))] : undefined;
+}
+
+/** Full hit points of a settler of `kind` at `level`: a fighter's from his level, a specialist's `hp`, else 0. */
+export function hpOf(kind: SettlerKind, level = 0): number {
+  return fighterLevel(kind, level)?.hp ?? PROFESSIONS[kind].hp ?? 0;
+}
 
 /**
  * Field units (direct army control, `field.ts`): a fighter on a field post engages enemy fighters
  * within `engageRadius` tiles (archers shoot within their range instead), looks around every
  * `scanEvery` ticks, gives up a chase beyond `chaseLimit` tiles from his post, and walks back to the
  * post once more than `slack` tiles from it. `formation`: tiles between neighbours of a formation.
+ * A swordsman whose enemy is busy with a comrade waits beside him `waitBeside` ticks, then gives up.
  */
-export const FIELD = { engageRadius: 4, scanEvery: 5, chaseLimit: 7, slack: 1.5, formation: 1 };
+export const FIELD = { engageRadius: 4, scanEvery: 5, chaseLimit: 7, slack: 1.5, formation: 1, waitBeside: 36 };
 
 // --------------------------------------------------------------- buildings
 
@@ -710,8 +772,6 @@ export interface GarrisonDef {
   keep?: number;
   /** Slots for archers; the other `capacity − archers` slots are for swordsmen. */
   archers?: number;
-  /** Defenders fighting at its door are this much stronger. */
-  defense?: number;
 }
 
 /**
@@ -761,7 +821,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     storage: true,
     territory: 10,
     // The headquarters: the army's reserve (S4 has no such building; 7 swordsmen + 5 archers).
-    garrison: { capacity: 12, claimsWhenEmpty: true, keep: 4, archers: 5, defense: 1.5 },
+    garrison: { capacity: 12, claimsWhenEmpty: true, keep: 4, archers: 5 },
   },
 
   house_small: {
@@ -985,7 +1045,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     category: 'military',
     territory: 8,
     // As in Settlers 4: 1 swordsman + 2 archers.
-    garrison: { capacity: 3, keep: 1, archers: 2, defense: 1.2 },
+    garrison: { capacity: 3, keep: 1, archers: 2 },
   },
   bigtower: {
     name: 'Большая башня',
@@ -997,7 +1057,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     category: 'military',
     territory: 11,
     // 3 swordsmen + 3 archers.
-    garrison: { capacity: 6, keep: 2, archers: 3, defense: 1.35 },
+    garrison: { capacity: 6, keep: 2, archers: 3 },
   },
   barracks: {
     name: 'Казарма',
@@ -1019,7 +1079,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     category: 'military',
     territory: 14,
     // The Settlers 4 castle: 4 swordsmen + 5 archers.
-    garrison: { capacity: 9, keep: 3, archers: 5, defense: 1.5 },
+    garrison: { capacity: 9, keep: 3, archers: 5 },
   },
   lookout: {
     name: 'Смотровая башня',

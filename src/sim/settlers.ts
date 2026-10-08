@@ -6,6 +6,7 @@ import {
   BUILDINGS,
   buildersOf,
   HANDLE_TICKS,
+  hpOf,
   OUTPUT_CAP,
   PATH_FAIL_BACKOFF,
   PROFESSIONS,
@@ -151,7 +152,7 @@ export function updateSettler(w: World, s: Settler): void {
     }
     case 'retool':
       s.kind = task.kind;
-      s.hp = PROFESSIONS[task.kind].hp ?? 0;
+      s.hp = hpOf(task.kind);
       s.home = null;
       s.carrying = null;
       s.tasks.shift();

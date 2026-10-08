@@ -6,9 +6,10 @@
  * pile, trains and walks to the nearest garrison with room. Empty slots are also filled by moving a
  * spare fighter out of a reserve building (the castle) or a rear outpost. Every building keeps `keep`
  * fighters it never gives away. An attack sends spare fighters to an enemy military building; at its door each
- * attacker duels one defender at a time (defenders are stronger by the building's `defense`).
- * Archers inside a garrison shoot attackers approaching it; attacking archers shoot defenders who are
- * busy duelling their comrades. When no defender is left, a swordsman (`combat.captures`) takes the
+ * attacker duels one defender at a time (`combat.ts`: both strike on their own timers; the defender
+ * fights at his owner's defence strength, the attacker at his attack strength). Archers inside a
+ * garrison shoot attackers approaching it (with the tower bonus, more at its door); attacking archers
+ * shoot defenders who are busy duelling their comrades. When no defender is left, a swordsman (`combat.captures`) takes the
  * building over: ownership and territory change, and enemy civil buildings left on foreign land are
  * destroyed. As in Settlers 4, garrison slots have a kind (swordsmen or archers), a fighter's level is
  * bought with gold at the barracks and never changes, and wounded fighters heal only in an infirmary.
@@ -25,8 +26,6 @@ import {
   BUILDINGS,
   INPUT_CAP,
   OUTPUT_SHARES,
-  DAMAGE,
-  FIGHT_EVERY,
   GARRISON_KEEP,
   LEVEL_RES,
   PROFESSIONS,
@@ -36,9 +35,8 @@ import {
   WOUNDED_CHECK_EVERY,
   type GarrisonDef,
 } from './config';
-import { randInt } from './rng';
-import { fieldIdle, fieldUnitsNear, moraleOf } from './field';
-import { fieldFactor } from './strength';
+import { duelTick, maxHp, rearm, startDuel, strike } from './combat';
+import { fieldIdle, fieldUnitsNear } from './field';
 import { abort } from './settlers';
 import type { Building, PlayerId, Point, Resource, Settler, SettlerKind, Task } from './types';
 import type { World } from './world';
@@ -70,15 +68,7 @@ export function keepOf(b: Building): number {
   return garrisonOf(b).keep ?? GARRISON_KEEP;
 }
 
-export function maxHp(s: Settler): number {
-  return Math.round((PROFESSIONS[s.kind].hp ?? 0) * SOLDIER_LEVELS[s.level].hp);
-}
-
-/** Melee strength: rank × profession, × the building's defense when fighting at its own door. */
-function strength(s: Settler, defending: Building | null): number {
-  const melee = PROFESSIONS[s.kind].combat?.melee ?? 1;
-  return SOLDIER_LEVELS[s.level].damage * melee * (defending ? (garrisonOf(defending).defense ?? 1) : 1);
-}
+export { maxHp };
 
 /** Free garrison slots not yet promised to an incoming soldier. */
 export function garrisonSpace(b: Building): number {
@@ -302,9 +292,13 @@ export function wantsRecruit(w: World, b: Building): boolean {
   return trainable(w, b, room).length > 0 && Math.max(0, room.archer) + Math.max(0, room.melee) > room.training;
 }
 
-/** The level a recruit leaves at: the ordered one, or the highest the gold on the pile pays for. */
-function recruitLevelAt(w: World, b: Building): number {
-  let level = Math.min(w.recruitLevel(b.owner), SOLDIER_LEVELS.length - 1);
+/**
+ * The level a recruit for `weapon` leaves at: the ordered one (at most his profession's highest), or
+ * the highest the gold on the pile pays for.
+ */
+function recruitLevelAt(w: World, b: Building, weapon: Resource): number {
+  const levels = PROFESSIONS[fighterFor(weapon)].combat!.levels.length;
+  let level = Math.min(w.recruitLevel(b.owner), SOLDIER_LEVELS.length - 1, levels - 1);
   while (level > 0 && SOLDIER_LEVELS[level].cost > b.input[LEVEL_RES]) level--;
   return level;
 }
@@ -327,7 +321,7 @@ export function updateBarracks(w: World, b: Building): void {
   if (ready.length === 0) return;
   b.timer = 0;
   const weapon = mostBehindShare(w, b.owner, ready, WEAPONS, (r) => fightersWith(w, b.owner, r)) ?? ready[0];
-  const level = recruitLevelAt(w, b);
+  const level = recruitLevelAt(w, b, weapon);
   b.input[weapon]--;
   const kit = PROFESSIONS[fighterFor(weapon)].kit ?? {};
   for (const k of Object.keys(kit) as Resource[]) b.input[k] -= kit[k] ?? 0;
@@ -448,37 +442,24 @@ export function attack(w: World, targetId: number, count: number, player: Player
   return sent.length;
 }
 
-/** One blow of a duel: either side may land it, in proportion to its strength. */
-function blow(w: World, attacker: Settler, defender: Settler, b: Building): void {
-  // Fighting strength where each stands (`strength.ts`): the attacker on foreign land at his owner's
-  // attack strength, the defender at home at his owner's defence strength.
-  const fa = fieldFactor(w, attacker) * moraleOf(w, attacker);
-  const fd = fieldFactor(w, defender) * moraleOf(w, defender);
-  const sa = strength(attacker, null) * fa;
-  const sd = strength(defender, b) * fd;
-  const hitter = w.rng() < sd / (sa + sd) ? defender : attacker;
-  const victim = hitter === defender ? attacker : defender;
-  const base = DAMAGE[0] + randInt(w.rng, DAMAGE[1] - DAMAGE[0] + 1);
-  victim.hp -= base * strength(hitter, null) * (hitter === attacker ? fa : fd);
-  if (victim.hp <= 0) killSettler(w, victim);
-}
+/** Enemies this close to a door stand at it (a tower's stone dropper hits them harder). */
+const AT_DOOR = 1.5;
 
-/** An archer's shot: hits at once for the profession's ranged damage × rank; the arrow is cosmetic. */
-function shoot(w: World, archer: Settler, target: Settler, from: Point): void {
+/**
+ * An archer's shot (`combat.ts`): hits at once, the arrow is cosmetic. From a garrison (`tower`) it
+ * deals the tower bonus, more at an enemy standing at that building's door.
+ */
+export function shoot(w: World, archer: Settler, target: Settler, from: Point, tower?: Building): void {
   const ranged = PROFESSIONS[archer.kind].combat!.ranged!;
-  archer.reload = ranged.every;
+  rearm(archer);
   w.shots.push({ x0: from.x, y0: from.y, x1: target.x, y1: target.y, tick: w.tick, owner: archer.owner });
-  target.hp -=
-    (ranged.damage[0] + randInt(w.rng, ranged.damage[1] - ranged.damage[0] + 1)) *
-    SOLDIER_LEVELS[archer.level].damage *
-    fieldFactor(w, archer) *
-    moraleOf(w, archer);
-  if (target.hp <= 0) killSettler(w, target);
+  const atDoor = tower && Math.hypot(target.x - tower.door.x, target.y - tower.door.y) <= AT_DOOR;
+  strike(w, archer, target, !tower ? 0 : atDoor ? ranged.towerDoor : ranged.tower);
 }
 
 /**
- * `assault` task, run by the attacker: duel the current defender (one blow every FIGHT_EVERY ticks),
- * or — for an archer — shoot defenders busy with comrades, call out the next defender (swordsmen
+ * `assault` task, run by the attacker: duel the current defender (both strike on their own timers,
+ * `duelTick`), or — for an archer — shoot defenders busy with comrades, call out the next defender (swordsmen
  * first), or take the building once nobody defends it.
  */
 export function assaultTick(w: World, s: Settler, task: Extract<Task, { t: 'assault' }>): void {
@@ -502,9 +483,7 @@ export function assaultTick(w: World, s: Settler, task: Extract<Task, { t: 'assa
     s.working = true;
     // Caught on the way by a field unit (`field.ts`): his `engage` task runs that duel.
     if (!b.garrison.includes(d.id)) return;
-    if (++task.n < FIGHT_EVERY) return;
-    task.n = 0;
-    blow(w, s, d, b);
+    duelTick(w, s, d);
     return;
   }
   const defenders = members(w, b);
@@ -529,7 +508,7 @@ export function assaultTick(w: World, s: Settler, task: Extract<Task, { t: 'assa
     defender.inside = null;
     defender.x = defender.px = b.door.x;
     defender.y = defender.py = b.door.y;
-    task.n = 0;
+    startDuel(w, s, defender);
     return;
   }
   // Defenders still out fighting other attackers: wait for the outcome.
@@ -580,7 +559,7 @@ export function updateGarrison(w: World, b: Building, assaults: Map<number, Sett
       const target = near.sort(
         (p, q) => Math.hypot(p.x - b.door.x, p.y - b.door.y) - Math.hypot(q.x - b.door.x, q.y - b.door.y) || p.id - q.id,
       )[0];
-      if (target) shoot(w, s, target, b.door);
+      if (target) shoot(w, s, target, b.door, b);
     }
   }
   if ((w.tick + b.id) % WOUNDED_CHECK_EVERY === 0 && !assaults.get(b.id)?.length) sendWounded(w, b, inside);
@@ -722,9 +701,11 @@ export function killSettler(w: World, s: Settler): void {
       if (home && home.garrison.includes(o.id) && o.tasks.length === 0) o.inside = home.id;
     }
   }
+  // What he carried is lost with him; dropped first, so `abort` reserves no trip home for it.
+  if (s.carrying) w.stats.lost[s.carrying] += s.load ?? 1;
+  s.carrying = null;
   abort(w, s);
   s.tasks = [];
-  s.carrying = null;
   for (const b of w.buildings.values()) {
     if (b.garrison.includes(s.id)) leaveGarrison(w, b, s);
     if (b.workerId === s.id) {

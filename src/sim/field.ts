@@ -13,12 +13,11 @@
  * list of outdoor fighters built once per tick (`outdoorFighters`) — proportional to units, not to the
  * map. Field units occupy no tiles, like every settler.
  */
-import { DAMAGE, FIELD, FIGHT_EVERY, PROFESSIONS, SOLDIER_LEVELS } from './config';
+import { duelTick, startDuel } from './combat';
+import { FIELD, PROFESSIONS } from './config';
 import { nearestIntruder } from './intruders';
-import { randInt } from './rng';
-import { fieldFactor } from './strength';
 import { abort } from './settlers';
-import { isFighter, killSettler, leaveGarrison, slotsFree, isArcher, isMilitary, keepOf } from './military';
+import { isFighter, leaveGarrison, shoot, slotsFree, isArcher, isMilitary, keepOf } from './military';
 import type { Building, FieldPost, PlayerId, Point, Settler, Task } from './types';
 import type { World } from './world';
 
@@ -47,8 +46,12 @@ function leaders(w: World): Settler[] {
   return list;
 }
 
-/** Morale factor for a fighter's blows and shots: a squad leader of his own within his radius lifts it. */
+/**
+ * Morale factor for a fighter's damage (`combat.ts`): a squad leader of his own within his radius
+ * lifts it. Leaders lead, they are not led (Settlers 4 gives the leader's 21 a blow without a bonus).
+ */
 export function moraleOf(w: World, s: Settler): number {
+  if (PROFESSIONS[s.kind].combat?.leads) return 1;
   let best = 1;
   for (const l of leaders(w)) {
     const leads = PROFESSIONS[l.kind].combat!.leads!;
@@ -267,7 +270,7 @@ export function fieldIdle(w: World, s: Settler): void {
     const target = nearestEnemy(w, s, ranged.range) ?? nearestIntruder(w, s, ranged.range);
     if (target) {
       s.working = true;
-      if (s.reload <= 0) shootAt(w, s, target);
+      if (s.reload <= 0) shoot(w, s, target, s);
       return;
     }
   } else if ((w.tick + s.id) % FIELD.scanEvery === 0) {
@@ -287,37 +290,10 @@ export function fieldIdle(w: World, s: Settler): void {
   if (dist(s, p) > FIELD.slack) s.tasks = [{ t: 'goto', x: p.x, y: p.y }];
 }
 
-/** An archer's shot from the field (same rules as from a garrison, `military.shoot`). */
-function shootAt(w: World, archer: Settler, target: Settler): void {
-  const ranged = PROFESSIONS[archer.kind].combat!.ranged!;
-  archer.reload = ranged.every;
-  w.shots.push({ x0: archer.x, y0: archer.y, x1: target.x, y1: target.y, tick: w.tick, owner: archer.owner });
-  target.hp -=
-    (ranged.damage[0] + randInt(w.rng, ranged.damage[1] - ranged.damage[0] + 1)) *
-    SOLDIER_LEVELS[archer.level].damage *
-    fieldFactor(w, archer) *
-    moraleOf(w, archer);
-  if (target.hp <= 0) killSettler(w, target);
-}
-
-const meleeOf = (s: Settler) => SOLDIER_LEVELS[s.level].damage * (PROFESSIONS[s.kind].combat?.melee ?? 1);
-
-/** One blow of an open-field duel: either side may land it, in proportion to its strength. */
-function fieldBlow(w: World, a: Settler, d: Settler): void {
-  const fa = fieldFactor(w, a) * moraleOf(w, a);
-  const fd = fieldFactor(w, d) * moraleOf(w, d);
-  const sa = meleeOf(a) * fa;
-  const sd = meleeOf(d) * fd;
-  const hitter = w.rng() < sd / (sa + sd) ? d : a;
-  const victim = hitter === d ? a : d;
-  const base = DAMAGE[0] + randInt(w.rng, DAMAGE[1] - DAMAGE[0] + 1);
-  victim.hp -= base * meleeOf(hitter) * (hitter === a ? fa : fd);
-  if (victim.hp <= 0) killSettler(w, victim);
-}
-
 /**
- * `engage` task: close in on the enemy fighter and duel him. The duel pairs both (`opponent`); one
- * side runs the blows — this task, unless the enemy is engaging back and has the lower id. Gives up
+ * `engage` task: close in on the enemy fighter and duel him (`combat.ts`: both strike on their own
+ * timers). The duel pairs both (`opponent`); one side runs it — this task, unless the enemy is
+ * engaging back and has the lower id (who runs it decides nothing about who strikes first). Gives up
  * when the enemy is gone, inside a building, busy with someone else for long, or lured beyond
  * `FIELD.chaseLimit` from the post.
  */
@@ -335,20 +311,20 @@ export function engageTick(w: World, s: Settler, task: Extract<Task, { t: 'engag
     // Both sides engaging each other: the lower id runs the duel, the other just stands.
     const mirrored = e.opponent === s.id && e.tasks[0]?.t === 'engage' && e.id < s.id;
     if (mirrored) return;
-    if (++task.n < FIGHT_EVERY) return;
-    task.n = 0;
-    fieldBlow(w, s, e);
+    duelTick(w, s, e);
     return;
   }
-  if (dist(s, e) <= 1.3) {
+  if (dist(s, e) <= 1.5) {
+    // Side by side, diagonals included (where an `adj` walk stops).
     if (e.opponent === null && s.opponent === null) {
       s.opponent = e.id;
       e.opponent = s.id;
       task.n = 0;
+      startDuel(w, s, e);
       return;
     }
     // He is busy with a comrade: wait beside, or give up after a while.
-    if (++task.n > FIGHT_EVERY * 6) quit();
+    if (++task.n > FIELD.waitBeside) quit();
     return;
   }
   // Close in: a short walk towards where he stands now, re-aimed each time it ends.
