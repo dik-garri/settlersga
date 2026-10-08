@@ -30,7 +30,8 @@ import { Effects } from './effects';
 import { AnimalLayer } from './animals';
 import { isCutOff } from '../sim/land';
 import { UNIT_ANIMALS } from './animalArt';
-import { setFrame, type Settler3d } from './settler3d';
+import { holdFrames, setFrame, workFrames, type Settler3d } from './settler3d';
+import { maxHp } from '../sim/military';
 import { BODY_STAND, BODY_WORK, CARRY_AT } from './settlerArt';
 import { depthOf, HALF_H, HALF_W, toScreen, toTile } from './iso';
 import { ART3D_BANNERS, ART3D_STAGES, ART3D_YARDS, CARRIED_WARE_3D_SCALE, PILE_MAX, SETTLER_3D_SCALE } from './art3d';
@@ -220,6 +221,8 @@ export class GameRenderer {
   /** Control-group numbers over selected units (pooled texts, see `markUnits`). */
   private readonly badges = new Container();
   private readonly badgePool: Text[] = [];
+  /** Fighters on screen in a fight and wounded this frame (filled by `syncSettlers`). */
+  private readonly inFight: number[] = [];
   private hintKey = '';
   private hintAt = 0;
   private readonly ghostSprite: Sprite;
@@ -729,7 +732,7 @@ export class GameRenderer {
     this.drawShots(alpha);
     this.drawMarks(ghost, selected, hover, area);
     this.markSettler(selectedSettler, timeMs);
-    this.markUnits(selectedUnits, groups);
+    this.markUnits(selectedUnits, groups, selectedSettler);
     this.drawHints(placing, timeMs);
   }
 
@@ -786,10 +789,18 @@ export class GameRenderer {
   }
 
   /** Selected army units (direct control): a ring in the player's colour at each one's feet. */
-  private markUnits(ids: readonly number[], groups: readonly (readonly number[])[]): void {
+  private markUnits(ids: readonly number[], groups: readonly (readonly number[])[], selected: number | null): void {
     for (const t of this.badgePool) t.visible = false;
-    if (ids.length === 0) return;
     const g = this.settlerMark;
+    // Wounded fighters in a fight: their health even when not selected.
+    for (const id of this.inFight) {
+      if (ids.includes(id) || id === selected) continue;
+      const root = this.figureRoot(id);
+      const s = this.sim.getSettler(id);
+      if (root && s) this.healthBar(g, s, root);
+    }
+    this.inFight.length = 0;
+    if (ids.length === 0) return;
     let used = 0;
     for (const id of ids) {
       const root = this.figureRoot(id);
@@ -797,6 +808,8 @@ export class GameRenderer {
       const { x, y } = root.position;
       const k = Math.abs(root.scale.y);
       g.ellipse(x, y, 10 * k + 3, 4.5 * k + 1.5).stroke({ width: 2, color: 0x7dff7d, alpha: 0.9 });
+      const s = this.sim.getSettler(id);
+      const top = s && styleOf(s.kind).fighter ? this.healthBar(g, s, root) : y - 52 * k - 4;
       // The unit's control group (the lowest number it belongs to), as a small badge over its head.
       const n = groups.findIndex((grp, i) => i > 0 && grp.includes(id));
       if (n < 1) continue;
@@ -812,9 +825,38 @@ export class GameRenderer {
       }
       used++;
       if (t.text !== String(n)) t.text = String(n);
-      t.position.set(x, y - 52 * k - 4);
+      t.position.set(x, top);
       t.visible = true;
     }
+  }
+
+  /**
+   * A fighter's health over his head: a dark bar between two corner brackets, filled green → yellow →
+   * red with hp / max hp, and one pip per level above level 1. Returns the y just above it.
+   */
+  private healthBar(g: Graphics, s: Settler, root: Container): number {
+    const { x, y } = root.position;
+    const k = Math.abs(root.scale.y);
+    const head = this.settler3d ? this.settler3d.rankY * k : -40;
+    const top = y + head - 4;
+    const w = 20;
+    const h = 3.5;
+    const ratio = Math.max(0, Math.min(1, s.hp / maxHp(s)));
+    const color = ratio > 0.6 ? 0x5ad04a : ratio > 0.3 ? 0xe8c23a : 0xe0412e;
+    const x0 = x - w / 2;
+    g.rect(x0 - 1, top - 1, w + 2, h + 2).fill({ color: 0x14100a, alpha: 0.85 });
+    if (ratio > 0) g.rect(x0, top, w * ratio, h).fill({ color });
+    // Corner brackets.
+    const b = 3;
+    for (const [bx, dir] of [
+      [x0 - 3, 1],
+      [x0 + w + 3, -1],
+    ] as const) {
+      g.moveTo(bx + dir * b, top - 2).lineTo(bx, top - 2).lineTo(bx, top + h + 2).lineTo(bx + dir * b, top + h + 2);
+    }
+    g.stroke({ width: 1.4, color: 0xf2e6c4, alpha: 0.95 });
+    for (let l = 0; l < s.level; l++) g.circle(x - (s.level - 1) * 2.5 + l * 5, top - 4, 1.6).fill({ color: 0xffd34a });
+    return top - (s.level > 0 ? 7 : 3);
   }
 
   /** Selected settler: a ring at its feet and a bobbing marker over its head, following it. */
@@ -826,7 +868,10 @@ export class GameRenderer {
     const { x, y } = root.position;
     const k = Math.abs(root.scale.y);
     g.ellipse(x, y, 11 * k + 3, 5 * k + 1.5).stroke({ width: 2, color: 0xffe066, alpha: 0.95 });
-    const head = y - 46 * k - 6 + Math.sin(timeMs / 180) * 2;
+    // A fighter shows his health; the marker bobs above it.
+    const s = this.sim.getSettler(id!);
+    const top = s && styleOf(s.kind).fighter ? this.healthBar(g, s, root) - 2 : y - 46 * k - 6;
+    const head = top + Math.sin(timeMs / 180) * 2;
     g.poly([x - 5, head - 7, x + 5, head - 7, x, head]).fill({ color: 0xffe066, alpha: 0.95 });
     g.poly([x - 5, head - 7, x + 5, head - 7, x, head]).stroke({ width: 1, color: 0x3a2a08, alpha: 0.9 });
   }
@@ -1675,16 +1720,20 @@ export class GameRenderer {
         f = moving ? walkFrame(v.walked) : WALK_FRAMES;
       }
       const tool = s.carrying !== null ? 'carry' : style.holds;
+      // A fighter's helmet shows his level (crest), as in Settlers 4.
+      const hatStyle = style.levelHats?.[s.level] ?? style.hatStyle;
       const s3d = this.settler3d;
+      // Fighters in a fight get their health shown over their heads (see `markUnits`).
+      if (style.fighter && foe && s.hp < maxHp(s)) this.inFight.push(s.id);
       let bob = 0;
       if (s3d) {
         // Pre-rendered figure: full frame, its tunic/shield part tinted, the hat on top; 8 painted
         // directions, so no mirroring.
-        const fr = action ? s3d.work[action][shown][f] : s3d.hold[tool][shown][f];
+        const fr = action ? workFrames(s3d, action, style.outfit)[shown][f] : holdFrames(s3d, tool, style.outfit)[shown][f];
         setFrame(v.body, fr.full);
         v.tunic.visible = fr.tint !== null;
         if (fr.tint) setFrame(v.tunic, fr.tint);
-        const hat = s3d.hats[style.hatStyle][shown];
+        const hat = s3d.hats[hatStyle][shown];
         v.hat.visible = hat !== null;
         if (hat) setFrame(v.hat, hat);
         v.head.visible = false;
@@ -1709,7 +1758,7 @@ export class GameRenderer {
         }
         v.tunic.texture = tex.tunic[pd];
         v.head.texture = tex.head[pd];
-        v.hat.texture = tex.hat[style.hatStyle][pd];
+        v.hat.texture = tex.hat[hatStyle][pd];
         const behind = FACES_AWAY[pd];
         if (behind !== v.armBehind) {
           // Facing away, the near arm, its tool and the goods in hand are hidden behind the body.
@@ -1720,7 +1769,8 @@ export class GameRenderer {
         v.root.scale.x = MIRRORED[shown] ? -1 : 1;
       }
 
-      v.rank.visible = s.level > 0;
+      // 3D fighters show their level by the helmet's crest; the procedural ones by chevrons.
+      v.rank.visible = !s3d && s.level > 0;
       if (s.level > 0) v.rank.texture = this.atlas.get(`chevrons:${s.level}`);
       v.root.position.set(px, py + bob);
       v.root.zIndex = depthOf(x, y) + 0.01;
@@ -1767,7 +1817,8 @@ export class GameRenderer {
     // 3D figures wear their owner's colour, as in Settlers 4 (the tool and hat tell the profession).
     const own = style.fighter || this.settler3d !== null;
     v.tunic.tint = own ? this.playerTint[(s.owner - 1) % this.playerTint.length] : this.tintOf(style.tunic);
-    v.hat.tint = this.tintOf(style.hat);
+    // 3D fighters' helmets carry their own colours (steel, red crest, gilding).
+    v.hat.tint = style.fighter && this.settler3d ? 0xffffff : this.tintOf(style.hat);
   }
 
   private tintOf(hex: string): number {

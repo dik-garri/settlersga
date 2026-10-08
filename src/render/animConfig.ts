@@ -9,8 +9,15 @@ import type { BuildingType, PlantKind, Resource, SettlerKind } from '../sim/type
 export const TOOLS = ['none', 'axe', 'hammer', 'pick', 'shovel', 'scythe', 'rod', 'bucket', 'sword', 'bow', 'carry'] as const;
 export type ToolShape = (typeof TOOLS)[number];
 
-export type HatStyle = 'cap' | 'straw' | 'helmet' | 'hood' | 'chef' | 'bare' | 'plume';
-export const HAT_STYLES: readonly HatStyle[] = ['cap', 'straw', 'helmet', 'hood', 'chef', 'bare', 'plume'];
+export type HatStyle = 'cap' | 'straw' | 'helmet' | 'hood' | 'chef' | 'bare' | 'plume' | 'galea1' | 'galea2' | 'galea3';
+export const HAT_STYLES: readonly HatStyle[] = ['cap', 'straw', 'helmet', 'hood', 'chef', 'bare', 'plume', 'galea1', 'galea2', 'galea3'];
+
+/**
+ * 3D outfits (`art/blender/figures.py` `OUTFITS`): what a profession wears over the tunic, rendered
+ * as their own pose groups (`hold:<tool>@<outfit>`, `work:<action>@<outfit>`); professions without
+ * one use the plain groups.
+ */
+export type Outfit = 'legion' | 'archer' | 'leader';
 
 /** Synthesised sound effects (see `audio/sounds.ts`). */
 export type SoundId =
@@ -68,9 +75,16 @@ export interface SettlerStyle {
   holds: ToolShape;
   /** Fighting profession: tunic in the owner's colour. */
   fighter?: boolean;
+  /** Hat by level (`Settler.level`), replacing `hatStyle`: the helmet's crest shows a fighter's rank. */
+  levelHats?: readonly HatStyle[];
+  /** What the 3D figure wears over the tunic (armour, shield, quiver…). */
+  outfit?: Outfit;
 }
 
 const DEFAULT_STYLE: SettlerStyle = { tunic: '#7a6a58', hat: '#5a4636', hatStyle: 'cap', work: 'idle', holds: 'none' };
+
+/** A fighter's helmet (galea) by level: no crest, a small crest, a big crest. */
+const FIGHTER_HELMETS: readonly HatStyle[] = ['galea1', 'galea2', 'galea3'];
 
 const STYLES: Partial<Record<SettlerKind, Partial<SettlerStyle>>> = {
   carrier: { tunic: '#3f6fb5', hat: '#6b4423', hatStyle: 'cap' },
@@ -95,10 +109,11 @@ const STYLES: Partial<Record<SettlerKind, Partial<SettlerStyle>>> = {
   smelter: { tunic: '#6e4a33', hat: '#3b2b1a', hatStyle: 'hood' },
   toolsmith: { tunic: '#5a5048', hat: '#8c4a3a', hatStyle: 'cap', work: 'hammer', holds: 'hammer' },
   weaponsmith: { tunic: '#4a4f55', hat: '#8c4a3a', hatStyle: 'cap', work: 'hammer', holds: 'hammer' },
-  soldier: { hat: '#9aa0a6', hatStyle: 'helmet', work: 'sword', holds: 'sword', fighter: true },
-  archer: { hat: '#4f6b3a', hatStyle: 'hood', work: 'shoot', holds: 'bow', fighter: true },
-  /** Squad leader: a crested, plumed helmet with a red plume. */
-  leader: { hat: '#d23a2a', hatStyle: 'plume', work: 'sword', holds: 'sword', fighter: true },
+  // Fighters: a steel helmet whose crest shows the level (none, small, big), as in Settlers 4.
+  soldier: { hat: '#9aa0a6', hatStyle: 'galea1', levelHats: FIGHTER_HELMETS, work: 'sword', holds: 'sword', fighter: true, outfit: 'legion' },
+  archer: { hat: '#9aa0a6', hatStyle: 'galea1', levelHats: FIGHTER_HELMETS, work: 'shoot', holds: 'bow', fighter: true, outfit: 'archer' },
+  /** Squad leader: a gilded helmet with a tall crest, gilded cuirass, round golden shield, cloak. */
+  leader: { hat: '#d23a2a', hatStyle: 'plume', work: 'sword', holds: 'sword', fighter: true, outfit: 'leader' },
   // Specialists: the pioneer digs border stones in, the thief goes about in a dark hood, hands free.
   pioneer: { tunic: '#a8743a', hat: '#6b4a2a', hatStyle: 'straw', work: 'dig', holds: 'shovel' },
   thief: { tunic: '#2e2a30', hat: '#1e1b20', hatStyle: 'hood', work: 'sow' },

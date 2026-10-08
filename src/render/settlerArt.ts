@@ -239,6 +239,17 @@ export function paintHat(ctx: Ctx, pd: number, style: HatStyle): void {
       ctx.fillStyle = '#8a8a8a';
       ctx.fillRect(cx - 3, -22.6, 6, 0.8);
       return;
+    case 'galea2':
+    case 'galea3': {
+      // A fighter's helmet with a crest front to back: small at level 2, tall at level 3.
+      const tall = style === 'galea3';
+      ctx.fillStyle = '#f2f2f2';
+      ctx.beginPath();
+      ctx.ellipse(cx - fr.f[0] * 0.4, tall ? -26.2 : -25, 1 + Math.abs(fr.f[0]) * (tall ? 2.6 : 1.6), tall ? 2.6 : 1.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // falls through: the helmet itself
+    case 'galea1':
     case 'helmet':
       ctx.fillStyle = '#d0d0d0';
       ctx.beginPath();

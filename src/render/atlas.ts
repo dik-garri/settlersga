@@ -456,7 +456,8 @@ export function settlerIcon(kind: SettlerKind, size = 56): HTMLCanvasElement {
   if (animal) return animalIcon(animal, size);
   if (iconArt) {
     // Standing with the profession's tool, facing south-east.
-    const { page, rect } = iconArt.settlers.portrait(styleOf(kind).holds, 1);
+    const st3 = styleOf(kind);
+    const { page, rect } = iconArt.settlers.portrait(st3.holds, 1, st3.outfit);
     return imageIcon(page, size, '', rect);
   }
   const canvas = document.createElement('canvas');

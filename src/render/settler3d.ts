@@ -9,7 +9,7 @@
  * are made once here, so the per-frame update only indexes arrays.
  */
 import { ImageSource, Rectangle, Texture, type Sprite } from 'pixi.js';
-import { ACTION_IDS, HAT_STYLES, TOOLS, type ActionId, type HatStyle, type ToolShape } from './animConfig';
+import { ACTION_IDS, HAT_STYLES, TOOLS, type ActionId, type HatStyle, type Outfit, type ToolShape } from './animConfig';
 
 /** `settlers.json` written by `art/blender/figures.py`. */
 export interface SettlersMeta {
@@ -46,18 +46,38 @@ export interface Frame3d {
   over: Texture | null;
 }
 
+/** The pose groups of one look: plain clothes, or an outfit (only the tools and actions it has). */
+export interface Look3d {
+  /** [tool][dir][walk frame 0..walk-1, then standing]. */
+  hold: Partial<Record<ToolShape, Frame3d[][]>>;
+  /** [action][dir][work frame]. */
+  work: Partial<Record<ActionId, Frame3d[][]>>;
+}
+
 export interface Settler3d {
   /** [tool][dir][walk frame 0..walk-1, then standing]. */
   hold: Record<ToolShape, Frame3d[][]>;
   /** [action][dir][work frame]. */
   work: Record<ActionId, Frame3d[][]>;
+  /** Outfits (`hold:<tool>@<outfit>` groups): armour, shields, quivers worn by fighters. */
+  outfits: Partial<Record<Outfit, Look3d>>;
   /** [hat][dir], null for bare heads. */
   hats: Record<HatStyle, (Texture | null)[]>;
   carryAt: [number, number][][];
   carryBehind: boolean[];
   rankY: number;
   /** An image and rectangle (page pixels) of a frame, for HTML portraits. */
-  portrait(tool: ToolShape, dir: number): { page: HTMLImageElement; rect: [number, number, number, number] };
+  portrait(tool: ToolShape, dir: number, outfit?: Outfit): { page: HTMLImageElement; rect: [number, number, number, number] };
+}
+
+/** Frames of a hold pose in a look (an outfit's own, else the plain one). */
+export function holdFrames(s3d: Settler3d, tool: ToolShape, outfit: Outfit | undefined): Frame3d[][] {
+  return (outfit && s3d.outfits[outfit]?.hold[tool]) || s3d.hold[tool];
+}
+
+/** Frames of a work action in a look (an outfit's own, else the plain one). */
+export function workFrames(s3d: Settler3d, action: ActionId, outfit: Outfit | undefined): Frame3d[][] {
+  return (outfit && s3d.outfits[outfit]?.work[action]) || s3d.work[action];
 }
 
 export function buildSettler3d(meta: SettlersMeta, pages: HTMLImageElement[]): Settler3d {
@@ -84,18 +104,34 @@ export function buildSettler3d(meta: SettlersMeta, pages: HTMLImageElement[]): S
   >;
   // Idling at work: standing empty-handed.
   work.idle = hold.none.map((row) => Array.from({ length: 4 }, () => row[meta.walk]));
+  // Outfit groups: `hold:<tool>@<outfit>` / `work:<action>@<outfit>`; idling at work in an outfit is
+  // standing with its tool.
+  const outfits: Partial<Record<Outfit, Look3d>> = {};
+  for (const key of Object.keys(meta.groups)) {
+    const m = /^(hold|work):(\w+)@(\w+)$/.exec(key);
+    if (!m) continue;
+    const look = (outfits[m[3] as Outfit] ??= { hold: {}, work: {} });
+    if (m[1] === 'hold') look.hold[m[2] as ToolShape] = group(key);
+    else look.work[m[2] as ActionId] = group(key);
+  }
+  for (const look of Object.values(outfits)) {
+    const stand = Object.values(look.hold)[0];
+    if (stand) look.work.idle = stand.map((row) => Array.from({ length: 4 }, () => row[meta.walk]));
+  }
   const hats = Object.fromEntries(
     HAT_STYLES.map((s) => [s, (meta.hats[s] ?? []).map((k) => tex(k))]),
   ) as Record<HatStyle, (Texture | null)[]>;
   return {
     hold,
     work,
+    outfits,
     hats,
     carryAt: meta.carryAt,
     carryBehind: meta.carryBehind,
     rankY: meta.rankY,
-    portrait(tool, dir) {
-      const [page, x, y, w, h] = meta.frames[meta.groups[`hold:${tool}`][dir][meta.walk][0]];
+    portrait(tool, dir, outfit) {
+      const g = (outfit && meta.groups[`hold:${tool}@${outfit}`]) || meta.groups[`hold:${tool}`];
+      const [page, x, y, w, h] = meta.frames[g[dir][meta.walk][0]];
       return { page: pages[page], rect: [x, y, w, h] };
     },
   };
