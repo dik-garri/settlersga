@@ -76,6 +76,19 @@ export class SettlerInfoView implements View {
     }
     const home = s.home !== null ? this.world.buildings.get(s.home) : undefined;
     if (home) rows.push(['Работает в', BUILDINGS[home.type].name]);
+    // A pack donkey's trip between markets (it takes no orders, as in Settlers 4).
+    const load = s.tasks.find((t) => t.t === 'load');
+    const unload = s.tasks.find((t) => t.t === 'unload');
+    if (load || unload) {
+      const name = (id: number) => {
+        const m = this.world.buildings.get(id);
+        return m ? `${BUILDINGS[m.type].name.toLowerCase()} (${m.door.x}, ${m.door.y})` : '—';
+      };
+      const from = load && 'b' in load ? name(load.b) : 'в пути';
+      const to = unload && 'b' in unload ? name(unload.b) : '—';
+      rows.push(['Маршрут', `${from} → ${to}`]);
+      if (load && load.t === 'load') rows.push(['Заберёт', `${RESOURCE_INFO[load.res].name} × ${load.n}`]);
+    }
     return rows;
   }
 
@@ -126,6 +139,8 @@ export class SettlerInfoView implements View {
         if (next?.t === 'prospect') return 'идёт к горе';
         if (next?.t === 'steal') return `крадётся к: ${at(next.b)}`;
         if (next?.t === 'claim') return 'идёт к границе';
+        if (next?.t === 'load') return `идёт за грузом: ${at(next.b)}`;
+        if (next?.t === 'unload') return s.carrying ? `везёт ${res(s.carrying).toLowerCase()} → ${at(next.b)}` : `идёт к: ${at(next.b)}`;
         return 'в пути';
       case 'pickup':
         return `берёт ${res(t.res)}`;
@@ -163,6 +178,10 @@ export class SettlerInfoView implements View {
         return `входит: ${at(t.b)}`;
       case 'wait':
         return 'ждёт';
+      case 'load':
+        return `навьючивает: ${res(t.res).toLowerCase()}`;
+      case 'unload':
+        return `разгружается: ${at(t.b)}`;
     }
     return 'занят';
   }

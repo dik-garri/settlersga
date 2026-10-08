@@ -1,4 +1,4 @@
-import { CanvasSource, Container, Graphics, MeshSimple, Sprite, Texture, type Application } from 'pixi.js';
+import { CanvasSource, Container, Graphics, MeshSimple, Sprite, Text, Texture, type Application } from 'pixi.js';
 import { BUILD_TICKS_PER_UNIT, BUILDINGS, CROP_KINDS, SHOT_TICKS, TERRAIN, TREE_MATURE } from '../sim/config';
 import { RESOURCES, Terrain, type Building, type BuildingType, type Resource, type Settler } from '../sim/types';
 import { CHUNK } from '../sim/map';
@@ -217,6 +217,9 @@ export class GameRenderer {
   private readonly hints = new Graphics();
   /** Marker over the selected settler, above the objects (it must not hide behind houses). */
   private readonly settlerMark = new Graphics();
+  /** Control-group numbers over selected units (pooled texts, see `markUnits`). */
+  private readonly badges = new Container();
+  private readonly badgePool: Text[] = [];
   private hintKey = '';
   private hintAt = 0;
   private readonly ghostSprite: Sprite;
@@ -292,7 +295,7 @@ export class GameRenderer {
     /** Draw the fog of war (`?fog=off` disables it for debugging). */
     private readonly fogOn = true,
   ) {
-    this.world.addChild(this.ground, this.territory, this.marks, this.hints, this.objects, this.settlerMark, this.shots, this.fog, this.ghostLayer);
+    this.world.addChild(this.ground, this.territory, this.marks, this.hints, this.objects, this.settlerMark, this.badges, this.shots, this.fog, this.ghostLayer);
     this.settlerTex = atlas.settlerTextures();
     this.animals = new AnimalLayer(sim, this.objects, (n) => atlas.get(n), fogOn, this.wareTex);
     this.settler3d = atlas.art3d?.settlers ?? null;
@@ -707,6 +710,7 @@ export class GameRenderer {
     placing: BuildingType | null = null,
     selectedSettler: number | null = null,
     selectedUnits: readonly number[] = [],
+    groups: readonly (readonly number[])[] = [],
   ) {
     this.view = view;
     this.nowMs = timeMs;
@@ -725,7 +729,7 @@ export class GameRenderer {
     this.drawShots(alpha);
     this.drawMarks(ghost, selected, hover, area);
     this.markSettler(selectedSettler, timeMs);
-    this.markUnits(selectedUnits);
+    this.markUnits(selectedUnits, groups);
     this.drawHints(placing, timeMs);
   }
 
@@ -735,8 +739,10 @@ export class GameRenderer {
    * wins. Only settlers drawn on screen count, so the fog of war is respected.
    */
   settlerAt(sx: number, sy: number): number | null {
-    let best: number | null = null;
-    let bestZ = -Infinity;
+    // Settlers drawn as animals (pack donkeys) compete by depth like the figures.
+    const animal = this.animals.unitAt(sx, sy);
+    let best: number | null = animal ? animal.id : null;
+    let bestZ = animal ? animal.z : -Infinity;
     for (const [id, v] of this.settlerViews) {
       if (!v.root.parent || !v.root.visible || !v.body.visible) continue;
       const b = v.body.getBounds();
@@ -768,19 +774,46 @@ export class GameRenderer {
       const fy = b.y + b.height * 0.85;
       if (fx >= ax && fx <= bx && fy >= ay && fy <= by) out.push(id);
     }
+    out.push(...this.animals.unitsInRect(ax, ay, bx, by));
     return out;
   }
 
+  /** The on-screen root of a settler's view: a figure, or an animal for pack donkeys. */
+  private figureRoot(id: number): Container | undefined {
+    const v = this.settlerViews.get(id);
+    if (v) return v.root.parent && v.root.visible ? v.root : undefined;
+    return this.animals.unitRoot(id);
+  }
+
   /** Selected army units (direct control): a ring in the player's colour at each one's feet. */
-  private markUnits(ids: readonly number[]): void {
+  private markUnits(ids: readonly number[], groups: readonly (readonly number[])[]): void {
+    for (const t of this.badgePool) t.visible = false;
     if (ids.length === 0) return;
     const g = this.settlerMark;
+    let used = 0;
     for (const id of ids) {
-      const v = this.settlerViews.get(id);
-      if (!v || !v.root.parent || !v.root.visible) continue;
-      const { x, y } = v.root.position;
-      const k = Math.abs(v.root.scale.y);
+      const root = this.figureRoot(id);
+      if (!root) continue;
+      const { x, y } = root.position;
+      const k = Math.abs(root.scale.y);
       g.ellipse(x, y, 10 * k + 3, 4.5 * k + 1.5).stroke({ width: 2, color: 0x7dff7d, alpha: 0.9 });
+      // The unit's control group (the lowest number it belongs to), as a small badge over its head.
+      const n = groups.findIndex((grp, i) => i > 0 && grp.includes(id));
+      if (n < 1) continue;
+      let t = this.badgePool[used];
+      if (!t) {
+        t = new Text({
+          text: '',
+          style: { fontFamily: 'Georgia, serif', fontSize: 11, fontWeight: 'bold', fill: 0xffe9a6, stroke: { color: 0x1a1206, width: 3 } },
+        });
+        t.anchor.set(0.5, 1);
+        this.badgePool.push(t);
+        this.badges.addChild(t);
+      }
+      used++;
+      if (t.text !== String(n)) t.text = String(n);
+      t.position.set(x, y - 52 * k - 4);
+      t.visible = true;
     }
   }
 
@@ -788,10 +821,10 @@ export class GameRenderer {
   private markSettler(id: number | null, timeMs: number): void {
     const g = this.settlerMark;
     g.clear();
-    const v = id !== null ? this.settlerViews.get(id) : undefined;
-    if (!v || !v.root.parent || !v.root.visible) return;
-    const { x, y } = v.root.position;
-    const k = Math.abs(v.root.scale.y);
+    const root = id !== null ? this.figureRoot(id) : undefined;
+    if (!root) return;
+    const { x, y } = root.position;
+    const k = Math.abs(root.scale.y);
     g.ellipse(x, y, 11 * k + 3, 5 * k + 1.5).stroke({ width: 2, color: 0xffe066, alpha: 0.95 });
     const head = y - 46 * k - 6 + Math.sin(timeMs / 180) * 2;
     g.poly([x - 5, head - 7, x + 5, head - 7, x, head]).fill({ color: 0xffe066, alpha: 0.95 });

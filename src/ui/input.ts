@@ -3,6 +3,7 @@ import type { Area, GameRenderer, Ghost } from '../render/renderer';
 import { BUILDINGS, PIONEER, PROSPECT_RADIUS } from '../sim/config';
 import { isFighter, isMilitary } from '../sim/military';
 import { claimable, isSpecialist, SPECIALIST_ORDERS } from '../sim/specialists';
+import { toScreen } from '../render/iso';
 import { Terrain, type BuildingType } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { isCommand, type GameState, type Placeable } from './state';
@@ -13,6 +14,10 @@ const EDGE = 10;
 const DRAG_THRESHOLD = 5;
 /** Two clicks on a unit within this many ms: select every own unit of that kind on screen. */
 const DOUBLE_CLICK_MS = 350;
+/** Two presses of a group's digit within this many ms: centre the camera on the group. */
+const DOUBLE_TAP_MS = 400;
+/** Settler kinds drawn as animals that can be selected but take no orders (pack donkeys, as in Settlers 4). */
+const LOOK_ONLY = new Set(['donkey']);
 
 export interface InputCallbacks {
   onSelectBuildType(type: Placeable | null): void;
@@ -34,6 +39,7 @@ export class InputController {
   private readonly hint: HTMLDivElement;
   private hintKey = '';
   private lastClick = { at: -Infinity, id: -1 };
+  private lastRecall = { at: -Infinity, n: -1 };
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -255,6 +261,14 @@ export class InputController {
     });
   }
 
+  /** The player's own pack donkeys among settler ids (selectable, but they take no orders). */
+  private ownDonkeys(ids: number[]): number[] {
+    return ids.filter((id) => {
+      const s = this.world.getSettler(id);
+      return !!s && s.owner === LOCAL_PLAYER && LOOK_ONLY.has(s.kind);
+    });
+  }
+
   private onUp(e: PointerEvent): void {
     const d = this.drag;
     this.drag = null;
@@ -263,7 +277,16 @@ export class InputController {
     if (d.moved && this.selecting(d)) {
       this.box.hidden = true;
       const p = this.local(e);
-      const caught = this.ownUnits(this.renderer.settlersInRect(d.startX, d.startY, p.x, p.y));
+      const inRect = this.renderer.settlersInRect(d.startX, d.startY, p.x, p.y);
+      let caught = this.ownUnits(inRect);
+      // Only own pack donkeys in the box: select them to look at (they take no orders).
+      if (caught.length === 0) caught = this.ownDonkeys(inRect);
+      if (caught.length === 1 && !e.shiftKey && LOOK_ONLY.has(this.world.getSettler(caught[0])!.kind)) {
+        this.state.selectedSettler = caught[0];
+        this.state.selected = null;
+        this.state.selectedUnits = [];
+        return;
+      }
       this.state.selectedUnits = e.shiftKey ? [...new Set([...this.state.selectedUnits, ...caught])] : caught;
       if (this.state.selectedUnits.length > 0) {
         this.state.selected = null;
@@ -390,6 +413,9 @@ export class InputController {
       if (n === 0) said.push('Туда не пройти');
       else if (acting > 0) said.push(`За работу: ${acting}`);
     }
+    if (fighters.length === 0 && specialists.length === 0 && this.state.selectedUnits.length > 0) {
+      said.push('Ослы ходят только по маршрутам рынков');
+    }
     if (said.length > 0) this.cb.onMessage(said.join(' · '));
   }
 
@@ -425,8 +451,63 @@ export class InputController {
         e.preventDefault();
         this.cb.onNextTab();
         break;
-      default:
-        if (/^Digit[1-9]$/.test(e.code)) this.cb.onHotkey(Number(e.code.slice(5)));
+      default: {
+        const m = /^Digit([1-9])$/.exec(e.code);
+        if (!m) break;
+        const n = Number(m[1]);
+        // Ctrl+digit stores the selection as a control group; a digit recalls a stored group, and
+        // only picks a building of the open build tab when no group is stored under it.
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          this.storeGroup(n);
+        } else if (!this.recallGroup(n)) {
+          this.cb.onHotkey(n);
+        }
+      }
     }
+  }
+
+  /** Ctrl+digit: the selected units (fighters, specialists, donkeys) become control group `n`. */
+  private storeGroup(n: number): void {
+    const ids = this.state.selectedUnits.filter((id) => this.ownLiving(id));
+    this.state.groups[n] = ids;
+    this.cb.onMessage(ids.length > 0 ? `Группа ${n}: ${ids.length}` : `Группа ${n} очищена`);
+  }
+
+  /**
+   * Digit: selects control group `n` if one is stored (dead or lost units drop out); a second press
+   * soon after centres the camera on it. Returns false when no living unit is in the group.
+   */
+  private recallGroup(n: number): boolean {
+    const ids = (this.state.groups[n] ?? []).filter((id) => this.ownLiving(id));
+    this.state.groups[n] = ids;
+    if (ids.length === 0) return false;
+    this.state.selectedUnits = [...ids];
+    this.state.selected = null;
+    this.state.selectedSettler = null;
+    this.cb.onSelectBuildType(null);
+    const now = performance.now();
+    if (this.lastRecall.n === n && now - this.lastRecall.at < DOUBLE_TAP_MS) {
+      let x = 0;
+      let y = 0;
+      for (const id of ids) {
+        const s = this.world.getSettler(id)!;
+        x += s.x;
+        y += s.y;
+      }
+      x /= ids.length;
+      y /= ids.length;
+      const p = toScreen(x, y);
+      this.camera.centerOn(p.x, p.y - this.world.map.heightAt(x, y));
+      this.lastRecall = { at: -Infinity, n: -1 };
+    } else {
+      this.lastRecall = { at: now, n };
+    }
+    return true;
+  }
+
+  private ownLiving(id: number): boolean {
+    const s = this.world.getSettler(id);
+    return !!s && !this.world.dying.has(id) && s.owner === LOCAL_PLAYER;
   }
 }
