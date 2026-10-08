@@ -42,7 +42,12 @@ export class TitleScene {
     private readonly audio: AudioEngine,
   ) {
     this.tick = (t) => this.frame(t.deltaMS);
-    this.ready = this.warmUp(atlas);
+    // A scene that fails to start must not hold the intro's gate (and so the menu) for ever: the
+    // intro and the menu then play over the plain background.
+    this.ready = this.warmUp(atlas).catch((e) => {
+      console.error(e);
+      this.progress = 1;
+    });
   }
 
   private async warmUp(atlas: Promise<SpriteAtlas>): Promise<void> {

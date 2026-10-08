@@ -53,7 +53,7 @@ export function settingsPanel(audio: AudioEngine, opts: { onArt?: () => void; on
   if (!opts.onArt) box.append(el('p', 'muted', 'Оформление меняется со следующей партии.'));
 
   box.append(el('h4', '', 'Заставка'));
-  row('Показывать при каждом запуске', check(readPrefs().intro, (on) => writePrefs({ intro: on })));
+  row('Показывать при запуске', check(readPrefs().showIntro, (on) => writePrefs({ showIntro: on })));
   if (opts.onShowIntro) {
     const show = el('button', 'menu-small', 'Показать заставку');
     show.onclick = opts.onShowIntro;

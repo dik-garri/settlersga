@@ -183,14 +183,27 @@ export const START_CONDITIONS: Record<StartLevel, StartDef> = {
 export const ORDERABLE: readonly SettlerKind[] = ['builder', 'digger', 'geologist', 'pioneer', 'thief'];
 
 /**
- * Specialists (Settlers 4), ordered like workers and sent on errands (`specialists.ts`):
- * - pioneer: claims neutral tiles next to his owner's land within `radius` of where he was sent, one
- *   every `claimTicks` ticks of work, up to `maxTiles` per errand; land a military building claims
- *   always wins over his (`recomputeTerritory`);
+ * Specialists (Settlers 4), ordered like workers and sent on errands (`specialists.ts`). The pioneer
+ * and the geologist search as S4's `CPioneerRole`/`CGeologistRole::SearchPosition` do: out from where
+ * they stand, the nearest `window` tiles of a distance-sorted spiral first (S4: 32 and 64 of its
+ * tiles, out to ≈ 3 and 4.2 S4 tiles = 1 and 1.4 of ours: himself and his 4 or 8 neighbours), the next
+ * window only when one holds nothing; within a window the tile with the least d²(to the spot ordered)
+ * + 3·d²(to himself). With nothing within `reach` (S4: 28 and 56 empty windows, ≈ 16 and 32 S4 tiles)
+ * the errand is over and he stays where he stands.
+ * - pioneer: claims neutral passable tiles (S4 `CheckLand`: they need not touch his owner's land — a
+ *   new island of land is fine), one every `claimTicks` ticks of work, until none is left in reach;
+ *   land a military building claims always wins over his (`recomputeTerritory`). S4 moves a border
+ *   stone every 4 s (siedlercommunity), its tile ≈ a ninth of ours: 4 s of work a tile keeps him
+ *   slower than S4 per stone and still faster per area;
+ * - geologist: puts a sign on every unexamined walkable mountain tile — on any land, his owner's,
+ *   neutral or foreign (S4 `CheckPosition` has no owner test) — `ticks` each, until none is left in
+ *   reach, so he follows the whole ridge. S4: a sign every 4 s (siedlercommunity), the step to the
+ *   next tile included: ≈ 2 s of work plus our ≈ 2 s step;
  * - thief: robs a foreign building's door pile or stock (`stealTicks` of work, one unit of its most
  *   plentiful good) and carries it home. How intruders are met is `INTRUDERS`.
  */
-export const PIONEER = { radius: 4, claimTicks: 40, maxTiles: 24 };
+export const PIONEER = { reach: 5.3, window: 5, claimTicks: 40 };
+export const GEOLOGIST = { reach: 10.6, window: 9, ticks: 21 };
 export const THIEF = { stealTicks: 30 };
 
 /** Work areas (`workArea.ts`): a moved centre may lie at most `maxShift` × the work radius from the door. */
@@ -460,10 +473,6 @@ export function oreOf(code: number): Resource | null {
  * mine's reserve stays about what it was with radius 3 and 6–14 a tile.
  */
 export const ORE_AMOUNT: [number, number] = [12, 28];
-/** Geologist: how far around the target he looks and how long each tile takes. */
-export const PROSPECT_RADIUS = 3;
-export const PROSPECT_TILES = 8;
-export const PROSPECT_TICKS = 15;
 /** Food a miner eats per unit of ore. */
 export const MINER_FOOD: readonly Resource[] = ['bread', 'fish', 'meat'];
 
@@ -631,14 +640,14 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
   toolsmith: { name: 'Инструментальщик', behavior: 'workshop' },
   /**
    * Ordered like the pioneer and the thief (`ORDERABLE`): a carrier takes up a hammer (used up, given
-   * back on dismissal) and waits for errands (`World.sendGeologist`). Specialists' `hp`
-   * is on the soldiers' scale (a swordsman 100): the thief's 20 is Settlers 4's; the geologist's and
-   * pioneer's are our approximation (no source gives them).
+   * back on dismissal) and waits for errands (`World.sendGeologist`). Specialists' `hp` is Settlers
+   * 4's, on the soldiers' scale (a swordsman 100): geologist and pioneer 25, thief 20 (Settlers United
+   * wiki, units/geologist, units/pioneer, units/thief).
    */
-  geologist: { name: 'Геолог', behavior: 'prospect', tool: 'hammer', hp: 20 },
+  geologist: { name: 'Геолог', behavior: 'prospect', tool: 'hammer', hp: 25 },
   weaponsmith: { name: 'Оружейник', behavior: 'workshop' },
   /** Specialists (`ORDERABLE`, `specialists.ts`). */
-  pioneer: { name: 'Первопроходец', behavior: 'pioneer', tool: 'shovel', hp: 20 },
+  pioneer: { name: 'Первопроходец', behavior: 'pioneer', tool: 'shovel', hp: 25 },
   /**
    * Disguised: no target on hostile land until a fighter of that land comes close (`INTRUDERS`).
    * Sees 25 S4 tiles (Settlers United changelog), ≈ 8 of ours.

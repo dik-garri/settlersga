@@ -1,8 +1,8 @@
 import type { Camera } from '../render/camera';
 import type { Area, GameRenderer, Ghost } from '../render/renderer';
-import { BUILDINGS, PIONEER, PROSPECT_RADIUS } from '../sim/config';
+import { BUILDINGS, GEOLOGIST, PIONEER } from '../sim/config';
 import { isFighter, isMilitary } from '../sim/military';
-import { claimable, isSpecialist, prospectTiles, SPECIALIST_ORDERS, toolPileNear } from '../sim/specialists';
+import { canProspect, isSpecialist, pioneerSpot, SPECIALIST_ORDERS, toolPileNear } from '../sim/specialists';
 import { toScreen } from '../render/iso';
 import { Terrain, type BuildingType } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
@@ -89,8 +89,7 @@ export class InputController {
   private geologistBlocker(x: number, y: number): string {
     const w = this.world;
     if (!w.map.inBounds(x, y) || w.map.terrain[w.map.idx(x, y)] !== Terrain.Mountain) return 'Геолог разведывает только горы: щёлкните по склону горы';
-    if (!w.owns(x, y)) return 'Гора должна быть на своей земле';
-    if (prospectTiles(w, x, y, LOCAL_PLAYER).length === 0) return 'Здесь всё уже разведано';
+    if (!canProspect(w, x, y, LOCAL_PLAYER)) return 'Здесь всё уже разведано';
     if (!toolPileNear(w, LOCAL_PLAYER, x, y)) {
       return 'Нет свободного геолога и молотка для нового: закажите геолога в меню «Поселенцы» (молотки делает инструментальщик, их берут и строители)';
     }
@@ -118,19 +117,10 @@ export class InputController {
     const x = Math.round(t.x);
     const y = Math.round(t.y);
     const m = this.world.map;
-    if (placing === 'pioneer') {
-      // Where a pioneer sent here would push the border: valid if some tile there is claimable.
-      let valid = false;
-      const r = PIONEER.radius;
-      for (let ty = y - r; ty <= y + r && !valid; ty++) {
-        for (let tx = x - r; tx <= x + r && !valid; tx++) {
-          if (Math.hypot(tx - x, ty - y) <= r && claimable(this.world, tx, ty, LOCAL_PLAYER)) valid = true;
-        }
-      }
-      return { x, y, r, valid };
-    }
-    const valid = this.world.owns(x, y) && m.terrain[m.idx(x, y)] === Terrain.Mountain;
-    return { x, y, r: PROSPECT_RADIUS, valid };
+    // Where he starts: he searches outwards from here (`reach`) and then on from where he stands.
+    if (placing === 'pioneer') return { x, y, r: PIONEER.reach, valid: pioneerSpot(this.world, x, y, LOCAL_PLAYER) };
+    const valid = m.inBounds(x, y) && m.terrain[m.idx(x, y)] === Terrain.Mountain && canProspect(this.world, x, y, LOCAL_PLAYER);
+    return { x, y, r: GEOLOGIST.reach, valid };
   }
 
   update(dtMs: number): void {
@@ -331,7 +321,7 @@ export class InputController {
     }
     if (placing === 'pioneer') {
       const ok = this.world.sendPioneer(Math.round(t.x), Math.round(t.y));
-      this.cb.onMessage(ok ? 'Первопроходец отправлен' : 'Нужна ничейная земля у своей границы и свободный первопроходец (заказ — в ⚙)');
+      this.cb.onMessage(ok ? 'Первопроходец отправлен' : 'Нужна ничейная земля, до которой можно дойти, и свободный первопроходец (заказ — в ⚙)');
       if (ok && !e.shiftKey) this.cb.onSelectBuildType(null);
       return;
     }
@@ -409,8 +399,8 @@ export class InputController {
   /**
    * Right click with units selected, as in Settlers 4. Fighters: on an enemy military building —
    * attack it; on an own military building — go in; anywhere else — move there. Specialists: their
-   * kind's action where it is possible (`SPECIALIST_ORDERS`: a geologist prospects an own mountain, a
-   * pioneer claims neutral land at the border, a thief robs an explored enemy store), else walk there.
+   * kind's action where it is possible (`SPECIALIST_ORDERS`: a geologist prospects a mountain, a
+   * pioneer claims neutral land, a thief robs an explored enemy store), else walk there.
    */
   private order(p: { x: number; y: number }): void {
     const { fighters, specialists } = this.selection();

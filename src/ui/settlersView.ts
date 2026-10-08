@@ -7,8 +7,8 @@ import type { GameState, Placeable } from './state';
 
 /** Errands sent from the settlers menu at a tile or a building, as in Settlers 4's specialists page. */
 export const COMMANDS: { type: 'geologist' | 'pioneer' | 'thief'; name: string; hint: string }[] = [
-  { type: 'geologist', name: 'Геолог', hint: 'Разведать гору: ЛКМ по своей горе' },
-  { type: 'pioneer', name: 'Первопроходец', hint: 'Расширить землю: ЛКМ у своей границы' },
+  { type: 'geologist', name: 'Геолог', hint: 'Разведать хребет: ЛКМ по горе' },
+  { type: 'pioneer', name: 'Первопроходец', hint: 'Занять землю: ЛКМ по ничейной земле' },
   { type: 'thief', name: 'Вор', hint: 'Украсть товар: ЛКМ по чужому зданию' },
 ];
 

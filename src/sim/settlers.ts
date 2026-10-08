@@ -25,7 +25,7 @@ import { pathSpeed, wearTile } from './paths';
 import { restIdle } from './idle';
 import { landAt } from './land';
 import { donkeyAbort, donkeyIdle, loadTick, marketOrdered, releaseLoad, unloadTick } from './trade';
-import { claimTick, geologistIdle, pioneerIdle, specialistPostIdle, stealTick, thiefIdle } from './specialists';
+import { claimTick, geologistIdle, pioneerIdle, prospectTick, skipErrandTile, specialistPostIdle, stealTick, thiefIdle } from './specialists';
 import { chaseTick } from './intruders';
 import { findGame, huntTick, releaseHunt } from './hunting';
 import { RESOURCES, Terrain, type Building, type Point, type Resource, type Settler, type Task } from './types';
@@ -180,19 +180,8 @@ export function updateSettler(w: World, s: Settler): void {
     case 'unload':
       if (!unloadTick(w, s, task)) abort(w, s);
       return;
-    case 'prospect': {
-      s.working = true;
-      if (--task.n > 0) return;
-      const i = w.map.idx(task.x, task.y);
-      const bit = 1 << (s.owner - 1);
-      if (!(w.map.prospected[i] & bit)) {
-        w.map.prospected[i] |= bit;
-        w.map.touch(i);
-        w.stats.prospected++;
-      }
-      s.tasks.shift();
-      return;
-    }
+    case 'prospect':
+      return prospectTick(w, s, task);
     case 'dig': {
       const b = w.buildings.get(task.b);
       if (!b || b.done || b.levelled) {
@@ -340,8 +329,10 @@ function otherSiteWithWork(w: World, s: Settler, current: Building): boolean {
  * the settler backs off instead of searching again every tick.
  */
 function routeFailed(w: World, s: Settler): void {
-  // A geologist skips a tile he cannot reach and carries on with the rest of his errand.
-  if (s.tasks[1]?.t === 'prospect') {
+  // A geologist or pioneer skips a tile he cannot reach and carries on with the rest of his errand.
+  const next = s.tasks[1];
+  if (next?.t === 'prospect' || next?.t === 'claim') {
+    skipErrandTile(w, s, next.x, next.y);
     s.tasks.splice(0, 2);
     s.path = [];
     return;

@@ -285,10 +285,13 @@ export interface Settler {
   strollIn: number;
   chatWith: number | null;
   /**
-   * Specialist errand (`specialists.ts`): where a pioneer was sent to push the border (`n`: tiles he
-   * may still claim), where a geologist was sent to prospect, or the building `b` a thief was sent to rob. Absent on everyone else (and on saves made before specialists).
+   * Specialist errand (`specialists.ts`): the spot a pioneer was sent to claim land around or a
+   * geologist to prospect around, or the building `b` a thief was sent to rob. `n` counts the tiles
+   * worked so far (absent until he has picked his first: until then he searches from the spot, after
+   * that from where he stands); `skip` lists tiles (indices) he found no route to. Absent on everyone
+   * else (and on saves made before specialists).
    */
-  errand?: { x: number; y: number; b?: number; n?: number } | null;
+  errand?: { x: number; y: number; b?: number; n?: number; skip?: number[] } | null;
   /** Donkey: units of `carrying` in its packs (a carrier always holds one; absent means one). */
   load?: number;
   /**

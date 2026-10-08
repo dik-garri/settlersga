@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BUILDINGS, MINING, oreOf } from '../src/sim/config';
 import { available } from '../src/sim/buildings';
-import { workersOf } from '../src/sim/economy';
+import { workerOrder, workersOf } from '../src/sim/economy';
 import { saveWorld } from '../src/sim/save';
 import { Terrain } from '../src/sim/types';
 import { World } from '../src/sim/world';
@@ -134,21 +134,26 @@ describe('mines', () => {
 });
 
 describe('geologist', () => {
-  it('prospects owned mountain tiles around the target and goes back to carrying', () => {
+  it('prospects the mountain around the target and stays a geologist, out there', () => {
     const w = richWorld();
     const [spot] = ownedOre(w, 'coal');
-    const carriersBefore = w.settlers.filter((s) => s.kind === 'carrier').length;
     const hammers = available(w, 1, 'hammer');
     expect(w.sendGeologist(spot.x, spot.y)).toBe(true);
-    // None ordered: a carrier takes up a hammer on the spot (counted as a geologist on his way).
+    // None ordered: a carrier takes up a hammer on the spot, and the order grows by one.
     expect(workersOf(w, 1, 'geologist')).toBe(1);
+    expect(workerOrder(w, 1, 'geologist')).toBe(1);
     run(w, 1500);
     expect(w.isProspected(spot.x, spot.y)).toBe(true);
     expect(w.stats.prospected).toBeGreaterThan(3);
-    expect(w.settlers.filter((s) => s.kind === 'carrier').length).toBe(carriersBefore);
-    // Not ordered, so he went back to carrying and brought the hammer home.
+    const geo = w.settlers.find((s) => s.kind === 'geologist')!;
+    for (let i = 0; i < 40000 && geo.errand; i++) w.step();
+    expect(geo.errand).toBeNull();
+    // He stays a geologist where he finished; the hammer is his and does not go home.
     run(w, 600);
-    expect(available(w, 1, 'hammer')).toBe(hammers);
+    expect(geo.kind).toBe('geologist');
+    expect(geo.post).not.toBeNull();
+    expect(Math.hypot(geo.x - geo.post!.x, geo.y - geo.post!.y)).toBeLessThan(2);
+    expect(available(w, 1, 'hammer')).toBe(hammers - 1);
     // Not on grass.
     const c = w.castle;
     expect(w.sendGeologist(c.door.x, c.door.y + 1)).toBe(false);

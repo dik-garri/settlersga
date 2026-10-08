@@ -1,26 +1,27 @@
 /**
  * Player preferences kept in this browser (`localStorage['settlers.prefs']`, every access guarded):
- * the art (3D or the procedural classic look), whether the intro plays at every start, and whether it
- * was ever seen (it plays once on the first visit either way). Sound settings live with the audio
- * engine (`settlers.audio`).
+ * the art (3D or the procedural classic look) and whether the intro plays before the main menu.
+ * Sound settings live with the audio engine (`settlers.audio`).
  */
 export interface Prefs {
   art: '3d' | 'classic';
-  /** Play the intro at every start (otherwise only on the first visit). */
-  intro: boolean;
-  introSeen: boolean;
+  /**
+   * Play the intro at every normal start (on by default; the settings can turn it off). Stored as
+   * `showIntro`: the old fields `intro` (false unless asked) and `introSeen`, which kept the intro to
+   * the first visit, are ignored, so a browser that saw it once plays it again.
+   */
+  showIntro: boolean;
 }
 
 const KEY = 'settlers.prefs';
-const DEFAULTS: Prefs = { art: '3d', intro: false, introSeen: false };
+const DEFAULTS: Prefs = { art: '3d', showIntro: true };
 
 export function readPrefs(): Prefs {
   try {
-    const raw = JSON.parse(localStorage.getItem(KEY) ?? '{}') as Partial<Prefs>;
+    const raw = JSON.parse(localStorage.getItem(KEY) ?? '{}') as Partial<Prefs> | null;
     return {
-      art: raw.art === 'classic' ? 'classic' : '3d',
-      intro: raw.intro === true,
-      introSeen: raw.introSeen === true,
+      art: raw?.art === 'classic' ? 'classic' : '3d',
+      showIntro: raw?.showIntro !== false,
     };
   } catch {
     return { ...DEFAULTS };
