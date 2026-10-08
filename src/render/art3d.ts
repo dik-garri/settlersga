@@ -46,8 +46,11 @@ export const MILL_SAIL_FRAMES = 12;
 
 /** Scale of the 3D settler figures on screen: rendered large for detail, shown at S4 proportions (a settler about a third as tall as a small house). */
 export const SETTLER_3D_SCALE = 0.72;
-/** Scale of goods in a 3D settler's hands, inside the figure (so on screen it is × SETTLER_3D_SCALE): a log about as wide as the body. */
-export const CARRIED_WARE_3D_SCALE = 1.7;
+/**
+ * Scale of goods in a 3D settler's hands, inside the figure: it undoes SETTLER_3D_SCALE, so a carried
+ * ware is exactly as big on screen as one ware lying in a pile (both are rendered at the same scale).
+ */
+export const CARRIED_WARE_3D_SCALE = 1 / SETTLER_3D_SCALE;
 
 /** Construction stages rendered per building (`STAGES` in build.py): 0 stakes … 3 roof half on. */
 export const ART3D_STAGES = 4;

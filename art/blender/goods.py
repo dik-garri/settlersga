@@ -22,7 +22,7 @@ PILE_MAX = 8
 #: Piles are drawn a little larger than carried wares, so they read at the door as in Settlers 4.
 PILE_SCALE = 1.3
 PILE = (44, 34, 22, 24)  # logical w, h, anchor of a pile at a door
-WARE = (16, 10, 8, 5)  # logical w, h, anchor of a carried ware / icon
+WARE = (24, 16, 12, 8)  # logical w, h, anchor of a carried ware / icon (same scale as a ware in a pile)
 
 
 # -------------------------------------------------------------------------------------- materials
