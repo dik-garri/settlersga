@@ -9,6 +9,7 @@ import {
   RACES,
   SLOT_KINDS,
   setupProblem,
+  sizeHint,
   type GameSetup,
   type SlotKind,
 } from './setup';
@@ -93,6 +94,8 @@ export function setupForm(setup: GameSetup, changed: (problem: string | null) =>
     fog.onchange = () => (setup.fog = fog.checked);
     field(map, 'Туман войны', fog);
     map.append(el('p', 'muted', 'Номер карты задаёт её рельеф: с одним номером карта всегда одинакова.'));
+    const fits = sizeHint(activeSlots(setup).length);
+    map.append(el('p', 'muted', `Для ${activeSlots(setup).length} игроков подходит карта ${fits} × ${fits}.`));
 
     const players = el('div', 'setup-players');
     players.append(el('h4', '', 'Игроки'));

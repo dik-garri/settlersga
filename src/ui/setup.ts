@@ -29,7 +29,17 @@ export type RaceId = (typeof RACES)[number]['id'];
 
 /** Player slots: one per player colour (`PLAYER_COLORS`). */
 export const MAX_SLOTS = 4;
-export const MAP_SIZES = [64, 96, 128, 192, 256, 384, 512];
+/**
+ * Map sizes offered in the setup. One of our tiles is about three of Settlers 4's (`docs/PROPORTIONS.md`):
+ * 128 ≈ a small S4 map (384) for two, 192 ≈ 576 for three or four, 320 ≈ 960 for up to eight.
+ */
+export const MAP_SIZES = [64, 96, 128, 160, 192, 256, 320, 384, 512];
+/** The map size of a new game and of a development address without `?size`: two players on a small S4 map. */
+export const DEFAULT_MAP_SIZE = 128;
+/** The size that suits a number of players (a hint on the setup screen). */
+export function sizeHint(players: number): number {
+  return players <= 2 ? 128 : players <= 4 ? 192 : 320;
+}
 
 export interface SlotSetup {
   kind: SlotKind;
@@ -54,11 +64,11 @@ export interface GameSetup {
 
 const slot = (kind: SlotKind, team: number): SlotSetup => ({ kind, team, level: 'medium', race: 'romans' });
 
-/** One computer opponent of medium difficulty on a 64×64 map, as the browser default always was. */
+/** One computer opponent of medium difficulty on a `DEFAULT_MAP_SIZE` map. */
 export function defaultSetup(): GameSetup {
   return {
     mode: 'single',
-    size: 64,
+    size: DEFAULT_MAP_SIZE,
     seed: null,
     start: 'medium',
     fog: true,
@@ -172,7 +182,7 @@ export function launchOf(params: URLSearchParams): Launch {
  */
 export function devWorldArgs(params: URLSearchParams, randomSeed: number): { seed: number; opts: WorldOptions } {
   const seed = params.has('seed') ? Number(params.get('seed')) : randomSeed;
-  const size = params.has('size') ? Number(params.get('size')) : undefined;
+  const size = params.has('size') ? Number(params.get('size')) : DEFAULT_MAP_SIZE;
   const players = params.has('players') ? Number(params.get('players')) : 2;
   const ai = params.get('ai') === 'off' ? [] : Array.from({ length: players - 1 }, (_, k) => k + 2);
   const teams = params.get('teams')?.split(',').map(Number);

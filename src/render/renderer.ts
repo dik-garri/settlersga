@@ -1,5 +1,5 @@
 import { CanvasSource, Container, Graphics, MeshSimple, Sprite, Text, Texture, type Application } from 'pixi.js';
-import { BUILD_TICKS_PER_UNIT, BUILDINGS, CROP_KINDS, SHOT_TICKS, TERRAIN, TREE_MATURE } from '../sim/config';
+import { BUILD_TICKS_PER_UNIT, BUILDINGS, CROP_KINDS, DEPOSIT_STONE, SHOT_TICKS, TERRAIN, TREE_MATURE } from '../sim/config';
 import { RESOURCES, Terrain, type Building, type BuildingType, type Resource, type Settler } from '../sim/types';
 import { CHUNK } from '../sim/map';
 import { LOCAL_PLAYER, type World } from '../sim/world';
@@ -1424,7 +1424,9 @@ export class GameRenderer {
   private syncDeposit(i: number): void {
     const { map } = this.sim;
     const left = map.stone[i];
-    const state = left === 0 ? 0 : left >= 6 ? 3 : left >= 3 ? 2 : 1;
+    // Three looks by what is left, relative to a fresh deposit's smallest amount.
+    const lo = DEPOSIT_STONE[0];
+    const state = left === 0 ? 0 : left >= lo * 1.5 ? 3 : left >= lo * 0.75 ? 2 : 1;
     if (state === this.depositState[i]) return;
     this.depositState[i] = state;
     let s = this.depositSprites[i];

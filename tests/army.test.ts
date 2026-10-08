@@ -84,7 +84,7 @@ describe('defence', () => {
     w.step();
     expect(w.attack(theirs.id, 1)).toBe(1);
     const attacker = w.settlers.find((s) => s.tasks.some((t) => t.t === 'assault'))!;
-    for (let i = 0; i < 600 && attacker.opponent === null; i++) w.step();
+    for (let i = 0; i < 1800 && attacker.opponent === null; i++) w.step();
     const defender = w.getSettler(attacker.opponent!)!;
     expect(defender.owner).toBe(2);
     attacker.hp = defender.hp = 1e9;
@@ -127,7 +127,7 @@ describe('archers', () => {
     const attacker = w.settlers.find((s) => s.tasks.some((t) => t.t === 'assault'))!;
     let hitAway = false;
     let shots = 0;
-    for (let i = 0; i < 600 && w.getSettler(attacker.id); i++) {
+    for (let i = 0; i < 1800 && w.getSettler(attacker.id); i++) {
       w.step();
       shots += w.shots.filter((s) => s.tick === w.tick).length;
       const d = Math.hypot(attacker.x - theirs.door.x, attacker.y - theirs.door.y);

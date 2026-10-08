@@ -222,7 +222,7 @@ describe('combat', () => {
 
     expect(w.availableAttackers(theirs.id)).toBeGreaterThan(0);
     expect(w.attack(theirs.id, 1)).toBe(1);
-    run(w, 600);
+    run(w, 1800);
     expect(theirs.owner).toBe(1);
     expect(theirs.garrison.length).toBe(1);
     expect(w.map.owner[w.map.idx(theirs.x, theirs.y)]).toBe(1);

@@ -123,7 +123,7 @@ describe('duels as in Settlers 4', () => {
     // Enemies coming for the tower: one at the door, one further off, alone in range.
     for (const [d, expected] of [
       [0, 4 + 2],
-      [4, 4 + 1],
+      [2, 4 + 1],
     ] as const) {
       const foe = fighter(w, 2, 'soldier', 0, tower.door.x + d, tower.door.y);
       foe.post = null;

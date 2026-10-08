@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { costOf } from '../src/sim/config';
 import { saveWorld } from '../src/sim/save';
 import { RESOURCES } from '../src/sim/types';
 import { World } from '../src/sim/world';
@@ -58,8 +59,9 @@ describe('priority', () => {
   it('a prioritised site gets scarce materials first', () => {
     const w = new World(42);
     const c = w.castle;
-    c.output.plank = 4; // enough for two small houses' planks only… and nothing else
-    c.output.stone = 1;
+    // Planks for both small houses, stone for one of them only.
+    c.output.plank = 2 * costOf('house_small').plank;
+    c.output.stone = costOf('house_small').stone;
     const a = placeNear(w, 'house_small', c.x + 5, c.y - 1)!;
     const b = placeNear(w, 'house_small', c.x - 5, c.y - 1)!;
     w.setPriority(b.id, true);

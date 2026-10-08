@@ -71,8 +71,27 @@ export function levelTarget(map: GameMap, b: Pick<Building, 'x' | 'y' | 'w' | 'h
 }
 
 /**
+ * Whether the corner also belongs to another building or site (a tile around it is that one's
+ * footprint or door). Such corners are left alone: two neighbouring sites levelling a shared corner
+ * to different heights would undo each other's work for ever, and a finished building's ground must
+ * not move under it.
+ */
+function sharedCorner(map: GameMap, b: Building, vx: number, vy: number): boolean {
+  for (let ty = vy - 1; ty <= vy; ty++) {
+    for (let tx = vx - 1; tx <= vx; tx++) {
+      if (!map.inBounds(tx, ty)) continue;
+      const i = map.idx(tx, ty);
+      const other = map.building[i] || map.door[i];
+      if (other !== 0 && other !== b.id) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * One spade of work: the corner furthest from the target moves one pixel towards it (first in scan
- * order on ties, so it is deterministic). Returns true once every corner is at the target.
+ * order on ties, so it is deterministic); corners shared with a neighbour stay as they are. Returns
+ * true once every other corner is at the target.
  */
 export function levelStep(map: GameMap, b: Building): boolean {
   const [x0, y0, x1, y1] = siteCorners(b.x, b.y, b.w, b.h);
@@ -82,6 +101,7 @@ export function levelStep(map: GameMap, b: Building): boolean {
   for (let vy = y0; vy <= y1; vy++) {
     for (let vx = x0; vx <= x1; vx++) {
       if (vx < 0 || vy < 0 || vx > map.w || vy > map.h) continue;
+      if (sharedCorner(map, b, vx, vy)) continue;
       const d = Math.abs(map.vertexHeight(vx, vy) - b.levelTo);
       if (d > worst) {
         worst = d;

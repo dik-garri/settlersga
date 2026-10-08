@@ -180,6 +180,8 @@ export function buildShowcase(): World {
     placeNear(w, type, cx + Math.cos(a) * r, cy + Math.sin(a) * r);
   });
   run(w, 9000);
+  // A site on a slope takes its diggers a while at Settlers 4's walking pace: give stragglers time.
+  for (let k = 0; k < 12 && [...w.buildings.values()].some((b) => !b.done && b.owner === LOCAL_PLAYER); k++) run(w, 1000);
 
   // A row of construction sites frozen at each stage, for every building type.
   let row = 0;
@@ -291,9 +293,9 @@ export function buildShowcase(): World {
     w.setTradeRoute(home.id, away.id);
     w.orderTrade(home.id, 'plank', ENDLESS);
     w.orderTrade(home.id, 'stone', ENDLESS);
-    // A first load already waiting, so the donkeys are under way when the demo opens.
-    home.input.plank += 4;
-    home.input.stone += 4;
+    // The first loads already waiting: at the walking pace carriers would take minutes to bring them.
+    home.input.plank += 8;
+    home.input.stone += 8;
     for (let k = 0; k < 3; k++) spawnSettler(w, 'donkey', home);
     const site = placeNear(w, 'woodcutter', away.x + 2, away.y - 3);
     if (site) {
@@ -317,6 +319,7 @@ export function buildShowcase(): World {
     const s = w.getSettler(id);
     if (s) s.hp = 8;
   }
-  run(w, 200);
+  // Long enough for the squad to reach its formation at Settlers 4's walking pace.
+  run(w, 450);
   return w;
 }

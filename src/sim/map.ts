@@ -338,8 +338,11 @@ export const START_GUARANTEES = {
       ],
     },
   ],
-  /** Ore units per tile of a guaranteed lobe, on 64×64 and on 256×256 and larger (natural ore: 6–14). */
-  oreAmount: [32, 48] as const,
+  /**
+   * Ore units per tile of a guaranteed lobe, on 64×64 and on 256×256 and larger (natural ore:
+   * `ORE_AMOUNT`, 12–28): a mine on a lobe holds about a Settlers 4 mine's reserve.
+   */
+  oreAmount: [64, 96] as const,
   quarries: [
     { dx: -7, dy: 3, r: 2.3, chance: 0.85 },
     { dx: 4, dy: -12, r: 1.8, chance: 0.8 },

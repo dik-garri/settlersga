@@ -75,9 +75,9 @@ describe('World', () => {
 
     const spentPlanks = costOf('woodcutter').plank + costOf('sawmill').plank;
     expect(goodsInWorld(world, 'plank')).toBe(START_PLANKS - spentPlanks + world.stats.produced.plank);
-    // The sawmill's stone came from the castle's starting stock.
+    // Both buildings' stone came from the castle's starting stock.
     expect(costOf('sawmill').stone).toBeGreaterThan(0);
-    expect(goodsInWorld(world, 'stone')).toBe(START_STONE - costOf('sawmill').stone);
+    expect(goodsInWorld(world, 'stone')).toBe(START_STONE - costOf('woodcutter').stone - costOf('sawmill').stone);
   });
 
   it('forester plants saplings around the hut', () => {
@@ -99,7 +99,7 @@ describe('World', () => {
 
   it('keeps a woodcutter supplied for an hour when paired with a forester', () => {
     const world = new World(42);
-    // On the castle meadow, so only the forester's saplings are within the woodcutter's reach.
+    // Next to the castle meadow, with the forester beside the woodcutter.
     const c = world.castle;
     const wc = findSpot(world, 'woodcutter', { x: c.x - 4, y: c.y + 3 });
     world.placeBuilding('woodcutter', wc.x, wc.y);
@@ -110,8 +110,9 @@ describe('World', () => {
     const before = world.stats.produced.log;
     run(world, 6000);
 
-    // Settlers 4's pace is a tree a minute: a supplied woodcutter fells close to 10 in these 10 minutes.
-    expect(world.stats.produced.log - before).toBeGreaterThan(7);
+    // Settlers 4's pace is at best a tree a minute; with the walks to the trees at its walking pace a
+    // supplied woodcutter fells 6–8 in these 10 minutes (one with nothing left in reach fells none).
+    expect(world.stats.produced.log - before).toBeGreaterThanOrEqual(6);
     for (const b of world.buildings.values()) {
       expect(findPath(world.map, c.door.x, c.door.y, b.door.x, b.door.y), b.type).not.toBeNull();
     }
@@ -136,7 +137,7 @@ describe('World', () => {
     const mined = before - totalStone(world);
     const inHand = world.getSettler(hut.workerId)?.carrying === 'stone' ? 1 : 0;
     expect(mined).toBe(world.stats.produced.stone + inHand);
-    expect(goodsInWorld(world, 'stone')).toBe(START_STONE + mined);
+    expect(goodsInWorld(world, 'stone')).toBe(START_STONE - costOf('stonecutter').stone + mined);
     // Deposits block movement only while stone is left.
     for (let i = 0; i < world.map.stone.length; i++) {
       const x = i % world.map.w;
@@ -220,18 +221,19 @@ describe('World', () => {
   it('builders leave a starved site for one they can work on', () => {
     const world = new World(42);
     const c = world.castle;
-    c.output.stone = 0; // towers will get their planks but never their stone
+    c.output.plank = 0; // towers will get their stone but never their planks
     const towers = [];
     for (const [dx, dy] of [[5, -4], [-5, -4], [-5, 4]]) {
       const spot = findSpot(world, 'tower', { x: c.x + dx, y: c.y + dy });
       towers.push(world.placeBuilding('tower', spot.x, spot.y)!);
     }
     run(world, 400); // all three builders settle on the towers
-    const wc = findSpot(world, 'woodcutter', { x: c.x + 5, y: c.y + 4 });
-    const hut = world.placeBuilding('woodcutter', wc.x, wc.y)!;
+    // A column needs stone only.
+    const spot = findSpot(world, 'column', { x: c.x + 5, y: c.y + 4 });
+    const column = world.placeBuilding('column', spot.x, spot.y)!;
     run(world, 3000);
     expect(towers.every((t) => !t.done)).toBe(true);
-    expect(hut.done).toBe(true);
+    expect(column.done).toBe(true);
   });
 
   it('a carrier cut off from its destination brings the goods back instead of losing them', () => {

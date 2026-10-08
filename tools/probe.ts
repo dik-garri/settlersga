@@ -23,9 +23,13 @@ for (const seed of seeds) {
   const cx = Math.round(c.x + (c.w - 1) / 2);
   const cy = Math.round(c.y + (c.h - 1) / 2);
   // Standard opening: wood and stone first, housing, then the food chain around the starting pond.
+  // Three woodcutters for the sawmill, as Settlers 4's pace and costs need (a woodcutter fells a tree
+  // a minute, a sawmill cuts three logs a minute; buildings cost what Roman S4 ones do).
   const plan: [number, BuildingType, number, number][] = [
     [0, 'stonecutter', -6, 2],
     [0, 'woodcutter', 4, -2],
+    [0, 'woodcutter', 5, -7],
+    [3, 'woodcutter', 9, -1],
     [0, 'forester', 4, 2],
     [0, 'sawmill', 0, 4],
     [0, 'house_small', -4, -5],

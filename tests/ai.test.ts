@@ -26,7 +26,8 @@ describe('computer player', () => {
     const w = new World(42, { players: 2, ai: [2] });
     const startSettlers = w.settlers.filter((s) => s.owner === 2).length;
     const startLand = w.map.owner.filter((o) => o === 2).length;
-    run(w, 15 * MINUTE);
+    // Settlers 4's walking pace and costs: about 18 minutes to its twentieth building.
+    run(w, 22 * MINUTE);
     const own = ownBuildings(w, 2);
     expect(own.filter((b) => b.done).length).toBeGreaterThanOrEqual(20);
     expect(own.filter((b) => b.done && b.garrison.length > 0 && b.type !== 'castle').length).toBeGreaterThanOrEqual(1);
@@ -72,8 +73,9 @@ describe('computer player', () => {
       if (player === 2 && b && !w.isExplored(b.door.x, b.door.y, 2)) unseen.push(`${w.tick} ${b.type}`);
       return attack(target, count, player);
     };
-    // Settlers 4's production times (docs/TIMINGS.md): it takes the castle after about 47 minutes.
-    for (let i = 0; i < 75 * MINUTE && !w.isDefeated(1); i++) w.step();
+    // Settlers 4's production times, walking pace and costs (docs/TIMINGS.md): it takes the castle
+    // after about 75 minutes.
+    for (let i = 0; i < 100 * MINUTE && !w.isDefeated(1); i++) w.step();
     expect(unseen).toEqual([]);
     const ai = w.ai.find((a) => a.player === 2)!;
     expect(ai.stats.attacks).toBeGreaterThanOrEqual(1);
@@ -106,8 +108,9 @@ describe('fog of war', () => {
     // Every start has a guaranteed gold lobe just beyond its castle's land (`START_GUARANTEES`).
     const w = new World(42, { size: 96, players: 2, ai: [2] });
     let ranked = 0;
-    // With Settlers 4's production times its first ranked fighter comes after about 72 minutes.
-    for (let i = 0; i < 95 * MINUTE && ranked === 0; i++) {
+    // With Settlers 4's production times, walking pace and costs its first ranked fighter comes after
+    // about 99 minutes.
+    for (let i = 0; i < 120 * MINUTE && ranked === 0; i++) {
       w.step();
       if (i % 100 === 0) ranked = w.settlers.filter((s) => s.owner === 2 && s.kind !== 'carrier' && s.level > 0).length;
     }
@@ -214,7 +217,7 @@ describe('AI ore prospecting', () => {
   it('looks for the ore of the first mine in its plan it cannot place, not the last one', () => {
     const w = new World(42, { players: 2, ai: [2] });
     // Let it build up to the toolsmith, so the later mines of the plan (gold, stone…) are in play.
-    for (let t = 0; t < 30 * MINUTE; t++) w.step();
+    for (let t = 0; t < 45 * MINUTE; t++) w.step();
     const own = () => [...w.buildings.values()].filter((b) => b.owner === 2);
     expect(own().some((b) => b.type === 'toolsmith' && b.done)).toBe(true);
     // Then coal, gold and stone run out everywhere and its coal mines are gone.

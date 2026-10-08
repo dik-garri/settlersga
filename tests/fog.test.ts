@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { spawnSettler } from '../src/sim/buildings';
+import { FOG, PROFESSIONS } from '../src/sim/config';
 import { saveWorld } from '../src/sim/save';
 import { World } from '../src/sim/world';
 import { placeNear } from '../tools/scenario';
@@ -66,6 +68,30 @@ describe('fog of war', () => {
     w.step();
     // Still explored, and visible only if something else watches it.
     expect(w.isExplored(hut.x + 4, hut.y + 4)).toBe(true);
+  });
+
+  it('settlers see `FOG.settlerRadius`, a thief further (`ProfessionDef.sight`)', () => {
+    const w = new World(42);
+    w.step();
+    const c = w.castle;
+    const out = (kind: 'carrier' | 'thief', dx: number) => {
+      const s = spawnSettler(w, kind, c);
+      s.inside = null;
+      s.x = s.px = c.x + dx;
+      s.y = s.py = c.y;
+      return s;
+    };
+    const carrier = out('carrier', -22);
+    const thief = out('thief', 22);
+    const r = PROFESSIONS.thief.sight!;
+    expect(r).toBeGreaterThan(FOG.settlerRadius);
+    const tile = (s: { x: number; y: number }, d: number) => [Math.round(s.x), Math.round(s.y) + d] as const;
+    expect(w.isExplored(...tile(thief, r))).toBe(false);
+    run(w, FOG.settlerEvery);
+    expect(w.isExplored(...tile(carrier, FOG.settlerRadius))).toBe(true);
+    expect(w.isExplored(...tile(carrier, FOG.settlerRadius + 1))).toBe(false);
+    expect(w.isExplored(...tile(thief, r))).toBe(true);
+    expect(w.isExplored(...tile(thief, r + 1))).toBe(false);
   });
 
   it('explored state survives save and load and continues identically', () => {
