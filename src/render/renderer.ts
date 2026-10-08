@@ -36,7 +36,7 @@ import { BODY_STAND, BODY_WORK, CARRY_AT } from './settlerArt';
 import { depthOf, HALF_H, HALF_W, toScreen, toTile } from './iso';
 import { ART3D_BANNERS, ART3D_STAGES, ART3D_YARDS, CARRIED_WARE_3D_SCALE, PILE_MAX, SETTLER_3D_SCALE } from './art3d';
 
-/** Goods kinds shown on an open storage yard, and the ring they stand on (screen px from its centre). */
+/** Piles shown on an open storage yard without a pile limit, and the ring they stand on (screen px from its centre). */
 const YARD_KINDS = 8;
 const YARD_RX = 30;
 const YARD_RY = 15;
@@ -1627,29 +1627,38 @@ export class GameRenderer {
   }
 
   /**
-   * An open storage yard (`ART3D_YARDS`, `?art=3d`) shows its stock on the platform, as in Settlers 4:
-   * the `YARD_KINDS` most plentiful goods, one pre-rendered pile each (up to `PILE_MAX` items),
-   * around the ring between the kerb and the centre stone, drawn back to front.
+   * An open storage yard (`ART3D_YARDS`, `?art=3d`) shows its stock on the platform as the piles it
+   * is stored in (Settlers 4: `StorageDef` piles of `perPile` units, a good may fill several), the most
+   * plentiful goods first, one pre-rendered pile each (up to `PILE_MAX` items), around the ring between
+   * the kerb and the centre stone, drawn back to front; at most `YARD_KINDS` piles for a yard without
+   * a pile limit.
    */
   private syncYard(b: Building, v: BuildingView): void {
-    const key = RESOURCES.map((r) => Math.min(b.output[r], PILE_MAX)).join(',');
+    const def = BUILDINGS[b.type].storage;
+    const per = Math.min(def?.perPile ?? PILE_MAX, PILE_MAX);
+    const slots = def?.piles ?? YARD_KINDS;
+    const piles: { res: Resource; n: number }[] = [];
+    const kinds = RESOURCES.filter((r) => b.output[r] > 0).sort(
+      (p, q) => b.output[q] - b.output[p] || RESOURCES.indexOf(p) - RESOURCES.indexOf(q),
+    );
+    for (const res of kinds) {
+      for (let left = b.output[res]; left > 0 && piles.length < slots; left -= per) piles.push({ res, n: Math.min(left, per) });
+    }
+    const key = piles.map((p) => `${p.res}${p.n}`).join(',');
     if (key === v.pileKey) return;
     v.pileKey = key;
     while (v.front.children.length > 0) v.front.children[0].destroy();
-    const kinds = RESOURCES.filter((r) => b.output[r] > 0)
-      .sort((p, q) => b.output[q] - b.output[p] || RESOURCES.indexOf(p) - RESOURCES.indexOf(q))
-      .slice(0, YARD_KINDS);
     // The platform's centre, seen from the door tile where the front container stands.
     const c = this.surface(v.at.x, v.at.y);
     const d = this.surface(v.doorAt.x, v.doorAt.y);
-    const spots = kinds.map((res, k) => {
-      // Start at the back of the ring and go round, so few kinds sit where they are best seen.
-      const a = -Math.PI / 2 + (k / YARD_KINDS) * Math.PI * 2;
-      return { res, x: c.x - d.x + Math.cos(a) * YARD_RX, y: c.y - d.y + Math.sin(a) * YARD_RY + 4 };
+    const spots = piles.map((p, k) => {
+      // Start at the back of the ring and go round, so few piles sit where they are best seen.
+      const a = -Math.PI / 2 + (k / slots) * Math.PI * 2;
+      return { ...p, x: c.x - d.x + Math.cos(a) * YARD_RX, y: c.y - d.y + Math.sin(a) * YARD_RY + 4 };
     });
     spots.sort((p, q) => p.y - q.y);
-    for (const { res, x, y } of spots) {
-      const s = new Sprite(this.atlas.get(`pile:${res}:${Math.min(b.output[res], PILE_MAX)}`));
+    for (const { res, n, x, y } of spots) {
+      const s = new Sprite(this.atlas.get(`pile:${res}:${n}`));
       s.position.set(x, y);
       v.front.addChild(s);
     }

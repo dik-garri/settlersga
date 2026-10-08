@@ -91,8 +91,10 @@ export class InputController {
     if (!w.map.inBounds(x, y) || w.map.terrain[w.map.idx(x, y)] !== Terrain.Mountain) return 'Геолог разведывает только горы: щёлкните по склону горы';
     if (!w.owns(x, y)) return 'Гора должна быть на своей земле';
     if (prospectTiles(w, x, y, LOCAL_PLAYER).length === 0) return 'Здесь всё уже разведано';
-    if (!toolPileNear(w, LOCAL_PLAYER, x, y)) return 'Нет свободного молотка: геолог берёт его со склада (молотки делает инструментальщик, их берут и строители)';
-    return 'Нет свободного носильщика';
+    if (!toolPileNear(w, LOCAL_PLAYER, x, y)) {
+      return 'Нет свободного геолога и молотка для нового: закажите геолога в меню «Поселенцы» (молотки делает инструментальщик, их берут и строители)';
+    }
+    return 'Нет свободного геолога и носильщика, который стал бы им';
   }
 
   private anchorFor(type: BuildingType, fx: number, fy: number): { x: number; y: number } {

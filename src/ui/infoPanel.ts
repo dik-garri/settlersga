@@ -18,7 +18,7 @@ import { RESOURCES, type Building, type BuildingType, type Resource, type Settle
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { barracksRows, garrisonSlotRows, recruitLevelControls, shareControls, supportRows } from './armyPanel';
 import { el, rowsTable, type View } from './dom';
-import { economyKey, economyRows, refreshStockCounts, toolOrderControls, warehouseControls } from './economyPanel';
+import { economyKey, economyRows, refreshStockCounts, stockText, toolOrderControls, warehouseControls } from './economyPanel';
 import { movableWorkArea, workRadius } from '../sim/workArea';
 import { glyph } from './icons';
 import { refreshTradeCounts, tradeControls, tradeKey, tradeRows } from './tradeView';
@@ -126,7 +126,7 @@ export class InfoView implements View {
         if (b.garrisonInbound > 0) rows.push(['Идут в гарнизон', String(b.garrisonInbound)]);
       }
       if (def.territory) rows.push(['Радиус земли', `${def.territory} клеток`]);
-      for (const r of RESOURCES) if (def.storage && b.output[r] > 0) rows.push([nameOf(r), String(b.output[r])]);
+      for (const r of RESOURCES) if (def.storage && b.output[r] > 0) rows.push([nameOf(r), stockText(b, r)]);
     } else if (!def.worker) {
       rows.push(...(supportRows(this.world, b) ?? []));
     } else {

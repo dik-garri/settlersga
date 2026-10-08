@@ -22,6 +22,7 @@
  */
 import { duelWorth } from './combat';
 import { attackStrength } from './strength';
+import { isLimited, pilesUsed } from './storage';
 import { available, centerOf, claimsTerritory, doorOf, oreLeft, waitingFor } from './buildings';
 import {
   AI,
@@ -146,6 +147,31 @@ export function updateAi(w: World): void {
 /** Retry a type with no spot after this many ticks (territory or resources may have changed). */
 const RETRY_TICKS = 600;
 const HOUSES: readonly BuildingType[] = ['house_small', 'house_medium', 'house_large'];
+const STORES = (Object.keys(BUILDINGS) as BuildingType[]).filter((t) => BUILDINGS[t].storage && BUILDINGS[t].playerBuildable);
+
+/**
+ * Whether it should build a warehouse: no warehouse site open, fewer than `AI.maxStores`, and its
+ * finished warehouses with a limit have fewer than `AI.storeFreePiles` piles free (goods on their way
+ * count, `storage.ts`).
+ */
+function storeWanted(own: Building[]): boolean {
+  let stores = 0;
+  let free = 0;
+  let limited = false;
+  for (const b of own) {
+    const def = BUILDINGS[b.type].storage;
+    if (!def) continue;
+    stores++;
+    if (!b.done) return false;
+    if (def.piles === undefined) {
+      if (!isLimited(def)) return false;
+      continue;
+    }
+    limited = true;
+    free += Math.max(0, def.piles - pilesUsed(b, def));
+  }
+  return limited && stores < AI.maxStores && free < AI.storeFreePiles;
+}
 
 function think(w: World, ai: AiState): void {
   const me = ai.player;
@@ -259,6 +285,16 @@ function think(w: World, ai: AiState): void {
   const decor = own.filter((b) => BUILDINGS[b.type].eyecatcher).length;
   // Not while cramped: an eyecatcher takes the room a workshop or tower needs.
   const roomy = w.tick >= (ai.crampedUntil ?? 0);
+  // Warehouses fill up (Settlers 4: 8 piles of 8): another one, so surplus need not wait at the
+  // producers and pause them — but after the plan, once it has `AI.storeAfter`, and not while
+  // cramped: a full warehouse only slows production, a warehouse in the barracks' spot stops the army.
+  if (roomy && prerequisiteMet(w, me, own, AI.storeAfter) && storeWanted(own)) {
+    const type = STORES.find((t) => ctx.affordable(t) && (ai.blockedUntil[t] ?? -Infinity) <= w.tick);
+    if (type) {
+      if (tryPlace(ctx, ai, type)) return;
+      ai.blockedUntil[type] = w.tick + RETRY_TICKS;
+    }
+  }
   if (roomy && decor * AI.decorEvery < own.length && (ai.blockedUntil.decor ?? -Infinity) <= w.tick) {
     const spare = (Object.entries(AI.decorSpare) as [Resource, number][]).every(([r, n]) => available(w, me, r) >= n);
     const type = spare ? EYECATCHERS.find((t) => ctx.affordable(t)) : undefined;
@@ -560,7 +596,10 @@ function placeTrade(ctx: Context, ai: AiState): boolean {
 
 function prospect(ctx: Context, ai: AiState): void {
   const { w, me } = ctx;
-  if (w.settlers.some((s) => s.owner === me && s.kind === 'geologist')) return;
+  // One errand at a time: a geologist out (or a carrier on his way to become one) is enough.
+  const out = (s: (typeof w.settlers)[number]) =>
+    s.kind === 'geologist' ? s.tasks.length > 0 || !!s.errand : s.tasks.some((t) => t.t === 'retool' && t.kind === 'geologist');
+  if (w.settlers.some((s) => s.owner === me && out(s))) return;
   const castle = centerOf(w.castleOf(me));
   let best: Point | null = null;
   let bestD = Infinity;

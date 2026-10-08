@@ -10,7 +10,6 @@ import {
   MAP_SIZE,
   OUTPUT_SHARES,
   SOLDIER_LEVELS,
-  PROFESSIONS,
   START_CONDITIONS,
   type StartLevel,
   totalCost,
@@ -19,13 +18,11 @@ import { levelTarget, needsDigger, needsLevelling } from './digging';
 import {
   dismissSpecialist,
   dismissUnits,
-  geologistErrand,
+  sendGeologist,
   holdSpecialists,
   orderSpecialists,
-  prospectTiles,
   sendPioneer,
   sendThief,
-  toolPileNear,
 } from './specialists';
 import { orderAttack, orderGarrison, orderHold, orderMove, releaseFighters } from './field';
 import { updateIntruders } from './intruders';
@@ -572,11 +569,7 @@ export class World {
     if (BUILDINGS[b.type].territory) recomputeTerritory(this);
   }
 
-  /**
-   * Player command: the nearest idle carrier becomes a geologist, examines up to `PROSPECT_TILES`
-   * unexplored mountain tiles around (x, y) and turns back into a carrier. False if impossible.
-   */
-  /** Player command: order `count` specialists (pioneers, thieves) — the same orders as workers. */
+  /** Player command: order `count` specialists (geologists, pioneers, thieves) — the same orders as workers. */
   orderSpecialist(kind: SettlerKind, count: number, player: PlayerId = LOCAL_PLAYER): boolean {
     return orderWorkers(this, player, kind, count);
   }
@@ -601,21 +594,13 @@ export class World {
     return attackStrength(this, player);
   }
 
+  /**
+   * Player command: the nearest idle (ordered) geologist examines up to `PROSPECT_TILES` unexplored
+   * mountain tiles around (x, y); with none waiting, a free carrier takes up a hammer and goes, and
+   * turns back into a carrier afterwards unless ordered (`specialists.ts`). False if impossible.
+   */
   sendGeologist(x: number, y: number, player: PlayerId = LOCAL_PLAYER): boolean {
-    if (prospectTiles(this, x, y, player).length === 0) return false;
-    // As in Settlers 4 he needs a hammer: fetched from the pile nearest the site, brought back after.
-    const tool = PROFESSIONS.geologist.tool;
-    const from = toolPileNear(this, player, x, y);
-    if (tool && !from) return false;
-    const near = from ? from.door : { x, y };
-    let best: Settler | undefined;
-    for (const s of this.settlers) {
-      if (s.owner !== player || s.kind !== 'carrier' || s.tasks.length > 0) continue;
-      if (!best || Math.hypot(s.x - near.x, s.y - near.y) < Math.hypot(best.x - near.x, best.y - near.y)) best = s;
-    }
-    if (!best) return false;
-    best.kind = 'geologist';
-    return geologistErrand(this, best, x, y);
+    return sendGeologist(this, x, y, player);
   }
 
   /**

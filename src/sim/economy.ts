@@ -7,7 +7,7 @@ import type { World } from './world';
 /**
  * A player's economy settings, as in Settlers 4's settlers and production menus (plain data, saved
  * with the player):
- * - `orders`: how many of each orderable profession (builders, diggers) the player wants; carriers
+ * - `orders`: how many of each orderable profession (builders, diggers, specialists) the player wants; carriers
  *   with the tool are recruited only up to that (`logistics.ts`);
  * - `toolOrders`: the toolsmith's order queue — units still to forge per tool, or `ENDLESS`; tools
  *   without orders are forged automatically, by need (`chooseOutput`);

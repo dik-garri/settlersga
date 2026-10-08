@@ -106,9 +106,9 @@ describe('specialists under direct control', () => {
     const w = new World(42);
     const m = mountainTile(w);
     expect(w.sendGeologist(m.x, m.y)).toBe(true);
-    const geo = w.settlers.find((s) => s.kind === 'geologist')!;
-    // Sent elsewhere on the mountain mid-errand: his queue becomes the new site's tiles.
+    // Sent elsewhere on the mountain mid-errand (he has fetched his hammer by now): his queue becomes the new site's tiles.
     run(w, 200);
+    const geo = w.settlers.find((s) => s.kind === 'geologist')!;
     const t = plainTile(w);
     expect(w.orderSpecialists([geo.id], t.x, t.y)).toBe(1);
     expect(geo.post).not.toBeNull();
@@ -116,6 +116,8 @@ describe('specialists under direct control', () => {
     expect(geo.kind).toBe('geologist'); // waits at the post instead of going back to carrying
     expect(w.orderSpecialists([geo.id], m.x, m.y)).toBe(1);
     expect(geo.post).toBeNull();
+    expect(geo.errand).toMatchObject({ x: m.x, y: m.y });
+    w.step();
     expect(geo.tasks.some((t) => t.t === 'prospect')).toBe(true);
     const before = w.stats.prospected;
     run(w, 2500);

@@ -4,9 +4,10 @@
  *
  *   npm run sim:probe -- --seeds=42,7,123 --minutes=60 --size=64
  */
-import { TICKS_PER_SECOND } from '../src/sim/config';
+import { BUILDINGS, TICKS_PER_SECOND } from '../src/sim/config';
 import { findPath } from '../src/sim/pathfinding';
-import { RESOURCES, type BuildingType } from '../src/sim/types';
+import { pilesUsed } from '../src/sim/storage';
+import { RESOURCES, type BuildingType, type Resource } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { arg, placeNear } from './scenario';
 
@@ -49,6 +50,9 @@ for (const seed of seeds) {
     [25, 'ironsmelter', -7, -5],
     [25, 'toolsmith', 5, -7],
     [25, 'house_medium', -9, 1],
+    // Warehouses hold 8 piles of 8 (Settlers 4) and the castle 40: coal and ore fill them by the half hour.
+    [20, 'warehouse', -3, -11],
+    [35, 'warehouse', 8, 8],
   ];
 
   const pending = [...plan];
@@ -85,10 +89,15 @@ for (const seed of seeds) {
   const lost = RESOURCES.map((r) => w.stats.lost[r]).reduce((a, b) => a + b, 0);
   console.log(`seed ${seed}`);
   rows.forEach((r, k) => console.log(`  ${(k * window).toString().padStart(3)}–${(k + 1) * window} min: ${r}`));
+  // Stock: the castle and the warehouses together; `full` = piles in use of all their piles.
+  const stores = [...w.buildings.values()].filter((b) => b.done && BUILDINGS[b.type].storage);
+  const stock = (r: Resource) => stores.reduce((n, b) => n + b.output[r], 0);
+  const piles = stores.reduce((n, b) => n + pilesUsed(b, BUILDINGS[b.type].storage!), 0);
+  const maxPiles = stores.reduce((n, b) => n + (BUILDINGS[b.type].storage!.piles ?? 0), 0);
   console.log(
-    `  buildings ${done}/${w.buildings.size} · settlers ${w.settlers.length} · stock ` +
-      RESOURCES.filter((r) => c.output[r] > 0)
-        .map((r) => `${r}:${c.output[r]}`)
+    `  buildings ${done}/${w.buildings.size} · settlers ${w.settlers.length} · ${stores.length} stores, piles ${piles}/${maxPiles} · stock ` +
+      RESOURCES.filter((r) => stock(r) > 0)
+        .map((r) => `${r}:${stock(r)}`)
         .join(' ') +
       ` · lost ${lost} · blocked doors ${blocked}` +
       (pending.length ? ` · not placed ${pending.map((p) => p[1]).join(',')}` : '') +

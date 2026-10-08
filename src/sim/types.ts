@@ -218,7 +218,8 @@ export type Task =
   | { t: 'prospect'; x: number; y: number; n: number }
   | { t: 'become'; b: number; kind: SettlerKind }
   /** Take up a profession that has no workplace (e.g. builder), using the tool in hand. */
-  | { t: 'retool'; kind: SettlerKind }
+  /** Takes up an orderable profession; `errand` starts the new specialist on one at once (a geologist sent before he was one). */
+  | { t: 'retool'; kind: SettlerKind; errand?: { x: number; y: number } }
   /** Soldier moves into a military building's garrison (reserved via `garrisonInbound`). */
   /** `archer`: which garrison role the slot was reserved for (see `garrisonArchersInbound`). */
   | { t: 'join'; b: number; archer?: boolean }
@@ -285,7 +286,7 @@ export interface Settler {
   chatWith: number | null;
   /**
    * Specialist errand (`specialists.ts`): where a pioneer was sent to push the border (`n`: tiles he
-   * may still claim), or the building `b` a thief was sent to rob. Absent on everyone else (and on saves made before specialists).
+   * may still claim), where a geologist was sent to prospect, or the building `b` a thief was sent to rob. Absent on everyone else (and on saves made before specialists).
    */
   errand?: { x: number; y: number; b?: number; n?: number } | null;
   /** Donkey: units of `carrying` in its packs (a carrier always holds one; absent means one). */

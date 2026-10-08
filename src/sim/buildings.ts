@@ -24,6 +24,7 @@ import {
   type Settler,
 } from './types';
 import { landOf } from './land';
+import { storageRoom } from './storage';
 import { wantsDonkeys } from './trade';
 import type { World } from './world';
 
@@ -127,9 +128,18 @@ export function isReachable(w: World, b: Building): boolean {
   return b.unreachableUntil <= w.tick;
 }
 
+/** Relaxations of `nearestStorage`'s rules, for goods already in a carrier's hands (`carryBack`). */
+export interface StoreRules {
+  /** Also a warehouse the player told to refuse the good. */
+  refused?: boolean;
+  /** Also a warehouse with no room left for it (`storage.ts`). */
+  full?: boolean;
+}
+
 /**
- * Nearest finished, reachable warehouse of the player (that takes `res` in, when given; on that
- * piece of the player's land, when `piece` is given — see `land.ts`).
+ * Nearest finished, reachable warehouse of the player (that takes `res` in and has room for one more
+ * unit, when `res` is given — unless `rules` relax that; on that piece of the player's land, when
+ * `piece` is given — see `land.ts`).
  */
 export function nearestStorage(
   w: World,
@@ -137,18 +147,19 @@ export function nearestStorage(
   near: Point,
   res?: Resource,
   piece?: number,
+  rules: StoreRules = {},
 ): Building | undefined {
   let best: Building | undefined;
   let bestD = Infinity;
   for (const b of w.buildings.values()) {
     if (b.owner !== owner || !b.done || !BUILDINGS[b.type].storage || !isReachable(w, b)) continue;
-    if (res && b.refuse?.includes(res)) continue;
-    if (piece !== undefined && landOf(w, b) !== piece) continue;
+    if (res && !rules.refused && b.refuse?.includes(res)) continue;
     const d = Math.hypot(b.door.x - near.x, b.door.y - near.y);
-    if (d < bestD) {
-      best = b;
-      bestD = d;
-    }
+    if (d >= bestD) continue;
+    if (piece !== undefined && landOf(w, b) !== piece) continue;
+    if (res && !rules.full && storageRoom(b, res) <= 0) continue;
+    best = b;
+    bestD = d;
   }
   return best;
 }

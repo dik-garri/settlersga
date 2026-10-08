@@ -25,7 +25,7 @@ import { pathSpeed, wearTile } from './paths';
 import { restIdle } from './idle';
 import { landAt } from './land';
 import { donkeyAbort, donkeyIdle, loadTick, marketOrdered, releaseLoad, unloadTick } from './trade';
-import { claimTick, pioneerIdle, specialistPostIdle, stealTick, thiefIdle } from './specialists';
+import { claimTick, geologistIdle, pioneerIdle, specialistPostIdle, stealTick, thiefIdle } from './specialists';
 import { chaseTick } from './intruders';
 import { findGame, huntTick, releaseHunt } from './hunting';
 import { RESOURCES, Terrain, type Building, type Point, type Resource, type Settler, type Task } from './types';
@@ -155,6 +155,7 @@ export function updateSettler(w: World, s: Settler): void {
       s.hp = hpOf(task.kind);
       s.home = null;
       s.carrying = null;
+      s.errand = task.errand ? { ...task.errand } : null;
       s.tasks.shift();
       return;
     case 'join':
@@ -403,13 +404,29 @@ export function abort(w: World, s: Settler): void {
   if (PROFESSIONS[s.kind].behavior === 'donkey') return donkeyAbort(w, s);
   const res = s.carrying;
   if (!res) return;
-  // Back to a warehouse on the carrier's own piece of land if there is one, else to any.
+  if (returning) {
+    // The trip back failed too.
+    w.stats.lost[res]++;
+    s.carrying = null;
+    return;
+  }
+  carryBack(w, s, res);
+}
+
+/**
+ * The good in the settler's hands goes back to a warehouse: one that takes it and has room, on his
+ * own piece of land if there is one, else anywhere; with every warehouse full (`storage.ts`) one that
+ * refuses it but has room, then the nearest regardless — a good in hand is put down beyond the limit
+ * rather than lost. Lost only when the player has no warehouse at all.
+ */
+export function carryBack(w: World, s: Settler, res: Resource): void {
   const piece = landAt(w, s, s.owner);
-  const store = returning
-    ? undefined
-    : ((piece ? nearestStorage(w, s.owner, s, res, piece) : undefined) ??
-      nearestStorage(w, s.owner, s, res) ??
-      nearestStorage(w, s.owner, s));
+  const store =
+    (piece ? nearestStorage(w, s.owner, s, res, piece) : undefined) ??
+    nearestStorage(w, s.owner, s, res) ??
+    nearestStorage(w, s.owner, s, res, undefined, { refused: true }) ??
+    nearestStorage(w, s.owner, s, res, undefined, { full: true }) ??
+    nearestStorage(w, s.owner, s);
   if (store) {
     store.inbound[res]++;
     s.tasks = [
@@ -554,25 +571,10 @@ function idle(w: World, s: Settler): void {
       if (home && s.inside !== home.id) goHome(s, home);
       return;
 
-    case 'prospect': {
+    case 'prospect':
       // Sent somewhere without an errand: wait there (direct control).
       if (specialistPostIdle(s)) return;
-      // Errand finished (or aborted): back to carrying; the tool goes back to a warehouse.
-      s.kind = 'carrier';
-      const tool = s.carrying;
-      const store = tool ? nearestStorage(w, s.owner, s) : undefined;
-      if (tool && store) {
-        store.inbound[tool]++;
-        s.tasks = [
-          { t: 'goto', x: store.door.x, y: store.door.y },
-          { t: 'drop', b: store.id, res: tool, back: true },
-        ];
-      } else if (tool) {
-        w.stats.lost[tool]++;
-        s.carrying = null;
-      }
-      return;
-    }
+      return geologistIdle(w, s);
 
     case 'hunt': {
       if (!home) return;
