@@ -136,23 +136,25 @@ describe('thief', () => {
     run(w, 6000);
     expect(store.output.iron).toBeLessThan(5);
     expect(w.castle.output.iron).toBeGreaterThan(home);
-    expect(w.stats.thievesCaught).toBe(0);
+    expect(w.stats.intrudersKilled).toBe(0);
     expect(thief.kind).toBe('thief');
   });
 
-  it('is caught near hostile fighters', () => {
+  it('is unmasked and cut down by guards standing near the building he robs', () => {
     const { w, store, thief } = target();
     explore(w, store);
-    // Guards standing by the warehouse door.
+    // Guards posted by the warehouse door (field units of player 2).
+    const guards: number[] = [];
     for (let k = 0; k < 3; k++) {
       const g = spawnSettler(w, 'soldier', store);
       g.inside = null;
-      g.x = g.px = store.door.x + 1;
-      g.y = g.py = store.door.y + 1;
+      g.hp = 100;
+      guards.push(g.id);
     }
+    w.orderMove(guards, store.door.x + 1, store.door.y + 1, 2);
     w.sendThief(store.id);
     run(w, 8000);
-    expect(w.stats.thievesCaught).toBe(1);
+    expect(w.stats.intrudersKilled).toBe(1);
     expect(w.settlers.includes(thief)).toBe(false);
   });
 
