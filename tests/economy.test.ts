@@ -35,27 +35,24 @@ describe('start conditions (as in Settlers 4)', () => {
   });
 });
 
-describe('houses grow with the map', () => {
-  it('hold 4/8/14 on 64×64 and Settlers 4\'s 10/20/50 from 256×256 up', () => {
-    expect(residentsOf(BUILDINGS.house_small, 64)).toBe(4);
-    expect(residentsOf(BUILDINGS.house_large, 64)).toBe(14);
-    expect(residentsOf(BUILDINGS.house_small, 256)).toBe(10);
-    expect(residentsOf(BUILDINGS.house_medium, 512)).toBe(20);
-    expect(residentsOf(BUILDINGS.house_large, 256)).toBe(50);
-    const mid = residentsOf(BUILDINGS.house_small, 128);
-    expect(mid).toBeGreaterThan(4);
-    expect(mid).toBeLessThan(10);
+describe('houses as in Settlers 4', () => {
+  it('hold 10/20/50 residents on every map size', () => {
+    expect(residentsOf(BUILDINGS.house_small)).toBe(10);
+    expect(residentsOf(BUILDINGS.house_medium)).toBe(20);
+    expect(residentsOf(BUILDINGS.house_large)).toBe(50);
   });
 
-  it('a house on a 128×128 map releases more settlers than on 64×64', () => {
-    const w = new World(42, { size: 128 });
-    w.castle.output.plank = 80;
-    w.castle.output.stone = 40;
-    const start = w.settlers.length;
-    const house = placeNear(w, 'house_small', w.castle.x + 5, w.castle.y - 1)!;
-    run(w, 6000);
-    expect(house.done).toBe(true);
-    expect(w.settlers.length).toBe(start + residentsOf(BUILDINGS.house_small, 128));
+  it('a small house releases the same number of settlers on 64×64 and 128×128', () => {
+    for (const size of [64, 128]) {
+      const w = new World(42, { size });
+      w.castle.output.plank = 80;
+      w.castle.output.stone = 40;
+      const start = w.settlers.length;
+      const house = placeNear(w, 'house_small', w.castle.x + 5, w.castle.y - 1)!;
+      run(w, 6000);
+      expect(house.done).toBe(true);
+      expect(w.settlers.length).toBe(start + 10);
+    }
   });
 });
 

@@ -609,11 +609,10 @@ export interface BuildingDef {
   /** Territory radius (tiles from the building center); claimed once staffed, or when done if no worker. */
   territory?: number;
   /**
-   * Residence: releases its residents as carriers, one every `everyTicks`, once built: `capacity` on
-   * a 64×64 map, growing with the map towards `large` (Settlers 4's 10/20/50) from `HOUSE_SCALE`'s
-   * size up (see `residentsOf`).
+   * Residence: releases `capacity` residents as carriers, one every `everyTicks`, once built — the
+   * same on every map size, as in Settlers 4 (small/medium/large house: 10/20/50).
    */
-  residence?: { capacity: number; large: number; everyTicks: number };
+  residence?: { capacity: number; everyTicks: number };
   /** Military building (see `GarrisonDef`). */
   garrison?: GarrisonDef;
   /** Footprint terrain: ordinary buildings need grass, mines need mountain. */
@@ -709,7 +708,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: null,
     playerBuildable: true,
     category: 'housing',
-    residence: { capacity: 4, large: 10, everyTicks: 150 },
+    residence: { capacity: 10, everyTicks: 150 },
   },
   house_medium: {
     name: 'Средний дом',
@@ -719,7 +718,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: null,
     playerBuildable: true,
     category: 'housing',
-    residence: { capacity: 8, large: 20, everyTicks: 120 },
+    residence: { capacity: 20, everyTicks: 120 },
   },
   house_large: {
     name: 'Большой дом',
@@ -729,7 +728,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: null,
     playerBuildable: true,
     category: 'housing',
-    residence: { capacity: 14, large: 50, everyTicks: 100 },
+    residence: { capacity: 50, everyTicks: 100 },
   },
 
   warehouse: {
@@ -1223,15 +1222,9 @@ export const ANIMAL_KINDS = Object.keys(ANIMALS) as AnimalKind[];
 /** Herds keep at least this far (tiles) from every start position. */
 export const ANIMAL_START_CLEARANCE = 16;
 
-/** Map edge (tiles) from which houses hold their full Settlers 4 numbers (`residence.large`). */
-export const HOUSE_SCALE = { from: 64, to: 256 };
-
-/** Residents of a house on a map of this edge: `capacity` at 64, linearly up to `large` at 256. */
-export function residentsOf(def: BuildingDef, mapSize: number): number {
-  const r = def.residence;
-  if (!r) return 0;
-  const t = Math.max(0, Math.min(1, (mapSize - HOUSE_SCALE.from) / (HOUSE_SCALE.to - HOUSE_SCALE.from)));
-  return Math.round(r.capacity + (r.large - r.capacity) * t);
+/** Residents a house releases: its `capacity`, the same on every map size (Settlers 4's 10/20/50). */
+export function residentsOf(def: BuildingDef): number {
+  return def.residence?.capacity ?? 0;
 }
 
 // ------------------------------------------------------------------- paths

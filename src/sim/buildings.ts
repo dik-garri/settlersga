@@ -295,9 +295,9 @@ function runMine(w: World, b: Building, def: BuildingDef, recipe: Recipe): void 
   w.stats.produced[res]++;
 }
 
-/** Residents a house of this type releases on this map (grows with the map size, `residentsOf`). */
-export function residents(w: World, b: Building): number {
-  return residentsOf(BUILDINGS[b.type], w.map.w);
+/** Residents a house of this type releases (`residentsOf`: Settlers 4's 10/20/50 on every map). */
+export function residents(_w: World, b: Building): number {
+  return residentsOf(BUILDINGS[b.type]);
 }
 
 /**
