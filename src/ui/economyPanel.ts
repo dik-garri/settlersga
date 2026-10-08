@@ -113,7 +113,8 @@ export function economyRows(b: Building): [string, string][] {
     rows.push(['Попыток в запасе', String(b.attempts ?? 0)]);
   }
   if (def.storage) rows.push(...storageRows(b));
-  if (def.storage && b.refuse?.length) rows.push(['Не принимает', b.refuse.map((r) => nameOf(r).toLowerCase()).join(', ')]);
+  // As in Settlers 4 a new warehouse takes nothing until goods are ticked in its window.
+  if (def.storage && !b.accept?.length) rows.push(['Принимает', 'ничего — отметьте товары']);
   return rows;
 }
 
@@ -146,7 +147,7 @@ export function stockText(b: Building, res: Resource): string {
 export function economyKey(world: World, b: Building): string {
   const def = BUILDINGS[b.type];
   if (def.recipe?.orderable) return JSON.stringify(economyOf(world, b.owner).toolOrders);
-  if (def.storage) return JSON.stringify(b.refuse ?? []);
+  if (def.storage) return JSON.stringify(b.accept ?? []);
   return '';
 }
 
@@ -181,7 +182,7 @@ export function warehouseControls(world: World, b: Building): HTMLElement | null
     goodsLists({
       inTitle: 'Принимает',
       outTitle: 'Не принимает',
-      isIn: (res) => !b.refuse?.includes(res),
+      isIn: (res) => !!b.accept?.includes(res),
       set: (res, on) => world.setAccepts(b.id, res, on),
       tipIn: (name) => `${name}: везут сюда — нажмите, чтобы не принимать`,
       tipOut: (name) => `${name}: сюда не везут — нажмите, чтобы принимать`,

@@ -5,15 +5,16 @@ import { killSettler } from '../src/sim/military';
 import { findPath } from '../src/sim/pathfinding';
 import type { Building, BuildingType, SettlerKind } from '../src/sim/types';
 import { World } from '../src/sim/world';
+import { base, startTower } from './helpers';
 
 /**
  * Settlers 4's timings (docs/TIMINGS.md): several builders on one site add up, carriers walk faster
  * on roads, other settlers do not.
  */
 
-/** A woodcutter site near the castle with all its material on site and the ground cleared. */
+/** A woodcutter site near the start with all its material on site and the ground cleared. */
 function readySite(w: World): Building {
-  const c = w.castle;
+  const c = base(w);
   for (let r = 3; r < 12; r++) {
     for (let y = c.y - r; y <= c.y + r; y++) {
       for (let x = c.x - r; x <= c.x + r; x++) {
@@ -65,10 +66,10 @@ describe('construction', () => {
 });
 
 describe('walking', () => {
-  /** Ticks for a settler of `kind` to walk a fixed route from the castle door, on worn road or not. */
+  /** Ticks for a settler of `kind` to walk a fixed route from the start tower's door, on worn road or not. */
   function walkTicks(kind: SettlerKind, road: boolean): { ticks: number; tiles: number } {
     const w = new World(42);
-    const c = w.castle;
+    const c = startTower(w);
     const s = spawnSettler(w, kind, c);
     const goal = { x: c.door.x - 6, y: c.door.y + 6 };
     const path = findPath(w.map, c.door.x, c.door.y, goal.x, goal.y)!;

@@ -122,13 +122,16 @@ export class SettlerInfoView implements View {
     const next = s.tasks.find((x) => x.t !== 'goto');
     if (!t) {
       if (s.inside !== null) return `внутри: ${at(s.inside)}`;
+      if (s.fled !== undefined) return 'бродит без крова';
       if (s.errand) return s.kind === 'pioneer' ? 'идёт к границе' : s.kind === 'geologist' ? 'идёт к горе' : 'идёт на дело';
       const idle = s.stroll ? 'прогуливается' : s.chatWith !== null ? 'беседует' : 'без дела';
       return SENDABLE[s.kind] ? `${idle}, ждёт приказа` : idle;
     }
     switch (t.t) {
       case 'goto':
-        if (next?.t === 'pickup') return s.tasks.some((x) => x.t === 'retool') ? `идёт за инструментом: ${res(next.res)}` : `идёт за товаром: ${res(next.res)}`;
+        if (next?.t === 'pickup' || next?.t === 'lift') {
+          return s.tasks.some((x) => x.t === 'retool') ? `идёт за инструментом: ${res(next.res)}` : `идёт за товаром: ${res(next.res)}`;
+        }
         if (next?.t === 'drop') return `несёт груз (${res(next.res).toLowerCase()}) → ${at(next.b)}`;
         if (next?.t === 'build') return `идёт на стройку: ${at(next.b)}`;
         if (next?.t === 'dig') return `идёт расчищать: ${at(next.b)}`;
@@ -138,15 +141,17 @@ export class SettlerInfoView implements View {
         if (next?.t === 'become') return `идёт работать: ${at(next.b)}`;
         if (next?.t === 'gather') return `идёт за сырьём: ${res(next.res)}`;
         if (next?.t === 'prospect') return 'идёт к горе';
+        if (s.fled !== undefined) return 'бродит без крова';
         if (next?.t === 'steal') return `крадётся к: ${at(next.b)}`;
         if (next?.t === 'claim') return 'идёт к границе';
         if (next?.t === 'load') return `идёт за грузом: ${at(next.b)}`;
         if (next?.t === 'unload') return s.carrying ? `везёт ${res(s.carrying).toLowerCase()} → ${at(next.b)}` : `идёт к: ${at(next.b)}`;
         return 'в пути';
       case 'pickup':
+      case 'lift':
         return `берёт ${res(t.res)}`;
       case 'drop':
-        return t.back ? `возвращает ${res(t.res)} на склад` : `кладёт ${res(t.res)}: ${at(t.b)}`;
+        return `кладёт ${res(t.res)}: ${at(t.b)}`;
       case 'store':
         return `складывает ${res(t.res)}`;
       case 'gather':
@@ -178,7 +183,7 @@ export class SettlerInfoView implements View {
       case 'enter':
         return `входит: ${at(t.b)}`;
       case 'wait':
-        return 'ждёт';
+        return s.fled !== undefined ? 'бродит без крова' : 'ждёт';
       case 'load':
         return `навьючивает: ${res(t.res).toLowerCase()}`;
       case 'unload':

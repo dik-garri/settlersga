@@ -6,11 +6,13 @@ import { saveWorld } from '../src/sim/save';
 import { movableWorkArea, workCentre, workRadius } from '../src/sim/workArea';
 import { World } from '../src/sim/world';
 import { placeNear } from '../tools/scenario';
+import { base, startTower } from './helpers';
 
 function richWorld(seed = 42): World {
   const w = new World(seed);
-  w.castle.output.plank = 80;
-  w.castle.output.stone = 40;
+  // Extra materials on the start tower's pile (a supply like any other).
+  startTower(w).output.plank = 80;
+  startTower(w).output.stone = 40;
   return w;
 }
 
@@ -28,7 +30,7 @@ describe('work areas (Settlers 4)', () => {
 
   it('can be moved by the owner within reach of the door, and back', () => {
     const w = richWorld();
-    const hut = placeNear(w, 'woodcutter', w.castle.x + 5, w.castle.y - 1)!;
+    const hut = placeNear(w, 'woodcutter', base(w).x + 5, base(w).y - 1)!;
     const r = workRadius('woodcutter')!;
     expect(workCentre(hut)).toEqual(hut.door);
     expect(w.setWorkArea(hut.id, { x: hut.door.x + 4, y: hut.door.y }, 2)).toBe(false); // not the owner
@@ -37,13 +39,13 @@ describe('work areas (Settlers 4)', () => {
     expect(workCentre(hut)).toEqual({ x: hut.door.x + 4, y: hut.door.y });
     expect(w.setWorkArea(hut.id, null)).toBe(true);
     expect(workCentre(hut)).toEqual(hut.door);
-    const castle = w.castle;
-    expect(w.setWorkArea(castle.id, { x: castle.door.x, y: castle.door.y })).toBe(false);
+    const tower = startTower(w);
+    expect(w.setWorkArea(tower.id, { x: tower.door.x, y: tower.door.y })).toBe(false);
   });
 
   it('steer where a gatherer looks for work', () => {
     const w = richWorld();
-    const hut = placeNear(w, 'woodcutter', w.castle.x + 5, w.castle.y - 1)!;
+    const hut = placeNear(w, 'woodcutter', base(w).x + 5, base(w).y - 1)!;
     const def = PROFESSIONS.woodcutter.gather!;
     const m = w.map;
     // A tree within reach of a moved centre.
@@ -64,7 +66,7 @@ describe('work areas (Settlers 4)', () => {
 
   it('survive save and load', () => {
     const w = richWorld();
-    const hut = placeNear(w, 'forester', w.castle.x + 5, w.castle.y + 3)!;
+    const hut = placeNear(w, 'forester', base(w).x + 5, base(w).y + 3)!;
     expect(w.setWorkArea(hut.id, { x: hut.door.x + 3, y: hut.door.y + 2 })).toBe(true);
     for (let i = 0; i < 300; i++) w.step();
     const l = World.load(JSON.parse(JSON.stringify(saveWorld(w))));

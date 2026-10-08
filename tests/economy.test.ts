@@ -1,20 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { ANIMALS, BUILDINGS, PATHS, residentsOf, START_CONDITIONS } from '../src/sim/config';
+import { ANIMALS, BUILDINGS, PATHS, residentsOf, START_CONDITIONS, startGoods } from '../src/sim/config';
 import { consumersOf, distributableGoods } from '../src/sim/economy';
 import { pathLevel, pathSpeed, updatePaths, wearTile } from '../src/sim/paths';
 import { saveWorld } from '../src/sim/save';
-import { Terrain } from '../src/sim/types';
+import { RESOURCES, Terrain } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { placeNear } from '../tools/scenario';
+import { base, groundUnits, startTower } from './helpers';
 
 function run(world: World, ticks: number) {
   for (let i = 0; i < ticks; i++) world.step();
 }
 
+/** Plenty of planks and stone on the start tower's pile (a plain supply pile, no warehouse). */
 function richWorld(seed = 42): World {
   const w = new World(seed);
-  w.castle.output.plank = 80;
-  w.castle.output.stone = 40;
+  startTower(w).output.plank = 80;
+  startTower(w).output.stone = 40;
   return w;
 }
 
@@ -24,14 +26,15 @@ describe('start conditions (as in Settlers 4)', () => {
     for (const level of ['low', 'medium', 'high'] as const) {
       const w = new World(42, { start: level });
       const def = START_CONDITIONS[level];
-      expect(w.castle.output.plank).toBe(def.goods.plank);
-      expect(w.castle.output.stone).toBe(def.goods.stone);
+      const goods = startGoods(def);
+      expect(groundUnits(w, 'plank', 1)).toBe(goods.plank);
+      expect(groundUnits(w, 'stone', 1)).toBe(goods.stone);
       expect(count(w, 'carrier')).toBe(def.carriers);
       expect(count(w, 'builder')).toBe(def.builders);
       expect(w.players[0].economy!.orders.builder).toBe(def.builders);
     }
-    expect(new World(42).castle.output.plank).toBe(START_CONDITIONS.medium.goods.plank);
-    expect(new World(42, { start: 'high' }).castle.output.bread).toBeGreaterThan(0);
+    expect(groundUnits(new World(42), 'plank', 1)).toBe(startGoods(START_CONDITIONS.medium).plank);
+    expect(groundUnits(new World(42, { start: 'high' }), 'bread', 1)).toBeGreaterThan(0);
   });
 });
 
@@ -45,10 +48,10 @@ describe('houses as in Settlers 4', () => {
   it('a small house releases the same number of settlers on 64×64 and 128×128', () => {
     for (const size of [64, 128]) {
       const w = new World(42, { size });
-      w.castle.output.plank = 80;
-      w.castle.output.stone = 40;
+      startTower(w).output.plank = 80;
+      startTower(w).output.stone = 40;
       const start = w.settlers.length;
-      const house = placeNear(w, 'house_small', w.castle.x + 5, w.castle.y - 1)!;
+      const house = placeNear(w, 'house_small', base(w).x + 5, base(w).y - 1)!;
       run(w, 6000);
       expect(house.done).toBe(true);
       expect(w.settlers.length).toBe(start + 10);
@@ -59,8 +62,8 @@ describe('houses as in Settlers 4', () => {
 describe('hunter', () => {
   it('shoots game near his lodge and brings the meat home; game comes back', () => {
     const w = richWorld();
-    const c = w.castle;
-    c.output.bow = 1;
+    const c = base(w);
+    startTower(w).output.bow = 1;
     const lodge = placeNear(w, 'hunter', c.x + 5, c.y + 3)!;
     run(w, 2500);
     expect(lodge.done).toBe(true);
@@ -97,14 +100,14 @@ describe('goods distribution (as in Settlers 4)', () => {
 
   it('a consumer type with weight 0 gets none of the good; weights steer the rest', () => {
     const w = richWorld();
-    const c = w.castle;
+    const c = base(w);
     const mill = placeNear(w, 'mill', c.x + 5, c.y - 1)!;
     const pigs = placeNear(w, 'pigfarm', c.x - 5, c.y - 1)!;
     run(w, 3000);
     expect(mill.done && pigs.done).toBe(true);
     expect(w.setDistribution('grain', 'pigfarm', 0)).toBe(true);
     expect(w.setDistribution('grain', 'sawmill', 50)).toBe(false); // not a grain consumer
-    c.output.grain = 6;
+    startTower(w).output.grain = 6;
     run(w, 1500);
     expect(pigs.input.grain + pigs.inbound.grain).toBe(0);
     expect(w.stats.produced.pig).toBe(0);
@@ -115,9 +118,12 @@ describe('goods distribution (as in Settlers 4)', () => {
 describe('warehouse settings', () => {
   it('a warehouse refusing a good is passed over by surplus hauling', () => {
     const w = richWorld();
-    const c = w.castle;
+    const c = base(w);
     const store = placeNear(w, 'warehouse', c.x + 8, c.y - 3)!;
     const hut = placeNear(w, 'woodcutter', c.x + 8, c.y - 6)!;
+    // As in Settlers 4 a new warehouse takes nothing in: tick every good but logs.
+    expect(store.accept).toBeUndefined();
+    for (const r of RESOURCES) if (r !== 'log') expect(w.setAccepts(store.id, r, true)).toBe(true);
     run(w, 1500);
     expect(store.done).toBe(true);
     expect(w.setAccepts(store.id, 'log', false)).toBe(true);
@@ -130,7 +136,7 @@ describe('warehouse settings', () => {
     expect(store.output.log).toBe(before);
     expect(w.stats.produced.log).toBeGreaterThan(0);
     expect(w.setAccepts(store.id, 'log', true)).toBe(true);
-    expect(store.refuse).toBeUndefined();
+    expect(store.accept).toEqual(RESOURCES);
   });
 });
 
@@ -157,7 +163,7 @@ describe('paths', () => {
 
   it('busy routes wear into paths in a real game', () => {
     const w = richWorld();
-    const c = w.castle;
+    const c = base(w);
     placeNear(w, 'woodcutter', c.x + 5, c.y - 1);
     placeNear(w, 'sawmill', c.x - 3, c.y + 5);
     run(w, 9000);
@@ -170,14 +176,15 @@ describe('paths', () => {
 describe('economy settings survive save and load', () => {
   it('orders, tool queue, distribution, warehouse refusals and paths continue bit for bit', () => {
     const a = richWorld();
-    const c = a.castle;
-    a.castle.output.bow = 1;
+    const c = base(a);
+    startTower(a).output.bow = 1;
     placeNear(a, 'woodcutter', c.x + 5, c.y - 1);
     placeNear(a, 'hunter', c.x - 5, c.y + 3);
     const store = placeNear(a, 'warehouse', c.x + 8, c.y - 3)!;
     a.orderWorkers('builder', 4);
     a.orderTool('rod', 2);
     a.setDistribution('grain', 'mill', 80);
+    for (const r of RESOURCES) a.setAccepts(store.id, r, true);
     run(a, 2000);
     a.setAccepts(store.id, 'stone', false);
     run(a, 1000);

@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { knownEnemies } from '../src/sim/ai';
 import { AI, AI_PLAN, BUILDINGS, oreOf } from '../src/sim/config';
 import { centerOf, spawnSettler } from '../src/sim/buildings';
-import { enterGarrison, killSettler } from '../src/sim/military';
+import { enterGarrison, isFighter, killSettler } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
 import { RESOURCES } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { placeNear } from '../tools/scenario';
+import { groundUnits, startTower } from './helpers';
 
 const MINUTE = 600;
 const LONG = 120_000; // these runs simulate up to an hour of game time
@@ -19,7 +20,7 @@ function run(w: World, ticks: number, each?: () => void) {
 }
 
 const ownBuildings = (w: World, p: number) => [...w.buildings.values()].filter((b) => b.owner === p);
-const soldiers = (w: World, p: number) => w.settlers.filter((s) => s.owner === p && s.kind === 'soldier');
+const fighters = (w: World, p: number) => w.settlers.filter((s) => s.owner === p && isFighter(s));
 
 describe('computer player', () => {
   it('builds up an economy and expands', { timeout: LONG }, () => {
@@ -30,7 +31,12 @@ describe('computer player', () => {
     run(w, 22 * MINUTE);
     const own = ownBuildings(w, 2);
     expect(own.filter((b) => b.done).length).toBeGreaterThanOrEqual(20);
-    expect(own.filter((b) => b.done && b.garrison.length > 0 && b.type !== 'castle').length).toBeGreaterThanOrEqual(1);
+    const start = startTower(w, 2).id;
+    expect(own.filter((b) => b.done && b.garrison.length > 0 && b.id !== start).length).toBeGreaterThanOrEqual(1);
+    // No headquarters: it builds a warehouse of its own and ticks the goods it takes in.
+    const store = own.find((b) => b.done && BUILDINGS[b.type].storage);
+    expect(store).toBeDefined();
+    expect(store!.accept?.length).toBe(RESOURCES.length);
     expect(w.settlers.filter((s) => s.owner === 2).length).toBeGreaterThan(startSettlers);
     expect(w.map.owner.filter((o) => o === 2).length).toBeGreaterThan(startLand);
     // The human did nothing and was left alone.
@@ -46,7 +52,7 @@ describe('computer player', () => {
       if (b && player === 2) placed.add(b.id);
       return b;
     };
-    const castle = w.castleOf(2).id;
+    const start = startTower(w, 2).id;
     const negative: string[] = [];
     run(w, 20 * MINUTE, () => {
       for (const b of w.buildings.values()) {
@@ -59,11 +65,11 @@ describe('computer player', () => {
       }
     });
     expect(negative.slice(0, 3)).toEqual([]);
-    // Every building it owns came out of placeBuilding (or is its castle).
-    for (const b of ownBuildings(w, 2)) expect(b.id === castle || placed.has(b.id), b.type).toBe(true);
+    // Every building it owns came out of placeBuilding (or is its start tower).
+    for (const b of ownBuildings(w, 2)) expect(b.id === start || placed.has(b.id), b.type).toBe(true);
   });
 
-  it('eventually attacks a passive player and takes the castle', { timeout: LONG }, () => {
+  it('eventually attacks a passive player and defeats it', { timeout: LONG }, () => {
     const w = new World(7, { players: 2, ai: [2] });
     // Every target it picks is one player 2 has explored.
     const unseen: string[] = [];
@@ -73,8 +79,8 @@ describe('computer player', () => {
       if (player === 2 && b && !w.isExplored(b.door.x, b.door.y, 2)) unseen.push(`${w.tick} ${b.type}`);
       return attack(target, count, player);
     };
-    // Settlers 4's production times, walking pace and costs (docs/TIMINGS.md): it takes the castle
-    // after about 75 minutes.
+    // Settlers 4's production times, walking pace and costs (docs/TIMINGS.md): it takes the last
+    // occupied tower of the passive player (Settlers 4's defeat rule) after about 75 minutes.
     for (let i = 0; i < 100 * MINUTE && !w.isDefeated(1); i++) w.step();
     expect(unseen).toEqual([]);
     const ai = w.ai.find((a) => a.player === 2)!;
@@ -90,22 +96,22 @@ describe('computer player', () => {
 describe('fog of war', () => {
   it('knows only enemy buildings it has explored, and guesses garrisons out of sight', () => {
     const w = new World(42, { players: 2, ai: [2] });
-    const enemy = w.castleOf(1);
+    const enemy = startTower(w, 1);
     expect(w.isExplored(enemy.door.x, enemy.door.y, 2)).toBe(false);
     expect(knownEnemies(w, 2)).toEqual([]);
     // Explored once (e.g. by a passing settler) but out of building sight: the garrison is a guess,
     // even though it is in fact empty.
-    for (const s of soldiers(w, 1)) killSettler(w, s);
+    for (const s of fighters(w, 1)) killSettler(w, s);
     w.step();
     w.map.explored[w.map.idx(enemy.door.x, enemy.door.y)] |= 1 << 1;
     const known = knownEnemies(w, 2);
     expect(known.map((k) => k.b.id)).toEqual([enemy.id]);
     expect(enemy.garrison.length).toBe(0);
-    expect(known[0].defenders).toBe(Math.ceil(12 * AI.unseenGarrison));
+    expect(known[0].defenders).toBe(Math.ceil(BUILDINGS.tower.garrison!.capacity * AI.unseenGarrison));
   });
 
   it('prospects for gold, mines and smelts it, and promotes its soldiers', { timeout: LONG }, () => {
-    // Every start has a guaranteed gold lobe just beyond its castle's land (`START_GUARANTEES`).
+    // Every start has a guaranteed gold lobe just beyond its start land (`START_GUARANTEES`).
     const w = new World(42, { size: 96, players: 2, ai: [2] });
     let ranked = 0;
     // With Settlers 4's production times, walking pace and costs its first ranked fighter comes after
@@ -129,33 +135,40 @@ describe('fog of war', () => {
     expect(ownBuildings(w, 1).length).toBe(1);
   });
 
-  it('puts a lookout tower at a border with foreign land and so finds the enemy castle', { timeout: LONG }, () => {
+  it('puts a lookout tower at a border with foreign land and so finds the enemy start tower', { timeout: LONG }, () => {
     const w = new World(42, { players: 2, ai: [2] });
+    const enemy = startTower(w, 1);
     let found = -1;
     for (let t = 0; t < 100 * MINUTE && found < 0; t++) {
       w.step();
-      if (t % 100 === 0 && knownEnemies(w, 2).some((e) => e.b === w.castleOf(1))) found = t;
+      if (t % 100 === 0 && knownEnemies(w, 2).some((e) => e.b === enemy)) found = t;
     }
     expect(ownBuildings(w, 2).some((b) => b.type === 'lookout')).toBe(true);
     expect(found).toBeGreaterThan(0);
     // Without lookouts it never finds it on this map (its towers stop ~25 tiles short). Since 2.5
     // the guaranteed far mountains draw its first towers elsewhere: ~41 minutes (31 before); with
-    // Settlers 4's production times (docs/TIMINGS.md) ~79; with S4 footprints (4×4 castle, 15×15
+    // Settlers 4's production times (docs/TIMINGS.md) ~79; with S4 footprints (the old 4×4 castle, 15×15
     // start meadow) ~122 while its pioneer was stuck on an unreachable tile, ~75 since that is fixed.
     expect(found).toBeLessThan(88 * MINUTE);
   });
 });
 
 describe('victory and defeat', () => {
-  /** Player 2's castle left without soldiers, a manned tower of player 1 within attack range. */
-  function undefendedCastle() {
+  /**
+   * Player 2's start tower held by one feeble swordsman (its last occupied military building), a
+   * manned tower of player 1 with spares within attack range.
+   */
+  function lastTower() {
     const w = new World(42, { players: 2 });
-    const [a, b] = [w.castleOf(1), w.castleOf(2)];
+    const [a, b] = [startTower(w, 1), startTower(w, 2)];
+    // Goods at home for the towers (a pile at the start tower's door).
     a.output.plank = 80;
     a.output.stone = 40;
-    // Extra swordsmen in the castle (test setup; in play they come from a barracks).
-    for (let k = 0; k < 6; k++) enterGarrison(w, a, spawnSettler(w, 'soldier', a));
-    for (const s of soldiers(w, 2)) killSettler(w, s);
+    // Extra swordsmen without a garrison: they man the new towers (test setup; in play they come from a barracks).
+    for (let k = 0; k < 6; k++) spawnSettler(w, 'soldier', a).inside = null;
+    const keep = fighters(w, 2).find((s) => s.kind === 'soldier' && s.home === b.id)!;
+    for (const s of fighters(w, 2)) if (s !== keep) killSettler(w, s);
+    keep.hp = 1;
     w.step();
     const ca = centerOf(a);
     const cb = centerOf(b);
@@ -168,24 +181,30 @@ describe('victory and defeat', () => {
       run(w, 3000);
       expect(tower.done && tower.garrison.length).toBeTruthy();
     }
-    // A small tower holds one swordsman and keeps him: put a spare one in (test setup).
-    enterGarrison(w, tower!, spawnSettler(w, 'soldier', tower!));
+    // A small tower holds one swordsman and keeps him: put spares in (test setup).
+    for (let k = 0; k < 2; k++) enterGarrison(w, tower!, spawnSettler(w, 'soldier', tower!));
     expect(w.availableAttackers(b.id)).toBeGreaterThan(0);
-    return { w, castle: b };
+    return { w, last: b };
   }
 
-  it('taking a castle defeats its owner: settlers die, buildings burn, the other player wins', { timeout: LONG }, () => {
-    const { w, castle } = undefendedCastle();
+  it('a player whose last occupied military building is taken is out: buildings burn, its people wander off and die', { timeout: LONG }, () => {
+    const { w, last } = lastTower();
     expect(w.outcome(1)).toBe('playing');
-    expect(w.attack(castle.id, 1)).toBe(1);
-    run(w, 1500);
-    expect(castle.owner).toBe(1);
+    expect(w.attack(last.id, 2)).toBe(2);
+    for (let i = 0; i < 3000 && !w.isDefeated(2); i++) w.step();
+    expect(last.owner).toBe(1);
     expect(w.isDefeated(2)).toBe(true);
     expect(w.outcome(2)).toBe('lost');
     expect(w.outcome(1)).toBe('won');
-    expect(w.settlers.some((s) => s.owner === 2)).toBe(false);
     expect(ownBuildings(w, 2)).toEqual([]);
     expect(w.map.owner.some((o) => o === 2)).toBe(false);
+    // Settlers 4: its people are not struck dead at once; they wander for a while, then die.
+    run(w, 20);
+    expect(w.settlers.some((s) => s.owner === 2)).toBe(true);
+    for (let i = 0; i < 6000 && w.settlers.some((s) => s.owner === 2); i++) w.step();
+    expect(w.settlers.some((s) => s.owner === 2)).toBe(false);
+    // Its start goods lie on land that is now player 1's: they are player 1's.
+    expect(groundUnits(w, 'plank', 2)).toBe(0);
     // No dangling references to the dead.
     for (const b of w.buildings.values()) {
       for (const id of b.garrison) expect(w.getSettler(id)).toBeDefined();

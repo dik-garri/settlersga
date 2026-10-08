@@ -266,6 +266,9 @@ export class GameRenderer {
   /** Geologist signs for the local player; state is ore code + 1, 0 = none. */
   private readonly signSprites: (Sprite | null)[];
   private readonly signState: Uint8Array;
+  /** Goods lying on the ground (`ground.ts`): one pile per tile, and its drawn kind × 16 + units (0 = none). */
+  private readonly goodsSprites: (Container | null)[];
+  private readonly goodsState: Uint16Array;
   private readonly cropState: Uint8Array;
   /** Rendered deposit size per tile: 0 = none, otherwise size class + 1. */
   private readonly depositState: Uint8Array;
@@ -335,6 +338,8 @@ export class GameRenderer {
     this.pathState = new Uint8Array(n);
     this.signSprites = new Array(n).fill(null);
     this.signState = new Uint8Array(n);
+    this.goodsSprites = new Array(n).fill(null);
+    this.goodsState = new Uint16Array(n);
     this.cropState = new Uint8Array(n);
     const chunks = map.chunksX * map.chunksY;
     this.ownerSeen = new Uint8Array(n).fill(255);
@@ -1107,7 +1112,7 @@ export class GameRenderer {
     for (let y = y0; y < Math.min(map.h, y0 + CHUNK); y++) {
       for (let x = x0; x < Math.min(map.w, x0 + CHUNK); x++) {
         const i = map.idx(x, y);
-        for (const list of [this.treeSprites, this.depositSprites, this.signSprites]) {
+        for (const list of [this.treeSprites, this.depositSprites, this.signSprites, this.goodsSprites]) {
           const sprite = list[i];
           if (sprite) this.removeStatic(sprite, x, y);
           list[i] = null;
@@ -1119,6 +1124,7 @@ export class GameRenderer {
         this.treeState[i] = 0;
         this.depositState[i] = 0;
         this.signState[i] = 0;
+        this.goodsState[i] = 0;
         this.cropState[i] = 0;
         this.pathState[i] = 0;
       }
@@ -1181,6 +1187,7 @@ export class GameRenderer {
           this.syncCrop(i);
           this.syncPath(i);
           this.syncSign(i);
+          this.syncGoods(i);
         }
       }
     }
@@ -1419,6 +1426,40 @@ export class GameRenderer {
     }
     s.texture = this.atlas.get(`sign:${state - 1}`);
     s.anchor.copyFrom(s.texture.defaultAnchor!);
+  }
+
+  /**
+   * Goods on the ground: the pre-rendered `pile:<res>:<n>` (3D art), else single wares stacked up,
+   * standing on the tile like any static object (culled with its chunk, hidden under unexplored fog).
+   */
+  private syncGoods(i: number): void {
+    const { map } = this.sim;
+    const n = map.goodsAmount[i];
+    const state = map.goods[i] === 0 || n === 0 ? 0 : map.goods[i] * 16 + n;
+    if (state === this.goodsState[i]) return;
+    this.goodsState[i] = state;
+    const x = i % map.w;
+    const y = Math.floor(i / map.w);
+    const old = this.goodsSprites[i];
+    if (old) this.removeStatic(old, x, y);
+    this.goodsSprites[i] = null;
+    if (state === 0) return;
+    const res = RESOURCES[map.goods[i] - 1];
+    const pile = new Container();
+    const key = `pile:${res}:${Math.min(n, PILE_MAX)}`;
+    if (this.atlas.has(key)) pile.addChild(new Sprite(this.atlas.get(key)));
+    else {
+      for (let k = 0; k < n; k++) {
+        const s = new Sprite(this.atlas.get(`ware:${res}`));
+        s.position.set(-4 + (k % 2) * 7, 6 - Math.floor(k / 2) * 4);
+        pile.addChild(s);
+      }
+    }
+    const p = this.surface(x, y);
+    pile.position.set(p.x, p.y + 2);
+    pile.zIndex = depthOf(x, y) - 0.1;
+    this.addStatic(pile, x, y);
+    this.goodsSprites[i] = pile;
   }
 
   private syncDeposit(i: number): void {

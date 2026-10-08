@@ -9,8 +9,9 @@ import type { World } from './world';
 /**
  * Idle crowds, as in Settlers 4: a free settler (a carrier without a job, a builder or digger
  * without a site) does not vanish into a warehouse. After `IDLE_GO_HOME_TICKS` it walks to the
- * nearest warehouse, castle or house that does not already have `IDLE.groupSize` idle settlers
- * about it, and hangs about outside: every `IDLE.strollEvery` ticks it strolls to another spot
+ * nearest warehouse or house (a military building while there is none, as at the start) that does
+ * not already have `IDLE.groupSize` idle settlers about it, and hangs about outside: every
+ * `IDLE.strollEvery` ticks it strolls to another spot
  * within `IDLE.radius` of the door, or goes to stand next to another idle settler of the group to
  * chat (`chatWith`, mutual; the renderer turns them to face each other).
  *
@@ -81,10 +82,22 @@ function walk(w: World, s: Settler): void {
   if (s.stroll && s.path.length === 0) s.stroll = null;
 }
 
-function gathers(b: Building): boolean {
+type GatherKind = (typeof IDLE.gatherAt)[number];
+
+function isKind(b: Building, kinds: readonly GatherKind[]): boolean {
   const def = BUILDINGS[b.type];
+  return kinds.some((k) => (k === 'storage' ? !!def.storage : k === 'residence' ? !!def.residence : !!def.garrison));
+}
+
+/** Where idle settlers gather: `IDLE.gatherAt` and marketplaces — or, while none stands, `IDLE.fallbackAt`. */
+function gathers(b: Building): boolean {
   // Marketplaces gather a crowd too (and give a cut-off piece of land its carriers a place to wait).
-  return b.done && (!!def.market || IDLE.gatherAt.some((k) => (k === 'storage' ? !!def.storage : !!def.residence)));
+  return b.done && (!!BUILDINGS[b.type].market || isKind(b, IDLE.gatherAt) || isKind(b, IDLE.fallbackAt));
+}
+
+/** A gathering place only for want of a better one (the start tower before the first house). */
+function fallback(b: Building): boolean {
+  return !BUILDINGS[b.type].market && !isKind(b, IDLE.gatherAt);
 }
 
 function validAnchor(w: World, s: Settler, id: number | null): boolean {
@@ -111,7 +124,7 @@ function chooseAnchor(w: World, s: Settler): number | null {
   const piece = landAt(w, s, s.owner);
   for (const b of w.buildings.values()) {
     if (b.owner !== s.owner || !gathers(b)) continue;
-    const away = piece !== 0 && landOf(w, b) !== piece ? 4000 : 0;
+    const away = (piece !== 0 && landOf(w, b) !== piece ? 4000 : 0) + (fallback(b) ? 2000 : 0);
     const d = Math.hypot(s.x - b.door.x, s.y - b.door.y) + away;
     // Cheap test first: a farther building cannot beat the best even with room.
     if (d >= bestScore) continue;

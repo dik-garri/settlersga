@@ -150,11 +150,12 @@ const HOUSES: readonly BuildingType[] = ['house_small', 'house_medium', 'house_l
 const STORES = (Object.keys(BUILDINGS) as BuildingType[]).filter((t) => BUILDINGS[t].storage && BUILDINGS[t].playerBuildable);
 
 /**
- * Whether it should build a warehouse: no warehouse site open, fewer than `AI.maxStores`, and its
- * finished warehouses with a limit have fewer than `AI.storeFreePiles` piles free (goods on their way
- * count, `storage.ts`).
+ * Whether it should build a warehouse: it has none (lost it), or no warehouse site is open, it has
+ * fewer than `AI.maxStores`, and its finished warehouses with a limit have fewer than
+ * `AI.storeFreePiles` piles free (goods on their way count, `storage.ts`).
  */
 function storeWanted(own: Building[]): boolean {
+  if (!own.some((b) => BUILDINGS[b.type].storage)) return true;
   let stores = 0;
   let free = 0;
   let limited = false;
@@ -180,6 +181,10 @@ function think(w: World, ai: AiState): void {
     for (const [res, weight] of Object.entries(AI.weaponShares) as [Resource, number][]) w.setShare(res, weight, me);
     w.setRecruitLevel(AI.recruitLevel, me);
     ai.sharesSet = true;
+  }
+  // As in Settlers 4 a new warehouse takes nothing in: it ticks every good (its own building's setting).
+  for (const b of own) {
+    if (BUILDINGS[b.type].storage && !b.accept?.length) for (const r of RESOURCES) w.setAccepts(b.id, r, true, me);
   }
 
   for (const b of own) {
@@ -600,7 +605,7 @@ function prospect(ctx: Context, ai: AiState): void {
   const out = (s: (typeof w.settlers)[number]) =>
     s.kind === 'geologist' ? s.tasks.length > 0 || !!s.errand : s.tasks.some((t) => t.t === 'retool' && t.kind === 'geologist');
   if (w.settlers.some((s) => s.owner === me && out(s))) return;
-  const castle = centerOf(w.castleOf(me));
+  const home = w.homeOf(me);
   let best: Point | null = null;
   let bestD = Infinity;
   for (const i of ctx.tiles) {
@@ -608,7 +613,7 @@ function prospect(ctx: Context, ai: AiState): void {
     const y = Math.floor(i / w.map.w);
     // Walkable only: a tile under a mine would make the geologist's errand fail every time.
     if (w.map.terrain[i] !== Terrain.Mountain || !w.map.isWalkable(x, y) || w.isProspected(x, y, me)) continue;
-    const d = Math.hypot(x - castle.x, y - castle.y);
+    const d = Math.hypot(x - home.x, y - home.y);
     if (d < bestD) {
       best = { x, y };
       bestD = d;
@@ -634,25 +639,54 @@ export function knownEnemies(w: World, me: PlayerId): { b: Building; defenders: 
 }
 
 /**
- * The castle of each enemy it knows, by owner: the building that ends the game, so the target its
- * attacks work towards and its siege buildings gather around.
+ * How many of `ready` fighters (party `power`, against a defence of `defense`) to send. A decisive
+ * target — the last military building of that enemy it knows of: taking it may put him out (`DEFEAT`)
+ * — gets everything. Anything else gets what it takes with a margin (`AI.overkill`); the rest stay in
+ * their garrisons, where they defend — a party of all spares leaves its towers at their minimum, and
+ * the enemy retakes them at once.
  */
-/**
- * How many of `ready` fighters (party `power`, against a defence of `defense`) to send. The castle
- * ends the game: everything goes. Anything else gets what it takes with a margin (`AI.overkill`); the
- * rest stay in their garrisons, where they defend — a party of all spares leaves its towers at their
- * minimum, and the enemy retakes them at once.
- */
-export function partySize(ready: number, power: number, defense: number, castle: boolean, ratio = AI.attackRatio): number {
-  if (castle || ready === 0) return ready;
+export function partySize(ready: number, power: number, defense: number, decisive: boolean, ratio = AI.attackRatio): number {
+  if (decisive || ready === 0) return ready;
   const perFighter = power / ready;
   return Math.min(ready, Math.max(AI.minAttackers, Math.ceil((AI.overkill * (ratio * defense + 1)) / perFighter)));
 }
 
-function knownCastles(w: World, me: PlayerId): Map<PlayerId, Building> {
-  const out = new Map<PlayerId, Building>();
-  for (const { b } of knownEnemies(w, me)) {
-    if (b.done && w.castleOf(b.owner) === b) out.set(b.owner, b);
+/** The start position nearest to these points (start positions are public, like the map size). */
+function presumedStart(w: World, points: Point[]): Point | null {
+  let best: Point | null = null;
+  let bestD = Infinity;
+  for (const st of startPositions(w.map.w, w.players.length)) {
+    const d = Math.min(...points.map((t) => Math.hypot(t.x - st.x, t.y - st.y)));
+    if (d < bestD) {
+      bestD = d;
+      best = st;
+    }
+  }
+  return best;
+}
+
+/**
+ * The heart of each enemy it knows, by owner — what its attacks work towards and its siege gathers
+ * round. Settlers 4 has no headquarters (a player is out once none of its military buildings is
+ * occupied), so it is the enemy's known military building nearest the start position nearest that
+ * enemy's known buildings: its start tower while it stands, then whatever holds the old home. `last`:
+ * the only military building of that enemy it knows of.
+ */
+function knownCastles(w: World, me: PlayerId): Map<PlayerId, { b: Building; last: boolean }> {
+  const out = new Map<PlayerId, { b: Building; last: boolean }>();
+  const known = knownEnemies(w, me);
+  const owners = [...new Set(known.map((e) => e.b.owner))].sort((a, b) => a - b);
+  for (const o of owners) {
+    const theirs = known.filter((e) => e.b.owner === o);
+    const military = theirs.filter((e) => e.b.done && isMilitary(e.b)).map((e) => e.b);
+    if (military.length === 0) continue;
+    const start = presumedStart(w, theirs.map((e) => centerOf(e.b)))!;
+    const heart = military.reduce((a, b) => {
+      const da = Math.hypot(centerOf(a).x - start.x, centerOf(a).y - start.y);
+      const db = Math.hypot(centerOf(b).x - start.x, centerOf(b).y - start.y);
+      return db < da || (db === da && b.id < a.id) ? b : a;
+    });
+    out.set(o, { b: heart, last: military.length === 1 });
   }
   return out;
 }
@@ -697,7 +731,8 @@ function attackIfStrong(w: World, ai: AiState): boolean {
     const c = centerOf(b);
     const goal = goals.get(b.owner);
     let score = power - t.attackRatio * defense;
-    if (castles.get(b.owner) === b) score += 100;
+    const heart = castles.get(b.owner);
+    if (heart?.b === b) score += 100;
     else if (goal) score -= Math.hypot(goal.x - c.x, goal.y - c.y) * AI.depthWeight;
     // Neighbours of the same owner it knows of: they will send fighters to retake it.
     const helpers = known.filter(
@@ -711,7 +746,7 @@ function attackIfStrong(w: World, ai: AiState): boolean {
     if (score > bestScore) {
       bestScore = score;
       target = b;
-      send = partySize(ready.length, power, defense, castles.get(b.owner) === b, t.attackRatio);
+      send = partySize(ready.length, power, defense, heart?.b === b && heart.last, t.attackRatio);
     }
   }
   if (!target) return false;
@@ -727,32 +762,23 @@ function attackIfStrong(w: World, ai: AiState): boolean {
 }
 
 /**
- * Where it besieges each enemy it knows of: that enemy's castle once explored, else the castle's
- * presumed place — the start position (public, like the map size) nearest to the enemy buildings it
- * knows. The siege then pushes towards it until the castle comes into sight.
+ * Where it besieges each enemy it knows of: that enemy's heart (`knownCastles`) once one of its
+ * military buildings is explored, else its presumed home — the start position (public, like the map
+ * size) nearest to the enemy buildings it knows. The siege then pushes towards it until something
+ * there comes into sight.
  */
 export function siegeGoals(w: World, me: PlayerId): (Point & { seen: boolean; owner: PlayerId })[] {
   const known = knownEnemies(w, me);
   const castles = knownCastles(w, me);
-  const starts = startPositions(w.map.w, w.players.length);
   const owners = [...new Set(known.map((e) => e.b.owner))].sort((a, b) => a - b);
   const goals: (Point & { seen: boolean; owner: PlayerId })[] = [];
   for (const o of owners) {
-    const castle = castles.get(o);
-    if (castle) {
-      goals.push({ ...centerOf(castle), seen: true, owner: o });
+    const heart = castles.get(o);
+    if (heart) {
+      goals.push({ ...centerOf(heart.b), seen: true, owner: o });
       continue;
     }
-    const theirs = known.filter((e) => e.b.owner === o).map((e) => centerOf(e.b));
-    let best: Point | null = null;
-    let bestD = Infinity;
-    for (const st of starts) {
-      const d = Math.min(...theirs.map((t) => Math.hypot(t.x - st.x, t.y - st.y)));
-      if (d < bestD) {
-        bestD = d;
-        best = st;
-      }
-    }
+    const best = presumedStart(w, known.filter((e) => e.b.owner === o).map((e) => centerOf(e.b)));
     if (best) goals.push({ ...best, seen: false, owner: o });
   }
   return goals;
@@ -842,10 +868,10 @@ function siege(ctx: Context, ai: AiState): boolean {
  */
 function scoutIfStuck(w: World, ai: AiState, own: Building[]): void {
   const me = ai.player;
-  const castle = centerOf(w.castleOf(me));
+  const home = w.homeOf(me);
   const unseen = siegeGoals(w, me).filter((g) => !g.seen);
   const goals: Point[] = unseen.length > 0 || knownEnemies(w, me).length > 0 ? unseen : unexploredStarts(w, me);
-  const goal = goals.sort((a, b) => Math.hypot(a.x - castle.x, a.y - castle.y) - Math.hypot(b.x - castle.x, b.y - castle.y))[0];
+  const goal = goals.sort((a, b) => Math.hypot(a.x - home.x, a.y - home.y) - Math.hypot(b.x - home.x, b.y - home.y))[0];
   if (updateScout(w, ai, !!goal)) return;
   if (!goal || ai.siegeStuck === undefined || w.tick - ai.siegeStuck < AI.scoutAfter || w.tick < (ai.nextScout ?? 0)) return;
   if (!sendScout(w, ai, own, goal)) return;
@@ -883,6 +909,7 @@ class Context {
   siege: (Point & { reach: number; land: number }) | null = null;
   /** Reserved materials (`AI.reserve`) nothing of its own produces any more: towers lean towards them. */
   readonly short: Resource[];
+  /** Where it started (`Player.home`): the base keeps compact round it. */
   private readonly castle: Point;
   /**
    * Centers of the enemy buildings it knows of (fog), or else foreign land its buildings see;
@@ -903,8 +930,9 @@ class Context {
   /** Whether workshops and houses keep off the band (cleared for a retry when nothing else fits). */
   reserveBand = true;
   /**
-   * Pieces of its land it builds on (`land.ts`): those with a finished warehouse, and those a market
-   * route of its own serves — elsewhere no carrier would ever bring a site its materials.
+   * Pieces of its land it builds on (`land.ts`): the one it started on, those with a finished
+   * warehouse, and those a market route of its own serves — elsewhere no carrier would ever bring a
+   * site its materials.
    */
   private readonly pieces: Set<number>;
   /** Set while placing a market on a cut-off piece: only that piece then. */
@@ -916,7 +944,7 @@ class Context {
     readonly own: Building[],
     readonly wantOre: Resource | null = null,
   ) {
-    this.castle = centerOf(w.castleOf(me));
+    this.castle = w.homeOf(me);
     const known = knownEnemies(w, me);
     this.knowsEnemy = known.length > 0;
     this.enemies = known.length > 0 ? known.map((e) => centerOf(e.b)) : this.foreignLandInSight();
@@ -934,6 +962,9 @@ class Context {
     for (const b of own) {
       if (b.done && (BUILDINGS[b.type].storage || (BUILDINGS[b.type].market && served.has(b.id)))) this.pieces.add(landOf(w, b));
     }
+    // The land it started on: its start goods lie there (no headquarters), its carriers work there.
+    const homePiece = landAt(w, w.homeOf(me), me);
+    if (homePiece) this.pieces.add(homePiece);
   }
 
   /** Some enemy point (known building, foreign land in sight, or a start it scouts for) within `r` of `p`. */
@@ -1061,15 +1092,20 @@ class Context {
 
   /**
    * A new military building needs at least one fighter to claim land: a spare one from any military
-   * building (beyond what each keeps; empty outposts are manned from the nearest spares) or a recruit
-   * with a weapon. Only build one if every still-empty military building gets its first one too and
+   * building (beyond what each keeps; empty outposts are manned from the nearest spares), a fighter
+   * without a garrison, or a recruit with a weapon. Only build one if every still-empty military building gets its first one too and
    * `AI.homeGuard` spares remain.
    */
   canMan(type: BuildingType): boolean {
     if (!BUILDINGS[type].garrison) return true;
     const military = this.own.filter((b) => b.done && isMilitary(b));
     const empty = military.filter((b) => b.garrison.length === 0).length;
-    const spare = military.reduce((n, b) => n + Math.max(0, b.garrison.length - keepOf(b)), 0);
+    // Spares in its buildings, and fighters with no garrison yet (the start fighters its start tower
+    // has no slot for): they walk into the next one with a free slot.
+    let spare = military.reduce((n, b) => n + Math.max(0, b.garrison.length - keepOf(b)), 0);
+    for (const s of this.w.settlers) {
+      if (s.owner === this.me && isFighter(s) && s.home === null && !s.post && s.tasks.every((t) => t.t === 'wait')) spare++;
+    }
     // Weapons only turn into fighters through a barracks.
     const trains = this.own.some((b) => b.done && BUILDINGS[b.type].barracks);
     const weapons = !trains ? 0 : FIGHTERS.reduce((n, k) => n + available(this.w, this.me, PROFESSIONS[k].tool!), 0);
@@ -1181,7 +1217,7 @@ class Context {
       const enemy = Math.min(...this.enemies.map((e) => Math.hypot(e.x - cx, e.y - cy)));
       if (this.frontier) return -enemy;
       // Scouting for the other starts, or towards foreign land it sees but whose buildings it does not
-      // know yet: a line of towers towards them, not a ring around the castle.
+      // know yet: a line of towers towards them, not a ring around its home.
       if (this.scoutingStarts || this.scoutingBorder) return fromCastle * 0.3 - enemy + this.unclaimedResources(cx, cy, reach) * 0.1;
       return fromCastle - enemy * 0.4 + this.unclaimedResources(cx, cy, reach) * 0.15;
     }
@@ -1327,12 +1363,12 @@ function useSpecialists(w: World, ai: AiState, own: Building[]): void {
 
   // Thief: a known enemy store with goods, close to its land.
   if (idle >= AI.thiefIdle) {
-    const castle = centerOf(w.castleOf(me));
+    const home = w.homeOf(me);
     let target: Building | null = null;
     let best = Infinity;
     for (const { b } of knownEnemies(w, me)) {
       if (!BUILDINGS[b.type].storage || !robbable(w, b, me)) continue;
-      const d = Math.hypot(b.door.x - castle.x, b.door.y - castle.y);
+      const d = Math.hypot(b.door.x - home.x, b.door.y - home.y);
       if (d <= AI.thiefRange && d < best) {
         best = d;
         target = b;
@@ -1352,7 +1388,7 @@ function useSpecialists(w: World, ai: AiState, own: Building[]): void {
  */
 function pioneerSpots(w: World, me: PlayerId, own: Building[]): Point[] {
   const m = w.map;
-  const castle = centerOf(w.castleOf(me));
+  const home = w.homeOf(me);
   const targets = knownEnemies(w, me).length === 0 ? unexploredStarts(w, me) : [];
   const spots: { x: number; y: number; score: number }[] = [];
   for (const b of own) {
@@ -1375,7 +1411,7 @@ function pioneerSpots(w: World, me: PlayerId, own: Building[]): Point[] {
         }
       }
       const toward = targets.length ? -Math.min(...targets.map((t) => Math.hypot(t.x - x, t.y - y))) * 0.5 : 0;
-      spots.push({ x, y, score: value + toward - Math.hypot(x - castle.x, y - castle.y) * 0.1 });
+      spots.push({ x, y, score: value + toward - Math.hypot(x - home.x, y - home.y) * 0.1 });
     }
   }
   return spots.sort((a, b) => b.score - a.score || m.idx(a.x, a.y) - m.idx(b.x, b.y));

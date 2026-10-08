@@ -3,6 +3,7 @@ import { generateMap, type GameMap } from '../src/sim/map';
 import { findPath } from '../src/sim/pathfinding';
 import { Terrain } from '../src/sim/types';
 import { World } from '../src/sim/world';
+import { base } from './helpers';
 
 const isWet = (m: GameMap, i: number) => m.terrain[i] === Terrain.Water || m.terrain[i] === Terrain.Ford;
 
@@ -98,15 +99,15 @@ describe('rivers', () => {
     }
   });
 
-  it('keep the starts connected by land and leave room to build around each castle', () => {
+  it('keep the starts connected by land and leave room to build around each start', () => {
     for (const size of [64, 128, 256]) {
       for (const seed of [42, 7]) {
         const w = new World(seed, { size, players: 2 });
-        const a = w.castleOf(1);
-        const b = w.castleOf(2);
-        expect(findPath(w.map, a.door.x, a.door.y, b.door.x, b.door.y), `size ${size} seed ${seed}`).not.toBeNull();
+        const a = w.homeOf(1);
+        const b = w.homeOf(2);
+        expect(findPath(w.map, a.x, a.y, b.x, b.y), `size ${size} seed ${seed}`).not.toBeNull();
         for (const p of w.players) {
-          const c = w.castleOf(p.id);
+          const c = base(w, p.id);
           let spots = 0;
           for (let y = c.y - 9; y <= c.y + 9; y++) {
             for (let x = c.x - 9; x <= c.x + 9; x++) if (w.canPlace('woodcutter', x, y, p.id)) spots++;

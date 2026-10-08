@@ -1,4 +1,5 @@
 import { isReachable, nearestStorage } from './buildings';
+import { freeGoods, goodsOn, reserveGoods, stackTiles } from './ground';
 import { landAt, landOf } from './land';
 import { dispatchTrade, marketWants } from './trade';
 import { goldWanted, staffGarrisons, wantsRecruit, weaponsWanted } from './military';
@@ -8,6 +9,34 @@ import { RESOURCES, type Building, type PlayerId, type Point, type Resource, typ
 import type { World } from './world';
 
 const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
+
+/**
+ * Where a carrier picks a unit up: a building's pile (at its door) or goods lying on the ground
+ * (`ground.ts`, at the tile itself).
+ */
+interface Supply {
+  at: Point;
+  piece: number;
+  b?: Building;
+  tile?: number;
+}
+
+/** The player's ground stacks per good: tile, place and piece of land (built once per dispatch round). */
+type GroundIndex = Map<Resource, Supply[]>;
+
+function groundIndex(w: World, owner: PlayerId): GroundIndex {
+  const out: GroundIndex = new Map();
+  const m = w.map;
+  for (const i of stackTiles(w)) {
+    if (m.owner[i] !== owner || freeGoods(w, i) <= 0) continue;
+    const res = goodsOn(w, i)!;
+    const at = { x: i % m.w, y: Math.floor(i / m.w) };
+    let list = out.get(res);
+    if (!list) out.set(res, (list = []));
+    list.push({ at, piece: landAt(w, at, owner), tile: i });
+  }
+  return out;
+}
 
 /** Units of `res` the building still wants delivered: site materials or workshop inputs. */
 export function demand(w: World, b: Building, res: Resource): number {
@@ -58,6 +87,8 @@ function dispatchFor(w: World, owner: PlayerId): void {
   const piece = new Map<number, number>();
   for (const b of own) piece.set(b.id, landOf(w, b));
   const pieceOf = (b: Building) => piece.get(b.id)!;
+  const ground = groundIndex(w, owner);
+  const supplyOf = (res: Resource, target: Building | null) => nearestSupply(w, own, res, target, pieceOf, ground);
 
   // Staff finished workplaces; professions with a tool fetch it from the nearest pile first.
   for (const b of own) {
@@ -67,16 +98,13 @@ function dispatchFor(w: World, owner: PlayerId): void {
     if (BUILDINGS[b.type].barracks && !wantsRecruit(w, b)) continue;
     if (!hasIdle(pieceOf(b))) continue;
     const tool = PROFESSIONS[kind].tool;
-    const from = tool ? nearestSupply(w, own, tool, b, pieceOf) : undefined;
+    const from = tool ? supplyOf(tool, b) : undefined;
     if (tool && !from) continue; // waits for the toolsmith
-    const s = take(from ? from.door : b.door, pieceOf(b));
+    const s = take(from ? from.at : b.door, pieceOf(b));
     if (!s) continue;
     b.workerRequested = true;
     s.tasks = [];
-    if (from && tool) {
-      from.outReserved[tool]++;
-      s.tasks.push({ t: 'goto', x: from.door.x, y: from.door.y }, { t: 'pickup', b: from.id, res: tool });
-    }
+    if (from && tool) fetchFrom(w, s, from, tool);
     s.tasks.push({ t: 'goto', x: b.door.x, y: b.door.y }, { t: 'become', b: b.id, kind });
   }
 
@@ -88,16 +116,13 @@ function dispatchFor(w: World, owner: PlayerId): void {
   for (const kind of ORDERABLE) {
     const tool = PROFESSIONS[kind].tool;
     for (let k = workerOrder(w, owner, kind) - workersOf(w, owner, kind); k > 0; k--) {
-      const from = tool ? nearestSupply(w, own, tool, null, pieceOf) : undefined;
+      const from = tool ? supplyOf(tool, null) : undefined;
       if (tool && !from) break;
-      const at = from ?? w.castleOf(owner);
-      const s = take(at.door, piece.get(at.id) ?? landAt(w, at.door, owner));
+      // Without a tool to fetch, any free carrier will do: the first one's piece of land.
+      const s = from ? take(from.at, from.piece) : idle.length > 0 ? take(idle[0], pieceOfCarrier[0]) : undefined;
       if (!s) break;
       s.tasks = [];
-      if (from && tool) {
-        from.outReserved[tool]++;
-        s.tasks.push({ t: 'goto', x: from.door.x, y: from.door.y }, { t: 'pickup', b: from.id, res: tool });
-      }
+      if (from && tool) fetchFrom(w, s, from, tool);
       s.tasks.push({ t: 'retool', kind });
       recountWorkers(w);
     }
@@ -126,14 +151,14 @@ function dispatchFor(w: World, owner: PlayerId): void {
       const p = pieceOf(b);
       // Nothing (or nobody to carry it) on its piece of land: every consumer there waits this round,
       // those on other pieces still get served (with one piece this is the old `break`).
-      const from = nearestSupply(w, own, res, b, pieceOf);
+      const from = supplyOf(res, b);
       if (from && !hasIdle(p)) needy.add(p);
-      const s = from ? take(from.door, p) : undefined;
+      const s = from ? take(from.at, p) : undefined;
       if (!s) {
         wanting = wanting.filter((c) => pieceOf(c) !== p);
         continue;
       }
-      assignDelivery(s, from!, b, res);
+      assignDelivery(w, s, from!, b, res);
       countDelivery(eco, res, b);
       if (demand(w, b, res) <= 0) wanting.shift();
     }
@@ -150,6 +175,16 @@ function dispatchFor(w: World, owner: PlayerId): void {
     }
     return n;
   };
+  // Where no warehouse on a piece takes a good (or has room), none will later this round: room only
+  // shrinks as deliveries are assigned. Spares a search per producer when every warehouse is full.
+  const noStore = new Set<number>();
+  const storeFor = (near: Point, res: Resource, piece: number): Building | undefined => {
+    const key = piece * RESOURCES.length + RESOURCES.indexOf(res);
+    if (noStore.has(key)) return undefined;
+    const store = nearestStorage(w, owner, near, res, piece);
+    if (!store) noStore.add(key);
+    return store;
+  };
   for (const b of own) {
     if (!b.done || BUILDINGS[b.type].storage || !isReachable(w, b)) continue;
     for (const res of RESOURCES) {
@@ -159,10 +194,30 @@ function dispatchFor(w: World, owner: PlayerId): void {
           if (pieceOf(b) !== 0) needy.add(pieceOf(b));
           break;
         }
-        const store = nearestStorage(w, owner, b.door, res, pieceOf(b));
+        const store = storeFor(b.door, res, pieceOf(b));
         if (!store) break; // every warehouse on its land refuses it (or there is none): it waits at the producer
         const s = take(b.door, pieceOf(b))!;
-        assignDelivery(s, b, store, res);
+        assignDelivery(w, s, { at: b.door, piece: pieceOf(b), b }, store, res);
+        stored.set(res, storedOf(res) + 1);
+      }
+    }
+  }
+  // Goods on the ground go to a warehouse that takes them (and has room); with none they stay where
+  // they lie, a supply for sites and workshops like any pile.
+  const taken = acceptedGoods(w, owner);
+  for (const [res, stacks] of ground) {
+    if (!taken.has(res)) continue;
+    const limit = RESOURCE_INFO[res].storeLimit ?? Infinity;
+    for (const from of stacks) {
+      while (idle.length > 0 && freeGoods(w, from.tile!) > 0 && storedOf(res) < limit) {
+        if (!hasIdle(from.piece)) {
+          if (from.piece !== 0) needy.add(from.piece);
+          break;
+        }
+        const store = storeFor(from.at, res, from.piece);
+        if (!store) break;
+        const s = take(from.at, from.piece)!;
+        assignDelivery(w, s, from, store, res);
         stored.set(res, storedOf(res) + 1);
       }
     }
@@ -201,9 +256,20 @@ function stocked(b: Building, res: Resource): number {
   return (b.done ? b.input[res] : b.delivered[res]) + b.inbound[res];
 }
 
+/** Goods some finished warehouse of the player takes in (so ground stacks of other goods are not even looked at). */
+function acceptedGoods(w: World, owner: PlayerId): Set<Resource> {
+  const out = new Set<Resource>();
+  for (const b of w.buildings.values()) {
+    if (b.owner !== owner || !b.done || !BUILDINGS[b.type].storage) continue;
+    for (const r of b.accept ?? []) out.add(r);
+  }
+  return out;
+}
+
 /**
- * Nearest pile holding unpromised `res` on the same piece of land as `target` (distance from its
- * door), or any pile on land with carriers when target is null.
+ * Nearest pile or ground stack holding unpromised `res` on the same piece of land as `target`
+ * (distance from its door; ties: buildings first, then by id or tile), or any on land with carriers
+ * when target is null.
  */
 function nearestSupply(
   w: World,
@@ -211,26 +277,43 @@ function nearestSupply(
   res: Resource,
   target: Building | null,
   pieceOf: (b: Building) => number,
-): Building | undefined {
+  ground: GroundIndex,
+): Supply | undefined {
   const want = target ? pieceOf(target) : -1;
   if (want === 0) return undefined;
-  let best: Building | undefined;
+  let best: Supply | undefined;
+  let bestD = Infinity;
+  const consider = (sup: Supply) => {
+    if (sup.piece === 0 || (want > 0 && sup.piece !== want)) return;
+    const d = target ? dist(sup.at, target.door) : 0;
+    if (!best || d < bestD) {
+      best = sup;
+      bestD = d;
+    }
+  };
   for (const b of own) {
     if (b === target || !b.done || !isReachable(w, b) || b.output[res] - b.outReserved[res] <= 0) continue;
-    const p = pieceOf(b);
-    if (p === 0 || (want > 0 && p !== want)) continue;
-    if (!best || (target && dist(b.door, target.door) < dist(best.door, target.door))) best = b;
+    consider({ at: b.door, piece: pieceOf(b), b });
   }
+  for (const sup of ground.get(res) ?? []) if (freeGoods(w, sup.tile!) > 0) consider(sup);
   return best;
 }
 
-function assignDelivery(s: Settler, from: Building, to: Building, res: Resource): void {
-  from.outReserved[res]++;
+/** Reserves one unit at the supply and queues the walk there and the pickup. */
+function fetchFrom(w: World, s: Settler, from: Supply, res: Resource): void {
+  s.tasks.push({ t: 'goto', x: from.at.x, y: from.at.y });
+  if (from.b) {
+    from.b.outReserved[res]++;
+    s.tasks.push({ t: 'pickup', b: from.b.id, res });
+  } else {
+    reserveGoods(w, from.tile!);
+    s.tasks.push({ t: 'lift', x: from.at.x, y: from.at.y, res });
+  }
+}
+
+function assignDelivery(w: World, s: Settler, from: Supply, to: Building, res: Resource): void {
   to.inbound[res]++;
-  s.tasks = [
-    { t: 'goto', x: from.door.x, y: from.door.y },
-    { t: 'pickup', b: from.id, res },
-    { t: 'goto', x: to.door.x, y: to.door.y },
-    { t: 'drop', b: to.id, res },
-  ];
+  s.tasks = [];
+  fetchFrom(w, s, from, res);
+  s.tasks.push({ t: 'goto', x: to.door.x, y: to.door.y }, { t: 'drop', b: to.id, res });
 }

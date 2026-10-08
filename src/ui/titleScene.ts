@@ -5,14 +5,13 @@ import { Camera } from '../render/camera';
 import { toScreen } from '../render/iso';
 import { GameRenderer } from '../render/renderer';
 import { TICKS_PER_SECOND } from '../sim/config';
-import { centerOf } from '../sim/buildings';
 import { World } from '../sim/world';
 
 /**
  * The live scene behind the intro and the main menu: a small settlement that the computer builds up
  * by itself (player 1 played by the AI, fixed seed, no fog), fast-forwarded to `WARMUP_MINUTES` in
  * slices so the page stays responsive, then played on at normal speed. The intro flies the camera in
- * from the edge of the land (`flyIn`); afterwards it drifts slowly round the castle.
+ * from the edge of the land (`flyIn`); afterwards it drifts slowly round the start.
  */
 const SEED = 20261008;
 const SIZE = 64;
@@ -58,8 +57,7 @@ export class TitleScene {
     this.renderer = new GameRenderer(this.app, this.world, a, false);
     this.renderer.onSound = (id, x, y) => this.audio.at(id, x, y);
     this.camera = new Camera(this.renderer.world, this.renderer.bounds);
-    const c = this.world.castle;
-    const mid = centerOf(c);
+    const mid = this.world.homeOf(1);
     this.home = toScreen(mid.x, mid.y);
     this.camera.centerOn(this.home.x, this.home.y);
     this.camera.zoom = 1.1;
@@ -84,7 +82,7 @@ export class TitleScene {
     }
     if (n === 5) this.acc = 0;
     const now = performance.now();
-    // Drift: a slow ellipse round the castle; the fly-in eases from its start onto that path.
+    // Drift: a slow ellipse round the start; the fly-in eases from its start onto that path.
     const a = now / 1000 / 70;
     const drift = { x: this.home.x + Math.cos(a) * 160, y: this.home.y + Math.sin(a) * 70, zoom: 1.1 };
     let { x, y, zoom } = drift;

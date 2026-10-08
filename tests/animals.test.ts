@@ -3,6 +3,7 @@ import { habitable } from '../src/sim/animals';
 import { ANIMAL_KINDS, ANIMAL_START_CLEARANCE, ANIMALS } from '../src/sim/config';
 import { saveWorld } from '../src/sim/save';
 import { World } from '../src/sim/world';
+import { base } from './helpers';
 
 function run(w: World, ticks: number) {
   for (let i = 0; i < ticks; i++) w.step();
@@ -16,7 +17,7 @@ describe('wild animals', () => {
       for (const k of ANIMAL_KINDS) expect(kinds.has(k)).toBe(true);
       for (const a of w.animals) {
         expect(habitable(w.map, ANIMALS[a.kind], a.x, a.y)).toBe(true);
-        for (const c of w.players.map((p) => w.castleOf(p.id))) {
+        for (const c of w.players.map((p) => base(w, p.id))) {
           // Herd homes keep the clearance; members start at most 2 tiles from home.
           expect(Math.hypot(a.hx - c.x - 1, a.hy - c.y - 1)).toBeGreaterThanOrEqual(ANIMAL_START_CLEARANCE - 2);
         }

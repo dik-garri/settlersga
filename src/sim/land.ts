@@ -78,13 +78,18 @@ export function landOf(w: World, b: Building): number {
 }
 
 /**
- * Pieces of land holding a finished warehouse of their owner (castle included). Cached until the
- * buildings or the territory change.
+ * Pieces of land holding a finished warehouse of their owner, and each player's home piece (the one
+ * it started on, `Player.home`: there is no headquarters, its start goods lie on the ground there).
+ * Cached until the buildings or the territory change.
  */
 function storedPieces(w: World): Set<number> {
   ensureLand(w);
   if (w.storedPieces && w.storedPiecesAt === w.buildingsVersion) return w.storedPieces;
   const set = new Set<number>();
+  for (const p of w.players) {
+    const piece = landAt(w, p.home, p.id);
+    if (piece) set.add(piece);
+  }
   for (const b of w.buildings.values()) {
     if (b.done && BUILDINGS[b.type].storage) {
       const piece = landOf(w, b);
@@ -97,8 +102,8 @@ function storedPieces(w: World): Set<number> {
 }
 
 /**
- * Whether the building stands on land with no warehouse of its owner: carriers there have nowhere
- * to take goods from or to, only donkeys can supply it (the UI marks it).
+ * Whether the building stands on land with no warehouse of its owner (and not on its home piece):
+ * carriers there have nowhere to take goods from or to, only donkeys can supply it (the UI marks it).
  */
 export function isCutOff(w: World, b: Building): boolean {
   const piece = landOf(w, b);

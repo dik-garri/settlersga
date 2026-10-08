@@ -7,6 +7,7 @@
 import { spawnSettler } from '../src/sim/buildings';
 import { PROFESSIONS } from '../src/sim/config';
 import { pathStats } from '../src/sim/pathfinding';
+import { RESOURCES } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { arg, placeNear } from './scenario';
 
@@ -33,9 +34,15 @@ for (let cy = 12; cy < size - 8; cy += 16) {
     if (built.length > 0) clusters++;
   }
 }
-while (w.settlers.length < target) spawnSettler(w, 'carrier', w.castle);
+// No headquarters (Settlers 4): settlers come out of the start tower, a warehouse by it takes every good.
+const home = w.homeOf(1);
+const tower = w.buildingAt(home.x, home.y)!;
+const store = placeNear(w, 'warehouse', home.x + 3, home.y + 3, 12)!;
+store.done = true;
+for (const r of RESOURCES) w.setAccepts(store.id, r, true);
+while (w.settlers.length < target) spawnSettler(w, 'carrier', tower);
 // Enough tools for every workplace, so the bench measures a working economy rather than idle huts.
-for (const tool of Object.values(PROFESSIONS).map((p) => p.tool)) if (tool) w.castle.output[tool] = target;
+for (const tool of Object.values(PROFESSIONS).map((p) => p.tool)) if (tool) store.output[tool] = target;
 
 const warmup = 600;
 for (let i = 0; i < warmup; i++) w.step();

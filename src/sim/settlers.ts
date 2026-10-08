@@ -1,4 +1,5 @@
-import { isReachable, nearestStorage, recomputeTerritory } from './buildings';
+import { isReachable, recomputeTerritory } from './buildings';
+import { dropGoods, liftGoods, releaseGoods } from './ground';
 import {
   BUILD_TICKS_PER_UNIT,
   BUILDER_STALL_TICKS,
@@ -23,10 +24,10 @@ import { findPath } from './pathfinding';
 import { sameRegion } from './regions';
 import { pathSpeed, wearTile } from './paths';
 import { restIdle } from './idle';
-import { landAt } from './land';
 import { donkeyAbort, donkeyIdle, loadTick, marketOrdered, releaseLoad, unloadTick } from './trade';
 import { claimTick, geologistIdle, pioneerIdle, specialistPostIdle, stealTick, thiefIdle } from './specialists';
 import { chaseTick } from './intruders';
+import { fleeing } from './flee';
 import { findGame, huntTick, releaseHunt } from './hunting';
 import { RESOURCES, Terrain, type Building, type Point, type Resource, type Settler, type Task } from './types';
 import type { World } from './world';
@@ -102,6 +103,13 @@ export function updateSettler(w: World, s: Settler): void {
       if (!b || b.output[task.res] <= 0) return abort(w, s);
       b.output[task.res]--;
       b.outReserved[task.res]--;
+      s.carrying = task.res;
+      s.tasks.shift();
+      s.tasks.unshift({ t: 'wait', n: HANDLE_TICKS });
+      return;
+    }
+    case 'lift': {
+      if (!liftGoods(w, w.map.idx(task.x, task.y), task.res)) return abort(w, s);
       s.carrying = task.res;
       s.tasks.shift();
       s.tasks.unshift({ t: 'wait', n: HANDLE_TICKS });
@@ -354,16 +362,18 @@ function routeFailed(w: World, s: Settler): void {
 }
 
 /**
- * Cancels the settler's job and releases every reservation it still holds.
- * Goods in hand go back to the nearest warehouse; they are lost only if that trip fails too.
+ * Cancels the settler's job and releases every reservation it still holds. Goods in hand are put
+ * down on the ground where he stands (`carryBack`), as in Settlers 4.
  */
 export function abort(w: World, s: Settler): void {
-  const returning = s.tasks.some((t) => t.t === 'drop' && t.back);
   for (const task of s.tasks) {
     const b = 'b' in task ? w.buildings.get(task.b) : undefined;
     switch (task.t) {
       case 'pickup':
         if (b) b.outReserved[task.res]--;
+        break;
+      case 'lift':
+        releaseGoods(w, w.map.idx(task.x, task.y));
         break;
       case 'drop':
         if (b) b.inbound[task.res]--;
@@ -403,40 +413,18 @@ export function abort(w: World, s: Settler): void {
   s.path = [];
   if (PROFESSIONS[s.kind].behavior === 'donkey') return donkeyAbort(w, s);
   const res = s.carrying;
-  if (!res) return;
-  if (returning) {
-    // The trip back failed too.
-    w.stats.lost[res]++;
-    s.carrying = null;
-    return;
-  }
-  carryBack(w, s, res);
+  if (res) carryBack(w, s, res);
 }
 
 /**
- * The good in the settler's hands goes back to a warehouse: one that takes it and has room, on his
- * own piece of land if there is one, else anywhere; with every warehouse full (`storage.ts`) one that
- * refuses it but has room, then the nearest regardless — a good in hand is put down beyond the limit
- * rather than lost. Lost only when the player has no warehouse at all.
+ * The good in the settler's hands is put down on the ground at his feet (or as near as there is
+ * room, `ground.ts`): Settlers 4 drops a carrier's load where his job ended, and a dismissed
+ * specialist's tool falls next to him (`CSettler::ChangeType`). Carriers take it up again like any
+ * pile: for a site or workshop that wants it, or for a warehouse that takes it in.
  */
 export function carryBack(w: World, s: Settler, res: Resource): void {
-  const piece = landAt(w, s, s.owner);
-  const store =
-    (piece ? nearestStorage(w, s.owner, s, res, piece) : undefined) ??
-    nearestStorage(w, s.owner, s, res) ??
-    nearestStorage(w, s.owner, s, res, undefined, { refused: true }) ??
-    nearestStorage(w, s.owner, s, res, undefined, { full: true }) ??
-    nearestStorage(w, s.owner, s);
-  if (store) {
-    store.inbound[res]++;
-    s.tasks = [
-      { t: 'goto', x: store.door.x, y: store.door.y },
-      { t: 'drop', b: store.id, res, back: true },
-    ];
-  } else {
-    w.stats.lost[res]++;
-    s.carrying = null;
-  }
+  s.carrying = null;
+  dropGoods(w, s, res, 1);
 }
 
 function goHome(s: Settler, b: Building): void {
@@ -480,6 +468,8 @@ function setOuting(s: Settler, home: Building, target: Target, work: Task, rest:
 
 function idle(w: World, s: Settler): void {
   s.idleTicks++;
+  // Stranded on foreign land, or the player is out: wander off (and die), as in Settlers 4.
+  if (fleeing(w, s)) return;
   const prof = PROFESSIONS[s.kind];
   const home = s.home !== null ? w.buildings.get(s.home) : undefined;
 

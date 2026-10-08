@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { AI, AI_LEVELS, AI_LEVEL_IDS } from '../src/sim/config';
 import { tuning } from '../src/sim/ai';
 import { World } from '../src/sim/world';
+import type { Resource } from '../src/sim/types';
+import { groundUnits } from './helpers';
 import { saveWorld } from '../src/sim/save';
 import { AUTO_ID, gameTime, SaveSlots, type KeyValue } from '../src/ui/saves';
 import { defaultSetup, devWorldArgs, launchOf, parseSetup, setupProblem, worldArgs, type GameSetup } from '../src/ui/setup';
@@ -110,13 +112,12 @@ describe('AI difficulty', () => {
     expect(tuning({} as never)).toEqual(t('medium'));
   });
 
-  it('a hard AI starts with its bonus goods; the level survives a save', () => {
+  it('a hard AI starts with its bonus goods on the ground by its start tower; the level survives a save', () => {
     const plain = new World(4, { players: 2, ai: [2] });
     const hard = new World(4, { players: 2, ai: [2], difficulty: ['medium', 'hard'] });
-    for (const [res, n] of Object.entries(AI_LEVELS.hard.bonus)) {
-      const r = res as keyof typeof plain.castle.output;
-      expect(hard.castleOf(2).output[r] - plain.castleOf(2).output[r]).toBe(n);
-      expect(hard.castleOf(1).output[r]).toBe(plain.castleOf(1).output[r]);
+    for (const [res, n] of Object.entries(AI_LEVELS.hard.bonus) as [Resource, number][]) {
+      expect(groundUnits(hard, res, 2) - groundUnits(plain, res, 2)).toBe(n);
+      expect(groundUnits(hard, res, 1)).toBe(groundUnits(plain, res, 1));
     }
     expect(World.load(JSON.parse(JSON.stringify(saveWorld(hard)))).ai[0].level).toBe('hard');
   });

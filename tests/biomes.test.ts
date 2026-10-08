@@ -5,6 +5,7 @@ import { canPlant } from '../src/sim/nature';
 import { findPath } from '../src/sim/pathfinding';
 import { Terrain } from '../src/sim/types';
 import { World } from '../src/sim/world';
+import { base } from './helpers';
 
 function count(map: GameMap, t: Terrain): number {
   let n = 0;
@@ -52,7 +53,7 @@ describe('terrain table', () => {
 
   it('nothing is planted on desert, even inside own territory', () => {
     const w = new World(42);
-    const c = w.castle;
+    const c = base(w);
     const x = c.x + 4;
     const y = c.y - 2;
     expect(canPlant(w, 'tree', x, y, 1)).toBe(true);
@@ -116,10 +117,10 @@ describe('impassable swamp', () => {
         const players = size >= 128 ? 4 : 2;
         const w = new World(seed, { size, players });
         const m = w.map;
-        /** Tiles reachable from the first castle by terrain alone (trees and boulders can be cleared). */
+        /** Tiles reachable from the first start by terrain alone (trees and boulders can be cleared). */
         const reach = (throughSwamp: boolean) => {
           const out = new Uint8Array(m.w * m.h);
-          const start = m.idx(w.castleOf(1).door.x, w.castleOf(1).door.y);
+          const start = m.idx(w.homeOf(1).x, w.homeOf(1).y);
           const queue = [start];
           out[start] = 1;
           for (let q = 0; q < queue.length; q++) {
@@ -147,7 +148,7 @@ describe('impassable swamp', () => {
         const dry = reach(false);
         const wet = reach(true);
         for (const p of w.players) {
-          const d = w.castleOf(p.id).door;
+          const d = w.homeOf(p.id);
           expect(dry[m.idx(d.x, d.y)], `size ${size} seed ${seed} player ${p.id}`).toBe(1);
         }
         let cut = 0;

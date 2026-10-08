@@ -1,5 +1,7 @@
 import {
+  BUILD_TICKS_PER_UNIT,
   BUILDINGS,
+  costOf,
   hpOf,
   MINING,
   ORDERABLE,
@@ -10,7 +12,7 @@ import {
   type BuildingDef,
   type Recipe,
 } from './config';
-import { orderedOutput, toolMade, workerOrder, workersOf } from './economy';
+import { accepts, orderedOutput, toolMade, workerOrder, workersOf } from './economy';
 import { fightersWith, mostBehindShare } from './military';
 import {
   emptyStock,
@@ -23,6 +25,7 @@ import {
   type SettlerKind,
   type Settler,
 } from './types';
+import { groundStock } from './ground';
 import { landOf } from './land';
 import { storageRoom } from './storage';
 import { wantsDonkeys } from './trade';
@@ -128,9 +131,9 @@ export function isReachable(w: World, b: Building): boolean {
   return b.unreachableUntil <= w.tick;
 }
 
-/** Relaxations of `nearestStorage`'s rules, for goods already in a carrier's hands (`carryBack`). */
+/** Relaxations of `nearestStorage`'s rules. */
 export interface StoreRules {
-  /** Also a warehouse the player told to refuse the good. */
+  /** Also a warehouse that does not take the good in (player setting). */
   refused?: boolean;
   /** Also a warehouse with no room left for it (`storage.ts`). */
   full?: boolean;
@@ -153,7 +156,7 @@ export function nearestStorage(
   let bestD = Infinity;
   for (const b of w.buildings.values()) {
     if (b.owner !== owner || !b.done || !BUILDINGS[b.type].storage || !isReachable(w, b)) continue;
-    if (res && !rules.refused && b.refuse?.includes(res)) continue;
+    if (res && !rules.refused && !accepts(b, res)) continue;
     const d = Math.hypot(b.door.x - near.x, b.door.y - near.y);
     if (d >= bestD) continue;
     if (piece !== undefined && landOf(w, b) !== piece) continue;
@@ -173,9 +176,12 @@ function canRunRecipe(b: Building, recipe: Recipe): boolean {
   return !recipe.outputChoice || recipe.outputChoice.some((r) => b.output[r] < OUTPUT_CAP);
 }
 
-/** Units of `res` the player has lying in piles and warehouses, not yet promised to anyone. */
+/**
+ * Units of `res` the player has lying in piles, warehouses and on the ground of its land (`ground.ts`),
+ * not yet promised to anyone.
+ */
 export function available(w: World, owner: PlayerId, res: Resource): number {
-  let n = 0;
+  let n = groundStock(w, owner, res);
   for (const b of w.buildings.values()) if (b.owner === owner) n += b.output[res] - b.outReserved[res];
   return n;
 }
@@ -354,6 +360,27 @@ export function updateBuilding(w: World, b: Building): void {
     w.stats.produced[chosen]++;
     if (recipe.orderable) toolMade(w, b.owner, chosen);
   }
+}
+
+/**
+ * What a building leaves on the ground when it is removed (Settlers 4's `ReturnBuildingMaterial` and
+ * the piles at it turning loose): `share` of every material built into it, rounded down — a finished
+ * building's whole cost, a site's units its builders used (materials in `RESOURCES` order, planks
+ * before stone, as they are built in) — and, with `keepsGoods`, everything lying at it whole: its
+ * input and output piles (a warehouse's stock) and a site's delivered materials not yet built in.
+ */
+export function ruinGoods(b: Building, share: number, keepsGoods: boolean): [Resource, number][] {
+  const out = emptyStock();
+  const cost = costOf(b.type);
+  let used = b.done ? Infinity : Math.floor(b.progress / BUILD_TICKS_PER_UNIT);
+  for (const r of RESOURCES) {
+    const have = b.done ? cost[r] : b.delivered[r];
+    const built = Math.min(have, used);
+    used -= built;
+    out[r] += Math.floor(built * share);
+    if (keepsGoods) out[r] += have - built + Math.max(0, b.input[r]) + Math.max(0, b.output[r]);
+  }
+  return RESOURCES.filter((r) => out[r] > 0).map((r) => [r, out[r]]);
 }
 
 /** Whether the building currently projects territory. */

@@ -2,19 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { spawnSettler } from '../src/sim/buildings';
 import { hpOf, INTRUDERS, PROFESSIONS } from '../src/sim/config';
 import { isTarget } from '../src/sim/intruders';
-import { killSettler } from '../src/sim/military';
+import { keepOf, killSettler } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
 import type { Settler } from '../src/sim/types';
 import { World } from '../src/sim/world';
+import { startTower } from './helpers';
 
 function run(w: World, ticks: number) {
   for (let i = 0; i < ticks; i++) w.step();
 }
 
-/** A specialist of player 2 standing (idle, without errand) on player 1's land, `off` tiles from the castle door. */
+/** A specialist of player 2 standing (idle, without errand) on player 1's land, `off` tiles from its start tower's door. */
 function intruder(w: World, kind: 'pioneer' | 'geologist' | 'thief', off: number): Settler {
-  const s = spawnSettler(w, kind, w.castleOf(2));
-  const c = w.castleOf(1);
+  const s = spawnSettler(w, kind, startTower(w, 2));
+  const c = startTower(w, 1);
   s.inside = null;
   s.hp = hpOf(kind);
   s.x = s.px = c.door.x + off;
@@ -27,21 +28,21 @@ function intruder(w: World, kind: 'pioneer' | 'geologist' | 'thief', off: number
 describe('specialists on hostile land (Settlers 4)', () => {
   it('a pioneer on enemy land attracts a swordsman from a nearby garrison and dies', () => {
     const w = new World(42, { players: 2 });
-    const castle = w.castleOf(1);
-    const before = castle.garrison.length;
+    const tower = startTower(w, 1);
+    const before = tower.garrison.length;
     const p = intruder(w, 'pioneer', 3);
     run(w, 400);
     expect(w.settlers.includes(p)).toBe(false);
     expect(w.stats.intrudersKilled).toBe(1);
     // The responder goes back into a garrison afterwards.
     run(w, 600);
-    expect(castle.garrison.length).toBe(before);
+    expect(tower.garrison.length).toBe(before);
   });
 
   it('a thief is no target until a fighter of that land comes close', () => {
     const w = new World(42, { players: 2 });
-    const c = w.castleOf(1);
-    // Beyond the decloak radius of the castle door, within its response radius.
+    const c = startTower(w, 1);
+    // Beyond the decloak radius of the tower's door, within its response radius.
     const t = intruder(w, 'thief', INTRUDERS.decloakRadius + 3);
     run(w, 300);
     expect(isTarget(w, t, 1)).toBe(false);
@@ -64,9 +65,9 @@ describe('specialists on hostile land (Settlers 4)', () => {
 
   it('a garrison down to its keep sends nobody', () => {
     const w = new World(42, { players: 2 });
-    const c = w.castleOf(1);
-    // Leave only the castle's keep inside.
-    const keep = 4;
+    const c = startTower(w, 1);
+    // Leave only the tower's keep inside.
+    const keep = keepOf(c);
     for (const id of c.garrison.slice(keep)) killSettler(w, w.getSettler(id)!);
     run(w, 1);
     expect(c.garrison.length).toBe(keep);

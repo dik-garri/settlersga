@@ -8,15 +8,16 @@ import { saveWorld } from '../src/sim/save';
 import type { Building, BuildingType } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { placeNear } from '../tools/scenario';
+import { base, startTower } from './helpers';
 
 function run(w: World, ticks: number) {
   for (let i = 0; i < ticks; i++) w.step();
 }
 
-/** A spot where a building of `type` fits on buildable ground at least `minD` from the castle. */
+/** A spot where a building of `type` fits on buildable ground at least `minD` from the start. */
 function freeSpot(w: World, type: BuildingType, minD: number, maxD: number): { x: number; y: number } {
   const m = w.map;
-  const c = w.castle;
+  const c = base(w);
   const def = BUILDINGS[type];
   for (let r = minD; r <= maxD; r++) {
     for (let a = 0; a < 64; a++) {
@@ -34,11 +35,11 @@ function freeSpot(w: World, type: BuildingType, minD: number, maxD: number): { x
   throw new Error('no free spot');
 }
 
-/** A manned tower far from the castle: a second piece of the player's land, cut off from the first. */
+/** A manned tower far from the start: a second piece of the player's land, cut off from the first. */
 function outpost(w: World): Building {
   const at = freeSpot(w, 'tower', 26, 40);
   const t = addBuilding(w, 'tower', at.x, at.y, 1, true);
-  enterGarrison(w, t, spawnSettler(w, 'soldier', w.castle));
+  enterGarrison(w, t, spawnSettler(w, 'soldier', t));
   recomputeTerritory(w);
   return t;
 }
@@ -62,22 +63,23 @@ function onPiece(w: World, type: BuildingType, near: Building): Building {
 }
 
 describe('carriers work only on their own land', () => {
-  it('splits the territory into pieces and marks buildings cut off from every warehouse', () => {
+  it('splits the territory into pieces and marks buildings cut off from every warehouse and from home', () => {
     const w = new World(42);
     const t = outpost(w);
     expect(landOf(w, t)).toBeGreaterThan(0);
-    expect(landOf(w, t)).not.toBe(landOf(w, w.castle));
-    expect(isCutOff(w, w.castle)).toBe(false);
+    expect(landOf(w, t)).not.toBe(landOf(w, startTower(w)));
+    // The home piece (where the start goods lie) counts as served, though it has no warehouse.
+    expect(isCutOff(w, startTower(w))).toBe(false);
     expect(isCutOff(w, t)).toBe(true);
   });
 
-  it('delivers to sites on the castle land but not to a site on a cut-off piece', () => {
+  it('delivers to sites on the home land but not to a site on a cut-off piece', () => {
     const w = new World(42);
     const t = outpost(w);
     const far = onPiece(w, 'woodcutter', t);
     far.done = false;
     far.levelled = true;
-    const near = placeNear(w, 'woodcutter', w.castle.x + 5, w.castle.y + 3)!;
+    const near = placeNear(w, 'woodcutter', base(w).x + 5, base(w).y + 3)!;
     run(w, 3000);
     expect(near.delivered.plank + (near.done ? 1 : 0)).toBeGreaterThan(0);
     expect(far.delivered.plank).toBe(0);
@@ -86,15 +88,15 @@ describe('carriers work only on their own land', () => {
 });
 
 describe('donkeys and marketplaces', () => {
-  /** Two markets — one by the castle, one on a cut-off piece — and two donkeys. */
+  /** Two markets — one by the start, one on a cut-off piece — and two donkeys. */
   function caravan() {
     const w = new World(42);
     const t = outpost(w);
-    const home = placeNear(w, 'market', w.castle.x + 5, w.castle.y - 2)!;
+    const home = placeNear(w, 'market', base(w).x + 5, base(w).y - 2)!;
     home.done = true;
     home.levelled = true;
     const away = onPiece(w, 'market', t);
-    for (let i = 0; i < 2; i++) spawnSettler(w, 'donkey', w.castle);
+    for (let i = 0; i < 2; i++) spawnSettler(w, 'donkey', startTower(w));
     return { w, t, home, away };
   }
 
@@ -173,15 +175,15 @@ describe('donkeys and marketplaces', () => {
 
   it('a donkey ranch breeds only while the markets want more donkeys', () => {
     const w = new World(42);
-    const ranch = placeNear(w, 'donkeyranch', w.castle.x + 5, w.castle.y + 3)!;
+    const ranch = placeNear(w, 'donkeyranch', base(w).x + 5, base(w).y + 3)!;
     ranch.done = true;
     ranch.levelled = true;
-    w.castle.output.grain = 20;
-    w.castle.output.water = 20;
+    startTower(w).output.grain = 20;
+    startTower(w).output.water = 20;
     run(w, 3000);
     const donkeys = () => w.settlers.filter((s) => s.kind === 'donkey').length;
     expect(donkeys()).toBe(0); // no market: no donkeys
-    const m = placeNear(w, 'market', w.castle.x - 5, w.castle.y + 3)!;
+    const m = placeNear(w, 'market', base(w).x - 5, base(w).y + 3)!;
     m.done = true;
     m.levelled = true;
     w.buildingsVersion++;
@@ -213,8 +215,9 @@ describe('donkeys and marketplaces', () => {
 
   it('rejects routes to other players’ buildings or to non-markets', () => {
     const { w, home } = caravan();
-    expect(w.setTradeRoute(home.id, w.castle.id)).toBe(false);
+    expect(w.setTradeRoute(home.id, startTower(w).id)).toBe(false);
     expect(w.setTradeRoute(home.id, home.id)).toBe(false);
-    expect(w.setTradeRoute(w.castle.id, home.id)).toBe(false);
+    expect(w.setTradeRoute(startTower(w).id, home.id)).toBe(false);
+    expect(w.setTradeRoute(home.id, startTower(w, 1).id, 2)).toBe(false);
   });
 });

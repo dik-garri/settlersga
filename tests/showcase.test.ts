@@ -6,7 +6,7 @@ import { pathLevel } from '../src/sim/paths';
 import type { BuildingType } from '../src/sim/types';
 
 describe('dev showcase (?demo)', () => {
-  it('shows every building finished, frozen construction stages and goods piles', () => {
+  it('shows every building finished, frozen construction stages and goods piles, also on the ground', () => {
     const w = buildShowcase();
     const all = [...w.buildings.values()];
     const frozen = (b: (typeof all)[number]) => b.unreachableUntil > 1e15;
@@ -36,6 +36,8 @@ describe('dev showcase (?demo)', () => {
     expect(w.settlers.some((s) => s.kind === 'donkey' && s.tasks.length > 0)).toBe(true);
     expect(w.settlers.some((s) => s.kind === 'donkey' && s.carrying !== null)).toBe(true);
     expect(all.some((b) => b.owner === 1 && isCutOff(w, b))).toBe(true);
+    // Goods lying on the ground (Settlers 4's piles: start goods, ruins), several kinds of them.
+    expect(new Set([...w.stacks].map((i) => w.map.goods[i])).size).toBeGreaterThanOrEqual(4);
     // A field squad stands round its leader (direct army control).
     const leader = w.settlers.find((s) => s.kind === 'leader' && s.post);
     expect(leader).toBeDefined();

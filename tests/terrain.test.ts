@@ -45,7 +45,7 @@ describe('terrain heights', () => {
     }
   });
 
-  it('level the castle meadow', () => {
+  it('level the start meadow', () => {
     for (const seed of [42, 7, 999]) {
       const map = generateMap(seed, 64, [{ x: 32, y: 32 }]);
       expect(map.heightRange(28, 28, 36, 36)).toBeLessThanOrEqual(1);

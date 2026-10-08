@@ -3,9 +3,10 @@ import { FIELD, ORDERABLE, PIONEER, PROFESSIONS, PROSPECT_RADIUS, PROSPECT_TICKS
 import { recountWorkers, workerOrder, workersOf } from './economy';
 import { restIdle } from './idle';
 import { formationSpots } from './field';
+import { freeGoods, goodsOn, reserveGoods, stackTiles } from './ground';
 import { sameRegion } from './regions';
 import { abort, carryBack } from './settlers';
-import { RESOURCES, Terrain, type Building, type PlayerId, type Resource, type Settler, type SettlerKind, type Task } from './types';
+import { RESOURCES, Terrain, type Building, type PlayerId, type Point, type Resource, type Settler, type SettlerKind, type Task } from './types';
 import type { World } from './world';
 
 /**
@@ -148,9 +149,9 @@ export function dismissSpecialist(w: World, kind: Settler['kind'], player: Playe
 }
 
 /**
- * An orderable worker (geologist, pioneer, thief…) turns back into a carrier and brings his tool back to
- * a warehouse (`carryBack`); the order drops by one unless `lowerOrder` is false (a geologist sent
- * without one ordered, `geologistIdle`).
+ * An orderable worker (geologist, pioneer, thief…) turns back into a carrier and puts his tool down on
+ * the ground next to him (`carryBack`, Settlers 4's `CSettler::ChangeType`); the order drops by one
+ * unless `lowerOrder` is false (a geologist sent without one ordered, `geologistIdle`).
  */
 function toCarrier(w: World, s: Settler, player: PlayerId, lowerOrder = true): void {
   const kind = s.kind;
@@ -257,14 +258,32 @@ export function prospectTiles(w: World, x: number, y: number, player: PlayerId):
   return tiles.sort((a, b) => a.d - b.d).slice(0, PROSPECT_TILES);
 }
 
-/** The player's pile with a free geologist's tool nearest to (x, y). */
-export function toolPileNear(w: World, player: PlayerId, x: number, y: number): Building | undefined {
+/**
+ * The player's pile with a free geologist's tool nearest to (x, y): a building's (at its door) or
+ * goods lying on the ground of its land (`ground.ts`; the start goods, as in Settlers 4).
+ */
+export function toolPileNear(w: World, player: PlayerId, x: number, y: number): { at: Point; b?: Building; tile?: number } | undefined {
   const tool = PROFESSIONS.geologist.tool;
   if (!tool) return undefined;
-  let from: Building | undefined;
+  let from: { at: Point; b?: Building; tile?: number } | undefined;
+  let best = Infinity;
   for (const b of w.buildings.values()) {
     if (b.owner !== player || !b.done || b.output[tool] - b.outReserved[tool] <= 0) continue;
-    if (!from || Math.hypot(b.door.x - x, b.door.y - y) < Math.hypot(from.door.x - x, from.door.y - y)) from = b;
+    const d = Math.hypot(b.door.x - x, b.door.y - y);
+    if (d < best) {
+      from = { at: b.door, b };
+      best = d;
+    }
+  }
+  const m = w.map;
+  for (const i of stackTiles(w)) {
+    if (m.owner[i] !== player || goodsOn(w, i) !== tool || freeGoods(w, i) <= 0) continue;
+    const at = { x: i % m.w, y: Math.floor(i / m.w) };
+    const d = Math.hypot(at.x - x, at.y - y);
+    if (d < best) {
+      from = { at, tile: i };
+      best = d;
+    }
   }
   return from;
 }
@@ -293,7 +312,7 @@ export function sendGeologist(w: World, x: number, y: number, player: PlayerId):
   const tool = PROFESSIONS.geologist.tool;
   const from = tool ? toolPileNear(w, player, x, y) : undefined;
   if (tool && !from) return false;
-  const near = from ? from.door : { x, y };
+  const near = from ? from.at : { x, y };
   let best: Settler | undefined;
   for (const s of w.settlers) {
     if (s.owner !== player || s.kind !== 'carrier' || s.tasks.length > 0 || w.dying.has(s.id)) continue;
@@ -302,8 +321,14 @@ export function sendGeologist(w: World, x: number, y: number, player: PlayerId):
   if (!best) return false;
   best.tasks = [];
   if (from && tool) {
-    from.outReserved[tool]++;
-    best.tasks.push({ t: 'goto', x: from.door.x, y: from.door.y }, { t: 'pickup', b: from.id, res: tool });
+    best.tasks.push({ t: 'goto', x: from.at.x, y: from.at.y });
+    if (from.b) {
+      from.b.outReserved[tool]++;
+      best.tasks.push({ t: 'pickup', b: from.b.id, res: tool });
+    } else {
+      reserveGoods(w, from.tile!);
+      best.tasks.push({ t: 'lift', x: from.at.x, y: from.at.y, res: tool });
+    }
   }
   best.tasks.push({ t: 'retool', kind: 'geologist', errand: { x, y } });
   recountWorkers(w);

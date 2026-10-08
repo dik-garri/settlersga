@@ -7,6 +7,7 @@ import { enterGarrison, isFighter, killSettler } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
 import type { Building, BuildingType } from '../src/sim/types';
 import { World } from '../src/sim/world';
+import { startTower } from './helpers';
 
 const MINUTE = 600;
 const LONG = 120_000;
@@ -15,10 +16,10 @@ function run(w: World, ticks: number) {
   for (let i = 0; i < ticks; i++) w.step();
 }
 
-/** A manned tower of `p` far from its castle: land cut off from its warehouses. */
+/** A manned tower of `p` far from its start tower: land cut off from its home and warehouses. */
 function outpost(w: World, p: number): Building {
   const m = w.map;
-  const c = w.castleOf(p);
+  const c = startTower(w, p);
   const def = BUILDINGS.tower;
   for (let r = 26; r <= 40; r++) {
     for (let a = 0; a < 64; a++) {
@@ -65,11 +66,12 @@ describe('computer player: markets for cut-off land', () => {
     const mine = onPiece(w, 'woodcutter', t);
     const empty = onPiece(w, 'sawmill', t);
     empty.done = false; // a site nothing reaches: demolished after two checks
-    const castle = w.castleOf(1);
-    castle.output.plank += 30;
-    castle.output.stone += 30;
-    castle.output.grain += 20;
-    castle.output.water += 20;
+    // Goods at home (a pile at the start tower's door, as any producer's): no headquarters.
+    const home0 = startTower(w, 1);
+    home0.output.plank += 30;
+    home0.output.stone += 30;
+    home0.output.grain += 20;
+    home0.output.water += 20;
     expect(isCutOff(w, mine)).toBe(true);
     const ai = w.ai[0];
     const market = () => [...w.buildings.values()].filter((b) => b.owner === 1 && b.type === 'market');
@@ -97,12 +99,12 @@ describe('computer player: markets for cut-off land', () => {
 });
 
 describe('computer player: field orders', () => {
-  /** Player 1's fighters standing in the field on the edge of player 2's land, in its castle's sight. */
+  /** Player 1's fighters standing in the field on the edge of player 2's land, in its start tower's sight. */
   function intruders(w: World, n: number) {
-    const c2 = w.castleOf(2);
+    const c2 = startTower(w, 2);
     const out = [];
     for (let k = 0; k < n; k++) {
-      const s = spawnSettler(w, 'soldier', w.castleOf(1));
+      const s = spawnSettler(w, 'soldier', startTower(w, 1));
       s.inside = null;
       s.home = null;
       s.x = s.px = c2.door.x + 4 + (k % 2);
@@ -115,7 +117,8 @@ describe('computer player: field orders', () => {
 
   it('meets enemy field units near its land with a field squad, then goes back inside', () => {
     const w = new World(42, { players: 2, ai: [2] });
-    const c2 = w.castleOf(2);
+    const c2 = startTower(w, 2);
+    // Extra swordsmen inside (test setup beyond the tower's slots; in play a fortress would hold them).
     for (let k = 0; k < 6; k++) enterGarrison(w, c2, spawnSettler(w, 'soldier', c2));
     const enemy = intruders(w, 2);
     // Keep them from walking off or fighting back for the check.
@@ -147,12 +150,13 @@ describe('computer player: field orders', () => {
     for (const s of intruders(w, 12)) s.hp = 1e9;
     run(w, AI.thinkEvery * 2);
     expect(w.ai[0].defense).toBeUndefined();
-    expect(w.settlers.filter((s) => s.owner === 2 && isFighter(s) && s.inside === null)).toEqual([]);
+    // Nobody sent out into the field (the start fighters the tower has no slot for stand by it).
+    expect(w.settlers.filter((s) => s.owner === 2 && isFighter(s) && s.post)).toEqual([]);
   });
 
   it('takes its squad leader along when he is among the spares, and the squad forms round him', () => {
     const w = new World(42, { players: 2, ai: [2] });
-    const c2 = w.castleOf(2);
+    const c2 = startTower(w, 2);
     for (const s of w.settlers.filter((q) => q.owner === 2 && isFighter(q))) killSettler(w, s);
     w.step();
     const join = (kind: 'soldier' | 'leader') => {
@@ -163,7 +167,7 @@ describe('computer player: field orders', () => {
     for (let k = 0; k < 4; k++) join('soldier');
     const leader = join('leader');
     for (let k = 0; k < 4; k++) join('soldier');
-    // An enemy tower a walk away from the castle.
+    // An enemy tower a walk away from the start tower.
     const def = BUILDINGS.tower;
     let target: Building | undefined;
     for (let r = 16; r < 26 && !target; r++) {
@@ -177,7 +181,7 @@ describe('computer player: field orders', () => {
         if (ok) target = addBuilding(w, 'tower', x, y, 1, true);
       }
     }
-    enterGarrison(w, target!, spawnSettler(w, 'soldier', w.castleOf(1)));
+    enterGarrison(w, target!, spawnSettler(w, 'soldier', startTower(w, 1)));
     const ai = w.ai[0];
     expect(stageStrike(w, ai, target!, 3)).toBe(5);
     expect(ai.strike!.ids).toContain(leader.id);

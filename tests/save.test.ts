@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { saveWorld } from '../src/sim/save';
 import { World } from '../src/sim/world';
+import { base, startTower } from './helpers';
 
 function placeNear(world: World, type: Parameters<World['canPlace']>[0], dx: number, dy: number) {
-  const c = world.castle;
+  const c = base(world);
   let best: { x: number; y: number } | null = null;
   let bestD = Infinity;
   for (let y = 0; y < world.map.h; y++) {
@@ -49,7 +50,7 @@ describe('save / load', () => {
   it('supports other map sizes', () => {
     const big = new World(5, { size: 128 });
     expect(big.map.w).toBe(128);
-    const c = big.castle;
+    const c = startTower(big);
     expect(Math.abs(c.x + 1 - 64)).toBeLessThanOrEqual(1);
     run(big, 200);
     const loaded = World.load(saveWorld(big));

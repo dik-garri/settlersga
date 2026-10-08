@@ -1,13 +1,17 @@
 import { wareIcon } from '../render/atlas';
 import { BUILDINGS, RESOURCE_GROUPS, RESOURCE_INFO, type ResourceGroup } from '../sim/config';
+import { groundStock } from '../sim/ground';
 import { RESOURCES, type Resource } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { button, el, type View } from './dom';
 import { DistributionView } from './economyPanel';
 
-/** Total of `res` in the local player's warehouses. */
+/**
+ * Total of `res` in the local player's warehouses and lying on the ground of its land (the start
+ * goods, ruins: Settlers 4 has no headquarters).
+ */
 export function inStorage(world: World, res: Resource): number {
-  let n = 0;
+  let n = groundStock(world, LOCAL_PLAYER, res);
   for (const b of world.buildings.values()) {
     if (b.owner === LOCAL_PLAYER && BUILDINGS[b.type].storage) n += b.output[res];
   }
@@ -16,7 +20,8 @@ export function inStorage(world: World, res: Resource): number {
 
 /**
  * The goods menu (Settlers 4's goods and production overviews): every good in the player's
- * warehouses by group, and on the second page the distribution of goods between consumers.
+ * warehouses and on the ground of its land by group, and on the second page the distribution of
+ * goods between consumers.
  */
 export class GoodsView implements View {
   readonly el = el('div', 'view goods-view');
@@ -44,7 +49,7 @@ export class GoodsView implements View {
     }
     const pages = el('div', 'page-tabs');
     this.pageButtons = {
-      stock: button('Склад', 'Все товары на складах', () => this.show('stock')),
+      stock: button('Склад', 'Все товары на складах и на земле', () => this.show('stock')),
       distribution: button('Распределение', 'Кому сколько товара', () => this.show('distribution')),
     };
     pages.append(this.pageButtons.stock, this.pageButtons.distribution);

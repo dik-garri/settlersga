@@ -306,7 +306,7 @@ export class Hud {
     this.endEl.innerHTML = '';
     this.endEl.append(
       el('h2', outcome === 'won' ? 'won' : 'lost', outcome === 'won' ? 'Победа!' : 'Поражение'),
-      el('p', '', outcome === 'won' ? 'Все замки противников взяты.' : 'Ваш замок захвачен.'),
+      el('p', '', outcome === 'won' ? 'У противников не осталось ни одной занятой башни.' : 'У вас не осталось ни одной занятой башни.'),
       rowsTable(rows),
     );
     const actions = el('div', 'info-actions');

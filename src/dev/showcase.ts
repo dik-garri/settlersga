@@ -4,6 +4,7 @@ import { clearStrokes } from '../sim/digging';
 import { ENDLESS } from '../sim/economy';
 import { formationSpots } from '../sim/field';
 import { enterGarrison } from '../sim/military';
+import { dropGoods } from '../sim/ground';
 import { RESOURCES, Terrain, type Building, type BuildingType, type Resource } from '../sim/types';
 import { LOCAL_PLAYER, World } from '../sim/world';
 
@@ -62,7 +63,7 @@ function placeFor(w: World, type: BuildingType, owner: number, x: number, y: num
 /** An own tile next to neutral land, on the side away from the other player (where to send a pioneer). */
 function borderTile(w: World, cx: number, cy: number): { x: number; y: number } | null {
   const m = w.map;
-  const away = w.castleOf(2);
+  const away = w.homeOf(2);
   let best: { x: number; y: number } | null = null;
   let bestD = -Infinity;
   for (let y = 1; y < m.h - 1; y++) {
@@ -88,7 +89,7 @@ function outpost(w: World, cx: number, cy: number): Building | null {
   const m = w.map;
   const def = BUILDINGS.tower;
   const reach = (def.territory ?? 0) + 2;
-  const rival = w.castleOf(2);
+  const rival = w.homeOf(2);
   const base = Math.atan2(cy - rival.y, cx - rival.x);
   for (let r = 30; r <= 50; r++) {
     for (let k = 0; k < 32; k++) {
@@ -104,7 +105,7 @@ function outpost(w: World, cx: number, cy: number): Building | null {
       }
       if (!ok) continue;
       const t = addBuilding(w, 'tower', x, y, LOCAL_PLAYER, true);
-      enterGarrison(w, t, spawnSettler(w, 'soldier', w.castle));
+      enterGarrison(w, t, spawnSettler(w, 'soldier', t));
       recomputeTerritory(w);
       return t;
     }
@@ -138,15 +139,24 @@ function run(w: World, ticks: number): void {
 export function buildShowcase(): World {
   // A second, passive player far away: someone for the thief to rob.
   const w = new World(SHOWCASE_SEED, { size: SIZE, players: 2 });
-  const c = w.castle;
-  // The start position (the castle's footprint centre, rounded).
+  // No headquarters (Settlers 4): the start tower, its goods on the ground round it.
+  const home = w.homeOf(LOCAL_PLAYER);
+  const c = w.buildingAt(home.x, home.y)!;
+  // The start position (the tower's footprint centre, rounded).
   const cx = Math.round(c.x + (c.w - 1) / 2);
   const cy = Math.round(c.y + (c.h - 1) / 2);
-  // Plenty of everything, so every building gets built and staffed.
-  for (const r of RESOURCES) c.output[r] += 40;
-  c.output.plank += 400;
-  c.output.stone += 400;
-  for (let i = 0; i < 48; i++) enterGarrison(w, c, spawnSettler(w, 'soldier', c));
+  // Plenty of everything in a warehouse that takes every good, so every building gets built and staffed.
+  const depot = placeNear(w, 'warehouse', cx + 4, cy + 5, true);
+  if (depot) {
+    for (const r of RESOURCES) {
+      w.setAccepts(depot.id, r, true);
+      depot.output[r] += 40;
+    }
+    depot.output.plank += 400;
+    depot.output.stone += 400;
+  }
+  // Fighters with no garrison yet: they man the towers as they are finished.
+  for (let i = 0; i < 48; i++) spawnSettler(w, 'soldier', c).inside = null;
   for (let i = 0; i < 64; i++) spawnSettler(w, 'carrier', c);
   for (let i = 0; i < 4; i++) spawnSettler(w, 'digger', c);
   // Builders and diggers come only as ordered (as in Settlers 4): order plenty.
@@ -172,7 +182,7 @@ export function buildShowcase(): World {
   }
   run(w, 5000);
 
-  // Every building type, finished and staffed, in a ring around the castle.
+  // Every building type, finished and staffed, in a ring around the start.
   const types = (Object.keys(BUILDINGS) as BuildingType[]).filter((t) => BUILDINGS[t].playerBuildable && t !== 'tower');
   types.forEach((type, k) => {
     const a = (k / types.length) * Math.PI * 2;
@@ -270,7 +280,7 @@ export function buildShowcase(): World {
     pioneer.inside = null;
     w.sendPioneer(edge.x, edge.y);
   }
-  const other = w.castleOf(2);
+  const other = w.homeOf(2);
   const store = placeFor(w, 'warehouse', 2, other.x + 8, other.y + 6);
   const thief = w.settlers.find((s) => s.kind === 'thief');
   if (store && thief) {
@@ -287,23 +297,29 @@ export function buildShowcase(): World {
   }
   // Trade (Settlers 4 logistics): a manned tower out on its own beyond the border — land cut off from
   // every warehouse, marked as such — with a market of its own; donkeys carry planks and stone there
-  // from the market by the castle, and a site on that land is built with what they bring.
-  const home = [...w.buildings.values()].find((b) => b.type === 'market' && b.done);
-  const post = home ? outpost(w, cx, cy) : null;
+  // from the market by the start, and a site on that land is built with what they bring.
+  const market = [...w.buildings.values()].find((b) => b.type === 'market' && b.done);
+  const post = market ? outpost(w, cx, cy) : null;
   const away = post ? placeFor(w, 'market', LOCAL_PLAYER, post.x + 3, post.y + 2) : null;
-  if (home && away) {
-    w.setTradeRoute(home.id, away.id);
-    w.orderTrade(home.id, 'plank', ENDLESS);
-    w.orderTrade(home.id, 'stone', ENDLESS);
+  if (market && away) {
+    w.setTradeRoute(market.id, away.id);
+    w.orderTrade(market.id, 'plank', ENDLESS);
+    w.orderTrade(market.id, 'stone', ENDLESS);
     // The first loads already waiting: at the walking pace carriers would take minutes to bring them.
-    home.input.plank += 8;
-    home.input.stone += 8;
-    for (let k = 0; k < 3; k++) spawnSettler(w, 'donkey', home);
+    market.input.plank += 8;
+    market.input.stone += 8;
+    for (let k = 0; k < 3; k++) spawnSettler(w, 'donkey', market);
     const site = placeNear(w, 'woodcutter', away.x + 2, away.y - 3);
     if (site) {
       site.levelled = true;
       site.dug = clearStrokes(site);
     }
+  }
+  // Goods on the ground (Settlers 4's piles: the start goods, ruins): a burnt hut's goods on that
+  // cut-off land — no warehouse there takes them and no site wants them, so they stay to be seen.
+  if (post) {
+    const at = { x: post.door.x - 3, y: post.door.y + 2 };
+    (['fish', 'coal', 'iron', 'sword', 'axe', 'bread', 'gold', 'ironore'] as Resource[]).forEach((r, k) => dropGoods(w, at, r, 1 + ((k * 3) % 8)));
   }
   // A field squad round its leader (direct army control): it marches out and stands in formation.
   const squad = (['leader', 'soldier', 'soldier', 'soldier', 'soldier', 'archer', 'archer'] as const).map((kind) => {
@@ -316,8 +332,10 @@ export function buildShowcase(): World {
   const open = openGround(w, c.door.x - 5, c.door.y + 5);
   const field = formationSpots(w, open.x, open.y, 1)[0];
   if (field) w.orderMove(squad, field.x, field.y);
-  // A few wounded in the castle: they walk to the infirmary and lie there while the demo opens.
-  for (const id of c.garrison.slice(0, 3)) {
+  // A few wounded in the start tower and the first towers: they walk to the infirmary and lie there
+  // while the demo opens.
+  const garrisons = [...w.buildings.values()].filter((b) => b.owner === LOCAL_PLAYER && b.garrison.length > 1);
+  for (const id of garrisons.slice(0, 3).map((b) => b.garrison[b.garrison.length - 1])) {
     const s = w.getSettler(id);
     if (s) s.hp = 8;
   }

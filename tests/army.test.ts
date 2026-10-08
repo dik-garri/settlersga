@@ -1,20 +1,22 @@
 import { attackStrength, defenceStrength } from '../src/sim/strength';
 import { describe, expect, it } from 'vitest';
 import { centerOf, spawnSettler } from '../src/sim/buildings';
-import { BUILDINGS, PROFESSIONS, START_SOLDIERS } from '../src/sim/config';
+import { BUILDINGS, PROFESSIONS } from '../src/sim/config';
 import { enterGarrison, isFighter, keepOf, killSettler, maxHp } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
 import type { Building, Settler } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { placeNear } from '../tools/scenario';
+import { base, startTower } from './helpers';
 
 function run(world: World, ticks: number) {
   for (let i = 0; i < ticks; i++) world.step();
 }
 
+/** Materials and iron on every start tower's pile (test setup; a plain supply pile). */
 function rich(w: World) {
   for (const p of w.players) {
-    const c = w.castleOf(p.id);
+    const c = startTower(w, p.id);
     c.output.plank = 120;
     c.output.stone = 80;
     c.output.iron = 10;
@@ -34,7 +36,7 @@ function station(w: World, b: Building, kind: 'soldier' | 'archer'): Settler {
 /** Two players, each with a finished military building of `type` built towards the other. */
 function frontLine(type: 'tower' | 'bigtower' = 'tower') {
   const w = rich(new World(42, { players: 2 }));
-  const [a, b] = [w.castleOf(1), w.castleOf(2)];
+  const [a, b] = [startTower(w, 1), startTower(w, 2)];
   const ca = centerOf(a);
   const cb = centerOf(b);
   const toward = (from: { x: number; y: number }, to: { x: number; y: number }, k: number) => ({
@@ -52,28 +54,32 @@ function frontLine(type: 'tower' | 'bigtower' = 'tower') {
 }
 
 describe('defence', () => {
-  it('the castle never gives away the fighters it keeps, neither to man towers nor to attack', () => {
+  it('a military building never gives away the fighters it keeps, neither to man towers nor to attack', () => {
     const w = rich(new World(42, { players: 2 }));
-    const c = w.castle;
-    expect(c.garrison.length).toBe(START_SOLDIERS);
-    expect(keepOf(c)).toBe(BUILDINGS.castle.garrison!.keep);
+    const c = startTower(w);
+    // Only the start tower's own garrison: the start fighters standing by it are taken out (setup).
+    for (const s of w.settlers.filter((x) => x.owner === 1 && isFighter(x) && x.home === null)) killSettler(w, s);
+    w.step();
+    expect(c.garrison.length).toBe(BUILDINGS.tower.garrison!.capacity);
+    expect(keepOf(c)).toBe(BUILDINGS.tower.garrison!.keep);
     // Many towers and no weapons: only the spares beyond `keep` may leave.
+    const o = base(w);
     for (const [dx, dy] of [
       [5, -4],
       [-5, -4],
       [-5, 4],
       [5, 4],
     ]) {
-      placeNear(w, 'tower', c.x + dx, c.y + dy, 4);
+      placeNear(w, 'tower', o.x + dx, o.y + dy, 4);
     }
     for (let i = 0; i < 4000; i++) {
       w.step();
       expect(c.garrison.length).toBeGreaterThanOrEqual(keepOf(c));
     }
-    const manned = [...w.buildings.values()].filter((b) => b.type === 'tower' && b.garrison.length > 0).length;
-    expect(manned).toBe(START_SOLDIERS - keepOf(c));
-    // Nothing left to send against the enemy castle from here.
-    expect(w.attackerComposition(w.castleOf(2).id, 99).filter((s) => s.home === c.id)).toHaveLength(0);
+    const manned = [...w.buildings.values()].filter((b) => b.type === 'tower' && b.owner === 1 && b !== c && b.garrison.length > 0).length;
+    expect(manned).toBe(BUILDINGS.tower.garrison!.capacity - keepOf(c));
+    // Nothing left to send against the enemy start tower from here.
+    expect(w.attackerComposition(startTower(w, 2).id, 99).filter((s) => s.home === c.id)).toHaveLength(0);
   });
 
   it('in a duel at the door both strike on their own timers, each at his fighting strength', () => {
@@ -106,9 +112,9 @@ describe('defence', () => {
 });
 
 describe('no promotion', () => {
-  it('gold in the castle no longer raises the fighters inside: a level is bought at the barracks', () => {
+  it('gold at a military building does not raise the fighters inside: a level is bought at the barracks', () => {
     const w = rich(new World(42));
-    const c = w.castle;
+    const c = startTower(w);
     c.output.gold = 4;
     run(w, 1500);
     expect(fighters(w, c).every((s) => s.level === 0)).toBe(true);
@@ -155,10 +161,12 @@ describe('archers', () => {
 describe('military buildings', () => {
   it('big towers and fortresses hold more fighters and claim more land than towers', () => {
     const w = rich(new World(42));
-    const c = w.castle;
-    for (let i = 0; i < 10; i++) station(w, c, 'soldier');
-    const big = placeNear(w, 'bigtower', c.x + 7, c.y - 3, 5)!;
-    const fort = placeNear(w, 'fortress', c.x - 7, c.y + 3, 6)!;
+    const c = startTower(w);
+    // Swordsmen standing by, to man the new buildings (test setup).
+    for (let i = 0; i < 10; i++) spawnSettler(w, 'soldier', c).inside = null;
+    const o = base(w);
+    const big = placeNear(w, 'bigtower', o.x + 7, o.y - 3, 5)!;
+    const fort = placeNear(w, 'fortress', o.x - 7, o.y + 3, 6)!;
     expect(big && fort).toBeTruthy();
     run(w, 5000);
     expect(big.done && fort.done).toBe(true);

@@ -3,25 +3,32 @@ import { PROFESSIONS } from '../src/sim/config';
 import { ENDLESS } from '../src/sim/economy';
 import { World } from '../src/sim/world';
 import { placeNear } from '../tools/scenario';
+import { clearGround, startTower } from './helpers';
 
 function run(world: World, ticks: number) {
   for (let i = 0; i < ticks; i++) world.step();
 }
 
+/**
+ * No start goods on the ground (their tools would spoil the counts): planks and stone on the start
+ * tower's pile instead, a plain supply pile the tests stock as needed.
+ */
 function richWorld(seed = 42): World {
   const w = new World(seed);
-  w.castle.output.plank = 80;
-  w.castle.output.stone = 40;
+  clearGround(w);
+  startTower(w).output.plank = 80;
+  startTower(w).output.stone = 40;
   return w;
 }
 
 describe('smelting', () => {
   it('turns ore and coal into metal bars', () => {
     const w = richWorld();
-    const c = w.castle;
+    const c = startTower(w);
     const smelter = placeNear(w, 'ironsmelter', c.x + 5, c.y + 3)!;
     const gold = placeNear(w, 'goldsmelter', c.x - 5, c.y + 3)!;
-    run(w, 1500);
+    // Three builders share two sites: the second is finished a little later.
+    for (let i = 0; i < 4000 && !(smelter.done && gold.done); i++) w.step();
     expect(smelter.done && gold.done).toBe(true);
     c.output.ironore = 3;
     c.output.goldore = 2;
@@ -36,7 +43,7 @@ describe('tools', () => {
   it('a workplace stays empty without its tool and is staffed once one is available', () => {
     expect(PROFESSIONS.woodcutter.tool).toBe('axe');
     const w = richWorld();
-    const c = w.castle;
+    const c = startTower(w);
     c.output.axe = 0;
     const hut = placeNear(w, 'woodcutter', c.x + 5, c.y - 1)!;
     run(w, 1500);
@@ -51,7 +58,7 @@ describe('tools', () => {
 
   it('the toolsmith forges the tool that workplaces are waiting for', () => {
     const w = richWorld();
-    const c = w.castle;
+    const c = startTower(w);
     c.output.saw = 0;
     const smith = placeNear(w, 'toolsmith', c.x - 5, c.y - 1)!;
     const mill = placeNear(w, 'sawmill', c.x + 5, c.y - 1)!;
@@ -67,7 +74,7 @@ describe('tools', () => {
 
   it('builders are recruited only as many as the player ordered (as in Settlers 4)', () => {
     const w = richWorld();
-    const c = w.castle;
+    const c = startTower(w);
     const builders = () => w.settlers.filter((s) => s.kind === 'builder').length;
     expect(builders()).toBe(3);
     c.output.hammer = 4;
@@ -94,7 +101,7 @@ describe('tools', () => {
 
   it('the toolsmith follows the player\'s order queue first, then works by need', () => {
     const w = richWorld();
-    const c = w.castle;
+    const c = startTower(w);
     const smith = placeNear(w, 'toolsmith', c.x - 5, c.y - 1)!;
     run(w, 1500);
     expect(smith.done).toBe(true);

@@ -54,7 +54,6 @@ export enum Terrain {
 }
 
 export type BuildingType =
-  | 'castle'
   | 'house_small'
   | 'house_medium'
   | 'house_large'
@@ -146,7 +145,7 @@ export interface Building {
   /** Goods on the way to this building (reserved by carriers). */
   inbound: Stock;
   input: Stock;
-  /** Output pile at the door. For the castle this is the warehouse stock. */
+  /** Output pile at the door. For a warehouse this is its stock. */
   output: Stock;
   /** Output units already promised to a carrier. */
   outReserved: Stock;
@@ -178,8 +177,11 @@ export interface Building {
   dug: number;
   /** Mine: digging attempts left from the food eaten (see `runMine`). */
   attempts?: number;
-  /** Warehouse: goods it does not take in (player setting, `World.setAccepts`). */
-  refuse?: Resource[];
+  /**
+   * Warehouse: goods it takes in (player setting, `World.setAccepts`). As in Settlers 4 a new one
+   * takes nothing until the player ticks goods (absent = none).
+   */
+  accept?: Resource[];
   /** Gatherer/planter/hunter: where its work area is centred, if the player moved it (`World.setWorkArea`). */
   workAt?: Point | null;
   /** Marketplace: where its donkeys take goods, and what (see `trade.ts`). */
@@ -203,8 +205,9 @@ export type Task =
   | { t: 'enter'; b: number }
   | { t: 'wait'; n: number }
   | { t: 'pickup'; b: number; res: Resource }
-  /** `back`: returning goods to a warehouse after a failed job. */
-  | { t: 'drop'; b: number; res: Resource; back?: boolean }
+  /** Take one unit of goods lying on the ground at (x, y) (`ground.ts`; reserved in `map.goodsReserved`). */
+  | { t: 'lift'; x: number; y: number; res: Resource }
+  | { t: 'drop'; b: number; res: Resource }
   /** Worker puts its own product on the building's output pile. */
   | { t: 'store'; b: number; res: Resource }
   /** Fell a tree or break stone off a deposit; the settler then carries `res`. */
@@ -289,6 +292,11 @@ export interface Settler {
    * may still claim), where a geologist was sent to prospect, or the building `b` a thief was sent to rob. Absent on everyone else (and on saves made before specialists).
    */
   errand?: { x: number; y: number; b?: number; n?: number } | null;
+  /**
+   * Fleeing (`flee.ts`, Settlers 4's `CFleeRole`): legs walked so far, stranded on land that is not
+   * his owner's or with his player defeated; he dies after `FLEE.legs`. Absent on everyone else.
+   */
+  fled?: number;
   /** Donkey: units of `carrying` in its packs (a carrier always holds one; absent means one). */
   load?: number;
   /**

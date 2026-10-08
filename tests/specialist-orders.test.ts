@@ -5,6 +5,7 @@ import { saveWorld } from '../src/sim/save';
 import { claimable, prospectTiles, SPECIALIST_ORDERS } from '../src/sim/specialists';
 import type { Building, Settler } from '../src/sim/types';
 import { World } from '../src/sim/world';
+import { base, startTower } from './helpers';
 
 function run(w: World, ticks: number) {
   for (let i = 0; i < ticks; i++) w.step();
@@ -22,9 +23,9 @@ function recruit(w: World, kind: 'pioneer' | 'thief', p = 1): Settler {
   return s!;
 }
 
-/** A neutral tile next to the player's land, nearest the castle. */
+/** A neutral tile next to the player's land, nearest the start. */
 function borderTile(w: World, p = 1): { x: number; y: number } {
-  const c = w.castleOf(p);
+  const c = base(w, p);
   let best: { x: number; y: number } | null = null;
   let bestD = Infinity;
   for (let y = 0; y < w.map.h; y++) {
@@ -40,9 +41,9 @@ function borderTile(w: World, p = 1): { x: number; y: number } {
   return best!;
 }
 
-/** An own walkable grass tile a few steps from the castle door (no action applies there). */
+/** An own walkable grass tile a few steps from the start tower's door (no action applies there). */
 function plainTile(w: World): { x: number; y: number } {
-  const c = w.castle;
+  const c = startTower(w);
   for (let r = 3; r < 10; r++) {
     for (let dx = -r; dx <= r; dx++) {
       const x = c.door.x + dx;
@@ -58,7 +59,7 @@ function plainTile(w: World): { x: number; y: number } {
 
 /** An own mountain tile with something left to prospect. */
 function mountainTile(w: World): { x: number; y: number } {
-  const c = w.castle;
+  const c = base(w);
   let best: { x: number; y: number } | null = null;
   let bestD = Infinity;
   for (let y = 0; y < w.map.h; y++) {
@@ -106,7 +107,8 @@ describe('specialists under direct control', () => {
     const w = new World(42);
     const m = mountainTile(w);
     expect(w.sendGeologist(m.x, m.y)).toBe(true);
-    // Sent elsewhere on the mountain mid-errand (he has fetched his hammer by now): his queue becomes the new site's tiles.
+    // Sent elsewhere on the mountain mid-errand (he has fetched his hammer off the ground by now): his
+    // queue becomes the new site's tiles.
     run(w, 200);
     const geo = w.settlers.find((s) => s.kind === 'geologist')!;
     const t = plainTile(w);
@@ -127,7 +129,7 @@ describe('specialists under direct control', () => {
   it('a right click on an explored enemy warehouse sends the thief to rob it; elsewhere he just walks', () => {
     const w = new World(42, { players: 2 });
     const thief = recruit(w, 'thief');
-    const other = w.castleOf(2);
+    const other = base(w, 2);
     let store: Building | null = null;
     for (let r = 6; r < 14 && !store; r++) {
       for (let dx = -r; dx <= r && !store; dx++) {
@@ -150,7 +152,7 @@ describe('specialists under direct control', () => {
     const w = new World(42);
     const pioneer = recruit(w, 'pioneer');
     const t = plainTile(w);
-    w.releaseFighters(w.castle.id, 2);
+    w.releaseFighters(startTower(w).id, 2);
     const fighters = w.settlers.filter((s) => s.post && s.owner === 1 && s.kind !== 'pioneer').map((s) => s.id);
     expect(fighters.length).toBeGreaterThan(0);
     const ids = [pioneer.id, ...fighters];

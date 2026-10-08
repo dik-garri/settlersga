@@ -8,7 +8,7 @@ import { BUILDINGS, TICKS_PER_SECOND } from '../src/sim/config';
 import { findPath } from '../src/sim/pathfinding';
 import { pilesUsed } from '../src/sim/storage';
 import { RESOURCES, type BuildingType, type Resource } from '../src/sim/types';
-import { World } from '../src/sim/world';
+import { LOCAL_PLAYER, World } from '../src/sim/world';
 import { arg, placeNear } from './scenario';
 
 const seeds = arg('seeds', '42,7,123,999').split(',').map(Number);
@@ -19,8 +19,10 @@ const ticksPerMinute = TICKS_PER_SECOND * 60;
 
 for (const seed of seeds) {
   const w = new World(seed, { size });
-  const c = w.castle;
-  // Offsets from the start position (the castle's footprint centre, rounded).
+  // No headquarters (Settlers 4): a small tower, the start goods on the ground round it.
+  const home = w.homeOf(LOCAL_PLAYER);
+  const c = w.buildingAt(home.x, home.y)!;
+  // Offsets from the start position (the tower's footprint centre, rounded).
   const cx = Math.round(c.x + (c.w - 1) / 2);
   const cy = Math.round(c.y + (c.h - 1) / 2);
   // Standard opening: wood and stone first, housing, then the food chain around the starting pond.
@@ -34,6 +36,8 @@ for (const seed of seeds) {
     [0, 'forester', 4, 2],
     [0, 'sawmill', 0, 4],
     [0, 'house_small', -4, -5],
+    // The first warehouse takes the start goods off the ground (it takes in every good: ticked below).
+    [0, 'warehouse', -9, -2],
     [3, 'house_small', 2, 2],
     [5, 'waterworks', -1, 7],
     [5, 'farm', 5, 4],
@@ -50,7 +54,7 @@ for (const seed of seeds) {
     [25, 'ironsmelter', -7, -5],
     [25, 'toolsmith', 5, -7],
     [25, 'house_medium', -9, 1],
-    // Warehouses hold 8 piles of 8 (Settlers 4) and the castle 40: coal and ore fill them by the half hour.
+    // Warehouses hold 8 piles of 8 (Settlers 4): coal and ore fill them by the half hour.
     [20, 'warehouse', -3, -11],
     [35, 'warehouse', 8, 8],
   ];
@@ -68,7 +72,11 @@ for (const seed of seeds) {
         const [minute, type, dx, dy] = pending[k];
         if (minute * ticksPerMinute > i - 1) continue;
         const radius = i - 1 >= (minute + 10) * ticksPerMinute ? 24 : 12;
-        if (placeNear(w, type, cx + dx, cy + dy, radius)) pending.splice(k--, 1);
+        const b = placeNear(w, type, cx + dx, cy + dy, radius);
+        if (!b) continue;
+        pending.splice(k--, 1);
+        // As in Settlers 4 a new warehouse takes nothing in until goods are ticked: tick them all.
+        if (BUILDINGS[type].storage) for (const r of RESOURCES) w.setAccepts(b.id, r, true);
       }
     }
     w.step();
@@ -89,7 +97,7 @@ for (const seed of seeds) {
   const lost = RESOURCES.map((r) => w.stats.lost[r]).reduce((a, b) => a + b, 0);
   console.log(`seed ${seed}`);
   rows.forEach((r, k) => console.log(`  ${(k * window).toString().padStart(3)}–${(k + 1) * window} min: ${r}`));
-  // Stock: the castle and the warehouses together; `full` = piles in use of all their piles.
+  // Stock: the warehouses together; `full` = piles in use of all their piles. Goods still on the ground apart.
   const stores = [...w.buildings.values()].filter((b) => b.done && BUILDINGS[b.type].storage);
   const stock = (r: Resource) => stores.reduce((n, b) => n + b.output[r], 0);
   const piles = stores.reduce((n, b) => n + pilesUsed(b, BUILDINGS[b.type].storage!), 0);
@@ -99,8 +107,15 @@ for (const seed of seeds) {
       RESOURCES.filter((r) => stock(r) > 0)
         .map((r) => `${r}:${stock(r)}`)
         .join(' ') +
+      ` · on the ground ${groundUnits(w)} in ${w.stacks.size} piles` +
       ` · lost ${lost} · blocked doors ${blocked}` +
       (pending.length ? ` · not placed ${pending.map((p) => p[1]).join(',')}` : '') +
       ` · ${(ms / (minutes * ticksPerMinute)).toFixed(3)} ms/tick`,
   );
+}
+
+function groundUnits(w: World): number {
+  let n = 0;
+  for (const i of w.stacks) n += w.map.goodsAmount[i];
+  return n;
 }

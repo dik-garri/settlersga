@@ -6,15 +6,25 @@ import { saveWorld } from '../src/sim/save';
 import { Terrain } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { placeNear } from '../tools/scenario';
+import { clearGround, depot, startTower } from './helpers';
 
 function run(world: World, ticks: number) {
   for (let i = 0; i < ticks; i++) world.step();
 }
 
+/**
+ * No start goods on the ground (their food would feed the mines): planks, stone and the tools the
+ * tests need on the start tower's pile instead, a plain supply pile.
+ */
 function richWorld(seed = 42): World {
   const w = new World(seed);
-  w.castle.output.plank = 80;
-  w.castle.output.stone = 40;
+  clearGround(w);
+  const t = startTower(w);
+  t.output.plank = 80;
+  t.output.stone = 40;
+  t.output.pickaxe = 4;
+  t.output.hammer = 4;
+  t.output.shovel = 2;
   return w;
 }
 
@@ -59,13 +69,15 @@ describe('mines', () => {
     run(w, 3000);
     expect(mine.done).toBe(true);
     expect(w.stats.produced.coal).toBe(0); // no food yet
+    // A warehouse takes the coal away: a full pile of 8 at the door would pause the mine.
+    depot(w, 1, undefined, ['coal']);
     expect(BUILDINGS.coalmine.mine!.favourite).toBe('bread');
 
     // One bread (coal's favourite) buys MINING.attempts.favourite attempts.
     const before = oreLeft(w, 'coal');
-    w.castle.output.bread = 1;
+    startTower(w).output.bread = 1;
     run(w, 3000);
-    expect(w.castle.output.bread).toBe(0);
+    expect(startTower(w).output.bread).toBe(0);
     expect(mine.attempts ?? 0).toBe(0);
     const fromBread = w.stats.produced.coal;
     expect(fromBread).toBeGreaterThan(0);
@@ -73,9 +85,9 @@ describe('mines', () => {
     expect(oreLeft(w, 'coal')).toBe(before - fromBread);
 
     // One fish (not its favourite) buys only MINING.attempts.other.
-    w.castle.output.fish = 1;
+    startTower(w).output.fish = 1;
     run(w, 3000);
-    expect(w.castle.output.fish).toBe(0);
+    expect(startTower(w).output.fish).toBe(0);
     const fromFish = w.stats.produced.coal - fromBread;
     expect(fromFish).toBeGreaterThan(0);
     expect(fromFish).toBeLessThanOrEqual(MINING.attempts.other);
@@ -88,8 +100,9 @@ describe('mines', () => {
     const mine = placeNear(w, 'coalmine', spot.x, spot.y, 4)!;
     run(w, 3000);
     expect(mine.done).toBe(true);
+    depot(w, 1, undefined, ['coal']);
     for (let i = 0; i < w.map.oreAmount.length; i++) if (oreOf(w.map.ore[i]) === 'coal') w.map.oreAmount[i] = MINING.sureAmount + 20;
-    w.castle.output.bread = 1;
+    startTower(w).output.bread = 1;
     run(w, 3000);
     expect(w.stats.produced.coal).toBe(MINING.attempts.favourite);
 
@@ -99,10 +112,11 @@ describe('mines', () => {
     const mine2 = placeNear(v, 'coalmine', spot2.x, spot2.y, 4)!;
     run(v, 3000);
     expect(mine2.done).toBe(true);
+    depot(v, 1, undefined, ['coal']);
     for (let i = 0; i < v.map.oreAmount.length; i++) if (oreOf(v.map.ore[i]) === 'coal') v.map.oreAmount[i] = 1;
-    v.castle.output.bread = 4;
+    startTower(v).output.bread = 4;
     run(v, 9000);
-    expect(v.castle.output.bread).toBe(0);
+    expect(startTower(v).output.bread).toBe(0);
     expect(v.stats.produced.coal).toBeGreaterThan(0);
     expect(v.stats.produced.coal).toBeLessThan(4 * MINING.attempts.favourite * 0.6);
   });
@@ -120,15 +134,17 @@ describe('mines', () => {
       const y = Math.floor(i / w.map.w);
       if (oreOf(w.map.ore[i]) === 'ironore' && Math.hypot(x - cx, y - cy) <= r) reachable += w.map.oreAmount[i];
     }
-    // The whole deposit has to go somewhere: the castle's limit (`storage.ts`) is not what this tests.
-    const limit = BUILDINGS.castle.storage;
-    BUILDINGS.castle.storage = {};
+    // The whole deposit has to go somewhere: a warehouse taking the ore, its limit (`storage.ts`) lifted
+    // — that is not what this tests.
+    const limit = BUILDINGS.warehouse.storage;
+    BUILDINGS.warehouse.storage = {};
     try {
-      w.castle.output.meat = reachable + 20;
+      depot(w, 1, undefined, ['ironore']);
+      startTower(w).output.meat = reachable + 20;
       run(w, 1500 + reachable * 400);
       expect(w.stats.produced.ironore).toBe(reachable);
     } finally {
-      BUILDINGS.castle.storage = limit;
+      BUILDINGS.warehouse.storage = limit;
     }
   });
 });
@@ -146,11 +162,11 @@ describe('geologist', () => {
     expect(w.isProspected(spot.x, spot.y)).toBe(true);
     expect(w.stats.prospected).toBeGreaterThan(3);
     expect(w.settlers.filter((s) => s.kind === 'carrier').length).toBe(carriersBefore);
-    // Not ordered, so he went back to carrying and brought the hammer home.
+    // Not ordered, so he went back to carrying and put the hammer down (S4: it falls by him).
     run(w, 600);
     expect(available(w, 1, 'hammer')).toBe(hammers);
     // Not on grass.
-    const c = w.castle;
+    const c = startTower(w);
     expect(w.sendGeologist(c.door.x, c.door.y + 1)).toBe(false);
   });
 

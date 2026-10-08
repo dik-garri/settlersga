@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addBuilding, recomputeTerritory, spawnSettler } from '../src/sim/buildings';
+import { addBuilding, available, recomputeTerritory, spawnSettler } from '../src/sim/buildings';
 import { BUILDINGS, PIONEER, STRENGTH } from '../src/sim/config';
 import { killSettler } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
@@ -7,6 +7,7 @@ import { claimable } from '../src/sim/specialists';
 import { attackStrength, defenceStrength, settlementValue, strengthFor } from '../src/sim/strength';
 import type { Building, Settler } from '../src/sim/types';
 import { World } from '../src/sim/world';
+import { base, depot, startTower } from './helpers';
 
 function run(w: World, ticks: number) {
   for (let i = 0; i < ticks; i++) w.step();
@@ -17,7 +18,7 @@ const owned = (w: World, p: number) => w.map.owner.reduce((n, o) => n + (o === p
 /** A neutral tile next to the player's land, far from other players. */
 function borderTile(w: World, p = 1): { x: number; y: number } {
   const m = w.map;
-  const c = w.castleOf(p);
+  const c = base(w, p);
   let best: { x: number; y: number } | null = null;
   let bestD = Infinity;
   for (let y = 0; y < m.h; y++) {
@@ -48,9 +49,10 @@ describe('pioneer', () => {
     const w = new World(42);
     run(w, 600);
     expect(w.settlers.some((s) => s.kind === 'pioneer')).toBe(false);
-    const shovels = w.castle.output.shovel;
+    // The start shovels lie on the ground by the start tower.
+    const shovels = available(w, 1, 'shovel');
     recruit(w, 'pioneer');
-    expect(w.castle.output.shovel).toBe(shovels - 1);
+    expect(available(w, 1, 'shovel')).toBe(shovels - 1);
   });
 
   it('claims neutral land next to the border, tile by tile, without a tower', () => {
@@ -72,10 +74,10 @@ describe('pioneer', () => {
   it('cannot be sent into the middle of his own land, and a military claim wins over his', () => {
     const w = new World(42, { players: 2 });
     recruit(w, 'pioneer');
-    const c = w.castle;
+    const c = base(w);
     expect(w.sendPioneer(c.x + 1, c.y + 1)).toBe(false);
     // A claimed tile inside another player's military land goes to that player.
-    const other = w.castleOf(2);
+    const other = base(w, 2);
     const i = w.map.idx(other.x + 1, other.y + 4);
     w.map.claimed[i] = 1;
     w.pioneerLand++;
@@ -83,15 +85,16 @@ describe('pioneer', () => {
     expect(w.map.owner[i]).toBe(2);
   });
 
-  it('goes back to being a carrier when dismissed on his own land, bringing the shovel back', () => {
+  it('goes back to being a carrier when dismissed on his own land, his shovel put down by him', () => {
     const w = new World(42);
     const s = recruit(w, 'pioneer');
     run(w, 200);
-    const shovels = w.castle.output.shovel;
+    const shovels = available(w, 1, 'shovel');
     expect(w.dismissSpecialist('pioneer')).toBe(true);
     expect(s.kind).toBe('carrier');
     run(w, 600);
-    expect(w.castle.output.shovel).toBe(shovels + 1);
+    // Settlers 4 (`CSettler::ChangeType`): the tool falls on the ground next to him, a supply again.
+    expect(available(w, 1, 'shovel')).toBe(shovels + 1);
   });
 });
 
@@ -100,7 +103,7 @@ describe('thief', () => {
   function target(): { w: World; store: Building; thief: Settler } {
     const w = new World(42, { players: 2 });
     const thief = recruit(w, 'thief');
-    const other = w.castleOf(2);
+    const other = base(w, 2);
     let store: Building | null = null;
     for (let r = 6; r < 14 && !store; r++) {
       for (let dx = -r; dx <= r && !store; dx++) {
@@ -120,22 +123,26 @@ describe('thief', () => {
   it('can only rob explored buildings of other players', () => {
     const { w, store } = target();
     expect(w.sendThief(store.id)).toBe(false); // unexplored
-    expect(w.sendThief(w.castle.id)).toBe(false); // own
+    expect(w.sendThief(startTower(w).id)).toBe(false); // own
     explore(w, store);
     expect(w.sendThief(store.id)).toBe(true);
   });
 
   it('takes goods from the other player and brings them home', () => {
     const { w, store, thief } = target();
-    // Nobody to watch: the other player's guards are gone for this test.
-    const other = w.castleOf(2);
-    for (const id of other.garrison.slice()) killSettler(w, w.getSettler(id)!);
+    // Nobody to watch: the other player's fighters standing outside are gone for this test (its start
+    // tower keeps its garrison, inside and out of sight of the warehouse door — a player with no
+    // occupied military building would be out of the game).
+    for (const s of w.settlers.filter((o) => o.owner === 2 && o.inside === null && (o.kind === 'soldier' || o.kind === 'archer'))) {
+      killSettler(w, s);
+    }
     explore(w, store);
-    const home = w.castle.output.iron;
+    // A warehouse of his own that takes iron: where the loot goes.
+    const home = depot(w, 1, undefined, ['iron']);
     expect(w.sendThief(store.id)).toBe(true);
     run(w, 6000);
     expect(store.output.iron).toBeLessThan(5);
-    expect(w.castle.output.iron).toBeGreaterThan(home);
+    expect(home.output.iron).toBeGreaterThan(0);
     expect(w.stats.intrudersKilled).toBe(0);
     expect(thief.kind).toBe('thief');
   });
@@ -188,12 +195,12 @@ describe('fighting strength', () => {
 
   it('eyecatchers count several times their materials', () => {
     const w = new World(42);
-    const base = settlementValue(w, 1);
-    const c = w.castle;
+    const before = settlementValue(w, 1);
+    const c = base(w);
     const statue = addBuilding(w, 'statue', c.x + 6, c.y, 1, true);
     const statueCost = BUILDINGS.statue.cost;
     const plain = (statueCost.stone ?? 0) * STRENGTH.points + (statueCost.gold ?? 0) * STRENGTH.goldPoints;
-    expect(settlementValue(w, 1) - base).toBe(plain * STRENGTH.eyecatcher);
+    expect(settlementValue(w, 1) - before).toBe(plain * STRENGTH.eyecatcher);
     expect(statue.done).toBe(true);
   });
 
@@ -203,7 +210,7 @@ describe('fighting strength', () => {
     expect(defenceStrength(w, 1)).toBe(100);
     // A settlement rich enough lifts both, defence at half the pace.
     for (let k = 0; k < 40; k++) {
-      const c = w.castle;
+      const c = base(w);
       const b = addBuilding(w, 'obelisk', c.x - 20 + (k % 8) * 2, c.y - 20 + Math.floor(k / 8) * 2, 1, true);
       expect(b).toBeTruthy();
     }

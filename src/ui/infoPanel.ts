@@ -258,7 +258,12 @@ export class InfoView implements View {
       actions.append(prio);
     }
     const confirming = this.confirmDemolish === b.id;
-    const demolish = el('button', confirming ? 'danger' : '', confirming ? 'Точно снести?' : '🔨 Снести');
+    // As in Settlers 4, warn before the last occupied military building goes: without one the player is out.
+    const last =
+      b.garrison.length > 0 &&
+      ![...this.world.buildings.values()].some((o) => o !== b && o.owner === b.owner && o.done && o.garrison.length > 0);
+    const demolish = el('button', confirming ? 'danger' : '', confirming ? (last ? 'Последняя башня — это поражение. Снести?' : 'Точно снести?') : '🔨 Снести');
+    demolish.title = 'Половина материалов и всё, что лежит у здания, останутся на земле';
     demolish.onclick = () => {
       if (!confirming) {
         this.confirmDemolish = b.id;

@@ -43,6 +43,14 @@ export class GameMap {
    * `recomputeTerritory` gives the rest of the claimed tiles to their claimant.
    */
   readonly claimed: Uint8Array;
+  /**
+   * Goods lying on the ground (`ground.ts`, Settlers 4's piles): the kind (`RESOURCES` index + 1, 0 =
+   * none), units (up to `GROUND.perStack`) and units already promised to a carrier. They block
+   * building and planting on the tile, never walking.
+   */
+  readonly goods: Uint8Array;
+  readonly goodsAmount: Uint8Array;
+  readonly goodsReserved: Uint8Array;
   /** Building id occupying the tile, 0 if none. */
   readonly building: Int32Array;
   /** Building id whose door is on this tile, 0 if none. */
@@ -83,6 +91,9 @@ export class GameMap {
     this.wear = new Uint8Array(n);
     this.owner = new Uint8Array(n);
     this.claimed = new Uint8Array(n);
+    this.goods = new Uint8Array(n);
+    this.goodsAmount = new Uint8Array(n);
+    this.goodsReserved = new Uint8Array(n);
     this.building = new Int32Array(n);
     this.door = new Int32Array(n);
     this.height = new Uint8Array((w + 1) * (h + 1));
@@ -140,7 +151,8 @@ export class GameMap {
 
   /**
    * Records that a tile's visible contents changed, so views only re-scan dirty chunks.
-   * Every runtime write to `tree`, `stone`, `crop`, `prospected`, or `oreAmount` reaching 0 must call this.
+   * Every runtime write to `tree`, `stone`, `crop`, `prospected`, `goods`/`goodsAmount`, or `oreAmount`
+   * reaching 0 must call this.
    */
   touch(i: number): void {
     this.chunkVersion[this.chunkOf(i % this.w, Math.floor(i / this.w))]++;
@@ -181,11 +193,16 @@ export class GameMap {
     return TERRAIN[this.terrain[this.idx(x, y)] as Terrain].plantable && this.isFree(x, y);
   }
 
-  /** Nothing on the tile: no tree, deposit, field, building or door. */
+  /** Nothing on the tile: no tree, deposit, field, goods on the ground, building or door. */
   private isFree(x: number, y: number): boolean {
     const i = this.idx(x, y);
     return (
-      this.tree[i] === 0 && this.stone[i] === 0 && this.crop[i] === 0 && this.building[i] === 0 && this.door[i] === 0
+      this.tree[i] === 0 &&
+      this.stone[i] === 0 &&
+      this.crop[i] === 0 &&
+      this.goods[i] === 0 &&
+      this.building[i] === 0 &&
+      this.door[i] === 0
     );
   }
 

@@ -6,6 +6,7 @@ import { saveWorld } from '../src/sim/save';
 import { abort } from '../src/sim/settlers';
 import type { Building } from '../src/sim/types';
 import { World } from '../src/sim/world';
+import { base, startTower } from './helpers';
 
 function run(world: World, ticks: number) {
   for (let i = 0; i < ticks; i++) world.step();
@@ -13,13 +14,14 @@ function run(world: World, ticks: number) {
 
 /**
  * A woodcutter site on ground that is buildable but too steep to build on directly: a flat spot
- * near the castle whose site corners are then tilted by hand.
+ * near the start whose site corners are then tilted by hand.
  */
 function slopedSite(): { w: World; b: Building; spot: { x: number; y: number } } {
   const w = new World(42);
-  w.castle.output.plank = 60;
-  w.castle.output.stone = 30;
-  const c = w.castle;
+  // Extra materials on the start tower's pile (a supply like any other).
+  startTower(w).output.plank = 60;
+  startTower(w).output.stone = 30;
+  const c = base(w);
   let spot: { x: number; y: number } | null = null;
   for (let r = 3; r < 10 && !spot; r++) {
     for (let y = c.y - r; y <= c.y + r && !spot; y++) {
@@ -30,8 +32,8 @@ function slopedSite(): { w: World; b: Building; spot: { x: number; y: number } }
   }
   if (!spot) throw new Error('no flat spot');
   // Tilt it: raise the back row of corners (footprint 2×2 plus door row → corners x..x+2, y..y+3).
-  const base = w.map.vertexHeight(spot.x, spot.y);
-  for (let vx = spot.x; vx <= spot.x + 2; vx++) w.map.setVertexHeight(vx, spot.y, base + BUILD_MAX_SLOPE + 8);
+  const low = w.map.vertexHeight(spot.x, spot.y);
+  for (let vx = spot.x; vx <= spot.x + 2; vx++) w.map.setVertexHeight(vx, spot.y, low + BUILD_MAX_SLOPE + 8);
   expect(needsLevelling(w.map, 'woodcutter', spot.x, spot.y)).toBe(true);
   const b = w.placeBuilding('woodcutter', spot.x, spot.y)!;
   expect(b).not.toBeNull();

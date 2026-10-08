@@ -47,8 +47,9 @@ export const IDLE_GO_HOME_TICKS = 30;
 
 /**
  * Idle crowds (`idle.ts`): as in Settlers 4, free carriers (and builders and diggers without a site)
- * do not disappear into a warehouse but stand about outside in small groups — near warehouses, the
- * castle and houses — strolling a little and chatting in pairs, always ready for the dispatcher.
+ * do not disappear into a warehouse but stand about outside in small groups — near warehouses and
+ * houses, or by a military building while there are none (the start) — strolling a little and
+ * chatting in pairs, always ready for the dispatcher.
  */
 export const IDLE = {
   /** How far from the gathering building's door (tiles) idle settlers stand. */
@@ -62,7 +63,9 @@ export const IDLE = {
   /** Random spots tried per stroll before giving up until the next one. */
   tries: 6,
   /** Building kinds idle settlers gather at (as BuildingDef flags). */
-  gatherAt: ['storage', 'residence'] as ('storage' | 'residence')[],
+  gatherAt: ['storage', 'residence'] as ('storage' | 'residence' | 'garrison')[],
+  /** Where they gather only when none of `gatherAt` stands on their land (the start tower). */
+  fallbackAt: ['garrison'] as ('storage' | 'residence' | 'garrison')[],
 };
 /** After a failed route search: how long the settler waits and how long the target building is skipped. */
 export const PATH_FAIL_BACKOFF = 10;
@@ -74,7 +77,7 @@ export const UNREACHABLE_TICKS = 100;
 export const BUILDER_STALL_TICKS = 120;
 
 export const START_CARRIERS = 12;
-/** Soldiers each player's castle starts with. */
+/** Fighters each player starts with (medium start): swordsmen and archers. */
 export const START_SOLDIERS = 6;
 /** Military buildings keep at least this many soldiers when sending others out (to attack or to man towers). */
 export const GARRISON_KEEP = 1;
@@ -120,59 +123,132 @@ export const CLEAR_STROKES_PER_TILE = 6;
  */
 export const DIG_STROKES_PER_DIGGER = 32;
 export const MAX_DIGGERS = 8;
-/** Settlers 4's medium start for the Romans (`StartResources.txt`, `docs/PROPORTIONS.md`). */
+/**
+ * Settlers 4's medium start for the Romans (`StartResources.txt`, `docs/PROPORTIONS.md`): 27 planks
+ * and 27 stone in eight piles.
+ */
 export const START_PLANKS = 27;
 export const START_STONE = 27;
-/**
- * Tools in the castle at the start, enough for the first workplaces. Axes, saws and pickaxes are
- * Settlers 4's medium Roman start (5, 2, 4; Settlers United wiki), the rest ours.
- */
-export const START_TOOLS: Partial<Stock> = { axe: 5, saw: 2, pickaxe: 4, shovel: 2, scythe: 2, rod: 2, hammer: 2 };
 
 /**
- * Start conditions, chosen before a free game as in Settlers 4 (low, medium or high start goods).
- * `medium` is the classic start above. Planks and stone are Settlers 4's for the Romans (15 / 16,
- * 27 / 27, 46 / 39, `StartResources.txt`); the rest approximates the original's proportions: low leaves
- * the bare minimum to found an economy, high adds food and metal so mines and smiths run at once.
+ * Start conditions, chosen before a free game as in Settlers 4 (low, medium or high start goods). As
+ * in Settlers 4 there is no headquarters: every player starts with one small tower (`building`,
+ * finished and manned by the start fighters as far as its slots go; the others stand by it) and the
+ * goods lying on the ground round it in piles of up to `GROUND.perStack` — the Roman piles of
+ * `Script/Internal/StartResources.txt` (`Goods.AddPileEx`, 11 / 22 / 35 piles), `piles` in that order.
+ * Carriers, builders, diggers and fighters are ours (S4 gives more people and pre-trained smiths and
+ * miners, which we have no use for); `soldiers` swordsmen and `archers` archers.
  */
 export type StartLevel = 'low' | 'medium' | 'high';
 export interface StartDef {
   name: string;
-  goods: Partial<Stock>;
+  building: BuildingType;
+  piles: readonly (readonly [Resource, number])[];
   carriers: number;
   builders: number;
   diggers: number;
   soldiers: number;
+  archers: number;
 }
 export const START_CONDITIONS: Record<StartLevel, StartDef> = {
   low: {
     name: 'Мало',
-    goods: { plank: 15, stone: 16, axe: 2, saw: 1, pickaxe: 2, shovel: 1, scythe: 1, rod: 1, hammer: 1 },
+    building: 'tower',
+    piles: [
+      ['plank', 5], ['plank', 5], ['plank', 5],
+      ['stone', 6], ['stone', 5], ['stone', 5],
+      ['shovel', 3], ['hammer', 3], ['axe', 2], ['pickaxe', 1], ['saw', 1],
+    ],
     carriers: 8,
     builders: 2,
     diggers: 1,
-    soldiers: 3,
+    soldiers: 2,
+    archers: 1,
   },
   medium: {
     name: 'Средне',
-    goods: { plank: START_PLANKS, stone: START_STONE, ...START_TOOLS },
+    building: 'tower',
+    piles: [
+      ['plank', 8], ['plank', 7], ['plank', 6], ['plank', 6],
+      ['stone', 8], ['stone', 8], ['stone', 6], ['stone', 5],
+      ['shovel', 7], ['hammer', 8], ['axe', 5], ['pickaxe', 4], ['saw', 2], ['rod', 1], ['scythe', 1],
+      ['fish', 4], ['bread', 5], ['bread', 5], ['meat', 6],
+      ['coal', 4], ['coal', 6], ['ironore', 5],
+    ],
     carriers: START_CARRIERS,
     builders: START_BUILDERS,
     diggers: START_DIGGERS,
-    soldiers: START_SOLDIERS,
+    soldiers: START_SOLDIERS - 2,
+    archers: 2,
   },
   high: {
     name: 'Много',
-    goods: {
-      plank: 46, stone: 39, log: 10,
-      bread: 10, fish: 10, meat: 10, coal: 12, ironore: 8, iron: 6, gold: 2,
-      axe: 5, saw: 3, pickaxe: 6, shovel: 4, scythe: 3, rod: 3, hammer: 4, sword: 4, bow: 2,
-    },
+    building: 'tower',
+    piles: [
+      ['plank', 8], ['plank', 8], ['plank', 8], ['plank', 8], ['plank', 8], ['plank', 6],
+      ['stone', 8], ['stone', 8], ['stone', 8], ['stone', 8], ['stone', 7],
+      ['shovel', 8], ['shovel', 8], ['shovel', 4], ['hammer', 8], ['hammer', 8], ['hammer', 6],
+      ['axe', 8], ['pickaxe', 5], ['saw', 3], ['rod', 2], ['scythe', 3],
+      ['fish', 4], ['fish', 4], ['bread', 8], ['bread', 8], ['meat', 5], ['meat', 3],
+      ['coal', 8], ['coal', 8], ['coal', 6], ['coal', 4], ['ironore', 8], ['ironore', 4], ['goldore', 2],
+    ],
     carriers: 24,
     builders: 5,
     diggers: 3,
-    soldiers: 10,
+    soldiers: 7,
+    archers: 3,
   },
+};
+
+/** A start level's goods in all (its piles added up). */
+export function startGoods(def: StartDef): Partial<Stock> {
+  const out: Partial<Stock> = {};
+  for (const [res, n] of def.piles) out[res] = (out[res] ?? 0) + n;
+  return out;
+}
+
+/**
+ * Goods lying on the ground (`ground.ts`), as Settlers 4's piles (`CPile::MAX_PILE_AMOUNT` 8): at
+ * most `perStack` units of one good per tile, put down within `searchRadius` tiles of where they
+ * fall, nearest first, topping up a pile of the same good (`CPileMgr::SearchSpaceForGoods`).
+ *
+ * Ruins (`World.removeBuilding`, Settlers 4's `IBuildingRole::ReturnBuildingMaterial`): a building the
+ * player demolishes gives back `demolishShare` of every material built into it, rounded down (S4:
+ * half of the cost; of a site, half of the units its builders built in); one that burns — on land a
+ * conquest took, or of a defeated player — gives back `burnShare` (S4: nothing). Either way the goods
+ * lying at it (its piles, a warehouse's stock, a site's materials not yet built in) stay on the ground
+ * whole (`keepsGoods`; S4 turns those piles into loose ones). They lie on and around the footprint and
+ * belong to whoever owns that land. Sources in `docs/S4-PARITY.md`.
+ */
+export const GROUND = {
+  perStack: 8,
+  searchRadius: 8,
+  demolishShare: 0.5,
+  burnShare: 0,
+  keepsGoods: true,
+};
+
+/**
+ * Defeat, as in Settlers 4's free games (`Game.DefaultPlayerLostCheck`: «keine besetzten Türme
+ * mehr»): a player with no occupied military building left is out. Checked every `checkEvery` ticks
+ * once `afterTick` has passed (S4: every 8 of its ticks after tick 140).
+ */
+export const DEFEAT = { checkEvery: Math.round(s4Ticks(8)), afterTick: Math.round(s4Ticks(140)) };
+
+/**
+ * Settlers stranded on land that is not their owner's (or an ally's), as Settlers 4's `CFleeRole`: a
+ * free carrier, builder or digger (`behaviors`; fighters are exempt) walks towards the nearest land
+ * of his own within `seek` tiles, or else to a random spot within `wander`, pausing `pause` ticks
+ * between legs (a random value in the range); back on own land he is an ordinary settler again, and
+ * after `legs` legs without reaching it he dies (S4: deleted after four). Every settler of a defeated
+ * player flees the same way, fighters too — he has no land left.
+ */
+export const FLEE = {
+  behaviors: ['carrier', 'builder', 'digger'] as Behavior[],
+  legs: 4,
+  seek: 24,
+  wander: 8,
+  pause: [20, 90] as [number, number],
 };
 
 /**
@@ -813,7 +889,7 @@ export interface BuildingDef {
 
 /**
  * Military building: holds up to `capacity` soldiers and claims `territory` while at least one is
- * inside, or always if `claimsWhenEmpty` (the castle). Slots have a kind, as in Settlers 4:
+ * inside, or always if `claimsWhenEmpty`. Slots have a kind, as in Settlers 4:
  * `archers` of them are for ranged fighters, the rest for melee ones.
  */
 export interface GarrisonDef {
@@ -864,26 +940,10 @@ function mine(name: string, res: Resource, favourite: Resource, cost: Partial<St
  * in `docs/TIMINGS.md`. Costs are the Roman buildings' (the-settlers fandom wiki), except the warehouse
  * and the market, which stay dearer by choice; territory radii are S4's in our tiles
  * (`docs/PROPORTIONS.md`). Footprints follow the original's on-screen widths
- * (barracks, pig farm and donkey ranch 3×3, castle and fortress 4×4).
+ * (barracks, pig farm and donkey ranch 3×3, the castle — our `fortress` — 4×4). There is no
+ * headquarters: players start with a small tower (`START_CONDITIONS`).
  */
 export const BUILDINGS: Record<BuildingType, BuildingDef> = {
-  castle: {
-    name: 'Замок',
-    w: 4,
-    h: 4,
-    cost: {},
-    worker: null,
-    playerBuildable: false,
-    // S4 has no headquarters: its castle stores nothing, the start goods lie on the ground in piles of
-    // up to 8 (11 / 22 / 35 piles at a low / medium / high Roman start, `StartResources.txt`). Ours
-    // stands for that tower and those piles together: 40 piles of 8, room for every start (`docs/S4-PARITY.md`).
-    storage: { piles: 40, perPile: STORE_PILE },
-    // As the small tower an S4 player starts with (3500 S4 tiles ≈ 340 of ours; a radius of 10 holds 317).
-    territory: 10,
-    // The headquarters: the army's reserve (S4 has no such building; 7 swordsmen + 5 archers).
-    garrison: { capacity: 12, claimsWhenEmpty: true, keep: 4, archers: 5 },
-  },
-
   house_small: {
     name: 'Малый дом',
     w: 2,
@@ -1134,7 +1194,8 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     barracks: { ticks: 60 },
   },
   fortress: {
-    name: 'Крепость',
+    // Settlers 4's castle («Burg»), «Замок» to Russian players; with no headquarters the name is free.
+    name: 'Замок',
     w: 4,
     h: 4,
     cost: { plank: 8, stone: 12 },
@@ -1195,7 +1256,6 @@ export function totalCost(type: BuildingType): number {
  * Roman buildings: each has that many builder spots around it). Types not listed: by footprint.
  */
 export const SITE_BUILDERS: Partial<Record<BuildingType, number>> = {
-  castle: 5,
   house_small: 3,
   house_medium: 4,
   house_large: 5,
@@ -1265,17 +1325,20 @@ export const AI_PLAN: readonly { type: BuildingType; count: number; after?: Buil
   // Settlers 4's rates: a woodcutter fells a tree a minute, a sawmill cuts three logs a minute; at
   // S4's building costs planks are what an economy waits for, so wood comes first.
   { type: 'woodcutter', count: 3 },
-  { type: 'tower', count: 1 },
+  // The start tower counts: this is the first one built.
+  { type: 'tower', count: 2 },
+  // No headquarters: the first warehouse takes the start goods off the ground and surplus later on.
+  { type: 'warehouse', count: 1 },
   { type: 'woodcutter', count: 4 },
   { type: 'farm', count: 1 },
   { type: 'waterworks', count: 1 },
   { type: 'sawmill', count: 2 },
-  { type: 'tower', count: 2 },
+  { type: 'tower', count: 3 },
   { type: 'mill', count: 1 },
   { type: 'bakery', count: 1 },
   { type: 'fisher', count: 1 },
   { type: 'house_medium', count: 1 },
-  { type: 'tower', count: 3 },
+  { type: 'tower', count: 4 },
   { type: 'coalmine', count: 1 },
   { type: 'ironmine', count: 1, after: 'coalmine' },
   { type: 'ironsmelter', count: 1, after: 'ironmine' },
@@ -1291,7 +1354,7 @@ export const AI_PLAN: readonly { type: BuildingType; count: number; after?: Buil
   { type: 'house_medium', count: 2 },
   { type: 'coalmine', count: 2, after: 'toolsmith' },
   { type: 'stonemine', count: 1, after: 'toolsmith' },
-  { type: 'tower', count: 4 },
+  { type: 'tower', count: 5 },
   // After the metal chain: without a tool to wait for, a second forester would otherwise grab the
   // space the smelters need early on.
   { type: 'forester', count: 2, after: 'toolsmith' },
@@ -1303,11 +1366,11 @@ export const AI_PLAN: readonly { type: BuildingType; count: number; after?: Buil
   { type: 'ironmine', count: 2, after: 'toolsmith' },
   { type: 'weaponsmith', count: 2, after: 'ironsmelter' },
   { type: 'bigtower', count: 1, after: 'weaponsmith' },
-  { type: 'tower', count: 7 },
+  { type: 'tower', count: 8 },
   { type: 'house_large', count: 2 },
   { type: 'bigtower', count: 3, after: 'weaponsmith' },
   { type: 'fortress', count: 1, after: 'goldsmelter' },
-  { type: 'tower', count: 12 },
+  { type: 'tower', count: 13 },
 ];
 
 /** Computer player tuning; `thinkEvery` and `attackRatio` are the difficulty knobs. */
@@ -1488,8 +1551,8 @@ export const AI = {
  * kept in the saved `AiState.level`). A level scales the `AI` tuning, so `medium` is exactly the `AI`
  * table (what `sim:ai` measures): `think` multiplies `AI.thinkEvery` (how often it decides), `attack`
  * the `AI.attackRatio` it wants over the defenders, `peace` `AI.peaceTicks` (no attacks before),
- * `cooldown` `AI.attackCooldown`; `sites` is added to `AI.maxOpenSites`; `bonus` goods start in its
- * castle on top of the start level's.
+ * `cooldown` `AI.attackCooldown`; `sites` is added to `AI.maxOpenSites`; `bonus` goods lie by its
+ * start tower on top of the start level's (S4's script adds goods for computer players too).
  */
 export type AiLevel = 'easy' | 'medium' | 'hard';
 export interface AiLevelDef {

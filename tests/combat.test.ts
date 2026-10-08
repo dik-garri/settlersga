@@ -8,6 +8,7 @@ import { saveWorld } from '../src/sim/save';
 import type { PlayerId, Settler, SettlerKind } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { placeNear } from '../tools/scenario';
+import { base, startTower } from './helpers';
 
 // Fighting strength is tested in army.test.ts; here it is pinned (100 % unless a test sets it) so the
 // numbers are Settlers 4's unit stats as they are.
@@ -23,7 +24,7 @@ function run(world: World, ticks: number) {
 
 /** A fighter of `owner` standing in the field at (x, y), holding there (`post`). */
 function fighter(w: World, owner: PlayerId, kind: SettlerKind, level: number, x: number, y: number): Settler {
-  const s = spawnSettler(w, kind, w.castleOf(owner));
+  const s = spawnSettler(w, kind, startTower(w, owner));
   s.level = level;
   s.hp = hpOf(kind, level);
   s.inside = null;
@@ -35,8 +36,9 @@ function fighter(w: World, owner: PlayerId, kind: SettlerKind, level: number, x:
 
 /** Two fighters of players 1 and 2 side by side in the open; returns them and where they stand. */
 function pair(w: World, a: [SettlerKind, number], b: [SettlerKind, number]) {
-  const c = w.castle;
-  const [p, q] = formationSpots(w, c.door.x + 6, c.door.y + 4, 2);
+  // Where the old castle's door stood plus (6, 4): one tile right and down of the start tower's door.
+  const c = startTower(w);
+  const [p, q] = formationSpots(w, c.door.x + 7, c.door.y + 5, 2);
   return { one: fighter(w, 1, a[0], a[1], p.x, p.y), two: fighter(w, 2, b[0], b[1], q.x, q.y) };
 }
 
@@ -114,7 +116,7 @@ describe('duels as in Settlers 4', () => {
   it('a tower archer hits harder, hardest at enemies at its door', () => {
     ctl.factor = 1;
     const w = new World(42, { players: 2, size: 64 });
-    const tower = placeNear(w, 'tower', w.castle.x + 6, w.castle.y + 2, 4, 1)!;
+    const tower = placeNear(w, 'tower', base(w).x + 6, base(w).y + 2, 4, 1)!;
     run(w, 3000);
     expect(tower.done).toBe(true);
     const archer = spawnSettler(w, 'archer', tower);

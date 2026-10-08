@@ -3,22 +3,23 @@ import { BUILDINGS } from '../src/sim/config';
 import { Terrain } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { placeNear } from '../tools/scenario';
+import { base, startTower } from './helpers';
 
 function run(world: World, ticks: number) {
   for (let i = 0; i < ticks; i++) world.step();
 }
 
-/** A world whose castle holds enough material to build a whole food economy. */
+/** A world whose start tower's pile holds enough material to build a whole food economy. */
 function richWorld(seed = 42): World {
   const w = new World(seed);
-  w.castle.output.plank = 80;
-  w.castle.output.stone = 40;
+  startTower(w).output.plank = 80;
+  startTower(w).output.stone = 40;
   return w;
 }
 
 /** Nearest owned water tile that touches walkable land. */
 function ownedShore(w: World) {
-  const c = w.castle;
+  const c = base(w);
   let best: { x: number; y: number } | null = null;
   let bestD = Infinity;
   for (let y = 0; y < w.map.h; y++) {
@@ -47,13 +48,13 @@ function worldWithShore() {
 }
 
 describe('residences', () => {
-  it('release their capacity of carriers over time, and the castle no longer does', () => {
+  it('release their capacity of carriers over time; nothing else does (the start tower neither)', () => {
     const w = richWorld();
     const start = w.settlers.length;
     run(w, 3000);
     expect(w.settlers.length).toBe(start);
 
-    const c = w.castle;
+    const c = base(w);
     const house = placeNear(w, 'house_small', c.x + 5, c.y + 4)!;
     run(w, 6000);
     expect(house.done).toBe(true);
@@ -65,7 +66,7 @@ describe('residences', () => {
 describe('farming', () => {
   it('a farmer sows walkable fields around the farm and harvests the grain', () => {
     const w = richWorld();
-    const c = w.castle;
+    const c = base(w);
     const farm = placeNear(w, 'farm', c.x + 5, c.y + 4)!;
     expect(farm).not.toBeNull();
     run(w, 8000);
@@ -85,7 +86,7 @@ describe('farming', () => {
 describe('food chain', () => {
   it('turns grain and water into bread, and pigs into meat', () => {
     const { w, shore } = worldWithShore();
-    const c = w.castle;
+    const c = base(w);
     placeNear(w, 'waterworks', shore.x, shore.y, 6);
     placeNear(w, 'house_medium', c.x - 3, c.y - 5);
     placeNear(w, 'farm', c.x + 6, c.y + 4);
@@ -116,12 +117,12 @@ describe('fishing', () => {
 describe('logistics fairness', () => {
   it('shares a scarce input between consumers instead of filling the oldest first', () => {
     const w = richWorld();
-    const c = w.castle;
+    const c = base(w);
     const a = placeNear(w, 'sawmill', c.x + 5, c.y - 2)!;
     const b = placeNear(w, 'sawmill', c.x - 5, c.y - 2)!;
     run(w, 1500);
     expect(a.done && b.done).toBe(true);
-    c.output.log = 2;
+    startTower(w).output.log = 2;
     run(w, 10); // one dispatch round
     // Promised or already delivered to each mill.
     const got = (m: typeof a) => m.input.log + m.inbound.log;

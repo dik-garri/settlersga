@@ -183,19 +183,23 @@ export function countDelivery(eco: EconomyState, res: Resource, b: Building): vo
 
 // ----------------------------------------------------------------------- warehouses
 
-/** Whether a warehouse takes this good in (player setting; it still gives out what it holds). */
+/**
+ * Whether a warehouse takes this good in (player setting; it still gives out what it holds). As in
+ * Settlers 4 (`CStorageBuildingRole::Init`, `SwitchGood`) a new warehouse takes nothing until the
+ * player ticks goods.
+ */
 export function accepts(b: Building, res: Resource): boolean {
-  return !b.refuse?.includes(res);
+  return !!b.accept?.includes(res);
 }
 
 export function setAccepts(w: World, player: PlayerId, id: number, res: Resource, on: boolean): boolean {
   const b = w.buildings.get(id);
   if (!b || b.owner !== player || !BUILDINGS[b.type].storage || !RESOURCES.includes(res)) return false;
-  const refuse = new Set(b.refuse ?? []);
-  if (on) refuse.delete(res);
-  else refuse.add(res);
-  b.refuse = RESOURCES.filter((r) => refuse.has(r));
-  if (b.refuse.length === 0) delete b.refuse;
+  const accept = new Set(b.accept ?? []);
+  if (on) accept.add(res);
+  else accept.delete(res);
+  b.accept = RESOURCES.filter((r) => accept.has(r));
+  if (b.accept.length === 0) delete b.accept;
   if (!on) redirectDeliveries(w, b, res);
   return true;
 }

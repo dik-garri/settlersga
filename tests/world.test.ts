@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { costOf, START_PLANKS, START_STONE } from '../src/sim/config';
+import { costOf, GROUND, START_PLANKS, START_STONE } from '../src/sim/config';
 import { RESOURCES, type BuildingType } from '../src/sim/types';
 import { findPath } from '../src/sim/pathfinding';
 import { World } from '../src/sim/world';
+import { base, depot, goodsInWorld, groundUnits, startTower } from './helpers';
 
 /** Finds the free spot closest to `near` where the building can be placed. */
 function findSpot(world: World, type: BuildingType, near: { x: number; y: number }) {
@@ -26,41 +27,48 @@ function totalStone(world: World) {
   return world.map.stone.reduce((sum, v) => sum + v, 0);
 }
 
-/** Units of `res` that exist as goods: in buildings' output and input piles and in carriers' hands. */
-function goodsInWorld(world: World, res: 'plank' | 'stone') {
-  let n = world.settlers.filter((s) => s.carrying === res).length;
-  for (const b of world.buildings.values()) n += b.output[res] + (b.done ? b.input[res] : 0);
-  return n;
-}
-
 function run(world: World, ticks: number) {
   for (let i = 0; i < ticks; i++) world.step();
 }
 
 describe('World', () => {
-  it('starts with a finished castle, settlers and planks', () => {
+  it('starts with a manned small tower, settlers, and its goods in piles on the ground (Settlers 4)', () => {
     const world = new World(42);
-    expect(world.castle.done).toBe(true);
-    expect(world.castle.output.plank).toBe(START_PLANKS);
+    const tower = startTower(world);
+    expect(tower.type).toBe('tower');
+    expect(tower.done).toBe(true);
+    expect(tower.garrison.length).toBe(3);
     expect(world.settlers.length).toBeGreaterThan(0);
+    // No warehouse: the start goods lie round the tower, at most a pile of 8 per tile.
+    expect([...world.buildings.values()].length).toBe(1);
+    expect(groundUnits(world, 'plank', 1)).toBe(START_PLANKS);
+    expect(groundUnits(world, 'stone', 1)).toBe(START_STONE);
+    for (const i of world.stacks) {
+      expect(world.map.goodsAmount[i]).toBeLessThanOrEqual(GROUND.perStack);
+      expect(world.map.building[i] + world.map.door[i]).toBe(0);
+      expect(Math.hypot((i % world.map.w) - tower.x, Math.floor(i / world.map.w) - tower.y)).toBeLessThan(GROUND.searchRadius + 2);
+    }
   });
 
-  it('rejects overlapping and water placements', () => {
+  it('rejects overlapping and water placements, and building on goods lying on the ground', () => {
     const world = new World(42);
-    const { x, y } = world.castle;
+    const { x, y } = startTower(world);
     expect(world.canPlace('woodcutter', x, y)).toBe(false);
-    expect(world.placeBuilding('castle', x + 5, y + 5)).toBeNull();
+    const pile = [...world.stacks][0];
+    const px = pile % world.map.w;
+    const py = Math.floor(pile / world.map.w);
+    for (let dy = -1; dy <= 0; dy++) for (let dx = -1; dx <= 0; dx++) expect(world.canPlace('woodcutter', px + dx, py + dy)).toBe(false);
     const water = [...world.map.terrain.keys()].find((i) => world.map.terrain[i] === 0)!;
     expect(world.canPlace('woodcutter', water % world.map.w, Math.floor(water / world.map.w))).toBe(false);
   });
 
   it('builds a site, staffs it and produces logs and planks', () => {
     const world = new World(42);
-    // The guaranteed grove is to the east of the castle.
-    const wc = findSpot(world, 'woodcutter', { x: world.castle.x + 6, y: world.castle.y });
+    // The guaranteed grove is to the east of the start.
+    const wc = findSpot(world, 'woodcutter', { x: base(world).x + 6, y: base(world).y });
     const woodcutter = world.placeBuilding('woodcutter', wc.x, wc.y)!;
     expect(woodcutter).not.toBeNull();
-    const sm = findSpot(world, 'sawmill', { x: world.castle.x + 1, y: world.castle.y + 6 });
+    const sm = findSpot(world, 'sawmill', { x: base(world).x + 1, y: base(world).y + 6 });
     const sawmill = world.placeBuilding('sawmill', sm.x, sm.y)!;
     expect(sawmill).not.toBeNull();
 
@@ -75,14 +83,14 @@ describe('World', () => {
 
     const spentPlanks = costOf('woodcutter').plank + costOf('sawmill').plank;
     expect(goodsInWorld(world, 'plank')).toBe(START_PLANKS - spentPlanks + world.stats.produced.plank);
-    // Both buildings' stone came from the castle's starting stock.
+    // Both buildings' stone came from the start goods on the ground.
     expect(costOf('sawmill').stone).toBeGreaterThan(0);
     expect(goodsInWorld(world, 'stone')).toBe(START_STONE - costOf('woodcutter').stone - costOf('sawmill').stone);
   });
 
   it('forester plants saplings around the hut', () => {
     const world = new World(42);
-    const spot = findSpot(world, 'forester', { x: world.castle.x - 5, y: world.castle.y });
+    const spot = findSpot(world, 'forester', { x: base(world).x - 5, y: base(world).y });
     const hut = world.placeBuilding('forester', spot.x, spot.y)!;
     expect(hut).not.toBeNull();
 
@@ -99,12 +107,14 @@ describe('World', () => {
 
   it('keeps a woodcutter supplied for an hour when paired with a forester', () => {
     const world = new World(42);
-    // Next to the castle meadow, with the forester beside the woodcutter.
-    const c = world.castle;
+    // Next to the start meadow, with the forester beside the woodcutter.
+    const c = base(world);
     const wc = findSpot(world, 'woodcutter', { x: c.x - 4, y: c.y + 3 });
     world.placeBuilding('woodcutter', wc.x, wc.y);
     const fr = findSpot(world, 'forester', { x: c.x - 4, y: c.y - 1 });
     world.placeBuilding('forester', fr.x, fr.y);
+    // A warehouse that takes the logs: with none the full pile at the door would pause the woodcutter.
+    depot(world, 1, { x: c.x + 6, y: c.y + 6 }, ['log']);
 
     run(world, 30000);
     const before = world.stats.produced.log;
@@ -114,16 +124,17 @@ describe('World', () => {
     // supplied woodcutter fells 6–8 in these 10 minutes (one with nothing left in reach fells none).
     expect(world.stats.produced.log - before).toBeGreaterThanOrEqual(6);
     for (const b of world.buildings.values()) {
-      expect(findPath(world.map, c.door.x, c.door.y, b.door.x, b.door.y), b.type).not.toBeNull();
+      const door = startTower(world).door;
+      expect(findPath(world.map, door.x, door.y, b.door.x, b.door.y), b.type).not.toBeNull();
     }
   });
 
   it('stonecutter quarries stone from deposits until they are used up', () => {
     const world = new World(42);
-    const c = world.castle;
+    const c = base(world);
     const before = totalStone(world);
     expect(before).toBeGreaterThan(0);
-    // The guaranteed quarry lies south-west of the castle.
+    // The guaranteed quarry lies south-west of the start.
     const spot = findSpot(world, 'stonecutter', { x: c.x - 5, y: c.y + 3 });
     const hut = world.placeBuilding('stonecutter', spot.x, spot.y)!;
     expect(hut).not.toBeNull();
@@ -148,7 +159,7 @@ describe('World', () => {
 
   it('only allows building inside the territory', () => {
     const world = new World(42);
-    const c = world.castle;
+    const c = base(world);
     expect(world.map.owner[world.map.idx(c.x + 1, c.y + 1)]).toBe(1);
     expect(world.map.owner[world.map.idx(0, 0)]).toBe(0);
     for (let y = 0; y < world.map.h; y++) {
@@ -163,10 +174,10 @@ describe('World', () => {
 
   it('a garrisoned tower pushes the border out', () => {
     const world = new World(42);
-    const c = world.castle;
+    const c = base(world);
     const owned = () => world.map.owner.reduce((sum, v) => sum + v, 0);
     const before = owned();
-    // As far from the castle as the territory allows.
+    // As far from the start as the territory allows.
     let spot: { x: number; y: number } | null = null;
     let far = 0;
     for (let y = 0; y < world.map.h; y++) {
@@ -184,7 +195,7 @@ describe('World', () => {
     run(world, 3000);
 
     expect(tower.done).toBe(true);
-    // Soldiers from the castle's reserve man it.
+    // The start fighters the start tower had no slot for man it.
     expect(tower.garrison.length).toBeGreaterThan(0);
     expect(tower.garrison.every((id) => world.getSettler(id)?.kind === 'soldier')).toBe(true);
     expect(owned()).toBeGreaterThan(before + 40);
@@ -198,7 +209,7 @@ describe('World', () => {
       if (world.map.tree[i] && !world.map.owner[i]) outside.add(i);
     }
     // Woodcutter right at the border, next to the wild forest.
-    const c = world.castle;
+    const c = base(world);
     const wc = findSpot(world, 'woodcutter', { x: c.x + 8, y: c.y - 2 });
     world.placeBuilding('woodcutter', wc.x, wc.y);
     run(world, 6000);
@@ -208,7 +219,7 @@ describe('World', () => {
 
   it('tags buildings, settlers and land with their owner', () => {
     const world = new World(42);
-    const c = world.castle;
+    const c = base(world);
     const wc = findSpot(world, 'woodcutter', { x: c.x + 5, y: c.y });
     const b = world.placeBuilding('woodcutter', wc.x, wc.y)!;
     expect(b.owner).toBe(1);
@@ -220,8 +231,8 @@ describe('World', () => {
 
   it('builders leave a starved site for one they can work on', () => {
     const world = new World(42);
-    const c = world.castle;
-    c.output.plank = 0; // towers will get their stone but never their planks
+    const c = base(world);
+    for (const i of [...world.stacks]) if (world.map.goods[i] === RESOURCES.indexOf('plank') + 1) world.map.goodsAmount[i] = 0; // towers will get their stone but never their planks
     const towers = [];
     for (const [dx, dy] of [[5, -4], [-5, -4], [-5, 4]]) {
       const spot = findSpot(world, 'tower', { x: c.x + dx, y: c.y + dy });
@@ -236,9 +247,9 @@ describe('World', () => {
     expect(column.done).toBe(true);
   });
 
-  it('a carrier cut off from its destination brings the goods back instead of losing them', () => {
+  it('a carrier cut off from its destination puts the goods down instead of losing them', () => {
     const world = new World(42);
-    const c = world.castle;
+    const c = base(world);
     const spot = findSpot(world, 'sawmill', { x: c.x + 6, y: c.y + 4 });
     const site = world.placeBuilding('sawmill', spot.x, spot.y)!;
     let carrier;
@@ -260,11 +271,12 @@ describe('World', () => {
     expect(site.done).toBe(false);
     expect(planks()).toBe(START_PLANKS);
     expect(world.settlers.some((s) => s.carrying === 'plank')).toBe(false);
+    expect(Object.values(world.stats.lost).every((n) => n === 0)).toBe(true);
   });
 
   it('refuses buildings that would close the only passage', () => {
     const world = new World(42);
-    const c = world.castle;
+    const c = base(world);
     const wx = c.x + 5;
     const gap = c.y + 1;
     for (let y = 0; y < world.map.h; y++) {
@@ -283,13 +295,13 @@ describe('World', () => {
 
   it('never leaves reservations negative', () => {
     const world = new World(7);
-    const wc = findSpot(world, 'woodcutter', { x: world.castle.x + 6, y: world.castle.y });
+    const wc = findSpot(world, 'woodcutter', { x: base(world).x + 6, y: base(world).y });
     world.placeBuilding('woodcutter', wc.x, wc.y);
-    const fr = findSpot(world, 'forester', { x: world.castle.x + 4, y: world.castle.y + 5 });
+    const fr = findSpot(world, 'forester', { x: base(world).x + 4, y: base(world).y + 5 });
     world.placeBuilding('forester', fr.x, fr.y);
-    const st = findSpot(world, 'stonecutter', { x: world.castle.x - 5, y: world.castle.y + 3 });
+    const st = findSpot(world, 'stonecutter', { x: base(world).x - 5, y: base(world).y + 3 });
     world.placeBuilding('stonecutter', st.x, st.y);
-    const sm = findSpot(world, 'sawmill', { x: world.castle.x + 1, y: world.castle.y - 5 });
+    const sm = findSpot(world, 'sawmill', { x: base(world).x + 1, y: base(world).y - 5 });
     world.placeBuilding('sawmill', sm.x, sm.y);
     const violations: string[] = [];
     for (let i = 0; i < 3000; i++) {
@@ -301,6 +313,10 @@ describe('World', () => {
           }
         }
       }
+      // Goods on the ground: never more promised than lie there.
+      for (const i of world.stacks) {
+        if (world.map.goodsReserved[i] > world.map.goodsAmount[i]) violations.push(`tick ${world.tick} ground ${i}`);
+      }
     }
     expect(violations.slice(0, 5)).toEqual([]);
     expect(Object.values(world.stats.lost).every((n) => n === 0)).toBe(true);
@@ -310,7 +326,7 @@ describe('World', () => {
 describe('settlers on a new building site', () => {
   it('step off the footprint instead of being walled in', () => {
     const world = new World(42);
-    const c = world.castle;
+    const c = base(world);
     const spot = findSpot(world, 'woodcutter', { x: c.x + 5, y: c.y + 4 });
     const s = world.settlers.find((x) => x.kind === 'carrier')!;
     s.inside = null;
@@ -320,6 +336,7 @@ describe('settlers on a new building site', () => {
     const b = world.placeBuilding('woodcutter', spot.x, spot.y)!;
     expect(b).not.toBeNull();
     expect(world.map.isWalkable(Math.round(s.x), Math.round(s.y))).toBe(true);
-    expect(findPath(world.map, Math.round(s.x), Math.round(s.y), c.door.x, c.door.y)).not.toBeNull();
+    const door = startTower(world).door;
+    expect(findPath(world.map, Math.round(s.x), Math.round(s.y), door.x, door.y)).not.toBeNull();
   });
 });

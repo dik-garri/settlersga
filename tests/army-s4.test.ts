@@ -7,14 +7,16 @@ import { saveWorld } from '../src/sim/save';
 import type { Building, Settler } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { placeNear } from '../tools/scenario';
+import { base, dismissStandby, startTower, vacateStart } from './helpers';
 
 function run(world: World, ticks: number) {
   for (let i = 0; i < ticks; i++) world.step();
 }
 
+/** Materials on every start tower's pile (test setup; a plain supply pile). */
 function rich(w: World) {
   for (const p of w.players) {
-    const c = w.castleOf(p.id);
+    const c = startTower(w, p.id);
     c.output.plank = 120;
     c.output.stone = 80;
   }
@@ -29,10 +31,10 @@ function station(w: World, b: Building, kind: 'soldier' | 'archer'): Settler {
 
 const members = (w: World, b: Building) => b.garrison.map((id) => w.getSettler(id)!).filter(Boolean);
 
-/** A finished barracks next to the castle. */
+/** A finished barracks next to the start tower, which has one free slot of each kind (`vacateStart`). */
 function withBarracks(w = rich(new World(42))) {
-  const c = w.castle;
-  const barracks = placeNear(w, 'barracks', c.x + 5, c.y - 1)!;
+  const c = vacateStart(w);
+  const barracks = placeNear(w, 'barracks', base(w).x + 5, base(w).y - 1)!;
   run(w, 1500);
   expect(barracks.done).toBe(true);
   return { w, c, barracks };
@@ -40,7 +42,7 @@ function withBarracks(w = rich(new World(42))) {
 
 /** Two players with a tower each, built towards the other. */
 function frontLine(w = rich(new World(42, { players: 2 }))) {
-  const [a, b] = [w.castleOf(1), w.castleOf(2)];
+  const [a, b] = [startTower(w, 1), startTower(w, 2)];
   const ca = centerOf(a);
   const cb = centerOf(b);
   const at = (from: typeof ca, to: typeof cb) => ({
@@ -100,9 +102,10 @@ describe('recruit levels (bought at the barracks, as in Settlers 4)', () => {
 describe('garrison slots by kind', () => {
   it('a small tower takes one swordsman and two archers, never more swordsmen', () => {
     const w = rich(new World(42));
-    const c = w.castle;
-    for (let i = 0; i < 4; i++) station(w, c, 'archer');
-    const tower = placeNear(w, 'tower', c.x + 6, c.y - 4, 5)!;
+    const c = startTower(w);
+    // Archers standing by besides the start swordsmen (test setup).
+    for (let i = 0; i < 4; i++) spawnSettler(w, 'archer', c).inside = null;
+    const tower = placeNear(w, 'tower', base(w).x + 6, base(w).y - 4, 5)!;
     run(w, 3000);
     expect(tower.done).toBe(true);
     const inside = members(w, tower);
@@ -119,8 +122,9 @@ describe('garrison slots by kind', () => {
 describe('capture', () => {
   it('archers cannot take a building: they fight, then look for a garrison of their own', () => {
     const { w, ours, theirs } = frontLine();
-    for (const s of members(w, theirs)) killSettler(w, s);
-    for (const s of w.settlers.filter((x) => x.owner === 2 && (x.kind === 'soldier' || x.kind === 'archer'))) killSettler(w, s);
+    // Player 2 keeps one fighter, holding its start tower (else it would be out): none to spare.
+    const keeper = startTower(w, 2).garrison[0];
+    for (const s of w.settlers.filter((x) => x.owner === 2 && (x.kind === 'soldier' || x.kind === 'archer') && x.id !== keeper)) killSettler(w, s);
     w.step();
     expect(theirs.garrison).toHaveLength(0);
     // Only archers in our tower: the swordsman leaves, three archers hold it.
@@ -147,13 +151,15 @@ describe('capture', () => {
 describe('infirmary', () => {
   it('wounded fighters heal only in an infirmary, then go back to a garrison', () => {
     const w = rich(new World(42));
-    const c = w.castle;
+    const c = startTower(w);
+    // Nobody standing by to take the wounded's slots while they are away (test setup).
+    dismissStandby(w);
     const wounded = members(w, c).slice(0, 2);
     for (const s of wounded) s.hp = 10;
     run(w, 600);
     // No infirmary: nobody heals, nobody leaves.
     for (const s of wounded) expect(s.hp).toBe(10);
-    const inf = placeNear(w, 'infirmary', c.x + 5, c.y + 3)!;
+    const inf = placeNear(w, 'infirmary', base(w).x + 5, base(w).y + 3)!;
     let wasInBed = false;
     for (let i = 0; i < 8000 && (!inf.done || wounded.some((s) => s.hp < maxHp(s))); i++) {
       w.step();
@@ -164,13 +170,13 @@ describe('infirmary', () => {
     for (const s of wounded) expect(s.hp).toBe(maxHp(s));
     run(w, 600);
     for (const s of wounded) expect(s.home).not.toBeNull();
-    expect(c.garrison.length).toBeGreaterThanOrEqual(BUILDINGS.castle.garrison!.keep!);
+    expect(c.garrison.length).toBeGreaterThanOrEqual(BUILDINGS.tower.garrison!.keep!);
   });
 
   it('a stay in the infirmary continues identically after save and load', () => {
     const w = rich(new World(42));
-    const c = w.castle;
-    const inf = placeNear(w, 'infirmary', c.x + 5, c.y + 3)!;
+    const c = startTower(w);
+    const inf = placeNear(w, 'infirmary', base(w).x + 5, base(w).y + 3)!;
     run(w, 2000);
     expect(inf.done).toBe(true);
     members(w, c)[0].hp = 5;
@@ -186,7 +192,7 @@ describe('infirmary', () => {
 describe('lookout tower', () => {
   it('sees far, claims no land and holds nobody', () => {
     const w = rich(new World(42));
-    const c = w.castle;
+    const c = base(w);
     const look = placeNear(w, 'lookout', c.x + 7, c.y, 5)!;
     run(w, 2000);
     expect(look.done).toBe(true);
@@ -211,9 +217,9 @@ describe('teams', () => {
     const w = rich(new World(42, { players: 3, teams: [1, 1, 2] }));
     expect(w.allied(1, 2)).toBe(true);
     expect(w.allied(1, 3)).toBe(false);
-    for (let i = 0; i < 4; i++) station(w, w.castle, 'soldier');
-    expect(w.attack(w.castleOf(2).id, 5)).toBe(0);
-    expect(w.availableAttackers(w.castleOf(2).id)).toBe(0);
+    for (let i = 0; i < 4; i++) station(w, startTower(w), 'soldier');
+    expect(w.attack(startTower(w, 2).id, 5)).toBe(0);
+    expect(w.availableAttackers(startTower(w, 2).id)).toBe(0);
     expect(knownEnemies(w, 1).some((e) => e.b.owner === 2)).toBe(false);
     w.defeatPlayer(3);
     expect(w.outcome(1)).toBe('won');

@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { addBuilding, spawnSettler } from '../src/sim/buildings';
 import { hpOf, PROFESSIONS } from '../src/sim/config';
 import { fieldUnits, formationSpots, moraleOf } from '../src/sim/field';
-import { enterGarrison } from '../src/sim/military';
+import { enterGarrison, keepOf, killSettler } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
 import { RESOURCES, type Settler } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { placeNear } from '../tools/scenario';
+import { base, dismissStandby, startTower, vacateStart } from './helpers';
 
 function run(world: World, ticks: number) {
   for (let i = 0; i < ticks; i++) world.step();
@@ -14,14 +15,14 @@ function run(world: World, ticks: number) {
 
 const dist = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
 
-/** A walkable tile about `r` tiles from the castle door, towards the map centre's other side. */
+/** A walkable tile near (x, y), where a formation of one would stand. */
 function spotNear(w: World, x: number, y: number) {
   return formationSpots(w, x, y, 1)[0];
 }
 
-/** New fighters of player 1 standing in the field before the castle door, holding there. */
-function outOfCastle(w: World, n: number, kind: 'soldier' | 'archer' | 'leader' = 'soldier'): Settler[] {
-  const c = w.castle;
+/** New fighters of player 1 standing in the field before the start tower's door, holding there. */
+function inTheField(w: World, n: number, kind: 'soldier' | 'archer' | 'leader' = 'soldier'): Settler[] {
+  const c = startTower(w);
   const made: Settler[] = [];
   for (let i = 0; i < n; i++) {
     const s = spawnSettler(w, kind, c);
@@ -37,7 +38,7 @@ function outOfCastle(w: World, n: number, kind: 'soldier' | 'archer' | 'leader' 
 describe('direct army control', () => {
   it('a building releases its spare fighters as field units, keeping its own', () => {
     const w = new World(42);
-    const c = w.castle;
+    const c = startTower(w);
     for (let i = 0; i < 6; i++) enterGarrison(w, c, spawnSettler(w, 'soldier', c));
     const before = c.garrison.length;
     const out = w.releaseFighters(c.id, 3);
@@ -46,14 +47,14 @@ describe('direct army control', () => {
     expect(fieldUnits(w, 1).length).toBe(3);
     // Never below what it keeps.
     w.releaseFighters(c.id, 99);
-    expect(c.garrison.length).toBeGreaterThanOrEqual(4);
+    expect(c.garrison.length).toBeGreaterThanOrEqual(keepOf(c));
   });
 
   it('fighters ordered to a point stay there as field units', () => {
     const w = new World(42);
-    const units = outOfCastle(w, 3);
+    const units = inTheField(w, 3);
     for (const s of units) expect(s.post).toBeTruthy();
-    const c = w.castle;
+    const c = startTower(w);
     const target = spotNear(w, c.door.x + 6, c.door.y + 3);
     expect(w.orderMove(units.map((s) => s.id), target.x, target.y)).toBe(3);
     run(w, 400);
@@ -69,28 +70,32 @@ describe('direct army control', () => {
 
   it('hold keeps them on their tile, garrison sends them back inside', () => {
     const w = new World(42);
-    const units = outOfCastle(w, 2);
+    // The start tower's swordsman falls (its archers hold it) and nobody stands by: one free
+    // swordsman's slot (test setup).
+    dismissStandby(w);
+    const t = startTower(w);
+    killSettler(w, w.getSettler(t.garrison.find((id) => w.getSettler(id)!.kind === 'soldier')!)!);
+    const units = inTheField(w, 2);
     const ids = units.map((s) => s.id);
     run(w, 60);
     expect(w.orderHold(ids)).toBe(2);
     for (const s of units) expect(s.post).toEqual({ x: Math.round(s.x), y: Math.round(s.y) });
     expect(w.orderGarrison(ids, null)).toBe(2);
     run(w, 400);
-    // Both left the field; the castle had a free swordsman's slot for one of them.
+    // Both left the field; the start tower had a free swordsman's slot for one of them.
     for (const s of units) expect(s.post).toBeNull();
     expect(units.filter((s) => s.inside !== null).length).toBeGreaterThanOrEqual(1);
   });
 
   it('field swordsmen engage enemy fighters that come near', () => {
     const w = new World(42, { players: 2 });
-    const mine = outOfCastle(w, 2);
-    const c = w.castle;
+    const mine = inTheField(w, 2);
+    const c = startTower(w);
     const at = spotNear(w, c.door.x + 4, c.door.y + 4);
     w.orderMove(mine.map((s) => s.id), at.x, at.y);
     run(w, 300);
     // An enemy swordsman walks into them.
-    const enemyCastle = w.castleOf(2);
-    const foe = spawnSettler(w, 'soldier', enemyCastle);
+    const foe = spawnSettler(w, 'soldier', startTower(w, 2));
     foe.hp = 100;
     foe.inside = null;
     foe.x = foe.px = at.x + 2;
@@ -108,9 +113,9 @@ describe('direct army control', () => {
 
   it('field archers shoot enemies in range', () => {
     const w = new World(42, { players: 2 });
-    const [archer] = outOfCastle(w, 1, 'archer');
+    const [archer] = inTheField(w, 1, 'archer');
     run(w, 100);
-    const foe = spawnSettler(w, 'soldier', w.castleOf(2));
+    const foe = spawnSettler(w, 'soldier', startTower(w, 2));
     foe.hp = 100;
     foe.inside = null;
     foe.x = foe.px = archer.x + 3;
@@ -129,8 +134,8 @@ describe('direct army control', () => {
 
   it('an attack order from the field takes an empty enemy building', () => {
     const w = new World(42, { players: 2 });
-    const [s] = outOfCastle(w, 1);
-    const c = w.castle;
+    const [s] = inTheField(w, 1);
+    const c = base(w);
     // An unmanned enemy tower a few tiles away (built directly, outside player 2's land is fine here).
     let tower;
     for (let r = 6; r < 14 && !tower; r++) {
@@ -154,9 +159,9 @@ describe('direct army control', () => {
 
   it('a squad leader lifts the fighters near him, and his squad follows him', () => {
     const w = new World(42);
-    const [leader] = outOfCastle(w, 1, 'leader');
-    const squad = outOfCastle(w, 3);
-    const c = w.castle;
+    const [leader] = inTheField(w, 1, 'leader');
+    const squad = inTheField(w, 3);
+    const c = startTower(w);
     const a = spotNear(w, c.door.x + 5, c.door.y + 2);
     w.orderMove([leader.id, ...squad.map((s) => s.id)], a.x, a.y);
     run(w, 400);
@@ -170,7 +175,7 @@ describe('direct army control', () => {
     expect(dist(leader, b)).toBeLessThan(2);
     for (const s of squad) expect(dist(s, leader)).toBeLessThan(5);
     // Far from any leader, no bonus.
-    const [lone] = outOfCastle(w, 1);
+    const [lone] = inTheField(w, 1);
     const far = spotNear(w, c.door.x + 12, c.door.y - 10);
     w.orderMove([lone.id], far.x, far.y);
     run(w, 600);
@@ -179,10 +184,11 @@ describe('direct army control', () => {
 
   it('a barracks makes a squad leader from armour and a sword', () => {
     const w = new World(42);
-    const c = w.castle;
+    // Room for a melee fighter: a free swordsman's slot in the start tower (`vacateStart`).
+    const c = vacateStart(w);
     c.output.plank = 80;
     c.output.stone = 40;
-    const barracks = placeNear(w, 'barracks', c.x + 5, c.y - 1)!;
+    const barracks = placeNear(w, 'barracks', base(w).x + 5, base(w).y - 1)!;
     run(w, 1500);
     expect(barracks.done).toBe(true);
     w.setShare('sword', 0);
@@ -199,8 +205,8 @@ describe('direct army control', () => {
 
   it('field units survive save and load bit for bit', () => {
     const w = new World(7, { players: 2 });
-    const units = outOfCastle(w, 3);
-    const c = w.castle;
+    const units = inTheField(w, 3);
+    const c = startTower(w);
     const t = spotNear(w, c.door.x + 6, c.door.y + 5);
     w.orderMove(units.map((s) => s.id), t.x, t.y);
     run(w, 50);

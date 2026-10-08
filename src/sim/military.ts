@@ -4,7 +4,7 @@
  * Military buildings (`def.garrison`) hold fighters: swordsmen (`soldier`) and archers. New fighters
  * come only from a barracks (`def.barracks`): a carrier enters as its recruit, takes a weapon from its
  * pile, trains and walks to the nearest garrison with room. Empty slots are also filled by moving a
- * spare fighter out of a reserve building (the castle) or a rear outpost. Every building keeps `keep`
+ * spare fighter out of a rear outpost. Every building keeps `keep`
  * fighters it never gives away. An attack sends spare fighters to an enemy military building; at its door each
  * attacker duels one defender at a time (`combat.ts`: both strike on their own timers; the defender
  * fights at his owner's defence strength, the attacker at his attack strength). Archers inside a
@@ -161,7 +161,7 @@ export function staffGarrisons(w: World, own: Building[]): void {
         (archer) => (!archer || RANGED_KIND !== undefined) && slotsFree(w, b, archer) > 0,
       );
       if (kinds.length === 0) break;
-      // Donors: the reserve (castle) for any outpost; an empty outpost also takes from the nearest
+      // Donors: a reserve (`claimsWhenEmpty`) for any outpost; an empty outpost also takes from the nearest
       // other outpost with spares, and any outpost from outposts further from the enemy — fighters
       // move from the rear to the front, never back, so this cannot cycle.
       const front = frontDistance.get(b.id) ?? Infinity;
@@ -651,7 +651,10 @@ export function pruneShots(w: World): void {
   w.shots = w.shots.filter((s) => w.tick - s.tick < SHOT_TICKS);
 }
 
-/** The attacker moves in: the building and its land change hands, enemy civil buildings there burn. */
+/**
+ * The attacker moves in: the building and its land change hands, enemy civil buildings there burn,
+ * and their people, homeless on foreign land, flee (`flee.ts`).
+ */
 function conquer(w: World, b: Building, s: Settler): void {
   const previous = b.owner;
   for (const o of w.settlers) {
@@ -664,12 +667,12 @@ function conquer(w: World, b: Building, s: Settler): void {
   s.tasks.shift();
   enterGarrison(w, b, s);
   recomputeTerritory(w);
+  // Burnt as in Settlers 4: no materials back, the goods lying at them stay on the ground (`GROUND`).
+  // A player left with no occupied military building is out at the next `checkDefeats`.
   for (const o of [...w.buildings.values()]) {
     if (isMilitary(o) || !onForeignLand(w, o)) continue;
-    w.removeBuilding(o);
+    w.removeBuilding(o, 'burn');
   }
-  // Losing the castle loses the game.
-  if (w.players.some((p) => p.id === previous && p.castleId === b.id)) w.defeatPlayer(previous);
 }
 
 function onForeignLand(w: World, b: Building): boolean {

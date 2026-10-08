@@ -548,7 +548,7 @@ const SMALL: BuildingCanvas = { w: 150, h: 140, ax: 75, ay: 100 };
 const LARGE: BuildingCanvas = { w: 220, h: 190, ax: 110, ay: 135 };
 /** Eyecatchers on one tile: narrow and tall enough for a column or an obelisk. */
 const DECOR: BuildingCanvas = { w: 80, h: 120, ax: 40, ay: 92 };
-/** The 4×4 strongholds (castle, fortress), as tall as two houses. */
+/** The 4×4 castle (our `fortress`), as tall as two houses. */
 const HUGE: BuildingCanvas = { w: 320, h: 290, ax: 160, ay: 200 };
 
 /** Construction-site sprites by footprint side (`site<n>`; 1×1 eyecatchers use the 2×2 one). */
@@ -559,7 +559,6 @@ export function siteSprite(side: number): SiteSprite {
 
 /** Sprite canvas per building; `site2`…`site4` are construction sites for 2×2 to 4×4 footprints. */
 export const BUILDING_CANVAS: Record<BuildingType | SiteSprite, BuildingCanvas> = {
-  castle: HUGE,
   house_small: SMALL,
   house_medium: SMALL,
   house_large: LARGE,
@@ -601,51 +600,6 @@ export const BUILDING_CANVAS: Record<BuildingType | SiteSprite, BuildingCanvas> 
   site3: { w: 220, h: 120, ax: 110, ay: 65 },
   site4: { w: 290, h: 160, ax: 145, ay: 85 },
 };
-
-function paintCastle(ctx: Ctx): void {
-  // 4×4: walls round the footprint, the keep in the middle, the gate in front of the door tile.
-  const hw = 1.75;
-  const hh = 1.75;
-  const H = 50;
-  const stone = '#a8a294';
-  shadow(ctx, hw, hh, 0.5);
-  walls(ctx, 0, 0, hw, hh, 0, H, stone);
-  for (let z = 7; z < H; z += 7) {
-    line(ctx, [-hw, hh, z], [hw, hh, z], shade(stone, 0.82));
-    line(ctx, [hw, -hh, z], [hw, hh, z], shade(stone, 0.6));
-  }
-  for (let z = 0, row = 0; z < H; z += 7, row++) {
-    for (let t = -hw + (row % 2 ? 0.15 : 0.3); t < hw; t += 0.32) {
-      line(ctx, [t, hh, z], [t, hh, Math.min(z + 7, H)], shade(stone, 0.82));
-      line(ctx, [hw, t, z], [hw, t, Math.min(z + 7, H)], shade(stone, 0.6));
-    }
-  }
-  poly(ctx, [[-hw, -hh, H], [hw, -hh, H], [hw, hh, H], [-hw, hh, H]], shade(stone, 0.9));
-  // Back crenellations, then the keep, then front crenellations.
-  const merlon = (cx: number, cy: number) => box(ctx, cx, cy, 0.11, 0.11, H, 8, stone);
-  for (let t = -hw + 0.11; t <= hw; t += 0.4) {
-    merlon(t, -hh + 0.11);
-    merlon(-hw + 0.11, t);
-  }
-  const k = 0.8;
-  box(ctx, 0, 0, k, k, H, 56, '#b4ae9f');
-  frontQuad(ctx, k, -0.2, 0.2, H + 32, H + 46, '#3a3430');
-  sideQuad(ctx, k, -0.2, 0.2, H + 32, H + 46, '#2c2724');
-  pyramidRoof(ctx, k + 0.12, H + 56, 50, '#b23a2c');
-  // The banner on the roof tip is a separate per-owner sprite (`BANNERS`).
-  for (let t = -hw + 0.11; t <= hw; t += 0.4) {
-    merlon(t, hh - 0.11);
-    merlon(hw - 0.11, t);
-  }
-  // Gate in front of the door tile (dx = +1.5).
-  frontQuad(ctx, hh, 1.2, 1.72, 0, 28, '#3d2a1a');
-  frontQuad(ctx, hh, 1.24, 1.68, 0, 25, '#5a3d22');
-  line(ctx, [1.46, hh, 0], [1.46, hh, 25], '#3d2a1a');
-  frontQuad(ctx, hh, -0.95, -0.7, 26, 36, '#2c2724');
-  frontQuad(ctx, hh, 0.1, 0.35, 26, 36, '#2c2724');
-  sideQuad(ctx, hw, -0.55, -0.3, 26, 36, '#221e1b');
-  sideQuad(ctx, hw, 0.55, 0.8, 26, 36, '#221e1b');
-}
 
 function paintWoodcutter(ctx: Ctx): void {
   const hw = 0.8;
@@ -1009,7 +963,6 @@ function paintFortress(ctx: Ctx): void {
  * The renderer places the `flag:<owner>` sprite there, so it follows conquests.
  */
 export const BANNERS: Partial<Record<BuildingType, { x: number; y: number }>> = {
-  castle: { x: 0, y: -156 },
   tower: { x: 0, y: -110 },
   bigtower: { x: 0, y: -126 },
   fortress: { x: 0, y: -120 },
@@ -1621,7 +1574,6 @@ export function buildingFxAnchors(type: BuildingType): FxAnchors {
 }
 
 export const BUILDING_PAINTERS: Record<BuildingType | SiteSprite, (ctx: Ctx) => void> = {
-  castle: paintCastle,
   house_small: styled('house_small'),
   house_medium: styled('house_medium'),
   house_large: styled('house_large'),

@@ -1,5 +1,6 @@
 import { BUILDINGS, costOf, HANDLE_TICKS, PROFESSIONS, TRADE } from './config';
 import { ENDLESS } from './economy';
+import { dropGoods } from './ground';
 import { RESOURCES, type Building, type PlayerId, type Point, type Resource, type Settler, type Task } from './types';
 import type { World } from './world';
 
@@ -161,7 +162,7 @@ export function unloadTick(w: World, s: Settler, task: Extract<Task, { t: 'unloa
 
 /**
  * A donkey whose trip failed with goods in its packs takes them to the nearest market of its owner;
- * with none left, they are lost.
+ * with none left, it puts them down on the ground where it stands (`ground.ts`).
  */
 export function donkeyAbort(w: World, s: Settler): void {
   const res = s.carrying;
@@ -173,7 +174,7 @@ export function donkeyAbort(w: World, s: Settler): void {
       { t: 'unload', b: home.id },
     ];
   } else {
-    w.stats.lost[res] += s.load ?? 1;
+    dropGoods(w, s, res, s.load ?? 1);
     s.carrying = null;
     delete s.load;
   }
@@ -181,8 +182,8 @@ export function donkeyAbort(w: World, s: Settler): void {
 
 /** Idle donkeys wait at the nearest market (or the ranch they came from), out of the way. */
 export function donkeyIdle(w: World, s: Settler): void {
-  const at =
-    nearestMarket(w, s.owner, s) ?? (s.inside !== null ? w.buildings.get(s.inside) : undefined) ?? w.castleOf(s.owner);
+  const at = nearestMarket(w, s.owner, s) ?? (s.inside !== null ? w.buildings.get(s.inside) : undefined);
+  if (!at) return;
   if (Math.abs(s.x - at.door.x) <= 1 && Math.abs(s.y - at.door.y) <= 1) return;
   s.tasks = [{ t: 'goto', x: at.door.x, y: at.door.y, adj: true }];
 }

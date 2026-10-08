@@ -1,4 +1,4 @@
-import { addBuilding, doorOf, recomputeTerritory, spawnSettler, updateBuilding } from './buildings';
+import { addBuilding, centerOf, doorOf, recomputeTerritory, ruinGoods, spawnSettler, updateBuilding } from './buildings';
 import {
   AI_LEVELS,
   type AiLevel,
@@ -6,7 +6,9 @@ import {
   type BuildGround,
   BUILD_TICKS_PER_UNIT,
   BUILDINGS,
+  DEFEAT,
   DISPATCH_EVERY,
+  GROUND,
   MAP_SIZE,
   OUTPUT_SHARES,
   SOLDIER_LEVELS,
@@ -14,6 +16,7 @@ import {
   type StartLevel,
   totalCost,
 } from './config';
+import { dropGoods, rebuildStacks } from './ground';
 import { levelTarget, needsDigger, needsLevelling } from './digging';
 import {
   dismissSpecialist,
@@ -41,10 +44,10 @@ import {
   enterGarrison,
   isFighter,
   isMilitary,
-  killSettler,
   leaveGarrison,
   pruneShots,
   removeDead,
+  slotsFree,
   updateBarracks,
   updateGarrison,
 } from './military';
@@ -72,8 +75,8 @@ import {
 export { doorOf } from './buildings';
 
 /**
- * Castle centers: the map center for one player, otherwise evenly spaced on a circle around it
- * (two players sit in opposite corners of the diagonal).
+ * Start positions (where each player's start tower stands): the map center for one player, otherwise
+ * evenly spaced on a circle around it (two players sit in opposite corners of the diagonal).
  */
 export function startPositions(size: number, players: number): { x: number; y: number }[] {
   const c = Math.floor(size / 2);
@@ -90,7 +93,11 @@ export const LOCAL_PLAYER: PlayerId = 1;
 
 export interface Player {
   id: PlayerId;
-  castleId: number;
+  /**
+   * Where the player started: the door of its start tower (Settlers 4 has no headquarters). Stays
+   * put when that tower is lost; the camera, path checks and the AI's sense of home use it.
+   */
+  home: Point;
   /** The player's weights for share-controlled outputs (weapons); missing ones use `OUTPUT_SHARES`. */
   shares?: Partial<Record<Resource, number>>;
   /** Level (index into `SOLDIER_LEVELS`) its barracks train recruits at; default 0. */
@@ -104,7 +111,7 @@ export interface Player {
 export interface WorldOptions {
   /** Map edge length in tiles. */
   size?: number;
-  /** Number of players, each with a castle (default 1). Player 1 is `LOCAL_PLAYER`. */
+  /** Number of players, each with a start tower (default 1). Player 1 is `LOCAL_PLAYER`. */
   players?: number;
   /** Players controlled by the computer (see `ai.ts`). */
   ai?: PlayerId[];
@@ -116,7 +123,7 @@ export interface WorldOptions {
   start?: StartLevel;
   /**
    * Difficulty of each computer player, by player index like `teams` (default `medium`); a level's
-   * `bonus` goods are added to that player's castle.
+   * `bonus` goods lie by that player's start tower.
    */
   difficulty?: AiLevel[];
 }
@@ -179,7 +186,7 @@ export class World {
   shots: { x0: number; y0: number; x1: number; y1: number; tick: number; owner: PlayerId }[] = [];
   /** Computer players' state (saved). */
   readonly ai: AiState[] = [];
-  /** Players whose castle has been taken, in order of defeat (saved). */
+  /** Players with no occupied military building left (`DEFEAT`), in order of defeat (saved). */
   readonly defeated: PlayerId[] = [];
   /** Current sight per player (derived; what was ever seen is `map.explored`). See fog.ts. */
   readonly fog: FogState = createFog();
@@ -190,6 +197,10 @@ export class World {
   readonly animalRng: Rng;
   /** Random stream of the idle crowds (`idle.ts`), so they never shift the economy's own RNG. */
   readonly idleRng: Rng;
+  /** Tiles with goods on the ground (`ground.ts`; derived from `map.goods`, rebuilt on load). */
+  readonly stacks = new Set<number>();
+  /** `stacks` in index order, rebuilt when a stack appears or goes (derived). */
+  stackOrder: number[] | null = null;
 
   constructor(seed = 1, opts: WorldOptions = {}) {
     this.rng = createRng(seed ^ 0x9e3779b9);
@@ -200,16 +211,14 @@ export class World {
       restoreWorld(this, opts.from);
       for (let i = 0; i < this.map.crop.length; i++) if (this.map.crop[i] > 0) this.fields.add(i);
       rebuildWorn(this);
+      rebuildStacks(this);
       for (const p of this.map.claimed) if (p !== 0) this.pioneerLand++;
       return;
     }
     const size = opts.size ?? MAP_SIZE;
     const starts = startPositions(size, opts.players ?? 1);
     this.map = generateMap(seed, size, starts);
-    // The castle's footprint centre on the start (a 4×4 one half a tile up-left of it); its door
-    // stays where a 3×3 castle's was, `(st.x + 1, st.y + 2)`.
-    const { w: cw, h: ch } = BUILDINGS.castle;
-    for (const st of starts) this.addPlayer(st.x - Math.floor(cw / 2), st.y - Math.floor(ch / 2), opts.start ?? 'medium');
+    for (const st of starts) this.addPlayer(st, opts.start ?? 'medium');
     opts.teams?.forEach((team, k) => {
       if (this.players[k] && Number.isFinite(team)) this.players[k].team = team;
     });
@@ -218,8 +227,8 @@ export class World {
       if (!this.players.some((pl) => pl.id === p)) continue;
       const level = opts.difficulty?.[p - 1] ?? 'medium';
       this.ai.push(createAi(p, level));
-      const castle = this.castleOf(p);
-      for (const [res, n] of Object.entries(AI_LEVELS[level].bonus)) castle.output[res as keyof Stock] += n ?? 0;
+      const home = this.homeOf(p);
+      for (const [res, n] of Object.entries(AI_LEVELS[level].bonus) as [Resource, number][]) dropGoods(this, home, res, n);
     }
     spawnAnimals(this, starts);
   }
@@ -228,38 +237,57 @@ export class World {
     return new World(0, { from: save });
   }
 
-  private addPlayer(x: number, y: number, start: StartLevel): Player {
+  /**
+   * A new player at start position `st`, as in Settlers 4 (`StartResources.txt`): the start level's
+   * building (a small tower), finished, centred on the start and manned by its fighters as far as
+   * its slots of their kind go (the others stand by it); its people; and its goods on the ground
+   * round it, pile by pile (`ground.ts`).
+   */
+  private addPlayer(st: Point, start: StartLevel): Player {
     const id = this.players.length + 1;
-    if (!this.canPlace('castle', x, y, id)) throw new Error('castle placement failed');
-    const castle = addBuilding(this, 'castle', x, y, id, true);
     const def = START_CONDITIONS[start];
-    for (const [res, n] of Object.entries(def.goods)) castle.output[res as keyof Stock] += n ?? 0;
-    const player: Player = { id, castleId: castle.id, economy: createEconomy(start) };
+    const { w: bw, h: bh } = BUILDINGS[def.building];
+    const x = st.x - Math.floor(bw / 2);
+    const y = st.y - Math.floor(bh / 2);
+    if (!this.canPlace(def.building, x, y, id, true)) throw new Error('start building placement failed');
+    const tower = addBuilding(this, def.building, x, y, id, true);
+    const player: Player = { id, home: { ...tower.door }, economy: createEconomy(start) };
     this.players.push(player);
+    const fighters: [SettlerKind, number][] = [
+      ['soldier', def.soldiers],
+      ['archer', def.archers],
+    ];
+    for (const [kind, n] of fighters) {
+      for (let i = 0; i < n; i++) {
+        const s = spawnSettler(this, kind, tower);
+        if (slotsFree(this, tower, kind === 'archer') > 0) enterGarrison(this, tower, s);
+        else s.inside = null;
+      }
+    }
     recomputeTerritory(this);
-    for (let i = 0; i < def.carriers; i++) spawnSettler(this, 'carrier', castle);
-    for (let i = 0; i < def.builders; i++) spawnSettler(this, 'builder', castle);
-    for (let i = 0; i < def.diggers; i++) spawnSettler(this, 'digger', castle);
-    for (let i = 0; i < def.soldiers; i++) enterGarrison(this, castle, spawnSettler(this, 'soldier', castle));
+    for (let i = 0; i < def.carriers; i++) spawnSettler(this, 'carrier', tower);
+    for (let i = 0; i < def.builders; i++) spawnSettler(this, 'builder', tower);
+    for (let i = 0; i < def.diggers; i++) spawnSettler(this, 'digger', tower);
+    const c = centerOf(tower);
+    for (const [res, n] of def.piles) dropGoods(this, { x: Math.round(c.x), y: Math.round(c.y) }, res, n);
     return player;
   }
 
   // ---------------------------------------------------------------- queries
 
-  /** The local player's castle. */
-  get castle(): Building {
-    return this.castleOf(LOCAL_PLAYER);
+  /** Where the player started: its start tower's door (see `Player.home`). */
+  homeOf(player: PlayerId = LOCAL_PLAYER): Point {
+    return this.players[player - 1].home;
   }
 
-  castleOf(player: PlayerId): Building {
-    return this.buildings.get(this.players[player - 1].castleId)!;
-  }
-
-  canPlace(type: BuildingType, x: number, y: number, player: PlayerId = LOCAL_PLAYER): boolean {
+  /**
+   * Whether the building fits there: buildable ground of its terrain (no goods lying on it either),
+   * the footprint and door on the player's land — or, `founding` a player's start, on nobody's.
+   */
+  canPlace(type: BuildingType, x: number, y: number, player: PlayerId = LOCAL_PLAYER, founding = false): boolean {
     const def = BUILDINGS[type];
-    // A castle founds a territory, everything else must stay inside its owner's.
     const owned = (tx: number, ty: number) =>
-      type === 'castle' ? this.map.inBounds(tx, ty) && this.map.owner[this.map.idx(tx, ty)] === 0 : this.owns(tx, ty, player);
+      founding ? this.map.inBounds(tx, ty) && this.map.owner[this.map.idx(tx, ty)] === 0 : this.owns(tx, ty, player);
     const ground: BuildGround = def.terrain === 'mountain' ? 'mountain' : 'ground';
     for (let dy = 0; dy < def.h; dy++) {
       for (let dx = 0; dx < def.w; dx++) {
@@ -270,9 +298,11 @@ export class World {
     // Mines sit on slopes; everything else needs fairly level ground under the footprint and door
     // (steeper than BUILD_MAX_SLOPE is allowed, but a digger levels it first).
     if (def.terrain !== 'mountain' && this.map.heightRange(x, y, x + def.w - 1, y + def.h) > BUILD_DIG_SLOPE) return false;
+    const di = this.map.idx(door.x, door.y);
     return (
       this.map.isWalkable(door.x, door.y) &&
-      this.map.door[this.map.idx(door.x, door.y)] === 0 &&
+      this.map.door[di] === 0 &&
+      this.map.goods[di] === 0 &&
       owned(door.x, door.y) &&
       this.footprintKeepsConnected(x, y, def.w, def.h)
     );
@@ -340,15 +370,32 @@ export class World {
   }
 
   /**
-   * A player whose castle was taken is out: its settlers die and its remaining buildings burn, so
-   * the land is free for the others. Called by the conquest (`military.ts`).
+   * A player with no occupied military building left is out (`DEFEAT`, Settlers 4's default rule;
+   * `checkDefeats`): its buildings burn — the goods lying at them stay on the ground (`GROUND`) —, its
+   * land is free for the others, and its settlers drop what they were doing and wander off until they
+   * die (`flee.ts`).
    */
   defeatPlayer(player: PlayerId): void {
     if (this.isDefeated(player)) return;
     this.defeated.push(player);
-    for (const s of this.settlers) if (s.owner === player) killSettler(this, s);
-    for (const b of [...this.buildings.values()]) if (b.owner === player) this.removeBuilding(b);
+    for (const b of [...this.buildings.values()]) if (b.owner === player) this.removeBuilding(b, 'burn');
     recomputeTerritory(this);
+    for (const s of this.settlers) {
+      if (s.owner !== player || this.dying.has(s.id)) continue;
+      abort(this, s);
+      s.home = null;
+      s.inside = null;
+      s.post = null;
+      s.errand = null;
+    }
+  }
+
+  /** Every `DEFEAT.checkEvery` ticks: players with no occupied military building are defeated. */
+  private checkDefeats(): void {
+    if (this.tick < DEFEAT.afterTick || this.tick % DEFEAT.checkEvery !== 0) return;
+    const holding = new Set<PlayerId>();
+    for (const b of this.buildings.values()) if (b.done && isMilitary(b) && b.garrison.length > 0) holding.add(b.owner);
+    for (const p of this.players) if (!holding.has(p.id) && !this.isDefeated(p.id)) this.defeatPlayer(p.id);
   }
 
   /** Fog of war: has the player ever seen the tile? */
@@ -483,14 +530,15 @@ export class World {
   }
 
   /**
-   * Player command: tear down a building. Goods lying there are lost; every job involving it is
-   * cancelled (goods in hands go back to a warehouse), its worker becomes a carrier again and the
-   * tiles become free. The castle cannot be demolished.
+   * Player command: tear down a building. As in Settlers 4 half of its materials (of a site, half of
+   * what was built in) and every good lying at it stay on the ground (`GROUND`); every job involving
+   * it is cancelled (goods in hands are put down), its worker becomes a carrier again and the tiles
+   * become free.
    */
   demolish(id: number, player: PlayerId = LOCAL_PLAYER): boolean {
     const b = this.buildings.get(id);
     if (!b || b.owner !== player || !BUILDINGS[b.type].playerBuildable) return false;
-    this.removeBuilding(b);
+    this.removeBuilding(b, 'demolish');
     return true;
   }
 
@@ -539,9 +587,10 @@ export class World {
   /**
    * Removes a building with no ownership checks (demolition, burning after a conquest): aborts every
    * job involving it, sends its worker back to carrying and its soldiers to find another garrison,
-   * and frees the tiles.
+   * frees the tiles and leaves its ruin's goods on and around the footprint (`ruinGoods`: `demolish`
+   * gives back `GROUND.demolishShare` of its materials, `burn` `GROUND.burnShare`; `none` nothing).
    */
-  removeBuilding(b: Building): void {
+  removeBuilding(b: Building, ruin: 'demolish' | 'burn' | 'none' = 'burn'): void {
     const id = b.id;
     for (const s of this.settlers) {
       if (s.tasks.some((t) => 'b' in t && t.b === id)) abort(this, s);
@@ -565,6 +614,12 @@ export class World {
         m.building[m.idx(b.x + dx, b.y + dy)] = 0;
         markWalkable(m, b.x + dx, b.y + dy);
       }
+    }
+    if (ruin !== 'none') {
+      const c = centerOf(b);
+      const at = { x: Math.round(c.x), y: Math.round(c.y) };
+      const share = ruin === 'demolish' ? GROUND.demolishShare : GROUND.burnShare;
+      for (const [res, n] of ruinGoods(b, share, GROUND.keepsGoods)) dropGoods(this, at, res, n);
     }
     if (BUILDINGS[b.type].territory) recomputeTerritory(this);
   }
@@ -632,8 +687,9 @@ export class World {
     if (!BUILDINGS[type].playerBuildable || !this.canPlace(type, x, y, player)) return null;
     const def = BUILDINGS[type];
     const door = doorOf(x, y, def.w, def.h);
-    const { door: from } = this.castleOf(player);
-    if (!findPath(this.map, from.x, from.y, door.x, door.y)) return null;
+    // Reachable from where the player started (unless something now stands there).
+    const from = this.homeOf(player);
+    if (this.map.isWalkable(from.x, from.y) && !findPath(this.map, from.x, from.y, door.x, door.y)) return null;
     const b = addBuilding(this, type, x, y, player, false);
     if (needsDigger(type)) {
       // Diggers clear every site first (and flatten a sloped one); carriers bring materials meanwhile.
@@ -667,6 +723,7 @@ export class World {
     updateIntruders(this);
     for (const s of this.settlers) if (!this.dying.has(s.id)) updateSettler(this, s);
     removeDead(this);
+    this.checkDefeats();
     pruneShots(this);
     if (this.tick % DISPATCH_EVERY === 0) dispatch(this);
     if (this.ai.length > 0) updateAi(this);
