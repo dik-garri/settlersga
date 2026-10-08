@@ -12,10 +12,19 @@ export const TICKS_PER_SECOND = 10;
 
 export const MAP_SIZE = 64;
 
-/** Tiles per tick. */
-export const SETTLER_SPEED = 0.2;
+/**
+ * Tiles per tick on open ground. Settlers 4 (decompiled `ISettlerRole`): every settler takes 9 game
+ * ticks per tile at 845 ticks a minute, i.e. 1.56 tiles/s; a settler is about as tall relative to a
+ * tile there as here, so the same number of tiles per second (`docs/TIMINGS.md`).
+ */
+export const SETTLER_SPEED = 0.156;
 
-export const BUILD_TICKS_PER_UNIT = 30;
+/**
+ * Work ticks one builder spends per material unit. Settlers 4 (`CBuildingSiteRole::AddWork`): every
+ * unit is 200 work, a builder adds one per game tick — 14.2 s per unit and builder; several builders
+ * on one site (`buildersOf`) add up.
+ */
+export const BUILD_TICKS_PER_UNIT = 142;
 export const HANDLE_TICKS = 3;
 
 /** Pile limits at a workplace door, per resource: every good a building uses or makes, up to this many units each. */
@@ -90,6 +99,13 @@ export const START_BUILDERS = 3;
 export const START_DIGGERS = 2;
 /** Spade strokes (one per `DIG_EVERY` ticks) to clear one footprint tile, on top of any levelling. */
 export const CLEAR_STROKES_PER_TILE = 6;
+/**
+ * Diggers one site takes at once, as in Settlers 4 (`CBuildingSiteRole::SetDiggingInfos`): one more
+ * per `DIG_STROKES_PER_DIGGER` spade strokes still to do (levelling steps plus clearing), at most
+ * `MAX_DIGGERS`.
+ */
+export const DIG_STROKES_PER_DIGGER = 32;
+export const MAX_DIGGERS = 8;
 export const START_PLANKS = 20;
 export const START_STONE = 10;
 /** Tools in the castle at the start, enough for the first workplaces. */
@@ -258,8 +274,13 @@ export const TREE_MATURE = 4;
 export const BUILD_MAX_SLOPE = 12;
 /** Up to this slope a site is still allowed, but a digger must level it before builders start. */
 export const BUILD_DIG_SLOPE = 30;
-/** A digger moves one corner by one pixel towards the site's level every this many ticks. */
-export const DIG_EVERY = 3;
+/**
+ * A digger moves one corner by one pixel towards the site's level (or makes one clearing stroke)
+ * every this many ticks: one stroke per loop of the spade animation (`ACTIONS.dig`, 0.82 s), as
+ * Settlers 4 changes one height step per spade animation cycle (its length is in no source we
+ * have, `docs/TIMINGS.md`).
+ */
+export const DIG_EVERY = 8;
 /** Rivers per 64×64 of map, carved from high ground down to the sea or into a lake. */
 export const RIVERS_PER_64 = 1.5;
 /** A river gets a walkable ford about this often (tiles), so rivers never cut the land apart. */
@@ -495,6 +516,10 @@ export interface ProfessionDef {
   /** Disguised on hostile land until a fighter of that land comes close (the thief, `INTRUDERS`). */
   cloaked?: boolean;
   combat?: CombatDef;
+  /** Walking speed relative to `SETTLER_SPEED` (Settlers 4: the squad leader rides, 9 ticks a tile against 7). */
+  speed?: number;
+  /** Walks faster on worn paths and roads (`PATHS`); in Settlers 4 only carriers and donkeys do. */
+  roads?: boolean;
   /** Tool a carrier must fetch from storage to take up the profession (it is used up). */
   tool?: Resource;
   /** Further goods a barracks consumes to make this fighter, besides `tool` (the squad leader's sword). */
@@ -505,36 +530,36 @@ export interface ProfessionDef {
 }
 
 export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
-  carrier: { name: 'Носильщик', behavior: 'carrier' },
+  carrier: { name: 'Носильщик', behavior: 'carrier', roads: true },
   builder: { name: 'Строитель', behavior: 'builder', tool: 'hammer' },
   digger: { name: 'Землекоп', behavior: 'digger', tool: 'shovel' },
-  woodcutter: { name: 'Лесоруб', behavior: 'gather', tool: 'axe', gather: { res: 'log', radius: 8, workTicks: 40, restTicks: 30 } },
+  woodcutter: { name: 'Лесоруб', behavior: 'gather', tool: 'axe', gather: { res: 'log', radius: 8, workTicks: 250, restTicks: 300 } },
   stonecutter: {
     name: 'Каменотёс',
     behavior: 'gather',
     tool: 'pickaxe',
-    gather: { res: 'stone', radius: 8, workTicks: 50, restTicks: 30 },
+    gather: { res: 'stone', radius: 8, workTicks: 200, restTicks: 150 },
   },
   forester: {
     name: 'Лесничий',
     behavior: 'plant',
-    plant: { what: 'tree', radius: 6, workTicks: 30, restTicks: 60 },
+    plant: { what: 'tree', radius: 6, workTicks: 120, restTicks: 130 },
   },
-  waterman: { name: 'Водонос', behavior: 'gather', gather: { res: 'water', radius: 7, workTicks: 20, restTicks: 20 } },
-  fisher: { name: 'Рыбак', behavior: 'gather', tool: 'rod', gather: { res: 'fish', radius: 8, workTicks: 60, restTicks: 30 } },
+  waterman: { name: 'Водонос', behavior: 'gather', gather: { res: 'water', radius: 7, workTicks: 40, restTicks: 40 } },
+  fisher: { name: 'Рыбак', behavior: 'gather', tool: 'rod', gather: { res: 'fish', radius: 8, workTicks: 150, restTicks: 100 } },
   farmer: {
     name: 'Фермер',
     behavior: 'farm',
     tool: 'scythe',
-    gather: { res: 'grain', radius: 5, workTicks: 30, restTicks: 15 },
-    plant: { what: 'grain', radius: 5, workTicks: 25, restTicks: 15, maxNearby: 10 },
+    gather: { res: 'grain', radius: 5, workTicks: 80, restTicks: 70 },
+    plant: { what: 'grain', radius: 5, workTicks: 60, restTicks: 70, maxNearby: 10 },
   },
   /** As in Settlers 4 the hunter uses a bow (forged by the weaponsmith). */
   hunter: {
     name: 'Охотник',
     behavior: 'hunt',
     tool: 'bow',
-    hunt: { radius: 12, range: 3.5, workTicks: 25, restTicks: 90, chases: 4 },
+    hunt: { radius: 12, range: 3.5, workTicks: 40, restTicks: 500, chases: 4 },
   },
   sawmiller: { name: 'Пильщик', behavior: 'workshop', tool: 'saw' },
   miller: { name: 'Мельник', behavior: 'workshop' },
@@ -556,7 +581,7 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
   /** Disguised: no target on hostile land until a fighter of that land comes close (`INTRUDERS`). */
   thief: { name: 'Вор', behavior: 'thief', hp: 20, cloaked: true },
   donkeyrancher: { name: 'Погонщик', behavior: 'workshop' },
-  donkey: { name: 'Осёл', behavior: 'donkey' },
+  donkey: { name: 'Осёл', behavior: 'donkey', roads: true },
   recruit: { name: 'Новобранец', behavior: 'workshop' },
   soldier: { name: 'Мечник', behavior: 'soldier', tool: 'sword', hp: 100, combat: { melee: 1, captures: true } },
   archer: {
@@ -576,6 +601,7 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
     tool: 'armor',
     kit: { sword: 1 },
     hp: 130,
+    speed: 9 / 7,
     combat: { melee: 1.25, captures: true, leads: { radius: 6, morale: 1.15 } },
   },
 };
@@ -713,6 +739,12 @@ function mine(name: string, res: Resource, favourite: Resource): BuildingDef {
   };
 }
 
+/**
+ * Recipe and gathering times follow Settlers 4 in real seconds at normal speed (10 ticks here = 1 s;
+ * the original runs 845 ticks a minute): the Roman buildings' ticks per product, measured by the
+ * Settlers United wiki, and the professions' cycles from siedlercommunity.de — table and sources
+ * in `docs/TIMINGS.md`.
+ */
 export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   castle: {
     name: 'Замок',
@@ -795,7 +827,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: 'sawmiller',
     playerBuildable: true,
     category: 'resources',
-    recipe: { inputs: { log: 1 }, outputs: { plank: 1 }, ticks: 50 },
+    recipe: { inputs: { log: 1 }, outputs: { plank: 1 }, ticks: 192 },
   },
   stonecutter: {
     name: 'Каменотёс',
@@ -835,7 +867,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: 'miller',
     playerBuildable: true,
     category: 'food',
-    recipe: { inputs: { grain: 1 }, outputs: { flour: 1 }, ticks: 60 },
+    recipe: { inputs: { grain: 1 }, outputs: { flour: 1 }, ticks: 133 },
   },
   bakery: {
     name: 'Пекарня',
@@ -845,7 +877,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: 'baker',
     playerBuildable: true,
     category: 'food',
-    recipe: { inputs: { flour: 1, water: 1 }, outputs: { bread: 1 }, ticks: 60 },
+    recipe: { inputs: { flour: 1, water: 1 }, outputs: { bread: 1 }, ticks: 347 },
   },
   pigfarm: {
     name: 'Свиноферма',
@@ -855,7 +887,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: 'pigfarmer',
     playerBuildable: true,
     category: 'food',
-    recipe: { inputs: { grain: 1, water: 1 }, outputs: { pig: 1 }, ticks: 120 },
+    recipe: { inputs: { grain: 1, water: 1 }, outputs: { pig: 1 }, ticks: 399 },
   },
   // Settlers 4 town buildings: carriers stay on their own land, donkeys carry goods between markets.
   market: {
@@ -876,7 +908,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: 'donkeyrancher',
     playerBuildable: true,
     category: 'trade',
-    recipe: { inputs: { grain: 1, water: 1 }, outputs: {}, ticks: 400 },
+    recipe: { inputs: { grain: 1, water: 1 }, outputs: {}, ticks: 192 },
     breeds: 'donkey',
   },
   slaughterhouse: {
@@ -887,7 +919,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: 'butcher',
     playerBuildable: true,
     category: 'food',
-    recipe: { inputs: { pig: 1 }, outputs: { meat: 2 }, ticks: 60 },
+    recipe: { inputs: { pig: 1 }, outputs: { meat: 2 }, ticks: 252 },
   },
 
   // Favourite foods as in Settlers 4: coal and stone bread, iron (and sulfur) meat, gold fish.
@@ -904,7 +936,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: 'smelter',
     playerBuildable: true,
     category: 'metal',
-    recipe: { inputs: { ironore: 1, coal: 1 }, outputs: { iron: 1 }, ticks: 70 },
+    recipe: { inputs: { ironore: 1, coal: 1 }, outputs: { iron: 1 }, ticks: 201 },
   },
   goldsmelter: {
     name: 'Плавильня золота',
@@ -914,7 +946,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: 'smelter',
     playerBuildable: true,
     category: 'metal',
-    recipe: { inputs: { goldore: 1, coal: 1 }, outputs: { gold: 1 }, ticks: 70 },
+    recipe: { inputs: { goldore: 1, coal: 1 }, outputs: { gold: 1 }, ticks: 214 },
   },
   toolsmith: {
     name: 'Инструментальщик',
@@ -924,7 +956,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: 'toolsmith',
     playerBuildable: true,
     category: 'metal',
-    recipe: { inputs: { iron: 1, coal: 1 }, outputs: {}, outputChoice: TOOLS, keepInStock: 2, orderable: true, ticks: 80 },
+    recipe: { inputs: { iron: 1, coal: 1 }, outputs: {}, outputChoice: TOOLS, keepInStock: 2, orderable: true, ticks: 219 },
   },
 
   weaponsmith: {
@@ -936,7 +968,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     playerBuildable: true,
     category: 'military',
     // Swords, bows and armour (squad leaders), whichever garrisons are waiting for (`waitingFor`), keeping a small stock.
-    recipe: { inputs: { iron: 1, coal: 1 }, outputs: {}, outputChoice: ['sword', 'bow', 'armor'], keepInStock: 3, ticks: 80 },
+    recipe: { inputs: { iron: 1, coal: 1 }, outputs: {}, outputChoice: ['sword', 'bow', 'armor'], keepInStock: 3, ticks: 277 },
   },
   tower: {
     name: 'Сторожевая башня',
@@ -1028,6 +1060,57 @@ export function totalCost(type: BuildingType): number {
   return Object.values(BUILDINGS[type].cost).reduce((sum, n) => sum + (n ?? 0), 0);
 }
 
+/**
+ * Builders that work on one site at once, from Settlers 4's building data (`m_iBuilderNumber`, the
+ * Roman buildings: each has that many builder spots around it). Types not listed: by footprint.
+ */
+export const SITE_BUILDERS: Partial<Record<BuildingType, number>> = {
+  castle: 5,
+  house_small: 3,
+  house_medium: 4,
+  house_large: 5,
+  warehouse: 4,
+  woodcutter: 3,
+  forester: 3,
+  sawmill: 3,
+  stonecutter: 3,
+  waterworks: 2,
+  fisher: 4,
+  hunter: 2,
+  farm: 4,
+  mill: 4,
+  bakery: 3,
+  pigfarm: 4,
+  market: 2,
+  donkeyranch: 4,
+  slaughterhouse: 2,
+  coalmine: 2,
+  ironmine: 3,
+  goldmine: 2,
+  stonemine: 2,
+  ironsmelter: 3,
+  goldsmelter: 4,
+  toolsmith: 3,
+  weaponsmith: 3,
+  tower: 3,
+  bigtower: 3,
+  barracks: 4,
+  fortress: 5,
+  lookout: 2,
+  infirmary: 3,
+  flowerbed: 1,
+  column: 1,
+  statue: 1,
+  fountain: 2,
+  obelisk: 1,
+};
+
+/** How many builders one site of this type takes at once (`SITE_BUILDERS`, else by footprint). */
+export function buildersOf(type: BuildingType): number {
+  const def = BUILDINGS[type];
+  return SITE_BUILDERS[type] ?? (def.w * def.h >= 9 ? 4 : def.w * def.h >= 4 ? 3 : 1);
+}
+
 /** What the building's own worker gathers, if it is a gatherer's hut. */
 export function gatheredBy(type: BuildingType): GatherDef | undefined {
   const worker = BUILDINGS[type].worker;
@@ -1050,7 +1133,8 @@ export const AI_PLAN: readonly { type: BuildingType; count: number; after?: Buil
   { type: 'house_small', count: 1 },
   { type: 'woodcutter', count: 2 },
   { type: 'tower', count: 1 },
-  { type: 'sawmill', count: 2 },
+  // Settlers 4's rates: a woodcutter fells a tree a minute, a sawmill cuts three logs a minute.
+  { type: 'woodcutter', count: 3 },
   { type: 'farm', count: 1 },
   { type: 'waterworks', count: 1 },
   { type: 'tower', count: 2 },
@@ -1078,7 +1162,9 @@ export const AI_PLAN: readonly { type: BuildingType; count: number; after?: Buil
   // After the metal chain: without a tool to wait for, a second forester would otherwise grab the
   // space the smelters need early on.
   { type: 'forester', count: 2, after: 'toolsmith' },
-  { type: 'woodcutter', count: 3 },
+  { type: 'woodcutter', count: 4 },
+  { type: 'sawmill', count: 2 },
+  { type: 'woodcutter', count: 5 },
   { type: 'stonecutter', count: 2, after: 'toolsmith' },
   { type: 'house_large', count: 1 },
   { type: 'ironmine', count: 2, after: 'toolsmith' },
@@ -1292,8 +1378,9 @@ export function residentsOf(def: BuildingDef): number {
 
 /**
  * Paths as in Settlers 4: every step onto a tile of a `terrains` kind adds `perStep` wear (max 255);
- * from `levels[k].wear` it shows as a dusty path, then a road, and settlers walk it `levels[k].speed`
- * times faster. Unused tiles lose `decay` wear every `decayEvery` ticks.
+ * from `levels[k].wear` it shows as a dusty path, then a road, and carriers and donkeys
+ * (`ProfessionDef.roads`) walk it `levels[k].speed` times faster — Settlers 4's 9 ticks a tile on
+ * grass, 8 on a dusty path, 7 on a paved road. Unused tiles lose `decay` wear every `decayEvery` ticks.
  */
 export const PATHS = {
   terrains: [Terrain.Grass, Terrain.Desert, Terrain.Sand] as readonly Terrain[],
@@ -1301,7 +1388,7 @@ export const PATHS = {
   decay: 1,
   decayEvery: 300,
   levels: [
-    { wear: 60, speed: 1.15, name: 'тропа' },
-    { wear: 170, speed: 1.35, name: 'дорога' },
+    { wear: 60, speed: 9 / 8, name: 'тропа' },
+    { wear: 170, speed: 9 / 7, name: 'дорога' },
   ],
 };

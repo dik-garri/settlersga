@@ -110,7 +110,8 @@ describe('World', () => {
     const before = world.stats.produced.log;
     run(world, 6000);
 
-    expect(world.stats.produced.log - before).toBeGreaterThan(20);
+    // Settlers 4's pace is a tree a minute: a supplied woodcutter fells close to 10 in these 10 minutes.
+    expect(world.stats.produced.log - before).toBeGreaterThan(7);
     for (const b of world.buildings.values()) {
       expect(findPath(world.map, c.door.x, c.door.y, b.door.x, b.door.y), b.type).not.toBeNull();
     }

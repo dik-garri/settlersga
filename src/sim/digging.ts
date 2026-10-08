@@ -1,4 +1,4 @@
-import { BUILD_MAX_SLOPE, BUILDINGS, CLEAR_STROKES_PER_TILE } from './config';
+import { BUILD_MAX_SLOPE, BUILDINGS, CLEAR_STROKES_PER_TILE, DIG_STROKES_PER_DIGGER, MAX_DIGGERS } from './config';
 import type { GameMap } from './map';
 import type { Building, BuildingType } from './types';
 
@@ -24,6 +24,36 @@ export function needsDigger(type: BuildingType): boolean {
 /** Spade strokes it takes to clear a site, levelling aside. */
 export function clearStrokes(b: Pick<Building, 'w' | 'h'>): number {
   return b.w * b.h * CLEAR_STROKES_PER_TILE;
+}
+
+/** Spade strokes a site still needs: levelling steps left (one per pixel per corner) plus clearing. */
+export function strokesLeft(map: GameMap, b: Building): number {
+  let left = Math.max(0, clearStrokes(b) - b.dug);
+  if (b.levelTo < 0) return left;
+  const [x0, y0, x1, y1] = siteCorners(b.x, b.y, b.w, b.h);
+  for (let vy = y0; vy <= y1; vy++) {
+    for (let vx = x0; vx <= x1; vx++) {
+      if (vx < 0 || vy < 0 || vx > map.w || vy > map.h) continue;
+      left += Math.abs(map.vertexHeight(vx, vy) - b.levelTo);
+    }
+  }
+  return left;
+}
+
+/**
+ * Diggers a site takes at once, as in Settlers 4: one, plus one per `DIG_STROKES_PER_DIGGER` strokes
+ * still to do, at most `MAX_DIGGERS`.
+ */
+export function diggersWanted(map: GameMap, b: Building): number {
+  return Math.min(MAX_DIGGERS, Math.floor((strokesLeft(map, b) + DIG_STROKES_PER_DIGGER / 2) / DIG_STROKES_PER_DIGGER) + 1);
+}
+
+/** Takes a settler off a site's builders and diggers (he left, died, or the job was aborted). */
+export function leaveSite(b: Building, id: number): void {
+  const i = b.builderIds.indexOf(id);
+  if (i >= 0) b.builderIds.splice(i, 1);
+  const j = b.diggerIds.indexOf(id);
+  if (j >= 0) b.diggerIds.splice(j, 1);
 }
 
 /** The height a site is flattened to: the rounded mean of its corners. */

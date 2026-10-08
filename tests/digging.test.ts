@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BUILD_MAX_SLOPE } from '../src/sim/config';
-import { needsLevelling } from '../src/sim/digging';
+import { diggersWanted, needsLevelling } from '../src/sim/digging';
+import { killSettler } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
 import { abort } from '../src/sim/settlers';
 import type { Building } from '../src/sim/types';
@@ -58,13 +59,35 @@ describe('diggers', () => {
     expect(w.settlers.some((s) => s.kind === 'digger')).toBe(true);
   });
 
+  it('two diggers share a sloped site, as in Settlers 4, and clear it about twice as fast as one', () => {
+    const levelTicks = (diggers: number) => {
+      const { w, b } = slopedSite();
+      expect(diggersWanted(w.map, b)).toBeGreaterThanOrEqual(2);
+      w.orderWorkers('digger', diggers);
+      for (const s of w.settlers.filter((s) => s.kind === 'digger').slice(diggers)) killSettler(w, s);
+      let start = -1;
+      let most = 0;
+      for (let i = 0; i < 6000 && !b.levelled; i++) {
+        w.step();
+        most = Math.max(most, b.diggerIds.length);
+        if (start < 0 && b.diggerIds.some((id) => w.getSettler(id)?.tasks[0]?.t === 'dig')) start = w.tick;
+      }
+      expect(b.levelled).toBe(true);
+      expect(most).toBe(diggers);
+      return w.tick - start;
+    };
+    const one = levelTicks(1);
+    const two = levelTicks(2);
+    expect(two).toBeLessThan(one * 0.65);
+  });
+
   it('a digger taken off the job releases the site and another one finishes it', () => {
     const { w, b } = slopedSite();
-    for (let i = 0; i < 600 && b.diggerId === null; i++) w.step();
-    const digger = w.getSettler(b.diggerId)!;
+    for (let i = 0; i < 600 && b.diggerIds.length === 0; i++) w.step();
+    const digger = w.getSettler(b.diggerIds[0])!;
     expect(digger.kind).toBe('digger');
     abort(w, digger);
-    expect(b.diggerId).toBeNull();
+    expect(b.diggerIds).not.toContain(digger.id);
     run(w, 4000);
     expect(b.levelled).toBe(true);
     expect(siteRange(w, b)).toBe(0);
@@ -72,8 +95,8 @@ describe('diggers', () => {
 
   it('demolishing a site mid-dig leaves no job behind', () => {
     const { w, b } = slopedSite();
-    for (let i = 0; i < 2000 && (b.diggerId === null || siteRange(w, b) === BUILD_MAX_SLOPE + 8); i++) w.step();
-    expect(b.diggerId).not.toBeNull();
+    for (let i = 0; i < 2000 && (b.diggerIds.length === 0 || siteRange(w, b) === BUILD_MAX_SLOPE + 8); i++) w.step();
+    expect(b.diggerIds.length).toBeGreaterThan(0);
     expect(w.demolish(b.id)).toBe(true);
     expect(w.settlers.some((s) => s.tasks.some((t) => 'b' in t && t.b === b.id))).toBe(false);
     run(w, 500);
@@ -82,7 +105,7 @@ describe('diggers', () => {
 
   it('a save taken mid-dig continues identically', () => {
     const { w, b } = slopedSite();
-    for (let i = 0; i < 2000 && (b.diggerId === null || b.levelled); i++) w.step();
+    for (let i = 0; i < 2000 && (b.diggerIds.length === 0 || b.levelled); i++) w.step();
     run(w, 30);
     expect(b.levelled).toBe(false);
     const l = World.load(JSON.parse(JSON.stringify(saveWorld(w))));

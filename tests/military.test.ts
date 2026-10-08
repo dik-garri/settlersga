@@ -32,7 +32,7 @@ function expectConsistent(w: World) {
   for (const b of w.buildings.values()) {
     for (const id of b.garrison) expect(w.getSettler(id)?.home).toBe(b.id);
     if (b.workerId !== null) expect(w.getSettler(b.workerId)).toBeDefined();
-    if (b.builderId !== null) expect(w.getSettler(b.builderId)).toBeDefined();
+    for (const id of [...b.builderIds, ...b.diggerIds]) expect(w.getSettler(id)).toBeDefined();
     expect(b.garrisonInbound).toBeGreaterThanOrEqual(0);
     for (const r of RESOURCES) expect(b.inbound[r]).toBeGreaterThanOrEqual(0);
   }

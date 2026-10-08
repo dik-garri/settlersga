@@ -18,6 +18,7 @@
  * itself leaves `World.settlers` at the end of the tick (`removeDead`).
  */
 import { centerOf, claimsTerritory, recomputeTerritory } from './buildings';
+import { leaveSite } from './digging';
 import {
   ATTACK_RANGE,
   BARRACKS_MIN_IDLE,
@@ -730,7 +731,7 @@ export function killSettler(w: World, s: Settler): void {
       b.workerId = null;
       b.workerRequested = false;
     }
-    if (b.builderId === s.id) b.builderId = null;
+    leaveSite(b, s.id);
   }
 }
 

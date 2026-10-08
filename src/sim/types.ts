@@ -141,7 +141,8 @@ export interface Building {
   /** Construction: materials delivered to the site and work ticks spent. */
   delivered: Stock;
   progress: number;
-  builderId: number | null;
+  /** Builders working on the site (up to `buildersOf(type)` at once, as in Settlers 4). */
+  builderIds: number[];
   /** Goods on the way to this building (reserved by carriers). */
   inbound: Stock;
   input: Stock;
@@ -169,7 +170,8 @@ export interface Building {
    * builders wait, carriers already bring materials. Mines need no digger.
    */
   levelled: boolean;
-  diggerId: number | null;
+  /** Diggers clearing the site (up to `diggersWanted`, as in Settlers 4). */
+  diggerIds: number[];
   /** Height the digger flattens the site's corners to (set when the site is laid out); −1: flat already. */
   levelTo: number;
   /** Spade strokes spent clearing the site; it is cleared at `clearStrokes(b)`. */

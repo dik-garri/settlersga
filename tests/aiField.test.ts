@@ -203,7 +203,7 @@ describe('computer player: field orders', () => {
     };
     const ai = w.ai[0];
     let staged: { target: number; ids: number[] } | undefined;
-    for (let i = 0; i < 45 * MINUTE && !staged; i++) {
+    for (let i = 0; i < 75 * MINUTE && !staged; i++) {
       w.step();
       if (ai.strike) staged = { target: ai.strike.target, ids: [...ai.strike.ids] };
     }

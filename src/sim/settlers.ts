@@ -4,6 +4,7 @@ import {
   BUILDER_STALL_TICKS,
   DIG_EVERY,
   BUILDINGS,
+  buildersOf,
   HANDLE_TICKS,
   OUTPUT_CAP,
   PATH_FAIL_BACKOFF,
@@ -13,11 +14,12 @@ import {
   UNREACHABLE_TICKS,
   TERRAIN,
 } from './config';
-import { clearStrokes, levelStep } from './digging';
+import { clearStrokes, diggersWanted, leaveSite, levelStep } from './digging';
 import { engageTick } from './field';
 import { assaultTick, healTick, joinTick, releaseJoin, soldierIdle } from './military';
 import { canPlant, findGatherTarget, findPlotFor, harvest, isGatherTarget, plant, type Target } from './nature';
 import { findPath } from './pathfinding';
+import { sameRegion } from './regions';
 import { pathSpeed, wearTile } from './paths';
 import { restIdle } from './idle';
 import { landAt } from './land';
@@ -192,7 +194,7 @@ export function updateSettler(w: World, s: Settler): void {
     case 'dig': {
       const b = w.buildings.get(task.b);
       if (!b || b.done || b.levelled) {
-        if (b && b.diggerId === s.id) b.diggerId = null;
+        if (b) leaveSite(b, s.id);
         s.tasks.shift();
         return;
       }
@@ -201,9 +203,10 @@ export function updateSettler(w: World, s: Settler): void {
       task.n = 0;
       // Flatten a sloped site first, then clear it.
       if (b.levelTo >= 0 && !levelStep(w.map, b)) return;
+      // Several diggers share the clearing strokes; whoever makes the last one ends it for all.
       if (++b.dug >= clearStrokes(b)) {
         b.levelled = true;
-        b.diggerId = null;
+        leaveSite(b, s.id);
         s.tasks.shift();
       }
       return;
@@ -220,13 +223,14 @@ export function updateSettler(w: World, s: Settler): void {
         task.stall = 0;
       } else if (++task.stall > BUILDER_STALL_TICKS && otherSiteWithWork(w, s, b)) {
         // Nothing to build with here, but another site is ready: go there instead.
-        b.builderId = null;
+        leaveSite(b, s.id);
         s.tasks.shift();
         return;
       }
       if (b.progress >= totalCost(b.type) * BUILD_TICKS_PER_UNIT) {
+        // The others at the site find it done on their next tick and leave.
         b.done = true;
-        b.builderId = null;
+        b.builderIds = [];
         // A finished warehouse now serves its piece of land (`land.ts` caches by this version).
         if (BUILDINGS[b.type].storage) w.buildingsVersion++;
         s.tasks.shift();
@@ -261,15 +265,16 @@ function atGoal(s: Settler, task: GotoTarget): boolean {
 export function move(w: World, s: Settler, task: GotoTarget, onBlocked?: () => void): void {
   // `left` is this tick's walking budget in tiles of normal ground; a step into slower terrain
   // (`TERRAIN[t].speed`, as charged by A*) uses it up faster.
-  let left = SETTLER_SPEED;
+  const prof = PROFESSIONS[s.kind];
+  let left = SETTLER_SPEED * (prof.speed ?? 1);
   while (left > 0 && s.path.length > 0) {
     const t = s.path[0];
     const dx = t.x - s.x;
     const dy = t.y - s.y;
     const d = Math.hypot(dx, dy);
     const ti = w.map.idx(t.x, t.y);
-    // Worn paths and roads (`paths.ts`) speed walking up.
-    const speed = TERRAIN[w.map.terrain[ti] as Terrain].speed * pathSpeed(w.map, ti);
+    // Worn paths and roads (`paths.ts`) speed carriers and donkeys up.
+    const speed = TERRAIN[w.map.terrain[ti] as Terrain].speed * (prof.roads ? pathSpeed(w.map, ti) : 1);
     const reach = left * speed;
     if (d > reach) {
       s.x += (dx / d) * reach;
@@ -291,6 +296,30 @@ export function move(w: World, s: Settler, task: GotoTarget, onBlocked?: () => v
   }
 }
 
+/** Where the k-th builder or digger of a site stands: the door, then free tiles along the front wall. */
+const SITE_SPOTS: readonly [number, number][] = [
+  [0, 0],
+  [-1, 0],
+  [1, 0],
+  [0, 1],
+  [-1, 1],
+  [1, 1],
+];
+
+function siteSpot(w: World, b: Building, k: number): Point {
+  const m = w.map;
+  const door = m.idx(b.door.x, b.door.y);
+  let n = 0;
+  for (const [dx, dy] of SITE_SPOTS) {
+    const x = b.door.x + dx;
+    const y = b.door.y + dy;
+    // Only tiles one can walk to from the door, so the spot never makes the site look unreachable.
+    if (!m.isWalkable(x, y) || !sameRegion(m, door, m.idx(x, y))) continue;
+    if (n++ === k % SITE_SPOTS.length) return { x, y };
+  }
+  return b.door;
+}
+
 /** Material delivered to the site but not yet built in. */
 function hasBuildWork(b: Building): boolean {
   const delivered = RESOURCES.reduce((sum, r) => sum + b.delivered[r], 0);
@@ -299,7 +328,7 @@ function hasBuildWork(b: Building): boolean {
 
 function otherSiteWithWork(w: World, s: Settler, current: Building): boolean {
   for (const b of w.buildings.values()) {
-    if (b !== current && b.owner === s.owner && !b.done && b.builderId === null && hasBuildWork(b)) return true;
+    if (b !== current && b.owner === s.owner && !b.done && b.builderIds.length < buildersOf(b.type) && hasBuildWork(b)) return true;
   }
   return false;
 }
@@ -344,10 +373,8 @@ export function abort(w: World, s: Settler): void {
         w.reservedPlots.delete(w.map.idx(task.x, task.y));
         break;
       case 'build':
-        if (b && b.builderId === s.id) b.builderId = null;
-        break;
       case 'dig':
-        if (b && b.diggerId === s.id) b.diggerId = null;
+        if (b) leaveSite(b, s.id);
         break;
       case 'become':
         if (b) b.workerRequested = false;
@@ -460,17 +487,20 @@ function idle(w: World, s: Settler): void {
       let best: Building | undefined;
       let bestScore = Infinity;
       for (const b of w.buildings.values()) {
-        if (b.owner !== s.owner || b.done || !b.levelled || b.builderId !== null || !isReachable(w, b)) continue;
-        const score = dist(s, b.door) + (hasBuildWork(b) ? 0 : 1000) - (b.priority ? 2000 : 0);
+        if (b.owner !== s.owner || b.done || !b.levelled || b.builderIds.length >= buildersOf(b.type) || !isReachable(w, b)) continue;
+        // As in Settlers 4 several builders share a site (`buildersOf`); a site nobody builds yet
+        // goes first among equals, so builders spread over the sites that have material.
+        const score = dist(s, b.door) + (hasBuildWork(b) ? 0 : 1000) - (b.priority ? 2000 : 0) + b.builderIds.length * 4;
         if (score < bestScore) {
           best = b;
           bestScore = score;
         }
       }
       if (best) {
-        best.builderId = s.id;
+        const spot = siteSpot(w, best, best.builderIds.length);
+        best.builderIds.push(s.id);
         s.tasks = [
-          { t: 'goto', x: best.door.x, y: best.door.y },
+          { t: 'goto', x: spot.x, y: spot.y },
           { t: 'build', b: best.id, stall: 0 },
         ];
       } else {
@@ -484,17 +514,20 @@ function idle(w: World, s: Settler): void {
       let best: Building | undefined;
       let bestScore = Infinity;
       for (const b of w.buildings.values()) {
-        if (b.owner !== s.owner || b.done || b.levelled || b.diggerId !== null || !isReachable(w, b)) continue;
-        const score = dist(s, b.door) - (b.priority ? 2000 : 0);
+        if (b.owner !== s.owner || b.done || b.levelled || !isReachable(w, b)) continue;
+        // Several diggers share a site while it has work for them (`diggersWanted`, Settlers 4).
+        if (b.diggerIds.length >= diggersWanted(w.map, b)) continue;
+        const score = dist(s, b.door) - (b.priority ? 2000 : 0) + b.diggerIds.length * 4;
         if (score < bestScore) {
           best = b;
           bestScore = score;
         }
       }
       if (best) {
-        best.diggerId = s.id;
+        const spot = siteSpot(w, best, best.diggerIds.length);
+        best.diggerIds.push(s.id);
         s.tasks = [
-          { t: 'goto', x: best.door.x, y: best.door.y },
+          { t: 'goto', x: spot.x, y: spot.y },
           { t: 'dig', b: best.id, n: 0 },
         ];
       } else {
