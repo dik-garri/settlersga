@@ -21,8 +21,11 @@ export interface SettlersMeta {
   pages: string[];
   /** [page, x, y, w, h, anchorX, anchorY] in page pixels. */
   frames: [number, number, number, number, number, number, number][];
-  /** `hold:<tool>` (walk frames, then standing) and `work:<action>`: [dir][frame] → [full, tint] frame ids. */
-  groups: Record<string, [number, number][][]>;
+  /**
+   * `hold:<tool>` (walk frames, then standing) and `work:<action>`: [dir][frame] → [full, tint] frame
+   * ids; work frames add a third, the arm-over-hat layer (−1 when the arms stay below the head).
+   */
+  groups: Record<string, number[][][]>;
   /** Hat style → [dir] frame id (−1: none). */
   hats: Record<string, number[]>;
   /** [dir][walk frame or standing]: goods in hand, relative to the anchor (logical px). */
@@ -33,10 +36,14 @@ export interface SettlersMeta {
   rankY: number;
 }
 
-/** One frame: the full sprite and its tintable part (null when the pose shows none). */
+/**
+ * One frame: the full sprite, its tintable part (null when the pose shows none) and, for work poses,
+ * the arms and tool where they pass in front of the head, drawn above the hat (null when they don't).
+ */
 export interface Frame3d {
   full: Texture;
   tint: Texture | null;
+  over: Texture | null;
 }
 
 export interface Settler3d {
@@ -68,7 +75,7 @@ export function buildSettler3d(meta: SettlersMeta, pages: HTMLImageElement[]): S
   const group = (key: string): Frame3d[][] => {
     const g = meta.groups[key];
     if (!g) throw new Error(`settlers.json has no group ${key}`);
-    return g.map((row) => row.map(([full, tint]) => ({ full: tex(full)!, tint: tex(tint) })));
+    return g.map((row) => row.map(([full, tint, over]) => ({ full: tex(full)!, tint: tex(tint), over: tex(over ?? -1) })));
   };
   const hold = Object.fromEntries(TOOLS.map((t) => [t, group(`hold:${t}`)])) as Record<ToolShape, Frame3d[][]>;
   const work = Object.fromEntries(ACTION_IDS.filter((a) => a !== 'idle').map((a) => [a, group(`work:${a}`)])) as Record<

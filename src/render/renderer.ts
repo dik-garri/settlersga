@@ -1546,7 +1546,10 @@ export class GameRenderer {
         const hat = s3d.hats[style.hatStyle][shown];
         v.hat.visible = hat !== null;
         if (hat) setFrame(v.hat, hat);
-        v.head.visible = v.arm.visible = false;
+        v.head.visible = false;
+        // Arms and tool passing in front of the face are drawn again above the hat.
+        v.arm.visible = fr.over !== null && hat !== null;
+        if (fr.over && hat) setFrame(v.arm, fr.over);
         // The 3D figure is rendered large for detail; shrunk to Settlers 4 proportions next to buildings.
         v.root.scale.set(SETTLER_3D_SCALE, SETTLER_3D_SCALE);
         const away = s3d.carryBehind[shown];
