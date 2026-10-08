@@ -1,5 +1,5 @@
 import { CanvasSource, Container, Graphics, MeshSimple, Sprite, Texture, type Application } from 'pixi.js';
-import { BUILD_TICKS_PER_UNIT, BUILDINGS, CROP_KINDS, SHOT_TICKS, TREE_MATURE } from '../sim/config';
+import { BUILD_TICKS_PER_UNIT, BUILDINGS, CROP_KINDS, SHOT_TICKS, TERRAIN, TREE_MATURE } from '../sim/config';
 import { RESOURCES, Terrain, type Building, type BuildingType, type Resource, type Settler } from '../sim/types';
 import { CHUNK } from '../sim/map';
 import { LOCAL_PLAYER, type World } from '../sim/world';
@@ -528,6 +528,7 @@ export class GameRenderer {
       shade,
     );
     this.scatterProps(layer, x0, y0, x1, y1);
+    this.streamBanks(layer, x0, y0, x1, y1);
     // The ground layer stays below the chunk's field decals.
     disposeLayer(this.groundLayers[c]);
     this.groundLayers[c] = layer;
@@ -561,6 +562,58 @@ export class GameRenderer {
         layer.addChild(s);
       }
     }
+  }
+
+  /**
+   * Narrow water — streams and the narrow stretches of rivers (water with land on two opposite sides,
+   * or with little water around) — gets pebbly banks: small stones of mixed greys along every edge it
+   * shares with land, on the land side, placed by tile hash. Render-only, part of the chunk's ground
+   * layer (both art modes), so it unloads with it.
+   */
+  private streamBanks(layer: Container, x0: number, y0: number, x1: number, y1: number): void {
+    const { map } = this.sim;
+    const water = (x: number, y: number) =>
+      !map.inBounds(x, y) || TERRAIN[map.terrain[map.idx(x, y)] as Terrain].water;
+    let g: Graphics | null = null;
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        if (!water(x, y)) continue;
+        const across = (!water(x - 1, y) && !water(x + 1, y)) || (!water(x, y - 1) && !water(x, y + 1));
+        if (!across) {
+          let wet = 0;
+          for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if (water(x + dx, y + dy)) wet++;
+          if (wet > 11) continue;
+        }
+        // Each land edge: corners of the shared side, and the step from the water onto the land.
+        const edges: [number, number, number, number, number, number][] = [
+          [1, 0, x + 1, y, x + 1, y + 1],
+          [-1, 0, x, y, x, y + 1],
+          [0, 1, x, y + 1, x + 1, y + 1],
+          [0, -1, x, y, x + 1, y],
+        ];
+        for (const [dx, dy, ax, ay, bx, by] of edges) {
+          // No pebbles where the bank is swamp: reeds and mud there.
+          if (water(x + dx, y + dy) || map.terrain[map.idx(x + dx, y + dy)] === Terrain.Swamp) continue;
+          g ??= new Graphics();
+          const i = map.idx(x, y);
+          for (let k = 0; k < 11; k++) {
+            const h = hash(i * 97 + (dx + 2) * 13 + (dy + 2) * 7 + k * 101);
+            const t = (k + ((h >>> 3) % 90) / 100) / 11;
+            // Mostly on the bank, some in the shallows.
+            const into = -0.07 + ((h >>> 9) % 24) / 100;
+            const tx = ax - 0.5 + (bx - ax) * t + dx * into;
+            const ty = ay - 0.5 + (by - ay) * t + dy * into;
+            const p = this.surface(tx, ty);
+            const r = 0.8 + ((h >>> 15) % 12) / 10;
+            const grey = 0x8a8f94 + (((h >>> 20) % 5) - 2) * 0x0d0d0d;
+            g.ellipse(p.x + 0.6, p.y + 0.8, r * 1.2, r * 0.7).fill({ color: 0x20262a, alpha: 0.45 });
+            g.ellipse(p.x, p.y, r * 1.2, r * 0.75).fill({ color: grey });
+            g.ellipse(p.x - r * 0.35, p.y - r * 0.25, r * 0.45, r * 0.25).fill({ color: 0xe8ecef, alpha: 0.7 });
+          }
+        }
+      }
+    }
+    if (g) layer.addChild(g);
   }
 
   /**
