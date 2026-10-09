@@ -520,6 +520,8 @@ button.wide {
   margin: 0;
   font: 700 14px 'Cinzel', Georgia, serif;
   color: #4a2a08;
+  overflow-wrap: anywhere;
+  hyphens: auto;
 }
 
 .info-head .gem.small {
@@ -539,9 +541,10 @@ button.wide {
 .eco-row .eco-name {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Long names (German compounds, «Schwertkämpfer, Stufe 1») wrap and hyphenate instead of being cut. */
+  overflow-wrap: anywhere;
+  hyphens: auto;
+  line-height: 1.15;
 }
 
 .eco-row button {

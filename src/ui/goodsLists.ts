@@ -1,6 +1,7 @@
 import { wareIcon } from '../render/atlas';
 import { RESOURCES, type Resource } from '../sim/types';
 import { button, el } from './dom';
+import { t } from './i18n';
 
 /**
  * Two lists of goods with big icons, as in Settlers 4's warehouse window: what is in (accepted,
@@ -39,7 +40,7 @@ export function goodsLists(spec: GoodsListsSpec): HTMLElement {
     const n = RESOURCES.filter((r) => spec.isIn(r) === on).length;
     head.append(el('span', '', `${on ? spec.inTitle : spec.outTitle} (${n})`));
     head.append(
-      button(on ? 'ничего' : 'все', on ? spec.noneTip : spec.allTip, () => {
+      button(on ? t('lists.none') : t('lists.all'), on ? spec.noneTip : spec.allTip, () => {
         for (const r of RESOURCES) spec.set(r, !on);
       }),
     );
@@ -62,7 +63,7 @@ export function goodsLists(spec: GoodsListsSpec): HTMLElement {
       }
       list.append(item);
     }
-    if (!list.firstChild) list.append(el('div', 'accept-empty', on ? 'ничего' : '—'));
+    if (!list.firstChild) list.append(el('div', 'accept-empty', on ? t('lists.nothing') : '—'));
     col.append(list);
     return col;
   };

@@ -1,9 +1,10 @@
-import { PROFESSIONS } from '../sim/config';
 import { isFighter, maxHp } from '../sim/military';
 import { isSpecialist } from '../sim/specialists';
 import type { Settler } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { button, el, rowsTable, type View } from './dom';
+import { t } from './i18n';
+import { profName } from './names';
 import type { GameState } from './state';
 
 /**
@@ -39,38 +40,38 @@ export class UnitsView implements View {
     let max = 0;
     let field = 0;
     for (const s of fighters) {
-      const k = `${PROFESSIONS[s.kind].name}, ур. ${s.level + 1}`;
+      const k = t('units.kindLevel', { name: profName(s.kind), level: s.level + 1 });
       byKind.set(k, (byKind.get(k) ?? 0) + 1);
       hp += Math.max(0, s.hp);
       max += maxHp(s);
       if (s.post) field++;
     }
     for (const s of specialists) {
-      const k = PROFESSIONS[s.kind].name;
+      const k = profName(s.kind);
       byKind.set(k, (byKind.get(k) ?? 0) + 1);
     }
     // Pack donkeys: selectable to look at, they take no orders.
     const donkeys = units.filter((s) => !isFighter(s) && !isSpecialist(s));
     for (const s of donkeys) {
-      const k = PROFESSIONS[s.kind].name;
+      const k = profName(s.kind);
       byKind.set(k, (byKind.get(k) ?? 0) + 1);
     }
-    const rows: [string, string][] = [['Выбрано', String(units.length)]];
+    const rows: [string, string][] = [[t('units.selected'), String(units.length)]];
     // Control groups the selected units belong to (Ctrl+1…9 stores, 1…9 recalls).
     const ids = new Set(units.map((s) => s.id));
     const groups = this.state.groups.map((g, n) => (n > 0 && g.some((id) => ids.has(id)) ? n : 0)).filter((n) => n > 0);
-    rows.push(['Группы', groups.length > 0 ? groups.join(', ') : '— (Ctrl+цифра — запомнить)']);
+    rows.push([t('units.groups'), groups.length > 0 ? groups.join(', ') : t('units.noGroup')]);
     for (const [k, n] of [...byKind].sort()) rows.push([k, String(n)]);
     if (fighters.length > 0) {
-      rows.push(['Здоровье', max > 0 ? `${Math.round((100 * hp) / max)}%` : '—']);
-      rows.push(['В поле', String(field)]);
+      rows.push([t('units.health'), max > 0 ? `${Math.round((100 * hp) / max)}%` : '—']);
+      rows.push([t('units.inField'), String(field)]);
     }
     if (specialists.length > 0) {
       const busy = specialists.filter((s) => s.errand || s.tasks.some((t) => t.t === 'prospect')).length;
-      rows.push(['Специалистов за работой', `${busy} из ${specialists.length}`]);
+      rows.push([t('units.specialistsBusy'), t('common.nOfM', { n: busy, m: specialists.length })]);
     }
     if (donkeys.length > 0) {
-      rows.push(['Ослов с грузом', `${donkeys.filter((s) => s.carrying !== null).length} из ${donkeys.length}`]);
+      rows.push([t('units.donkeysLoaded'), t('common.nOfM', { n: donkeys.filter((s) => s.carrying !== null).length, m: donkeys.length })]);
     }
     const key = JSON.stringify(rows);
     if (key === this.key) return;
@@ -79,41 +80,38 @@ export class UnitsView implements View {
     this.el.append(rowsTable(rows));
     const hints: string[] = [];
     if (fighters.length > 0) {
-      hints.push('бойцы: по земле — идти туда, по вражескому военному зданию — атаковать, по своему — войти в него');
+      hints.push(t('units.hint.fighters'));
     }
     if (specialists.length > 0) {
-      hints.push(
-        'геолог: по горе — разведать хребет; первопроходец: по ничейной земле — занять её; ' +
-          'вор: по разведанному вражескому складу — украсть; иначе — идти туда и ждать',
-      );
+      hints.push(t('units.hint.specialists'));
     }
-    if (donkeys.length > 0) hints.push('ослы приказов не слушают: они ходят по маршрутам рынков');
-    if (hints.length > 0) this.el.append(el('p', 'hint-text', `Правый щелчок: ${hints.join('; ')}.`));
+    if (donkeys.length > 0) hints.push(t('units.hint.donkeys'));
+    if (hints.length > 0) this.el.append(el('p', 'hint-text', t('units.hint', { list: hints.join('; ') })));
     const fighterIds = () => this.units().filter(isFighter).map((s) => s.id);
     const specialistIds = () => this.units().filter(isSpecialist).map((s) => s.id);
     const actions = el('div', 'info-actions');
     actions.append(
-      button('✋ Стоять', 'Остаться на месте', () =>
-        this.toast(`Стоят: ${this.world.orderHold(fighterIds()) + this.world.holdSpecialists(specialistIds())}`),
+      button(t('units.hold'), t('units.holdTip'), () =>
+        this.toast(t('units.holding', { n: this.world.orderHold(fighterIds()) + this.world.holdSpecialists(specialistIds()) })),
       ),
     );
     if (fighters.length > 0) {
       actions.append(
-        button('🏰 В гарнизон', 'Каждый в ближайшее своё военное здание со свободным местом', () =>
-          this.toast(`Возвращаются: ${this.world.orderGarrison(fighterIds(), null)}`),
+        button(t('units.garrison'), t('units.garrisonTip'), () =>
+          this.toast(t('units.returning', { n: this.world.orderGarrison(fighterIds(), null) })),
         ),
       );
     }
     if (specialists.length > 0) {
       actions.append(
-        button('↩ Отпустить', 'Специалисты на своей земле снова становятся носильщиками и несут инструмент на склад', () => {
+        button(t('units.dismiss'), t('units.dismissTip'), () => {
           const n = this.world.dismissUnits(specialistIds());
-          this.toast(n > 0 ? `Отпущено: ${n}` : 'Отпустить можно только на своей земле');
+          this.toast(n > 0 ? t('units.dismissed', { n }) : t('units.dismissOwnLand'));
         }),
       );
     }
     actions.append(
-      button('✕ Снять выбор', 'Esc', () => {
+      button(t('units.deselect'), 'Esc', () => {
         this.state.selectedUnits = [];
       }),
     );

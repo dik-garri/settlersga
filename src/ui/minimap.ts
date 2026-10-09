@@ -5,14 +5,15 @@ import { isFighter } from '../sim/military';
 import { Terrain } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { PLAYER_COLORS } from '../render/sprites';
+import { LANG_EVENT, t, type Key } from './i18n';
 
 /** What the minimap shows (Settlers 4's minimap switches); land is the territory tint of the overview. */
 export type MinimapLayer = 'buildings' | 'fighters' | 'settlers' | 'land';
-const LAYERS: { id: MinimapLayer; label: string; title: string }[] = [
-  { id: 'buildings', label: '⌂', title: 'Здания' },
-  { id: 'fighters', label: '⚔', title: 'Бойцы' },
-  { id: 'settlers', label: '☺', title: 'Поселенцы' },
-  { id: 'land', label: '▦', title: 'Земля (границы владений)' },
+const LAYERS: { id: MinimapLayer; label: string; title: Key }[] = [
+  { id: 'buildings', label: '⌂', title: 'minimap.buildings' },
+  { id: 'fighters', label: '⚔', title: 'minimap.fighters' },
+  { id: 'settlers', label: '☺', title: 'minimap.settlers' },
+  { id: 'land', label: '▦', title: 'minimap.land' },
 ];
 
 /** Terrain and trees are re-rasterised about this often (ms), a slice of rows per frame; buildings and the view frame every frame. */
@@ -62,7 +63,6 @@ export class Minimap {
     this.el.height = height * dpr;
     this.el.style.width = `${width}px`;
     this.el.style.height = `${height}px`;
-    this.el.title = 'Клик — перейти';
     this.ctx = this.el.getContext('2d')!;
     this.ctx.scale(dpr, dpr);
     this.base = document.createElement('canvas');
@@ -76,7 +76,6 @@ export class Minimap {
     for (const l of LAYERS) {
       const b = document.createElement('button');
       b.textContent = l.label;
-      b.title = `${l.title}: показать/скрыть`;
       b.classList.toggle('active', this.layers[l.id]);
       b.onclick = () => {
         this.setLayer(l.id, !this.layers[l.id]);
@@ -88,7 +87,15 @@ export class Minimap {
     this.box = document.createElement('div');
     this.box.className = 'mm-box';
     this.box.append(this.el, this.controls);
+    this.label();
+    window.addEventListener(LANG_EVENT, () => this.label());
     this.rasterize(0, world.map.h);
+  }
+
+  /** Tooltips in the current language. */
+  private label(): void {
+    this.el.title = t('minimap.jumpTip');
+    LAYERS.forEach((l, k) => ((this.controls.children[k] as HTMLElement).title = t('minimap.layerTip', { name: t(l.title) })));
   }
 
   /** Turns a layer on or off (the land tint at once: the overview is re-rasterised). */

@@ -211,7 +211,6 @@ export const START_STONE = 27;
  */
 export type StartLevel = 'low' | 'medium' | 'high';
 export interface StartDef {
-  name: string;
   building: BuildingType;
   piles: readonly (readonly [Resource, number])[];
   carriers: number;
@@ -226,7 +225,6 @@ export interface StartDef {
 
 export const START_CONDITIONS: Record<StartLevel, StartDef> = {
   low: {
-    name: 'Мало',
     building: 'tower',
     piles: [
       ['plank', 5], ['plank', 5], ['plank', 5],
@@ -243,7 +241,6 @@ export const START_CONDITIONS: Record<StartLevel, StartDef> = {
     workers: { toolsmith: 1, miner: 2 },
   },
   medium: {
-    name: 'Средне',
     building: 'tower',
     piles: [
       ['plank', 8], ['plank', 7], ['plank', 6], ['plank', 6],
@@ -262,7 +259,6 @@ export const START_CONDITIONS: Record<StartLevel, StartDef> = {
     workers: { toolsmith: 2, miner: 4 },
   },
   high: {
-    name: 'Много',
     building: 'tower',
     piles: [
       ['plank', 8], ['plank', 8], ['plank', 8], ['plank', 8], ['plank', 8], ['plank', 6],
@@ -467,46 +463,43 @@ export const STRENGTH = {
     [150, 80],
   ] as readonly (readonly [number, number])[],
 };
-/** Display names and stock-panel groups, kept with the data so new resources are one entry. */
+/**
+ * Stock-panel groups in display order; the names of groups, goods, buildings and professions live in
+ * the UI's dictionaries (`src/i18n`), looked up by id — the simulation keeps no language.
+ */
 export type ResourceGroup = 'building' | 'food' | 'metal' | 'tools' | 'military';
-export const RESOURCE_GROUPS: Record<ResourceGroup, string> = {
-  building: 'Стройматериалы',
-  food: 'Еда',
-  metal: 'Руда и металл',
-  tools: 'Инструменты',
-  military: 'Оружие',
-};
+export const RESOURCE_GROUPS: readonly ResourceGroup[] = ['building', 'food', 'metal', 'tools', 'military'];
 /**
  * `storeLimit`: surplus is hauled to warehouses only while fewer than this many units are stored;
  * beyond that goods wait at the producer, whose full pile pauses it, so carriers are not spent on
  * goods nobody needs (water is unlimited and only used next door). Unset = no limit.
  */
-export const RESOURCE_INFO: Record<Resource, { name: string; group: ResourceGroup; storeLimit?: number }> = {
-  log: { name: 'Брёвна', group: 'building' },
-  plank: { name: 'Доски', group: 'building' },
-  stone: { name: 'Камень', group: 'building' },
-  water: { name: 'Вода', group: 'food', storeLimit: 16 },
-  fish: { name: 'Рыба', group: 'food' },
-  grain: { name: 'Зерно', group: 'food' },
-  flour: { name: 'Мука', group: 'food' },
-  bread: { name: 'Хлеб', group: 'food' },
-  pig: { name: 'Свиньи', group: 'food' },
-  meat: { name: 'Мясо', group: 'food' },
-  coal: { name: 'Уголь', group: 'metal' },
-  ironore: { name: 'Железная руда', group: 'metal' },
-  goldore: { name: 'Золотая руда', group: 'metal' },
-  iron: { name: 'Железо', group: 'metal' },
-  gold: { name: 'Золото', group: 'metal' },
-  axe: { name: 'Топоры', group: 'tools' },
-  saw: { name: 'Пилы', group: 'tools' },
-  pickaxe: { name: 'Кирки', group: 'tools' },
-  shovel: { name: 'Лопаты', group: 'tools' },
-  scythe: { name: 'Косы', group: 'tools' },
-  rod: { name: 'Удочки', group: 'tools' },
-  hammer: { name: 'Молотки', group: 'tools' },
-  sword: { name: 'Мечи', group: 'military' },
-  bow: { name: 'Луки', group: 'military' },
-  armor: { name: 'Доспехи', group: 'military' },
+export const RESOURCE_INFO: Record<Resource, { group: ResourceGroup; storeLimit?: number }> = {
+  log: { group: 'building' },
+  plank: { group: 'building' },
+  stone: { group: 'building' },
+  water: { group: 'food', storeLimit: 16 },
+  fish: { group: 'food' },
+  grain: { group: 'food' },
+  flour: { group: 'food' },
+  bread: { group: 'food' },
+  pig: { group: 'food' },
+  meat: { group: 'food' },
+  coal: { group: 'metal' },
+  ironore: { group: 'metal' },
+  goldore: { group: 'metal' },
+  iron: { group: 'metal' },
+  gold: { group: 'metal' },
+  axe: { group: 'tools' },
+  saw: { group: 'tools' },
+  pickaxe: { group: 'tools' },
+  shovel: { group: 'tools' },
+  scythe: { group: 'tools' },
+  rod: { group: 'tools' },
+  hammer: { group: 'tools' },
+  sword: { group: 'military' },
+  bow: { group: 'military' },
+  armor: { group: 'military' },
 };
 
 /** Field plantings stored in `map.crop` (stage) with their kind in `map.cropKind` (index here). */
@@ -542,7 +535,6 @@ export type BuildGround = 'ground' | 'mountain';
  * (`GROUND_COLORS`/`GROUND_PRIORITY` in sprites.ts); sim code only reads this table.
  */
 export interface TerrainDef {
-  name: string;
   walkable: boolean;
   /** Footprints it accepts, or null. */
   build: BuildGround | null;
@@ -558,7 +550,6 @@ export interface TerrainDef {
 
 export const TERRAIN: Record<Terrain, TerrainDef> = {
   [Terrain.Water]: {
-    name: 'Вода',
     walkable: false,
     build: null,
     plantable: false,
@@ -567,7 +558,6 @@ export const TERRAIN: Record<Terrain, TerrainDef> = {
     rgb: [47, 111, 158],
   },
   [Terrain.Sand]: {
-    name: 'Песок',
     walkable: true,
     build: null,
     plantable: false,
@@ -576,7 +566,6 @@ export const TERRAIN: Record<Terrain, TerrainDef> = {
     rgb: [216, 196, 138],
   },
   [Terrain.Grass]: {
-    name: 'Трава',
     walkable: true,
     build: 'ground',
     plantable: true,
@@ -585,7 +574,6 @@ export const TERRAIN: Record<Terrain, TerrainDef> = {
     rgb: [106, 154, 60],
   },
   [Terrain.Rock]: {
-    name: 'Скалы',
     walkable: false,
     build: null,
     plantable: false,
@@ -594,7 +582,6 @@ export const TERRAIN: Record<Terrain, TerrainDef> = {
     rgb: [110, 104, 96],
   },
   [Terrain.Mountain]: {
-    name: 'Горы',
     walkable: true,
     build: 'mountain',
     plantable: false,
@@ -602,9 +589,8 @@ export const TERRAIN: Record<Terrain, TerrainDef> = {
     water: false,
     rgb: [150, 141, 124],
   },
-  [Terrain.Ford]: { name: 'Брод', walkable: true, build: null, plantable: false, speed: 1, water: false, rgb: [95, 151, 180] },
+  [Terrain.Ford]: { walkable: true, build: null, plantable: false, speed: 1, water: false, rgb: [95, 151, 180] },
   [Terrain.Desert]: {
-    name: 'Пустыня',
     walkable: true,
     build: 'ground',
     plantable: false,
@@ -613,7 +599,6 @@ export const TERRAIN: Record<Terrain, TerrainDef> = {
     rgb: [222, 190, 120],
   },
   [Terrain.Swamp]: {
-    name: 'Болото',
     // Impassable, as in Settlers 4; generation keeps land connected across it (`connectAcrossSwamps`).
     walkable: false,
     build: null,
@@ -681,25 +666,25 @@ export type MessageKind =
 
 /**
  * Messages (`messages.ts`), as in Settlers 4 (manual §5.1: a message with a place on the map, Space
- * jumps there): `text` for the ticker (`{b}` stands for the building's name, `{res}` for the good's),
- * `every` — the same message (kind, player and building or good — any building with `perPlayer`)
+ * jumps there; the ticker text is the UI's, `msg.<kind>` in `src/i18n`, with `{b}` the building's name and
+ * `{res}` the good's), `every` — the same message (kind, player and building or good — any building with `perPlayer`)
  * comes at most this often (ticks; our choice), `alert` — shown as an alarm. Sources: the S4 text ids of `CTextMsgHandler::AddWarningMsg`
  * calls — 2450 attack (also the lookout tower's alarm, `CLookoutTowerRole`), 2453–2460 a missing tool
  * (`CEcoSector::MissingToolWarning`), 2459 no carrier, 2461/2462/2551 a tower lost or taken, 2526 a
  * mine worked out (`CMineRole`: after more than 15 fruitless attempts in a row, `MINING.emptyAfter`).
  * The buffer keeps the last `MESSAGE_KEEP`.
  */
-export const MESSAGES: Record<MessageKind, { text: string; every: number; alert?: boolean; perPlayer?: boolean }> = {
-  attacked: { text: '{b}: нападение!', every: 30 * TICKS_PER_SECOND, alert: true },
-  captured: { text: '{b}: захвачено', every: 0 },
-  lost: { text: '{b}: потеряно', every: 0, alert: true },
-  noFighter: { text: '{b} пустует: нет свободных бойцов', every: 60 * TICKS_PER_SECOND },
-  noCarrier: { text: '{b}: нет свободного носильщика', every: 60 * TICKS_PER_SECOND, perPlayer: true },
-  noTool: { text: 'Нет инструмента: {res}', every: 60 * TICKS_PER_SECOND },
-  mineEmpty: { text: '{b}: руда кончилась', every: 0 },
-  oreFound: { text: 'Геолог нашёл руду: {res}', every: 60 * TICKS_PER_SECOND },
-  strike: { text: 'Забастовка: носильщикам не хватает кроватей — постройте дом', every: 60 * TICKS_PER_SECOND },
-  alarm: { text: '{b}: враг рядом!', every: 0, alert: true },
+export const MESSAGES: Record<MessageKind, { every: number; alert?: boolean; perPlayer?: boolean }> = {
+  attacked: { every: 30 * TICKS_PER_SECOND, alert: true },
+  captured: { every: 0 },
+  lost: { every: 0, alert: true },
+  noFighter: { every: 60 * TICKS_PER_SECOND },
+  noCarrier: { every: 60 * TICKS_PER_SECOND, perPlayer: true },
+  noTool: { every: 60 * TICKS_PER_SECOND },
+  mineEmpty: { every: 0 },
+  oreFound: { every: 60 * TICKS_PER_SECOND },
+  strike: { every: 60 * TICKS_PER_SECOND },
+  alarm: { every: 0, alert: true },
 };
 export const MESSAGE_KEEP = 50;
 /**
@@ -893,7 +878,6 @@ export interface CombatDef {
 }
 
 export interface ProfessionDef {
-  name: string;
   behavior: Behavior;
   /** Hit points of a specialist (see `INTRUDERS`); fighters' come from `combat.levels` (`hpOf`). */
   hp?: number;
@@ -932,24 +916,21 @@ export interface ProfessionDef {
 }
 
 export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
-  carrier: { name: 'Носильщик', behavior: 'carrier', roads: true },
-  builder: { name: 'Строитель', behavior: 'builder', tool: 'hammer' },
-  digger: { name: 'Землекоп', behavior: 'digger', tool: 'shovel' },
-  woodcutter: { name: 'Лесоруб', behavior: 'gather', tool: 'axe', gather: { res: 'log', radius: 7, workTicks: 200, restTicks: 230 } },
+  carrier: { behavior: 'carrier', roads: true },
+  builder: { behavior: 'builder', tool: 'hammer' },
+  digger: { behavior: 'digger', tool: 'shovel' },
+  woodcutter: { behavior: 'gather', tool: 'axe', gather: { res: 'log', radius: 7, workTicks: 200, restTicks: 230 } },
   stonecutter: {
-    name: 'Каменотёс',
     behavior: 'gather',
     tool: 'pickaxe',
     gather: { res: 'stone', radius: 7, workTicks: 170, restTicks: 140 },
   },
   forester: {
-    name: 'Лесничий',
     behavior: 'plant',
     plant: { what: 'tree', radius: 4, workTicks: 60, restTicks: 40 },
   },
-  waterman: { name: 'Водонос', behavior: 'gather', gather: { res: 'water', radius: 7, workTicks: 30, restTicks: 30 } },
+  waterman: { behavior: 'gather', gather: { res: 'water', radius: 7, workTicks: 30, restTicks: 30 } },
   fisher: {
-    name: 'Рыбак',
     behavior: 'gather',
     tool: 'rod',
     gather: { res: 'fish', radius: 7, workTicks: 90, restTicks: 70, missChance: 0.33 },
@@ -960,7 +941,6 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
    * (`SearchGrainSeedPos`), so no `maxNearby`.
    */
   farmer: {
-    name: 'Фермер',
     behavior: 'farm',
     tool: 'scythe',
     gather: { res: 'grain', radius: 4, workTicks: 50, restTicks: 10 },
@@ -968,45 +948,43 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
   },
   /** As in Settlers 4 the hunter uses a bow (forged by the weaponsmith). */
   hunter: {
-    name: 'Охотник',
     behavior: 'hunt',
     tool: 'bow',
     hunt: { radius: 7, range: 3.5, workTicks: 40, restTicks: 500, chases: 4 },
   },
-  sawmiller: { name: 'Пильщик', behavior: 'workshop', tool: 'saw' },
-  miller: { name: 'Мельник', behavior: 'workshop' },
-  baker: { name: 'Пекарь', behavior: 'workshop' },
-  pigfarmer: { name: 'Свинопас', behavior: 'workshop' },
-  butcher: { name: 'Мясник', behavior: 'workshop', tool: 'axe' },
-  miner: { name: 'Шахтёр', behavior: 'workshop', tool: 'pickaxe' },
-  smelter: { name: 'Плавильщик', behavior: 'workshop' },
-  toolsmith: { name: 'Инструментальщик', behavior: 'workshop', trade: 'smith' },
+  sawmiller: { behavior: 'workshop', tool: 'saw' },
+  miller: { behavior: 'workshop' },
+  baker: { behavior: 'workshop' },
+  pigfarmer: { behavior: 'workshop' },
+  butcher: { behavior: 'workshop', tool: 'axe' },
+  miner: { behavior: 'workshop', tool: 'pickaxe' },
+  smelter: { behavior: 'workshop' },
+  toolsmith: { behavior: 'workshop', trade: 'smith' },
   /**
    * Ordered like the pioneer and the thief (`ORDERABLE`): a carrier takes up a hammer (used up, given
    * back on dismissal) and waits for errands (`World.sendGeologist`). Specialists' `hp` is Settlers
    * 4's, on the soldiers' scale (a swordsman 100): geologist and pioneer 25, thief 20 (Settlers United
    * wiki, units/geologist, units/pioneer, units/thief).
    */
-  geologist: { name: 'Геолог', behavior: 'prospect', tool: 'hammer', hp: 25 },
-  weaponsmith: { name: 'Оружейник', behavior: 'workshop', trade: 'smith' },
+  geologist: { behavior: 'prospect', tool: 'hammer', hp: 25 },
+  weaponsmith: { behavior: 'workshop', trade: 'smith' },
   /** Specialists (`ORDERABLE`, `specialists.ts`). */
-  pioneer: { name: 'Первопроходец', behavior: 'pioneer', tool: 'shovel', hp: 25 },
+  pioneer: { behavior: 'pioneer', tool: 'shovel', hp: 25 },
   /**
    * Disguised: no target on hostile land until a fighter of that land comes close (`INTRUDERS`).
    * Sees 25 S4 tiles (Settlers United changelog), ≈ 8 of ours.
    */
-  thief: { name: 'Вор', behavior: 'thief', hp: 20, cloaked: true, sight: 10 },
-  donkeyrancher: { name: 'Погонщик', behavior: 'workshop' },
+  thief: { behavior: 'thief', hp: 20, cloaked: true, sight: 10 },
+  donkeyrancher: { behavior: 'workshop' },
   /** Settlers 4 `CDonkeyRole::TakeJob`: a loaded donkey of a player is vulnerable (`ENTITY_FLAG_VulnerableMask`). */
-  donkey: { name: 'Осёл', behavior: 'donkey', roads: true, dropsLoad: true },
+  donkey: { behavior: 'donkey', roads: true, dropsLoad: true },
   /** The infirmary's healer (Settlers 4 `SETTLER_HEALER`, no tool): works while inside (`infirmary.ts`). */
-  healer: { name: 'Лекарь', behavior: 'workshop' },
+  healer: { behavior: 'workshop' },
   /** The lookout tower's occupant (Settlers 4 orders one before it works, `CLookoutTowerRole`). */
-  watchman: { name: 'Дозорный', behavior: 'workshop' },
-  recruit: { name: 'Новобранец', behavior: 'workshop', transient: true },
+  watchman: { behavior: 'workshop' },
+  recruit: { behavior: 'workshop', transient: true },
   /** Settlers 4: 100 / 150 / 210 hit points, 10 / 14 / 20 a blow, a blow every 13 of its ticks. */
   soldier: {
-    name: 'Мечник',
     behavior: 'soldier',
     tool: 'sword',
     combat: {
@@ -1027,7 +1005,6 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
    * enemy building like a swordsman (S4).
    */
   archer: {
-    name: 'Лучник',
     behavior: 'soldier',
     tool: 'bow',
     combat: {
@@ -1050,7 +1027,6 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
    * bowmen); the barracks makes him first when it can (S4's priority level 4).
    */
   leader: {
-    name: 'Командир',
     behavior: 'soldier',
     tool: 'armor',
     kit: { sword: 1, gold: 3 },
@@ -1114,16 +1090,8 @@ export interface Recipe {
 /** Build-menu tab. */
 export type Category = 'housing' | 'resources' | 'food' | 'mining' | 'metal' | 'military' | 'trade' | 'decor';
 
-export const CATEGORIES: Record<Category, string> = {
-  housing: 'Поселение',
-  resources: 'Сырьё',
-  food: 'Еда',
-  mining: 'Горное дело',
-  metal: 'Металл',
-  military: 'Военное',
-  trade: 'Торговля',
-  decor: 'Украшения',
-};
+/** Build-menu tabs in order (names: the UI dictionaries). */
+export const CATEGORIES: readonly Category[] = ['housing', 'resources', 'food', 'mining', 'metal', 'military', 'trade', 'decor'];
 
 /**
  * A warehouse's capacity (`storage.ts`): `piles` piles of up to `perPile` units of one good each (a
@@ -1136,7 +1104,6 @@ export interface StorageDef {
 }
 
 export interface BuildingDef {
-  name: string;
   w: number;
   h: number;
   /** Materials needed to construct. */
@@ -1241,9 +1208,8 @@ export const TRADE = { donkeyLoad: 8, packs: 2, donkeysPerMarket: 3, stock: 24 }
 /** Settlers 4's tower door: `MaxTowerDoorHealth` 50, one hit point back every 15 of its ticks. */
 const TOWER_DOOR = { hp: 50, regenEvery: s4Ticks(15) };
 
-function mine(name: string, res: Resource, favourite: Resource, cost: Partial<Stock> = { plank: 4, stone: 1 }): BuildingDef {
+function mine(res: Resource, favourite: Resource, cost: Partial<Stock> = { plank: 4, stone: 1 }): BuildingDef {
   return {
-    name,
     w: 2,
     h: 2,
     cost,
@@ -1270,7 +1236,6 @@ function mine(name: string, res: Resource, favourite: Resource, cost: Partial<St
  */
 export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   house_small: {
-    name: 'Малый дом',
     w: 2,
     h: 2,
     cost: { plank: 3, stone: 3 },
@@ -1280,7 +1245,6 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     residence: { capacity: 10, everyTicks: 150 },
   },
   house_medium: {
-    name: 'Средний дом',
     w: 2,
     h: 2,
     cost: { plank: 5, stone: 6 },
@@ -1290,7 +1254,6 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     residence: { capacity: 20, everyTicks: 120 },
   },
   house_large: {
-    name: 'Большой дом',
     w: 3,
     h: 3,
     cost: { plank: 10, stone: 12 },
@@ -1301,7 +1264,6 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   },
 
   warehouse: {
-    name: 'Склад',
     w: 2,
     h: 2,
     cost: { plank: 3, stone: 2 },
@@ -1314,7 +1276,6 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   },
 
   woodcutter: {
-    name: 'Дом лесоруба',
     w: 2,
     h: 2,
     cost: { plank: 2, stone: 2 },
@@ -1323,7 +1284,6 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     category: 'resources',
   },
   forester: {
-    name: 'Дом лесничего',
     w: 2,
     h: 2,
     cost: { plank: 3, stone: 1 },
@@ -1332,7 +1292,6 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     category: 'resources',
   },
   sawmill: {
-    name: 'Лесопилка',
     w: 2,
     h: 2,
     cost: { plank: 3, stone: 4 },
@@ -1342,7 +1301,6 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     recipe: { inputs: { log: 1 }, outputs: { plank: 1 }, ticks: 192 },
   },
   stonecutter: {
-    name: 'Каменотёс',
     w: 2,
     h: 2,
     cost: { plank: 2, stone: 3 },
@@ -1352,7 +1310,6 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   },
 
   waterworks: {
-    name: 'Водокачка',
     w: 2,
     h: 2,
     cost: { plank: 3, stone: 3 },
@@ -1360,10 +1317,9 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     playerBuildable: true,
     category: 'food',
   },
-  fisher: { name: 'Рыбак', w: 2, h: 2, cost: { plank: 3, stone: 2 }, worker: 'fisher', playerBuildable: true, category: 'food' },
-  hunter: { name: 'Охотник', w: 2, h: 2, cost: { plank: 3, stone: 3 }, worker: 'hunter', playerBuildable: true, category: 'food' },
+  fisher: { w: 2, h: 2, cost: { plank: 3, stone: 2 }, worker: 'fisher', playerBuildable: true, category: 'food' },
+  hunter: { w: 2, h: 2, cost: { plank: 3, stone: 3 }, worker: 'hunter', playerBuildable: true, category: 'food' },
   farm: {
-    name: 'Ферма',
     w: 3,
     h: 3,
     cost: { plank: 6, stone: 6 },
@@ -1372,7 +1328,6 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     category: 'food',
   },
   mill: {
-    name: 'Мельница',
     w: 2,
     h: 2,
     cost: { plank: 6, stone: 3 },
@@ -1382,7 +1337,6 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     recipe: { inputs: { grain: 1 }, outputs: { flour: 1 }, ticks: 133 },
   },
   bakery: {
-    name: 'Пекарня',
     w: 2,
     h: 2,
     cost: { plank: 4, stone: 5 },
@@ -1392,7 +1346,6 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     recipe: { inputs: { flour: 1, water: 1 }, outputs: { bread: 1 }, ticks: 347 },
   },
   pigfarm: {
-    name: 'Свиноферма',
     w: 3,
     h: 3,
     cost: { plank: 6, stone: 6 },
@@ -1404,7 +1357,6 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   },
   // Settlers 4 town buildings: carriers stay on their own land, donkeys carry goods between markets.
   market: {
-    name: 'Рынок',
     w: 2,
     h: 2,
     cost: { plank: 2, stone: 4 },
@@ -1414,7 +1366,6 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     market: true,
   },
   donkeyranch: {
-    name: 'Ослиная ферма',
     w: 3,
     h: 3,
     cost: { plank: 6, stone: 6 },
@@ -1426,7 +1377,6 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     breeds: 'donkey',
   },
   slaughterhouse: {
-    name: 'Бойня',
     w: 2,
     h: 2,
     cost: { plank: 4, stone: 4 },
@@ -1438,13 +1388,12 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   },
 
   // Favourite foods as in Settlers 4: coal and stone bread, iron (and sulfur) meat, gold fish.
-  coalmine: mine('Угольная шахта', 'coal', 'bread'),
-  ironmine: mine('Железный рудник', 'ironore', 'meat'),
-  goldmine: mine('Золотой рудник', 'goldore', 'fish', { plank: 5, stone: 1 }),
-  stonemine: mine('Каменоломня в горе', 'stone', 'bread'),
+  coalmine: mine('coal', 'bread'),
+  ironmine: mine('ironore', 'meat'),
+  goldmine: mine('goldore', 'fish', { plank: 5, stone: 1 }),
+  stonemine: mine('stone', 'bread'),
 
   ironsmelter: {
-    name: 'Плавильня железа',
     w: 2,
     h: 2,
     cost: { plank: 4, stone: 6 },
@@ -1454,7 +1403,6 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     recipe: { inputs: { ironore: 1, coal: 1 }, outputs: { iron: 1 }, ticks: 201 },
   },
   goldsmelter: {
-    name: 'Плавильня золота',
     w: 2,
     h: 2,
     cost: { plank: 4, stone: 6 },
@@ -1464,7 +1412,6 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     recipe: { inputs: { goldore: 1, coal: 1 }, outputs: { gold: 1 }, ticks: 214 },
   },
   toolsmith: {
-    name: 'Инструментальщик',
     w: 2,
     h: 2,
     cost: { plank: 3, stone: 5 },
@@ -1475,7 +1422,6 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   },
 
   weaponsmith: {
-    name: 'Оружейник',
     w: 2,
     h: 2,
     cost: { plank: 5, stone: 7 },
@@ -1486,7 +1432,6 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     recipe: { inputs: { iron: 1, coal: 1 }, outputs: {}, outputChoice: ['sword', 'bow', 'armor'], keepInStock: 3, ticks: 277 },
   },
   tower: {
-    name: 'Сторожевая башня',
     w: 2,
     h: 2,
     cost: { plank: 3, stone: 2 },
@@ -1501,7 +1446,6 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     sight: 14,
   },
   bigtower: {
-    name: 'Большая башня',
     w: 2,
     h: 2,
     cost: { plank: 7, stone: 7 },
@@ -1516,7 +1460,6 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     sight: 15,
   },
   barracks: {
-    name: 'Казарма',
     w: 3,
     h: 3,
     cost: { plank: 4, stone: 5 },
@@ -1527,7 +1470,6 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   },
   fortress: {
     // Settlers 4's castle («Burg»), «Замок» to Russian players; with no headquarters the name is free.
-    name: 'Замок',
     w: 4,
     h: 4,
     cost: { plank: 8, stone: 12 },
@@ -1542,7 +1484,6 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     sight: 17,
   },
   lookout: {
-    name: 'Смотровая башня',
     w: 2,
     h: 2,
     cost: { plank: 2, stone: 2 },
@@ -1560,7 +1501,6 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     // every 31 of its ticks; its radius and how fast it heals are in the game data, not in the code
     // [оценка]: 8 tiles (24 of S4's), a hit point every 4 ticks (a swordsman of level 1 in 40 s,
     // «gemächlich», siedlercommunity).
-    name: 'Лазарет',
     w: 2,
     h: 2,
     cost: { plank: 3, stone: 3 },
@@ -1572,11 +1512,11 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
 
   // Eyecatchers, as in Settlers 4: built for show, they raise the settlement value and so the army's
   // strength on foreign land (STRENGTH). Our own small set of designs.
-  flowerbed: { name: 'Клумба', w: 1, h: 1, cost: { plank: 1, stone: 1 }, worker: null, playerBuildable: true, category: 'decor', eyecatcher: true },
-  column: { name: 'Колонна', w: 1, h: 1, cost: { stone: 3 }, worker: null, playerBuildable: true, category: 'decor', eyecatcher: true },
-  statue: { name: 'Статуя', w: 1, h: 1, cost: { stone: 4, gold: 1 }, worker: null, playerBuildable: true, category: 'decor', eyecatcher: true },
-  fountain: { name: 'Фонтан', w: 2, h: 2, cost: { stone: 5, plank: 1 }, worker: null, playerBuildable: true, category: 'decor', eyecatcher: true },
-  obelisk: { name: 'Обелиск', w: 1, h: 1, cost: { stone: 6, gold: 2 }, worker: null, playerBuildable: true, category: 'decor', eyecatcher: true },
+  flowerbed: { w: 1, h: 1, cost: { plank: 1, stone: 1 }, worker: null, playerBuildable: true, category: 'decor', eyecatcher: true },
+  column: { w: 1, h: 1, cost: { stone: 3 }, worker: null, playerBuildable: true, category: 'decor', eyecatcher: true },
+  statue: { w: 1, h: 1, cost: { stone: 4, gold: 1 }, worker: null, playerBuildable: true, category: 'decor', eyecatcher: true },
+  fountain: { w: 2, h: 2, cost: { stone: 5, plank: 1 }, worker: null, playerBuildable: true, category: 'decor', eyecatcher: true },
+  obelisk: { w: 1, h: 1, cost: { stone: 6, gold: 2 }, worker: null, playerBuildable: true, category: 'decor', eyecatcher: true },
 };
 
 /** Fills the missing resources of a partial stock with zeros. */
@@ -1977,7 +1917,6 @@ export interface AiMineHelp {
   free: { chance: number; attempts: number } | null;
 }
 export interface AiLevelDef {
-  name: string;
   /** Settlers 4's difficulty number (1 easy, 2 normal, 3 hard). */
   s4: number;
   /** Recruit levels it orders (1–3, `AI.recruitKinds`). */
@@ -1994,7 +1933,6 @@ export interface AiLevelDef {
 }
 export const AI_LEVELS: Record<AiLevel, AiLevelDef> = {
   easy: {
-    name: 'Лёгкий',
     s4: 1,
     recruitLevels: 1,
     think: 2,
@@ -2008,7 +1946,6 @@ export const AI_LEVELS: Record<AiLevel, AiLevelDef> = {
     strengthDouble: false,
   },
   medium: {
-    name: 'Средний',
     s4: 2,
     recruitLevels: 3,
     think: 1,
@@ -2022,7 +1959,6 @@ export const AI_LEVELS: Record<AiLevel, AiLevelDef> = {
     strengthDouble: true,
   },
   hard: {
-    name: 'Тяжёлый',
     s4: 3,
     recruitLevels: 3,
     think: 0.6,
@@ -2048,7 +1984,6 @@ export type Habitat = 'meadow' | 'forest' | 'shore';
  * new animal is an entry here plus its sprites. `herds` is per 64×64 of map, scaled by area.
  */
 export interface AnimalDef {
-  name: string;
   habitat: Habitat;
   /** Tiles per tick while moving (they amble: a share of the settlers' `SETTLER_SPEED`; no S4 source). */
   speed: number;
@@ -2094,7 +2029,6 @@ export const ANIMAL_SPAWN = {
 
 export const ANIMALS = {
   deer: {
-    name: 'Олень',
     habitat: 'forest',
     speed: 0.35 * SETTLER_SPEED,
     herd: [2, 4],
@@ -2105,9 +2039,9 @@ export const ANIMALS = {
     // S4's animal data (`LAND_TYPE` per kind) is not in our sources: deer are born in any wooded square.
     spawn: ['plain', 'light', 'deep'],
   },
-  donkey: { name: 'Осёл', habitat: 'meadow', speed: 0.2 * SETTLER_SPEED, herd: [1, 3], herds: 1, roam: 5, rest: [60, 200] },
-  duck: { name: 'Утка', habitat: 'shore', speed: 0.16 * SETTLER_SPEED, herd: [2, 5], herds: 2, roam: 4, rest: [20, 90] },
-  chicken: { name: 'Курица', habitat: 'meadow', speed: 0.2 * SETTLER_SPEED, herd: [3, 6], herds: 1, roam: 3, rest: [10, 60] },
+  donkey: { habitat: 'meadow', speed: 0.2 * SETTLER_SPEED, herd: [1, 3], herds: 1, roam: 5, rest: [60, 200] },
+  duck: { habitat: 'shore', speed: 0.16 * SETTLER_SPEED, herd: [2, 5], herds: 2, roam: 4, rest: [20, 90] },
+  chicken: { habitat: 'meadow', speed: 0.2 * SETTLER_SPEED, herd: [3, 6], herds: 1, roam: 3, rest: [10, 60] },
 } satisfies Record<string, AnimalDef>;
 
 export type AnimalKind = keyof typeof ANIMALS;
@@ -2166,7 +2100,7 @@ export const PATHS = {
   decay: 1,
   decayEvery: 300,
   levels: [
-    { wear: 60, speed: 9 / 8, name: 'тропа' },
-    { wear: 170, speed: 9 / 7, name: 'дорога' },
+    { wear: 60, speed: 9 / 8 },
+    { wear: 170, speed: 9 / 7 },
   ],
 };

@@ -1,5 +1,6 @@
 import type { AudioEngine } from '../audio/audio';
 import { el } from './dom';
+import { t, type Key } from './i18n';
 import type { TitleScene } from './titleScene';
 
 /**
@@ -10,9 +11,9 @@ import type { TitleScene } from './titleScene';
  * waits for the scene to be ready.
  */
 const LENGTH_MS = 15500;
-const CAPTIONS: [number, number, string][] = [
-  [1600, 5200, 'Новая земля. Леса, горы, реки — и ни одного дома.'],
-  [5800, 9400, 'Носильщики, лесорубы, каменотёсы — каждый знает своё дело.'],
+const CAPTIONS: [number, number, Key][] = [
+  [1600, 5200, 'intro.caption1'],
+  [5800, 9400, 'intro.caption2'],
 ];
 const TITLE_AT = 9800;
 
@@ -40,7 +41,7 @@ export class Intro {
     const bar = el('div', 'gate-bar');
     const fill = el('div', 'gate-fill');
     bar.append(fill);
-    const text = el('p', 'gate-text', 'Подготовка мира…');
+    const text = el('p', 'gate-text', t('intro.preparing'));
     gate.append(text, bar);
     this.el.append(gate);
     return new Promise((resolve) => {
@@ -54,7 +55,7 @@ export class Intro {
           return;
         }
         if (ready) {
-          text.textContent = 'Щёлкните или нажмите любую клавишу';
+          text.textContent = t('intro.clickToBegin');
           bar.hidden = true;
         }
         requestAnimationFrame(poll);
@@ -62,7 +63,7 @@ export class Intro {
       const go = () => {
         this.audio.unlock();
         clicked = true;
-        if (this.scene.progress < 1) text.textContent = 'Ещё мгновение…';
+        if (this.scene.progress < 1) text.textContent = t('intro.moment');
         window.removeEventListener('pointerdown', go);
         window.removeEventListener('keydown', go);
       };
@@ -75,10 +76,10 @@ export class Intro {
   private run(): Promise<void> {
     const night = el('div', 'intro-night');
     const dawn = el('div', 'intro-dawn');
-    const lines = CAPTIONS.map(([, , text]) => el('p', 'intro-caption', text));
+    const lines = CAPTIONS.map(([, , key]) => el('p', 'intro-caption', t(key)));
     const title = el('div', 'intro-title');
-    title.append(el('span', 'wm-title', 'Поселенцы'), el('span', 'wm-sub', 'экономическая стратегия'));
-    const skip = el('p', 'intro-skip', 'Щелчок или любая клавиша — пропустить');
+    title.append(el('span', 'wm-title', t('app.title')), el('span', 'wm-sub', t('app.subtitle')));
+    const skip = el('p', 'intro-skip', t('intro.skip'));
     this.el.append(dawn, night, ...lines, title, skip);
     this.scene.flyIn(LENGTH_MS - 2500);
     this.audio.theme();

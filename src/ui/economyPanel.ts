@@ -1,5 +1,5 @@
 import { buildingIcon, settlerIcon, wareIcon } from '../render/atlas';
-import { BUILDINGS, CARRIER_RESERVE, ORDERABLE, PROFESSIONS, RESOURCE_INFO } from '../sim/config';
+import { BUILDINGS, CARRIER_RESERVE, ORDERABLE } from '../sim/config';
 import {
   carrierReserve,
   consumersOf,
@@ -17,6 +17,8 @@ import { LOCAL_PLAYER, type World } from '../sim/world';
 import { storageFill } from '../sim/storage';
 import { button, el, type View } from './dom';
 import { goodsLists } from './goodsLists';
+import { lower, t } from './i18n';
+import { buildingName, profName, resName } from './names';
 
 /**
  * Economy settings as in Settlers 4 (`sim/economy.ts`): the settlers menu's worker orders and the goods
@@ -24,7 +26,7 @@ import { goodsLists } from './goodsLists';
  * toolsmith's order queue and a warehouse's accepted goods.
  */
 
-const nameOf = (r: Resource) => RESOURCE_INFO[r].name;
+const nameOf = (r: Resource) => resName(r);
 
 /** Settlers menu: builders, diggers and specialists ordered from free carriers (Settlers 4). */
 export class WorkersView implements View {
@@ -42,10 +44,8 @@ export class WorkersView implements View {
     this.key = key;
     this.el.innerHTML = '';
     // Settlers 4's carrier reserve: no carrier takes up a job while no more than this are left.
-    this.el.append(el('h4', '', 'Резерв носильщиков'));
-    this.el.append(
-      el('p', 'muted', `Столько носильщиков никогда не станут рабочими, строителями, специалистами или солдатами (от ${CARRIER_RESERVE.min}).`),
-    );
+    this.el.append(el('h4', '', t('eco.reserve')));
+    this.el.append(el('p', 'muted', t('eco.reserveNote', { min: CARRIER_RESERVE.min })));
     const keep = el('div', 'eco-row carrier-reserve');
     const setReserve = (n: number) => {
       w.setCarrierReserve(n);
@@ -53,31 +53,29 @@ export class WorkersView implements View {
     };
     keep.append(
       settlerIcon('carrier', 28),
-      el('span', 'eco-name', PROFESSIONS.carrier.name),
+      el('span', 'eco-name', profName('carrier')),
       el('b', '', String(reserve)),
-      button('−5', 'На пятерых меньше', () => setReserve(reserve - 5)),
-      button('−1', 'На одного меньше', () => setReserve(reserve - 1)),
-      button('+1', 'На одного больше', () => setReserve(reserve + 1)),
-      button('+5', 'На пятерых больше', () => setReserve(reserve + 5)),
+      button('−5', t('eco.less5'), () => setReserve(reserve - 5)),
+      button('−1', t('eco.less1'), () => setReserve(reserve - 1)),
+      button('+1', t('eco.more1'), () => setReserve(reserve + 1)),
+      button('+5', t('eco.more5'), () => setReserve(reserve + 5)),
     );
     this.el.append(keep);
-    this.el.append(el('h4', '', 'Заказ рабочих'));
-    this.el.append(
-      el('p', 'muted', 'Строители, землекопы и специалисты набираются из свободных носильщиков с инструментом — сколько заказано.'),
-    );
+    this.el.append(el('h4', '', t('eco.workers')));
+    this.el.append(el('p', 'muted', t('eco.workersNote')));
     ORDERABLE.forEach((kind, i) => {
       const [have, ordered] = workers[i];
       const row = el('div', 'eco-row');
-      row.append(settlerIcon(kind, 28), el('span', 'eco-name', PROFESSIONS[kind].name), el('b', '', `${have} / ${ordered}`));
+      row.append(settlerIcon(kind, 28), el('span', 'eco-name', profName(kind)), el('b', '', `${have} / ${ordered}`));
       const set = (n: number) => {
         w.orderWorkers(kind, Math.max(0, n));
         this.update();
       };
       row.append(
-        button('−1', 'Заказать на одного меньше', () => set(ordered - 1)),
-        button('+1', 'Заказать ещё одного', () => set(ordered + 1)),
-        button('+5', 'Заказать ещё пятерых', () => set(ordered + 5)),
-        button('↩', 'Отпустить одного свободного (на своей земле): снова станет носильщиком', () => {
+        button('−1', t('eco.orderLess'), () => set(ordered - 1)),
+        button('+1', t('eco.orderOne'), () => set(ordered + 1)),
+        button('+5', t('eco.orderFive'), () => set(ordered + 5)),
+        button('↩', t('eco.dismissOne'), () => {
           w.dismissSpecialist(kind);
           this.update();
         }),
@@ -104,8 +102,8 @@ export class TransportView implements View {
     if (key === this.key) return;
     this.key = key;
     this.el.innerHTML = '';
-    this.el.append(el('h4', '', 'Порядок перевозки'));
-    this.el.append(el('p', 'muted', 'Когда носильщиков не хватает, товары выше по списку везут первыми.'));
+    this.el.append(el('h4', '', t('eco.transport')));
+    this.el.append(el('p', 'muted', t('eco.transportNote')));
     const list = el('div', 'transport-list');
     const move = (res: Resource, how: TransportMove) => {
       w.moveTransport(res, how);
@@ -115,10 +113,10 @@ export class TransportView implements View {
       const row = el('div', 'eco-row transport-row');
       const first = i === 0;
       const last = i === order.length - 1;
-      const up = button('↑', 'На одно место выше', () => move(res, 'up'));
-      const top = button('⤒', 'В начало списка', () => move(res, 'top'));
-      const down = button('↓', 'На одно место ниже', () => move(res, 'down'));
-      const bottom = button('⤓', 'В конец списка', () => move(res, 'bottom'));
+      const up = button('↑', t('eco.up'), () => move(res, 'up'));
+      const top = button('⤒', t('eco.top'), () => move(res, 'top'));
+      const down = button('↓', t('eco.down'), () => move(res, 'down'));
+      const bottom = button('⤓', t('eco.bottom'), () => move(res, 'bottom'));
       up.disabled = top.disabled = first;
       down.disabled = bottom.disabled = last;
       row.append(el('span', 'transport-rank', String(i + 1)), wareIcon(res, 18), el('span', 'eco-name', nameOf(res)), top, up, down, bottom);
@@ -141,8 +139,8 @@ export class DistributionView implements View {
     if (key === this.key) return;
     this.key = key;
     this.el.innerHTML = '';
-    this.el.append(el('h4', '', 'Распределение товаров'));
-    this.el.append(el('p', 'muted', 'Какую долю товара получает каждый вид зданий. Без настройки делится поровну.'));
+    this.el.append(el('h4', '', t('eco.distribution')));
+    this.el.append(el('p', 'muted', t('eco.distributionNote')));
     for (const res of distributableGoods()) {
       const block = el('div', 'eco-dist');
       const head = el('div', 'eco-row');
@@ -161,7 +159,7 @@ export class DistributionView implements View {
         slider.value = String(weight);
         slider.oninput = () => w.setDistribution(res, type, Number(slider.value));
         slider.onchange = () => this.update();
-        row.append(buildingIcon(type, 22), el('span', 'eco-name', BUILDINGS[type].name), slider, el('b', '', `${Math.round((100 * weight) / total)}%`));
+        row.append(buildingIcon(type, 22), el('span', 'eco-name', buildingName(type)), slider, el('b', '', `${Math.round((100 * weight) / total)}%`));
         block.append(row);
       }
       this.el.append(block);
@@ -174,12 +172,12 @@ export function economyRows(b: Building): [string, string][] {
   const def = BUILDINGS[b.type];
   const rows: [string, string][] = [];
   if (def.mine && b.done) {
-    rows.push(['Любимая еда', nameOf(def.mine.favourite).toLowerCase()]);
-    rows.push(['Попыток в запасе', String(b.attempts ?? 0)]);
+    rows.push([t('eco.favourite'), lower(nameOf(def.mine.favourite))]);
+    rows.push([t('eco.attempts'), String(b.attempts ?? 0)]);
   }
   if (def.storage) rows.push(...storageRows(b));
   // As in Settlers 4 a new warehouse takes nothing until goods are ticked in its window.
-  if (def.storage && !b.accept?.length) rows.push(['Принимает', 'ничего — отметьте товары']);
+  if (def.storage && !b.accept?.length) rows.push([t('eco.accepts'), t('eco.acceptsNothing')]);
   return rows;
 }
 
@@ -188,11 +186,11 @@ export function storageRows(b: Building): [string, string][] {
   const def = BUILDINGS[b.type].storage;
   if (!def || !b.done) return [];
   const fill = storageFill(b);
-  if (fill.capacity === Infinity) return [['Вместимость', 'без предела']];
-  const rows: [string, string][] = [['Заполнено', `${fill.units} / ${fill.capacity}`]];
-  if (fill.maxPiles !== undefined) rows.push(['Стопки', `${fill.piles} из ${fill.maxPiles} (по ${def.perPile} шт.)`]);
+  if (fill.capacity === Infinity) return [[t('eco.capacity'), t('eco.unlimited')]];
+  const rows: [string, string][] = [[t('eco.filled'), `${fill.units} / ${fill.capacity}`]];
+  if (fill.maxPiles !== undefined) rows.push([t('eco.piles'), t('eco.pilesOf', { n: fill.piles ?? 0, m: fill.maxPiles, per: def.perPile ?? 0 })]);
   const full = fill.units >= fill.capacity || (fill.maxPiles !== undefined && (fill.piles ?? 0) >= fill.maxPiles);
-  if (full) rows.push(['Статус', 'полон: новые товары ждут у производителей']);
+  if (full) rows.push([t('info.status'), t('eco.full')]);
   return rows;
 }
 
@@ -201,11 +199,7 @@ export function stockText(b: Building, res: Resource): string {
   const n = b.output[res];
   const per = BUILDINGS[b.type].storage?.perPile;
   if (!per || n <= 0) return String(n);
-  const piles = Math.ceil(n / per);
-  const ten = piles % 10;
-  const teen = piles % 100 >= 11 && piles % 100 <= 14;
-  const word = ten === 1 && !teen ? 'стопка' : ten >= 2 && ten <= 4 && !teen ? 'стопки' : 'стопок';
-  return `${n} · ${piles} ${word}`;
+  return `${n} · ${t('eco.pileCount', { n: Math.ceil(n / per) })}`;
 }
 
 /** A string that changes whenever the economy controls of this building must be redrawn. */
@@ -222,16 +216,16 @@ export function toolOrderControls(world: World, b: Building): HTMLElement | null
   if (!recipe?.orderable || b.owner !== LOCAL_PLAYER) return null;
   const orders = economyOf(world, b.owner).toolOrders;
   const box = el('div', 'eco-orders');
-  box.append(el('h4', '', 'Заказы'), el('p', 'muted', 'Заказанное куётся первым, потом — что нужно поселению.'));
+  box.append(el('h4', '', t('eco.orders')), el('p', 'muted', t('eco.ordersNote')));
   for (const res of recipe.outputChoice ?? []) {
     const n = orders[res];
     const row = el('div', 'eco-row');
     row.append(wareIcon(res, 18), el('span', 'eco-name', nameOf(res)), el('b', '', n === undefined ? '—' : n === ENDLESS ? '∞' : String(n)));
     row.append(
-      button('+1', 'Заказать ещё один', () => world.orderTool(res, 1)),
-      button('+5', 'Заказать ещё пять', () => world.orderTool(res, 5)),
-      button('∞', 'Ковать без остановки', () => world.orderTool(res, ENDLESS)),
-      button('✕', 'Отменить заказ', () => world.orderTool(res, 0)),
+      button('+1', t('eco.toolOne'), () => world.orderTool(res, 1)),
+      button('+5', t('eco.toolFive'), () => world.orderTool(res, 5)),
+      button('∞', t('eco.toolEndless'), () => world.orderTool(res, ENDLESS)),
+      button('✕', t('eco.cancelOrder'), () => world.orderTool(res, 0)),
     );
     box.append(row);
   }
@@ -245,14 +239,14 @@ export function warehouseControls(world: World, b: Building): HTMLElement | null
   const box = el('div', 'eco-orders');
   box.append(
     goodsLists({
-      inTitle: 'Принимает',
-      outTitle: 'Не принимает',
+      inTitle: t('eco.accepts'),
+      outTitle: t('eco.refuses'),
       isIn: (res) => !!b.accept?.includes(res),
       set: (res, on) => world.setAccepts(b.id, res, on),
-      tipIn: (name) => `${name}: везут сюда — нажмите, чтобы не принимать`,
-      tipOut: (name) => `${name}: сюда не везут — нажмите, чтобы принимать`,
-      noneTip: 'Не принимать ничего',
-      allTip: 'Принимать всё',
+      tipIn: (name) => t('eco.tipIn', { name }),
+      tipOut: (name) => t('eco.tipOut', { name }),
+      noneTip: t('eco.noneTip'),
+      allTip: t('eco.allTip'),
       nameOf,
       count: (res) => ({ value: b.output[res], dataKey: 'res' }),
       countBoth: true,

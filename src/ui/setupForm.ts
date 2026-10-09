@@ -1,5 +1,7 @@
 import { PLAYER_COLORS } from '../render/sprites';
 import { AI_LEVEL_IDS, START_CONDITIONS, type StartLevel } from '../sim/config';
+import { t } from './i18n';
+import { startName } from './names';
 import { el } from './dom';
 import {
   activeSlots,
@@ -7,7 +9,8 @@ import {
   MAP_SIZES,
   MAX_SLOTS,
   RACES,
-  SLOT_KINDS,
+  raceName,
+  slotKindName,
   setupProblem,
   sizeHint,
   type GameSetup,
@@ -54,36 +57,36 @@ export function setupForm(setup: GameSetup, changed: (problem: string | null) =>
   const render = () => {
     box.innerHTML = '';
     const map = el('div', 'setup-map');
-    map.append(el('h4', '', 'Карта'));
+    map.append(el('h4', '', t('setup.map')));
     field(
       map,
-      'Размер',
+      t('setup.size'),
       select(MAP_SIZES.map((n): [number, string] => [n, `${n} × ${n}`]), setup.size, (v) => (setup.size = v)),
     );
     const seed = el('input');
     seed.type = 'number';
     seed.min = '0';
-    seed.placeholder = 'случайная';
+    seed.placeholder = t('setup.seedRandom');
     seed.value = setup.seed === null ? '' : String(setup.seed);
     seed.oninput = () => {
       const v = Number(seed.value);
       setup.seed = seed.value.trim() === '' || !Number.isInteger(v) || v < 0 ? null : v;
     };
-    const dice = el('button', 'menu-small', 'наугад');
+    const dice = el('button', 'menu-small', t('setup.dice'));
     dice.type = 'button';
-    dice.title = 'Случайная карта';
+    dice.title = t('setup.diceTip');
     dice.onclick = () => {
       setup.seed = Math.floor(Math.random() * 1e9);
       seed.value = String(setup.seed);
     };
     const seedBox = el('span', 'seed-box');
     seedBox.append(seed, dice);
-    field(map, 'Номер карты', seedBox);
+    field(map, t('setup.seed'), seedBox);
     field(
       map,
-      'Запасы на старте',
+      t('setup.start'),
       select(
-        (Object.keys(START_CONDITIONS) as StartLevel[]).map((k): [StartLevel, string] => [k, START_CONDITIONS[k].name]),
+        (Object.keys(START_CONDITIONS) as StartLevel[]).map((k): [StartLevel, string] => [k, startName(k)]),
         setup.start,
         (v) => (setup.start = v),
       ),
@@ -92,15 +95,15 @@ export function setupForm(setup: GameSetup, changed: (problem: string | null) =>
     fog.type = 'checkbox';
     fog.checked = setup.fog;
     fog.onchange = () => (setup.fog = fog.checked);
-    field(map, 'Туман войны', fog);
-    map.append(el('p', 'muted', 'Номер карты задаёт её рельеф: с одним номером карта всегда одинакова.'));
+    field(map, t('setup.fog'), fog);
+    map.append(el('p', 'muted', t('setup.seedNote')));
     const fits = sizeHint(activeSlots(setup).length);
-    map.append(el('p', 'muted', `Для ${activeSlots(setup).length} игроков подходит карта ${fits} × ${fits}.`));
+    map.append(el('p', 'muted', t('setup.sizeHint', { n: activeSlots(setup).length, size: `${fits} × ${fits}` })));
 
     const players = el('div', 'setup-players');
-    players.append(el('h4', '', 'Игроки'));
+    players.append(el('h4', '', t('setup.players')));
     const table = el('div', 'slot-table');
-    for (const h of ['', 'Кто играет', 'Народ', 'Команда', 'Сложность']) table.append(el('span', 'slot-head', h));
+    for (const h of ['', t('setup.col.who'), t('setup.col.race'), t('setup.col.team'), t('setup.col.level')]) table.append(el('span', 'slot-head', h));
     const active = activeSlots(setup);
     setup.slots.forEach((slot, k) => {
       // Player colours follow the order of the slots that take part, as the game assigns them.
@@ -114,13 +117,13 @@ export function setupForm(setup: GameSetup, changed: (problem: string | null) =>
       table.append(
         swatch,
         select(
-          kinds.map((v): [SlotKind, string] => [v, k === 0 ? 'Вы' : SLOT_KINDS[v]]),
+          kinds.map((v): [SlotKind, string] => [v, k === 0 ? t('common.you') : slotKindName(v)]),
           slot.kind,
           (v) => (slot.kind = v),
           k === 0,
         ),
         select(
-          RACES.map((r): [string, string] => [r.id, r.ready ? r.name : `${r.name} — скоро`]),
+          RACES.map((r): [string, string] => [r.id, r.ready ? raceName(r.id) : t('setup.raceSoon', { name: raceName(r.id) })]),
           slot.race,
           (v) => (slot.race = v as typeof slot.race),
           off,
@@ -143,7 +146,7 @@ export function setupForm(setup: GameSetup, changed: (problem: string | null) =>
     });
     players.append(
       table,
-      el('p', 'muted', 'Одна команда — союзники: не воюют друг с другом, видят землю друг друга и побеждают вместе.'),
+      el('p', 'muted', t('setup.teamsNote')),
     );
     box.append(map, players);
     changed(setupProblem(setup));

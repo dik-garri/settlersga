@@ -1,5 +1,7 @@
-import { AI_LEVELS, AI_LEVEL_IDS, START_CONDITIONS, type AiLevel, type StartLevel } from '../sim/config';
+import { AI_LEVEL_IDS, START_CONDITIONS, type AiLevel, type StartLevel } from '../sim/config';
 import type { WorldOptions } from '../sim/world';
+import { t } from './i18n';
+import { aiLevelName } from './names';
 
 /**
  * The game setup, as on Settlers 4's free-game screen: map, start goods, fog and one slot per player.
@@ -11,21 +13,20 @@ import type { WorldOptions } from '../sim/world';
 
 /** Who plays a slot. `remote` is a human over the network (phase 7; only the lobby offers it). */
 export type SlotKind = 'human' | 'ai' | 'remote' | 'closed';
-export const SLOT_KINDS: Record<SlotKind, string> = {
-  human: 'Игрок',
-  ai: 'Компьютер',
-  remote: 'Игрок по сети',
-  closed: 'Закрыто',
-};
+export const SLOT_KINDS: readonly SlotKind[] = ['human', 'ai', 'remote', 'closed'];
+/** A slot kind's name for the screens. */
+export const slotKindName = (k: SlotKind): string => t(`slot.${k}`);
 
 /** Races: only the Romans play until phase 6; the others are listed so the menu has their place. */
 export const RACES = [
-  { id: 'romans', name: 'Римляне', ready: true },
-  { id: 'vikings', name: 'Викинги', ready: false },
-  { id: 'mayans', name: 'Майя', ready: false },
-  { id: 'trojans', name: 'Трояне', ready: false },
+  { id: 'romans', ready: true },
+  { id: 'vikings', ready: false },
+  { id: 'mayans', ready: false },
+  { id: 'trojans', ready: false },
 ] as const;
 export type RaceId = (typeof RACES)[number]['id'];
+/** A race's name for the screens. */
+export const raceName = (r: RaceId): string => t(`race.${r}`);
 
 /** Player slots: one per player colour (`PLAYER_COLORS`). */
 export const MAX_SLOTS = 4;
@@ -79,15 +80,15 @@ export function defaultSetup(): GameSetup {
 /** The slots that take part, in player order (closed ones are skipped). */
 export const activeSlots = (s: GameSetup): SlotSetup[] => s.slots.filter((x) => x.kind !== 'closed');
 
-/** Why the setup cannot start (in Russian, for the screen), or null if it can. */
+/** Why the setup cannot start (in the interface language, for the screen), or null if it can. */
 export function setupProblem(s: GameSetup): string | null {
   const active = activeSlots(s);
-  if (s.slots[0]?.kind !== 'human') return 'Первое место — ваше';
-  if (s.slots.some((x, k) => k > 0 && x.kind === 'human')) return 'Второй игрок за этим компьютером не предусмотрен';
-  if (s.mode === 'single' && active.some((x) => x.kind === 'remote')) return 'Игроки по сети — только в сетевой игре';
-  if (active.some((x) => !RACES.find((r) => r.id === x.race)?.ready)) return 'Эта раса скоро появится';
-  if (active.length > 1 && new Set(active.map((x) => x.team)).size === 1) return 'Все в одной команде — не с кем воевать';
-  if (s.mode === 'network') return 'Сетевая игра скоро появится';
+  if (s.slots[0]?.kind !== 'human') return t('setup.problem.firstSlot');
+  if (s.slots.some((x, k) => k > 0 && x.kind === 'human')) return t('setup.problem.secondHuman');
+  if (s.mode === 'single' && active.some((x) => x.kind === 'remote')) return t('setup.problem.remote');
+  if (active.some((x) => !RACES.find((r) => r.id === x.race)?.ready)) return t('setup.problem.race');
+  if (active.length > 1 && new Set(active.map((x) => x.team)).size === 1) return t('setup.problem.oneTeam');
+  if (s.mode === 'network') return t('setup.problem.network');
   return null;
 }
 
@@ -132,7 +133,7 @@ export function parseSetup(text: string | null): GameSetup | null {
   const slots = Array.from({ length: MAX_SLOTS }, (_, k): SlotSetup => {
     const x = (raw.slots as Partial<SlotSetup>[])[k] ?? {};
     return {
-      kind: oneOf(x.kind, Object.keys(SLOT_KINDS) as SlotKind[], def.slots[k].kind),
+      kind: oneOf(x.kind, SLOT_KINDS, def.slots[k].kind),
       team: Number.isInteger(x.team) && x.team! >= 1 && x.team! <= MAX_SLOTS ? x.team! : k + 1,
       level: oneOf(x.level, AI_LEVEL_IDS, 'medium'),
       race: oneOf(x.race, RACES.map((r) => r.id), 'romans'),
@@ -194,4 +195,4 @@ export function devWorldArgs(params: URLSearchParams, randomSeed: number): { see
 }
 
 /** Names of the difficulty levels for the screens. */
-export const levelName = (l: AiLevel) => AI_LEVELS[l].name;
+export const levelName = (l: AiLevel): string => aiLevelName(l);

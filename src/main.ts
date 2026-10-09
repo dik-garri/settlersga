@@ -11,6 +11,7 @@ import { LOCAL_PLAYER, World } from './sim/world';
 import { audioControls } from './ui/audioControls';
 import { el } from './ui/dom';
 import { Hud } from './ui/hud';
+import { isLang, lang, LANG_EVENT, pickLang, setAddressLang, setLang, t, withLang } from './ui/i18n';
 import { InputController } from './ui/input';
 import { Intro } from './ui/intro';
 import { MainMenu } from './ui/menu';
@@ -38,6 +39,21 @@ async function main() {
   const params = new URLSearchParams(location.search);
   const launch = launchOf(params);
   const prefs = readPrefs();
+  // The interface language: ?lang, else the one chosen in the settings, else the browser's (en/de), else Russian.
+  const asked = params.get('lang');
+  setAddressLang(isLang(asked) ? asked : null);
+  setLang(pickLang(asked, prefs.lang, navigator.languages ?? [navigator.language]));
+  showLang();
+  window.addEventListener(LANG_EVENT, () => {
+    // A choice in the settings wins over the address from now on.
+    setAddressLang(null);
+    const p = new URLSearchParams(location.search);
+    if (p.has('lang')) {
+      p.delete('lang');
+      history.replaceState(null, '', `${location.pathname}${p.size ? `?${p}` : ''}`);
+    }
+    showLang();
+  });
   const app = new Application();
   await app.init({
     resizeTo: document.getElementById('game')!,
@@ -83,7 +99,7 @@ async function main() {
     const slots = browserSlots();
     const id = launch.slot ?? slots.latest()?.id;
     const data = id ? await slots.read(id) : null;
-    if (!data) return title(app, atlas, audio, { setup: false, intro: false, notice: 'Сохранение не найдено' });
+    if (!data) return title(app, atlas, audio, { setup: false, intro: false, notice: t('menu.saveNotFound') });
     world = World.load(data);
   } else if (launch.kind === 'demo') {
     // A development showcase that builds itself up to show everything at once (src/dev).
@@ -120,7 +136,7 @@ async function title(
 
   const begin = async (make: () => Promise<World | null>, fog: boolean, seed: number) => {
     menu.el.classList.add('busy');
-    menu.say('Подготовка карты…');
+    menu.say(t('menu.preparing'));
     // Let the notice paint before the map is generated.
     await new Promise((r) => setTimeout(r, 30));
     let world: World | null = null;
@@ -131,7 +147,7 @@ async function title(
     }
     if (!world) {
       menu.el.classList.remove('busy');
-      menu.say('Не удалось открыть игру');
+      menu.say(t('menu.openFailed'));
       return;
     }
     const a = await atlas;
@@ -140,7 +156,7 @@ async function title(
     document.body.classList.remove('title-mode');
     app.resize();
     // A refresh during the game returns to the menu, not to a stale ?menu=new.
-    history.replaceState(null, '', location.pathname);
+    history.replaceState(null, '', withLang(location.pathname));
     game(app, a, audio, world, { fog, seed, autosave: true });
   };
   const menu = new MainMenu(
@@ -201,29 +217,41 @@ function game(
   // Loading or leaving starts the page over: nothing of this game is left behind.
   const pause = new PauseMenu(world, state, {
     save,
-    load: (meta) => (location.href = `${location.pathname}?load=${encodeURIComponent(meta.id)}`),
-    quit: () => (location.href = `${location.pathname}?menu`),
+    load: (meta) => (location.href = withLang(`${location.pathname}?load=${encodeURIComponent(meta.id)}`)),
+    quit: () => (location.href = withLang(`${location.pathname}?menu`)),
   }, audio);
 
   // The minimap is framed at the top of the side panel, as wide as the panel's inside (--mm-w).
   const hudEl = document.getElementById('hud')!;
   const mmWidth = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--mm-w')) || 252;
   const minimap = new Minimap(world, camera, state.fog, mmWidth);
-  const hud = new Hud(
-    hudEl,
-    world,
-    state,
-    { onSave: () => pause.open('save'), onLoad: () => pause.open('load'), onMenu: () => pause.open('main') },
-    {
-      minimap: minimap.box,
-      sound: audioControls(audio),
-      jump: (x, y) => {
-        const p = toScreen(x, y);
-        camera.centerOn(p.x, p.y - world.map.heightAt(x, y));
+  const sound = audioControls(audio);
+  const makeHud = (previous?: Hud) =>
+    new Hud(
+      hudEl,
+      world,
+      state,
+      { onSave: () => pause.open('save'), onLoad: () => pause.open('load'), onMenu: () => pause.open('main') },
+      {
+        minimap: minimap.box,
+        sound,
+        jump: (x, y) => {
+          const p = toScreen(x, y);
+          camera.centerOn(p.x, p.y - world.map.heightAt(x, y));
+        },
+        memo: previous?.memo(),
       },
-    },
-  );
+    );
+  let hud = makeHud();
   hudEl.append(pause.el);
+  // Another language chosen in the settings: the side panel is built again in it (menus, windows,
+  // statistics and messages carry over); the pause menu and the minimap redraw themselves.
+  window.addEventListener(LANG_EVENT, () => {
+    const previous = hud;
+    previous.dispose();
+    hud = makeHud(previous);
+    hudEl.append(pause.el);
+  });
   hudEl.addEventListener('click', (e) => {
     if (e.target instanceof Element && e.target.closest('button')) audio.ui('click');
   });
@@ -241,8 +269,8 @@ function game(
   let nextAutosave = world.tick + autosaveEvery;
   const autosave = () => {
     nextAutosave = world.tick + autosaveEvery;
-    void slots.write(saveWorld(world), 'Автосохранение', Date.now(), AUTO_ID).then((m) => {
-      if (m) hud.toast('Автосохранение');
+    void slots.write(saveWorld(world), t('saves.auto'), Date.now(), AUTO_ID).then((m) => {
+      if (m) hud.toast(t('saves.auto'));
     });
   };
 
@@ -276,6 +304,12 @@ function game(
   Object.assign(window, { world, seed: opts.seed, state, renderer, camera, audio, pause });
   if (opts.seed) console.info(`Settlers prototype, seed ${opts.seed} (add ?seed=${opts.seed} to replay this map)`);
   else console.info(`Game at tick ${world.tick}`);
+}
+
+/** The page's language and title. */
+function showLang(): void {
+  document.documentElement.lang = lang();
+  document.title = t('app.pageTitle');
 }
 
 main();

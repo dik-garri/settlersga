@@ -1,4 +1,5 @@
 import type { AudioEngine } from '../audio/audio';
+import { LANG_EVENT, t } from './i18n';
 
 /**
  * Sound controls for the top-right panel: mute, master volume and music on/off. Returns the
@@ -15,15 +16,15 @@ export function audioControls(audio: AudioEngine): HTMLElement {
   volume.min = '0';
   volume.max = '100';
   volume.className = 'volume';
-  volume.title = 'Громкость';
   const music = document.createElement('button');
   music.textContent = '♫';
-  music.title = 'Музыка';
 
   const refresh = () => {
     const s = audio.settings;
     mute.textContent = s.muted || s.volume === 0 ? '🔇' : '🔊';
-    mute.title = s.muted ? 'Включить звук (M)' : 'Выключить звук (M)';
+    mute.title = s.muted ? t('audio.unmute') : t('audio.mute');
+    volume.title = t('settings.volume');
+    music.title = t('settings.music');
     mute.classList.toggle('active', s.muted);
     volume.value = String(Math.round(s.volume * 100));
     music.classList.toggle('active', s.music);
@@ -49,6 +50,7 @@ export function audioControls(audio: AudioEngine): HTMLElement {
     audio.setMuted(!audio.settings.muted);
     refresh();
   });
+  window.addEventListener(LANG_EVENT, refresh);
   refresh();
   box.append(mute, volume, music);
   return box;
