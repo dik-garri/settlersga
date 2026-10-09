@@ -306,7 +306,13 @@ export class Hud {
     this.endEl.innerHTML = '';
     this.endEl.append(
       el('h2', outcome === 'won' ? 'won' : 'lost', outcome === 'won' ? 'Победа!' : 'Поражение'),
-      el('p', '', outcome === 'won' ? 'У противников не осталось ни одной занятой башни.' : 'У вас не осталось ни одной занятой башни.'),
+      el(
+        'p',
+        '',
+        outcome === 'won'
+          ? 'У противников не осталось ни занятых башен, ни бойцов.'
+          : 'У вас не осталось ни занятых башен, ни бойцов.',
+      ),
       rowsTable(rows),
     );
     const actions = el('div', 'info-actions');

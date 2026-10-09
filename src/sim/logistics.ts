@@ -1,11 +1,11 @@
-import { isReachable, nearestStorage } from './buildings';
+import { canTakeUp, isReachable, isReadyWorker, nearestStorage } from './buildings';
 import { freeGoods, goodsOn, reserveGoods, stackTiles } from './ground';
 import { landAt, landOf } from './land';
 import { dispatchTrade, marketWants } from './trade';
 import { goldWanted, staffGarrisons, wantsRecruit, weaponsWanted } from './military';
 import { BUILDINGS, costOf, INPUT_CAP, ORDERABLE, PROFESSIONS, RESOURCE_INFO } from './config';
 import { countDelivery, distributionKey, economyOf, recountWorkers, workerOrder, workersOf } from './economy';
-import { RESOURCES, type Building, type PlayerId, type Point, type Resource, type Settler } from './types';
+import { RESOURCES, type Building, type PlayerId, type Point, type Resource, type Settler, type SettlerKind } from './types';
 import type { World } from './world';
 
 const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -49,6 +49,19 @@ export function demand(w: World, b: Building, res: Resource): number {
   return goldWanted(w, b, res, INPUT_CAP) || weaponsWanted(b, res) || marketWants(b, res);
 }
 
+/**
+ * The ready-made worker nearest the workplace's door who may take it up (`canTakeUp`) on its piece
+ * of land, taken out of `ready`.
+ */
+function takeReady(w: World, ready: Settler[], kind: SettlerKind, b: Building, piece: number, owner: PlayerId): Settler | undefined {
+  let best = -1;
+  for (let i = 0; i < ready.length; i++) {
+    if (!canTakeUp(ready[i].kind, kind) || landAt(w, ready[i], owner) !== piece) continue;
+    if (best < 0 || dist(ready[i], b.door) < dist(ready[best], b.door)) best = i;
+  }
+  return best < 0 ? undefined : ready.splice(best, 1)[0];
+}
+
 /** Hands jobs to idle carriers (and donkeys) of every player. */
 export function dispatch(w: World): void {
   for (const p of w.players) {
@@ -90,12 +103,24 @@ function dispatchFor(w: World, owner: PlayerId): void {
   const ground = groundIndex(w, owner);
   const supplyOf = (res: Resource, target: Building | null) => nearestSupply(w, own, res, target, pieceOf, ground);
 
-  // Staff finished workplaces; professions with a tool fetch it from the nearest pile first.
+  // Ready-made workers waiting for a workplace (Settlers 4's start smiths and miners).
+  const ready = w.settlers.filter((s) => s.owner === owner && s.tasks.length === 0 && isReadyWorker(s));
+  // Staff finished workplaces: a ready-made worker of the profession first, else a carrier, who
+  // fetches the profession's tool from the nearest pile first.
   for (const b of own) {
     const kind = BUILDINGS[b.type].worker;
     if (!kind || !b.done || b.workerId !== null || b.workerRequested || !isReachable(w, b)) continue;
     // A barracks calls its next recruit only when there is a weapon for him and room for a new fighter.
     if (BUILDINGS[b.type].barracks && !wantsRecruit(w, b)) continue;
+    const r = ready.length > 0 ? takeReady(w, ready, kind, b, pieceOf(b), owner) : undefined;
+    if (r) {
+      b.workerRequested = true;
+      r.tasks = [
+        { t: 'goto', x: b.door.x, y: b.door.y },
+        { t: 'become', b: b.id, kind },
+      ];
+      continue;
+    }
     if (!hasIdle(pieceOf(b))) continue;
     const tool = PROFESSIONS[kind].tool;
     const from = tool ? supplyOf(tool, b) : undefined;

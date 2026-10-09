@@ -5,7 +5,7 @@ import type { Building, PlayerId, Settler } from './types';
 import type { Player, World } from './world';
 
 /** Bump when the save layout changes incompatibly. */
-export const SAVE_VERSION = 26;
+export const SAVE_VERSION = 27;
 
 const MAP_LAYERS = [
   'terrain',
@@ -20,7 +20,6 @@ const MAP_LAYERS = [
   'explored',
   'wear',
   'owner',
-  'claimed',
   'goods',
   'goodsAmount',
   'goodsReserved',

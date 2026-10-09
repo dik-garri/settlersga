@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { addBuilding, recomputeTerritory, spawnSettler } from '../src/sim/buildings';
+import { addBuilding, spawnSettler } from '../src/sim/buildings';
+import { recomputeTerritory } from '../src/sim/territory';
 import { BUILDINGS, TRADE } from '../src/sim/config';
 import { ENDLESS } from '../src/sim/economy';
 import { isCutOff, landOf } from '../src/sim/land';

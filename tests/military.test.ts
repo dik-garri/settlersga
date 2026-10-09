@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { centerOf, spawnSettler } from '../src/sim/buildings';
-import { START_SOLDIERS } from '../src/sim/config';
+import { START_CONDITIONS } from '../src/sim/config';
+
+const START_FIGHTERS = START_CONDITIONS.medium.soldiers + START_CONDITIONS.medium.archers;
 import { enterGarrison, isFighter, killSettler } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
 import { RESOURCES, type Building } from '../src/sim/types';
@@ -88,7 +90,7 @@ describe('players', () => {
     expect(Math.hypot(p1.x - p2.x, p1.y - p2.y)).toBeGreaterThan(30);
     expect(startTower(w, 1).owner).toBe(1);
     expect(startTower(w, 2).owner).toBe(2);
-    expect(fightersOf(w, 2).length).toBe(START_SOLDIERS);
+    expect(fightersOf(w, 2).length).toBe(START_FIGHTERS);
     const c2 = startTower(w, 2);
     expect(w.map.owner[w.map.idx(c2.x, c2.y)]).toBe(2);
     run(w, 600);
@@ -118,7 +120,7 @@ describe('military economy', () => {
     const c = startTower(w);
     c.output.sword = 2;
     run(w, 600);
-    expect(fightersOf(w, 1).length).toBe(START_SOLDIERS);
+    expect(fightersOf(w, 1).length).toBe(START_FIGHTERS);
     expect(c.output.sword).toBe(2);
   });
 

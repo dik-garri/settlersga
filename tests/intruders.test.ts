@@ -6,7 +6,7 @@ import { keepOf, killSettler } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
 import type { Settler } from '../src/sim/types';
 import { World } from '../src/sim/world';
-import { startTower } from './helpers';
+import { dismissStandby, startTower } from './helpers';
 
 function run(w: World, ticks: number) {
   for (let i = 0; i < ticks; i++) w.step();
@@ -66,7 +66,8 @@ describe('specialists on hostile land (Settlers 4)', () => {
   it('a garrison down to its keep sends nobody', () => {
     const w = new World(42, { players: 2 });
     const c = startTower(w, 1);
-    // Leave only the tower's keep inside.
+    // Leave only the tower's keep inside, and nobody standing by to fill its slots again.
+    dismissStandby(w, 1);
     const keep = keepOf(c);
     for (const id of c.garrison.slice(keep)) killSettler(w, w.getSettler(id)!);
     run(w, 1);

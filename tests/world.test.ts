@@ -197,7 +197,7 @@ describe('World', () => {
     expect(tower.done).toBe(true);
     // The start fighters the start tower had no slot for man it.
     expect(tower.garrison.length).toBeGreaterThan(0);
-    expect(tower.garrison.every((id) => world.getSettler(id)?.kind === 'soldier')).toBe(true);
+    expect(tower.garrison.every((id) => world.getSettler(id)?.home === tower.id)).toBe(true);
     expect(owned()).toBeGreaterThan(before + 40);
     expect(world.map.owner[world.map.idx(tower.x, tower.y)]).toBe(1);
   });

@@ -1,6 +1,6 @@
 /**
  * Stranded settlers, as Settlers 4's `CFleeRole` (`ISettlerRole::SetFree`): a free carrier, builder
- * or digger (`FLEE.behaviors`) standing on land that is not his owner's or an ally's — his workplace
+ * or digger (`FLEE.behaviors`) or a ready-made worker without a workplace (`isReadyWorker`) standing on land that is not his owner's or an ally's — his workplace
  * burnt on land a conquest took, or the border moved away from him — walks towards the nearest land of
  * his own within `FLEE.seek`, or else to a random spot within `FLEE.wander`, a leg at a time with a
  * pause between legs. Back on own land he is an ordinary settler again; after `FLEE.legs` legs without
@@ -14,6 +14,7 @@
  * `World.idleRng`, the stream idle settlers already use, so the economy's own RNG is untouched. Cost:
  * a spiral search of at most `FLEE.seek`² tiles per leg, for stranded settlers only.
  */
+import { isReadyWorker } from './buildings';
 import { FLEE, PROFESSIONS } from './config';
 import { killSettler } from './military';
 import { sameRegion } from './regions';
@@ -45,7 +46,7 @@ function onOwnLand(w: World, s: Settler): boolean {
 export function fleeing(w: World, s: Settler): boolean {
   const out = w.isDefeated(s.owner);
   if (!out) {
-    if (!FLEE.behaviors.includes(PROFESSIONS[s.kind].behavior)) return false;
+    if (!FLEE.behaviors.includes(PROFESSIONS[s.kind].behavior) && !isReadyWorker(s)) return false;
     if (s.inside !== null || onOwnLand(w, s)) {
       if (s.fled !== undefined) delete s.fled;
       return false;

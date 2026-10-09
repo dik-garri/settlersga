@@ -107,3 +107,13 @@ export function vacateStart(w: World, p: PlayerId = 1): Building {
   }
   return t;
 }
+
+/**
+ * Test setup: the start's geologists (Settlers 4 gives every start some) are taken out and none are
+ * ordered, so a test of ordering and sending geologists starts from none.
+ */
+export function noGeologists(w: World, p: PlayerId = 1): void {
+  for (const s of w.settlers) if (s.owner === p && s.kind === 'geologist') killSettler(w, s);
+  w.orderSpecialist('geologist', 0, p);
+  w.step();
+}

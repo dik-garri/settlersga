@@ -8,7 +8,7 @@ import { saveWorld } from '../src/sim/save';
 import type { PlayerId, Settler, SettlerKind } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { placeNear } from '../tools/scenario';
-import { base, startTower } from './helpers';
+import { base, dismissStandby, startTower } from './helpers';
 
 // Fighting strength is tested in army.test.ts; here it is pinned (100 % unless a test sets it) so the
 // numbers are Settlers 4's unit stats as they are.
@@ -116,6 +116,8 @@ describe('duels as in Settlers 4', () => {
   it('a tower archer hits harder, hardest at enemies at its door', () => {
     ctl.factor = 1;
     const w = new World(42, { players: 2, size: 64 });
+    // Only the archer put in below shoots from the new tower: nobody stands by to man it.
+    dismissStandby(w, 1);
     const tower = placeNear(w, 'tower', base(w).x + 6, base(w).y + 2, 4, 1)!;
     run(w, 3000);
     expect(tower.done).toBe(true);
