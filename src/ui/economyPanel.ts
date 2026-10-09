@@ -1,5 +1,5 @@
 import { buildingIcon, settlerIcon, wareIcon } from '../render/atlas';
-import { BUILDINGS, CARRIER_RESERVE, ORDERABLE } from '../sim/config';
+import { BUILDINGS, CARRIER_RESERVE, INPUT_CAP, ORDERABLE } from '../sim/config';
 import {
   carrierReserve,
   consumersOf,
@@ -18,7 +18,7 @@ import { storageFill } from '../sim/storage';
 import { button, el, type View } from './dom';
 import { goodsLists } from './goodsLists';
 import { lower, t } from './i18n';
-import { buildingName, profName, resName } from './names';
+import { buildingName, profName, resLower, resName } from './names';
 import { tag } from './uiTarget';
 
 /**
@@ -143,7 +143,7 @@ export class DistributionView implements View {
     this.el.append(el('h4', '', t('eco.distribution')));
     this.el.append(el('p', 'muted', t('eco.distributionNote')));
     for (const res of distributableGoods()) {
-      const block = el('div', 'eco-dist');
+      const block = tag(el('div', 'eco-dist'), `distribution.${res}`);
       const head = el('div', 'eco-row');
       head.append(wareIcon(res, 18), el('span', 'eco-name', nameOf(res)));
       block.append(head);
@@ -168,18 +168,30 @@ export class DistributionView implements View {
   }
 }
 
-/** Rows for the building window that the economy adds (mine attempts, house size). */
+/** Rows for the building window that the economy adds (warehouse fill and what it takes in). */
 export function economyRows(b: Building): [string, string][] {
   const def = BUILDINGS[b.type];
   const rows: [string, string][] = [];
-  if (def.mine && b.done) {
-    rows.push([t('eco.favourite'), lower(nameOf(def.mine.favourite))]);
-    rows.push([t('eco.attempts'), String(b.attempts ?? 0)]);
-  }
   if (def.storage) rows.push(...storageRows(b));
   // As in Settlers 4 a new warehouse takes nothing until goods are ticked in its window.
   if (def.storage && !b.accept?.length) rows.push([t('eco.accepts'), t('eco.acceptsNothing')]);
   return rows;
+}
+
+/**
+ * A mine's food rows (Settlers 4: each food eaten buys attempts, the favourite more): what it holds,
+ * its favourite and the attempts left. Their own table in the building window, for the tutorial's mark.
+ */
+export function mineRows(b: Building): [string, string][] {
+  const def = BUILDINGS[b.type];
+  const anyOf = def.recipe?.inputsAnyOf;
+  if (!def.mine || !anyOf || !b.done) return [];
+  const held = anyOf.map((r) => `${resLower(r)} ${b.input[r]}`).join(', ');
+  return [
+    [t('info.foodInput'), `${held} / ${INPUT_CAP}`],
+    [t('eco.favourite'), lower(nameOf(def.mine.favourite))],
+    [t('eco.attempts'), String(b.attempts ?? 0)],
+  ];
 }
 
 /** How full a warehouse is (Settlers 4: piles of 8, a good may take several; `sim/storage.ts`). */
@@ -220,7 +232,7 @@ export function toolOrderControls(world: World, b: Building): HTMLElement | null
   box.append(el('h4', '', t('eco.orders')), el('p', 'muted', t('eco.ordersNote')));
   for (const res of recipe.outputChoice ?? []) {
     const n = orders[res];
-    const row = el('div', 'eco-row');
+    const row = tag(el('div', 'eco-row'), `info.toolOrder.${res}`);
     row.append(wareIcon(res, 18), el('span', 'eco-name', nameOf(res)), el('b', '', n === undefined ? '—' : n === ENDLESS ? '∞' : String(n)));
     row.append(
       button('+1', t('eco.toolOne'), () => world.orderTool(res, 1)),

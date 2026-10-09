@@ -1,9 +1,10 @@
 import { addBuilding, centerOf, spawnSettler } from './buildings';
 import { BUILDINGS, ORDERABLE } from './config';
-import { orderWorkers, workerOrder } from './economy';
+import { orderWorkers, setAccepts, workerOrder } from './economy';
 import { dropGoods } from './ground';
+import { enterGarrison } from './military';
 import { claimChanged } from './territory';
-import type { Building, BuildingType, PlayerId, Resource, SettlerKind } from './types';
+import { RESOURCES, type Building, type BuildingType, type PlayerId, type Resource, type SettlerKind } from './types';
 import type { World } from './world';
 
 /**
@@ -21,6 +22,10 @@ export interface ScenarioBuilding {
   tag?: string;
   /** A ready-made worker of its profession comes with it (and takes it up at once, `isReadyWorker`). */
   worker?: boolean;
+  /** A military building's swordsmen, inside from the start (it holds its land at once). */
+  garrison?: number;
+  /** A warehouse's accepted goods (`setAccepts`; a new one takes nothing): a list, or every good. */
+  accepts?: Resource[] | 'all';
 }
 
 export interface ScenarioPlayer {
@@ -74,6 +79,8 @@ export function applyScenario(w: World, def: ScenarioDef): void {
       const b = placeFinished(w, sb.type, sp.player, cx + sb.near.dx, cy + sb.near.dy);
       if (!b) throw new Error(`scenario: no room for ${sb.type}`);
       if (sb.tag) w.tags.set(sb.tag, b.id);
+      for (let k = 0; k < (sb.garrison ?? 0); k++) enterGarrison(w, b, spawnSettler(w, 'soldier', b));
+      for (const res of sb.accepts === 'all' ? RESOURCES : (sb.accepts ?? [])) setAccepts(w, sp.player, b.id, res, true);
       const job = BUILDINGS[sb.type].worker;
       if (sb.worker && job) spawnSettler(w, job, tower);
     }
