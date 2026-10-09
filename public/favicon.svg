@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Our own emblem: a heraldic shield with a stone tower. -->
+  <path d="M32 3 L57 11 V30 C57 45 46 55 32 61 C18 55 7 45 7 30 V11 Z" fill="#2c4f9e" stroke="#d9a441" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M22 47 V27 H20 V21 H24 V24 H28 V21 H36 V24 H40 V21 H44 V27 H42 V47 Z" fill="#f3e6c4"/>
+  <path d="M29 47 V39 A3 3 0 0 1 35 39 V47 Z" fill="#2c4f9e"/>
+  <rect x="30" y="29" width="4" height="5" fill="#2c4f9e"/>
+</svg>
