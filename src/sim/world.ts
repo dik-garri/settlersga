@@ -170,6 +170,8 @@ export interface WorldOptions {
   from?: SaveData;
   /** Start goods and workers, as in Settlers 4 (default `medium`). */
   start?: StartLevel;
+  /** A start level per player, by player index like `teams` (a scenario's rival may start poorer); default `start`. */
+  starts?: StartLevel[];
   /**
    * Difficulty of each computer player, by player index like `teams` (default `medium`); a level's
    * `bonus` goods lie by that player's start tower.
@@ -292,7 +294,7 @@ export class World {
     const starts = startPositions(size, opts.players ?? 1);
     this.map = generateMap(seed, size, starts);
     rebuildGrowing(this);
-    for (const st of starts) this.addPlayer(st, opts.start ?? 'medium');
+    starts.forEach((st, k) => this.addPlayer(st, opts.starts?.[k] ?? opts.start ?? 'medium'));
     opts.teams?.forEach((team, k) => {
       if (this.players[k] && Number.isFinite(team)) this.players[k].team = team;
     });

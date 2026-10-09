@@ -201,6 +201,8 @@ export interface Building {
   workAt?: Point | null;
   /** Marketplace: where its donkeys take goods, and what (see `trade.ts`). */
   trade?: TradeRoute;
+  /** Marketplace: goods donkeys have brought here since it was finished, by good (`unloadTick`); absent = none yet. */
+  received?: Partial<Stock>;
   /** Infirmary: the fighter it called and is healing (`infirmary.ts`), one at a time. */
   patient?: number;
   /** Lookout tower: its alarm is up (an enemy fighter in range, `lookout.ts`) until none is left. */

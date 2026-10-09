@@ -1,5 +1,5 @@
 import type { Category } from '../sim/config';
-import type { BuildingType, Resource } from '../sim/types';
+import type { BuildingType, Resource, SettlerKind } from '../sim/types';
 import type { CommandId, MenuId } from './locks';
 import type { SPEEDS } from './optionsView';
 
@@ -32,6 +32,16 @@ export type UiTarget =
   | 'settlers.beds'
   | 'settlers.reserve'
   | `settlers.cmd.${CommandId}`
+  /** A worker order's «+1» (builders, diggers, specialists). */
+  | `settlers.order.${SettlerKind}`
+  /** A market's destination buttons, and a good in its «not carried» list. */
+  | 'trade.route'
+  | `trade.goods.${Resource}`
+  /** A military building's garrison: «Fill», and −/+ per kind. */
+  | 'garrison.fill'
+  | `garrison.${'melee' | 'ranged'}.${'plus' | 'minus'}`
+  /** A recruit order (kind, level from 1, button). */
+  | `recruit.${SettlerKind}.${1 | 2 | 3}.${'plus1' | 'plus5' | 'endless'}`
   | 'hud.ticker'
   | 'minimap';
 

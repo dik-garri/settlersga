@@ -18,6 +18,8 @@ import type { Anchor, AnchorKind, Prefer } from './types';
 export interface AnchorCtx {
   world: World;
   player: PlayerId;
+  /** The scenario's building names (`World.tags`, kept with the mission's progress: the world does not save them). */
+  tags: Record<string, number>;
   resolve: (a: Anchor) => Point | null;
 }
 
@@ -143,30 +145,42 @@ export const ANCHORS: Resolvers = {
     }
     return best;
   },
-  nearest: (a, { world, resolve }) => {
+  nearest: (a, { world, player, resolve }) => {
     const from = resolve(a.from);
     if (!from) return null;
     const m = world.map;
+    const ownAt = (x: number, y: number) => m.inBounds(x, y) && m.owner[m.idx(x, y)] === player;
     const test: Record<typeof a.terrain, (i: number) => boolean> = {
       water: (i) => TERRAIN[m.terrain[i] as Terrain].water,
       meadow: (i) => TERRAIN[m.terrain[i] as Terrain].plantable && m.tree[i] === 0 && m.building[i] === 0,
       forest: (i) => m.tree[i] >= TREE_MATURE,
+      // Open land a pioneer can claim: nobody's, walkable, unbuilt, beside the player's own.
+      border: (i) => {
+        const x = i % m.w;
+        const y = (i - x) / m.w;
+        return m.owner[i] === 0 && m.isWalkable(x, y) && m.building[i] === 0 &&
+          (ownAt(x + 1, y) || ownAt(x - 1, y) || ownAt(x, y + 1) || ownAt(x, y - 1));
+      },
     };
     return nearestTile(world, from, 24, (x, y) => test[a.terrain](m.idx(x, y)));
   },
-  building: (a, { world, player }) => {
+  building: (a, { world, player, tags, resolve }) => {
     if (a.owner === 'scenario') {
-      const id = a.tag !== undefined ? world.tags.get(a.tag) : undefined;
+      const id = a.tag !== undefined ? (tags[a.tag] ?? world.tags.get(a.tag)) : undefined;
       const b = id !== undefined ? world.buildings.get(id) : undefined;
       return b && b.type === a.type ? centre(b) : null;
     }
-    // Own buildings: the newest of the type. Enemy ones: the nearest explored one (fog rule, as the AI's).
+    // Own buildings: the newest of the type, or the nearest to `near`. Enemy ones: the nearest explored
+    // one (fog rule, as the AI's).
     let best: Building | null = null;
     const home = world.homeOf(player);
+    const to = a.near ? resolve(a.near) : null;
+    if (a.near && !to) return null;
+    const dist = (b: Building) => (to ? Math.hypot(b.door.x - to.x, b.door.y - to.y) : -b.id);
     for (const b of world.buildings.values()) {
       if (b.type !== a.type) continue;
       if (a.owner === 'me') {
-        if (b.owner === player && (!best || b.id > best.id)) best = b;
+        if (b.owner === player && (!best || dist(b) < dist(best))) best = b;
       } else if (!world.allied(b.owner, player) && world.isExplored(b.door.x, b.door.y, player)) {
         if (!best || Math.hypot(b.door.x - home.x, b.door.y - home.y) < Math.hypot(best.door.x - home.x, best.door.y - home.y)) best = b;
       }
@@ -215,13 +229,18 @@ export const anchorKey = (a: Anchor): string => JSON.stringify(a);
  * A resolver with a cache: fixed anchors are resolved once (the cache is part of the mission's saved
  * progress), live ones every time.
  */
-export function anchorResolver(world: World, player: PlayerId, cache: Record<string, Point | null>): (a: Anchor) => Point | null {
+export function anchorResolver(
+  world: World,
+  player: PlayerId,
+  cache: Record<string, Point | null>,
+  tags: Record<string, number> = {},
+): (a: Anchor) => Point | null {
   const resolve = (a: Anchor): Point | null => {
     const live = isLive(a);
     const key = live ? '' : anchorKey(a);
     if (!live && key in cache) return cache[key];
     const run = ANCHORS[a.a] as (a: Anchor, ctx: AnchorCtx) => Point | null;
-    const p = run(a, { world, player, resolve });
+    const p = run(a, { world, player, tags, resolve });
     if (!live) cache[key] = p;
     return p;
   };

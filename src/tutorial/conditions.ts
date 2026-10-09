@@ -65,8 +65,21 @@ export const SETTINGS: Table<SettingCheck, 's'> = {
     return n === ENDLESS || n >= c.min;
   },
   distribution: (c, { world, player }) => Object.keys(economyOf(world, player).distribution[c.res] ?? {}).length > 0,
-  tradeRoute: (c, { world, player }) =>
-    own(world, player).some((b) => !!b.trade && b.trade.to !== null && (b.trade.orders[c.res] ?? 0) !== 0),
+  // An order counts down as the barracks calls a carrier: those on their way in count with it.
+  recruitOrder: (c, { world, player }) => {
+    const n = world.recruitOrder(c.kind, c.level - 1, player);
+    if (n === ENDLESS) return true;
+    const coming = world.settlers.filter(
+      (s) => s.owner === player && s.tasks.some((t) => t.t === 'recruit' && t.kind === c.kind && t.level === c.level - 1),
+    ).length;
+    return n + coming >= c.min;
+  },
+  tradeRoute: (c, p) => {
+    const ordering = own(p.world, p.player).some(
+      (b) => near(p, b.door, c.near, c.r) && !!b.trade && b.trade.to !== null && (b.trade.orders[c.res] ?? 0) !== 0,
+    );
+    return c.off ? !ordering : ordering;
+  },
 };
 
 export const UI_CHECKS: Table<UiCheck, 'u'> = {
@@ -135,6 +148,11 @@ export const CONDITIONS: Table<Condition, 'k'> = {
         n++;
       }
     }
+    return n >= c.min;
+  },
+  received: (c, p) => {
+    let n = 0;
+    for (const b of own(p.world, p.player)) if (b.received && near(p, b.door, c.near, c.r)) n += b.received[c.res] ?? 0;
     return n >= c.min;
   },
   claimed: (c, p) => landOf(p.world, p.player) - p.start.land >= c.min,

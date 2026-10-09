@@ -24,8 +24,17 @@ export interface ScenarioBuilding {
   worker?: boolean;
   /** A military building's swordsmen, inside from the start (it holds its land at once). */
   garrison?: number;
+  /** A military building's archers, inside from the start. */
+  archers?: number;
+  /**
+   * Placed on nobody's land (as a player's start is founded) rather than on the player's own: an
+   * outpost beyond the border whose garrison then claims its land (Settlers 4 maps give such ones).
+   */
+  founding?: boolean;
   /** A warehouse's accepted goods (`setAccepts`; a new one takes nothing): a list, or every good. */
   accepts?: Resource[] | 'all';
+  /** Goods on the ground by its door (an outpost's own little store). */
+  piles?: [Resource, number][];
 }
 
 export interface ScenarioPlayer {
@@ -48,11 +57,19 @@ const PLACE_RADIUS = 10;
  * A finished building of `owner`'s on the free spot nearest (x, y) — within `radius`, ring after ring —
  * placed directly (scenarios and the dev showcase); null if none fits.
  */
-export function placeFinished(w: World, type: BuildingType, owner: PlayerId, x: number, y: number, radius = PLACE_RADIUS): Building | null {
+export function placeFinished(
+  w: World,
+  type: BuildingType,
+  owner: PlayerId,
+  x: number,
+  y: number,
+  radius = PLACE_RADIUS,
+  founding = false,
+): Building | null {
   for (let r = 0; r <= radius; r++) {
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
-        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r || !w.canPlace(type, x + dx, y + dy, owner)) continue;
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r || !w.canPlace(type, x + dx, y + dy, owner, founding)) continue;
         const b = addBuilding(w, type, x + dx, y + dy, owner, true);
         claimChanged(w, b);
         return b;
@@ -76,11 +93,14 @@ export function applyScenario(w: World, def: ScenarioDef): void {
     const cx = Math.round(c.x);
     const cy = Math.round(c.y);
     for (const sb of sp.buildings ?? []) {
-      const b = placeFinished(w, sb.type, sp.player, cx + sb.near.dx, cy + sb.near.dy);
+      const b = placeFinished(w, sb.type, sp.player, cx + sb.near.dx, cy + sb.near.dy, PLACE_RADIUS, sb.founding);
       if (!b) throw new Error(`scenario: no room for ${sb.type}`);
       if (sb.tag) w.tags.set(sb.tag, b.id);
-      for (let k = 0; k < (sb.garrison ?? 0); k++) enterGarrison(w, b, spawnSettler(w, 'soldier', b));
+      const crew: [SettlerKind, number][] = [['soldier', sb.garrison ?? 0], ['archer', sb.archers ?? 0]];
+      // Its land is settled as the first of them goes in (`enterGarrison`), a founded outpost's too.
+      for (const [kind, n] of crew) for (let k = 0; k < n; k++) enterGarrison(w, b, spawnSettler(w, kind, b));
       for (const res of sb.accepts === 'all' ? RESOURCES : (sb.accepts ?? [])) setAccepts(w, sp.player, b.id, res, true);
+      for (const [res, n] of sb.piles ?? []) dropGoods(w, { x: b.door.x, y: b.door.y + 1 }, res, n);
       const job = BUILDINGS[sb.type].worker;
       if (sb.worker && job) spawnSettler(w, job, tower);
     }

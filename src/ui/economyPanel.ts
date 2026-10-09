@@ -74,7 +74,8 @@ export class WorkersView implements View {
       };
       row.append(
         button('−1', t('eco.orderLess'), () => set(ordered - 1)),
-        button('+1', t('eco.orderOne'), () => set(ordered + 1)),
+        // The tutorial's mark counts as used while an order is still waiting for its worker.
+        tag(button('+1', t('eco.orderOne'), () => set(ordered + 1)), `settlers.order.${kind}`, ordered > have),
         button('+5', t('eco.orderFive'), () => set(ordered + 5)),
         button('↩', t('eco.dismissOne'), () => {
           w.dismissSpecialist(kind);

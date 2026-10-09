@@ -42,6 +42,8 @@ export class Minimap {
   private readonly pad = 4;
   /** Next row to rasterise: the overview is refreshed a slice of rows per frame, never all at once. */
   private nextRow = 0;
+  /** The tutorial's marks (tile points), blinking on the overview so a mark out of view is found. */
+  private marks: readonly { x: number; y: number }[] = [];
 
   constructor(
     private readonly world: World,
@@ -153,7 +155,12 @@ export class Minimap {
     return [(x - y) * this.sx + this.cx, (x + y) * this.sy + this.pad];
   }
 
-  update(_nowMs: number, viewW: number, viewH: number): void {
+  /** The tutorial's marks to blink (`GuideMark`s; none = nothing drawn). */
+  setMarks(marks: readonly { x: number; y: number }[]): void {
+    this.marks = marks;
+  }
+
+  update(nowMs: number, viewW: number, viewH: number): void {
     // About one full refresh per BASE_EVERY at 60 fps, whatever the map size.
     const { h } = this.world.map;
     const rows = Math.max(1, Math.ceil((h * 16) / BASE_EVERY));
@@ -208,5 +215,19 @@ export class Minimap {
     corners.forEach(([x, y], k) => (k ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
     ctx.closePath();
     ctx.stroke();
+
+    // The tutorial's marks: a blinking ring with a dot (on for 0.6 s, off for 0.3 s).
+    if (this.marks.length > 0 && nowMs % 900 < 600) {
+      ctx.lineWidth = 1.5;
+      for (const m of this.marks) {
+        const [x, y] = this.point(m.x, m.y);
+        ctx.strokeStyle = '#ffd34a';
+        ctx.beginPath();
+        ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = '#e0402a';
+        ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+      }
+    }
   }
 }

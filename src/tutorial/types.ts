@@ -17,7 +17,16 @@ import type { UiTarget } from '../ui/uiTarget';
 export type MissionId = 'forest' | 'logistics' | 'bread' | 'metal' | 'trade' | 'battle';
 
 /** What fills a `{name}` placeholder in a step's text: a name looked up in the language, a number or a key. */
-export type ParamSpec = { building: BuildingType } | { res: Resource } | { prof: SettlerKind } | { n: number } | { label: Key };
+export type ParamSpec =
+  | { building: BuildingType }
+  | { res: Resource }
+  | { prof: SettlerKind }
+  | { n: number }
+  | { label: Key }
+  /** A modifier key as the player's keyboard names it (⌘ for Ctrl on a Mac, Strg in German). */
+  | { key: ModifierKey };
+
+export type ModifierKey = 'ctrl' | 'alt' | 'shift';
 
 export interface MissionDef {
   id: MissionId;
@@ -25,7 +34,8 @@ export interface MissionDef {
   title: Key;
   summary: Key;
   debrief: Key;
-  world: { seed: number; size: number; players: number; ai?: PlayerId[]; start: StartLevel; fog: boolean };
+  /** The map and its players (`starts`: a start level per player, e.g. a poorer rival; default `start`). */
+  world: { seed: number; size: number; players: number; ai?: PlayerId[]; start: StartLevel; starts?: StartLevel[]; fog: boolean };
   scenario?: ScenarioDef;
   /** What this mission opens (later missions inherit it; see `locksFor`). */
   unlock: Partial<Locks>;
@@ -90,6 +100,8 @@ export type Condition =
   | { k: 'explored'; at: Anchor }
   /** Tiles within `r` of the point the player's geologists examined (with `ore`: only those found holding it). */
   | { k: 'prospected'; at: Anchor; r: number; min: number; ore?: Resource }
+  /** Units of a good donkeys brought to the player's finished markets (near a point: those markets only). */
+  | { k: 'received'; res: Resource; min: number; near?: Anchor; r?: number }
   /** Tiles of land gained since the mission began. */
   | { k: 'claimed'; min: number }
   | { k: 'captured'; min: number }
@@ -117,8 +129,13 @@ export type SettingCheck =
   | { s: 'toolOrder'; res: Resource; min: number }
   /** A distribution weight of the good was set. */
   | { s: 'distribution'; res: Resource }
-  /** A market of the player has a route and an order for the good. */
-  | { s: 'tradeRoute'; res: Resource };
+  /** At least `min` recruits of the kind ordered at the level (1 = the lowest; or endless), those on their way to the barracks included. */
+  | { s: 'recruitOrder'; kind: SettlerKind; level: number; min: number }
+  /**
+   * A market of the player (near a point, if given) has a route and an order for the good — or, with
+   * `off`, none there orders it.
+   */
+  | { s: 'tradeRoute'; res: Resource; near?: Anchor; r?: number; off?: boolean };
 
 export type SettingKind = SettingCheck['s'];
 
@@ -147,9 +164,13 @@ export type Anchor =
   | { a: 'guarantee'; mountain?: number; lobe?: number; quarry?: number; grove?: true; pond?: true }
   /** The best place for a building near another anchor (`prefer`: what its work area should hold). */
   | { a: 'spot'; type: BuildingType; near: Anchor; prefer?: Prefer; within?: number }
-  | { a: 'nearest'; terrain: 'water' | 'meadow' | 'forest'; from: Anchor }
-  /** A building of the player's (or an enemy's, or a scenario's by tag); re-found on every check. */
-  | { a: 'building'; type: BuildingType; owner: 'me' | 'enemy' | 'scenario'; tag?: string }
+  /** The nearest tile of a kind (`border`: nobody's walkable land next to the player's, where a pioneer can claim). */
+  | { a: 'nearest'; terrain: 'water' | 'meadow' | 'forest' | 'border'; from: Anchor }
+  /**
+   * A building of the player's (the newest, or the one nearest `near`), an enemy's (the nearest
+   * explored one) or a scenario's by tag; re-found on every check.
+   */
+  | { a: 'building'; type: BuildingType; owner: 'me' | 'enemy' | 'scenario'; tag?: string; near?: Anchor }
   /** A pile of goods on the ground nearest another anchor; re-found on every check. */
   | { a: 'pile'; res: Resource; near: Anchor }
   | { a: 'between'; from: Anchor; to: Anchor; t: number }

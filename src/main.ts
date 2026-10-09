@@ -310,7 +310,10 @@ function game(
     tutorial = new TutorialView(runner, world, hudEl, {
       state,
       jump,
-      marks: (m) => renderer.setGuide(m),
+      marks: (m) => {
+        renderer.setGuide(m);
+        minimap.setMarks(m);
+      },
       startMission: (id) => (location.href = withLang(`${location.pathname}?tutorial=${encodeURIComponent(id)}`)),
       toMenu: () => (location.href = withLang(`${location.pathname}?menu`)),
     });

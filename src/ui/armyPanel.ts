@@ -13,6 +13,7 @@ import { LOCAL_PLAYER, type World } from '../sim/world';
 import { button, el, type View } from './dom';
 import { t } from './i18n';
 import { profName, resLower, resName } from './names';
+import { tag } from './uiTarget';
 
 /** Weapons whose shares the player sets (share-controlled outputs). */
 const OUTPUT_WEAPONS = RESOURCES.filter((r) => OUTPUT_SHARES[r] !== undefined);
@@ -75,23 +76,34 @@ export function garrisonControls(w: World, b: Building, onChange: () => void): H
     const name = archer ? t('army.bowmen') : t('army.swordsmen');
     row.append(settlerIcon(kind, 18), el('span', 'eco-name', name), el('b', '', `${n} / ${slotsOf(b, archer)}`));
     row.append(
-      button('−', t('army.wishLess', { name }), () => {
-        w.changeGarrison(b.id, archer, -1);
-        onChange();
-      }),
-      button('+', t('army.wishMore', { name }), () => {
-        w.changeGarrison(b.id, archer, 1);
-        onChange();
-      }),
+      tag(
+        button('−', t('army.wishLess', { name }), () => {
+          w.changeGarrison(b.id, archer, -1);
+          onChange();
+        }),
+        `garrison.${archer ? 'ranged' : 'melee'}.minus`,
+      ),
+      tag(
+        button('+', t('army.wishMore', { name }), () => {
+          w.changeGarrison(b.id, archer, 1);
+          onChange();
+        }),
+        `garrison.${archer ? 'ranged' : 'melee'}.plus`,
+        n >= slotsOf(b, archer),
+      ),
     );
     box.append(row);
   }
   const actions = el('div', 'info-actions');
   actions.append(
-    button(t('army.fill'), t('army.fillTip'), () => {
-      w.fillGarrison(b.id);
-      onChange();
-    }),
+    tag(
+      button(t('army.fill'), t('army.fillTip'), () => {
+        w.fillGarrison(b.id);
+        onChange();
+      }),
+      'garrison.fill',
+      wish.melee >= slotsOf(b, false) && wish.ranged >= slotsOf(b, true),
+    ),
     button(t('army.withdraw'), t('army.withdrawTip'), () => {
       w.withdrawGarrison(b.id);
       onChange();
@@ -145,14 +157,16 @@ export function recruitOrderControls(w: World, onChange: () => void): HTMLElemen
         w.orderRecruits(kind, level, count);
         onChange();
       };
+      const mark = `recruit.${kind}.${(level + 1) as 1 | 2 | 3}` as const;
       row.append(
         button('−', t('eco.less1'), () => {
           w.reduceRecruits(kind, level, 1);
           onChange();
         }),
-        button('+1', t('army.one'), order(1)),
-        button('+5', t('army.five'), order(5)),
-        button('∞', t('army.endless'), order(ENDLESS)),
+        // The tutorial's marks count as used once the row holds an order.
+        tag(button('+1', t('army.one'), order(1)), `${mark}.plus1`, n !== 0),
+        tag(button('+5', t('army.five'), order(5)), `${mark}.plus5`, n !== 0),
+        tag(button('∞', t('army.endless'), order(ENDLESS)), `${mark}.endless`, n !== 0),
         button('✕', t('eco.cancelOrder'), order(0)),
       );
       box.append(row);
