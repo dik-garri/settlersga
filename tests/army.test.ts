@@ -1,6 +1,6 @@
 import { attackStrength, defenceStrength } from '../src/sim/strength';
 import { describe, expect, it } from 'vitest';
-import { centerOf, spawnSettler } from '../src/sim/buildings';
+import { centerOf, claimsTerritory, spawnSettler } from '../src/sim/buildings';
 import { BUILDINGS, PROFESSIONS } from '../src/sim/config';
 import { enterGarrison, isFighter, keepOf, killSettler, maxHp } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
@@ -58,32 +58,33 @@ function frontLine(type: 'tower' | 'bigtower' = 'tower') {
 }
 
 describe('defence', () => {
-  it('a military building never gives away the fighters it keeps, neither to man towers nor to attack', () => {
+  it('fighters never move between buildings by themselves; a tower with nobody free stays empty, holds no land and warns', () => {
     const w = rich(new World(42, { players: 2 }));
     const c = startTower(w);
-    // Only the start tower's own garrison: the start fighters standing by it are taken out (setup).
-    for (const s of w.settlers.filter((x) => x.owner === 1 && isFighter(x) && x.home === null)) killSettler(w, s);
+    // Only the start tower's own garrison, filled: the start fighters standing by it are taken out (setup).
+    dismissStandby(w, 1);
+    station(w, c, 'archer');
+    station(w, c, 'archer');
     w.step();
     expect(c.garrison.length).toBe(BUILDINGS.tower.garrison!.capacity);
     expect(keepOf(c)).toBe(BUILDINGS.tower.garrison!.keep);
-    // Many towers and no weapons: only the spares beyond `keep` may leave.
     const o = base(w);
-    for (const [dx, dy] of [
+    const towers = [
       [5, -4],
       [-5, -4],
       [-5, 4],
       [5, 4],
-    ]) {
-      placeNear(w, 'tower', o.x + dx, o.y + dy, 4);
-    }
+    ].map(([dx, dy]) => placeNear(w, 'tower', o.x + dx, o.y + dy, 4)!);
     for (let i = 0; i < 4000; i++) {
       w.step();
-      expect(c.garrison.length).toBeGreaterThanOrEqual(keepOf(c));
+      expect(c.garrison.length).toBe(3);
     }
-    const manned = [...w.buildings.values()].filter((b) => b.type === 'tower' && b.owner === 1 && b !== c && b.garrison.length > 0).length;
-    expect(manned).toBe(BUILDINGS.tower.garrison!.capacity - keepOf(c));
-    // Nothing left to send against the enemy start tower from here.
-    expect(w.attackerComposition(startTower(w, 2).id, 99).filter((s) => s.home === c.id)).toHaveLength(0);
+    for (const t of towers.filter((t) => t.done)) {
+      expect(t.garrison).toHaveLength(0);
+      expect(claimsTerritory(t)).toBe(false);
+      expect(w.warnings.some((m) => m.kind === 'noFighter' && m.b === t.id && m.player === 1)).toBe(true);
+    }
+    expect(towers.some((t) => t.done)).toBe(true);
   });
 
   it('in a duel at the door both strike on their own timers, each at his fighting strength', () => {

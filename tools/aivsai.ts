@@ -43,7 +43,8 @@ for (const seed of seeds) {
         const archers = fighters.filter((s) => isArcher(s)).length;
         const ranked = fighters.filter((s) => s.level > 0).length;
         const leaders = fighters.filter((s) => PROFESSIONS[s.kind].combat?.leads).length;
-        const soldiers = `${fighters.length} (archers ${archers}, ranked ${ranked}, leaders ${leaders})`;
+        const inside = fighters.filter((s) => s.home !== null).length;
+        const soldiers = `${fighters.length} (archers ${archers}, ranked ${ranked}, leaders ${leaders}, in garrisons ${inside})`;
         let land = 0;
         for (const o of w.map.owner) if (o === p.id) land++;
         const st = w.ai.find((a) => a.player === p.id)?.stats;

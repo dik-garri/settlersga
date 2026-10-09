@@ -50,6 +50,13 @@ describe('dev showcase (?demo)', () => {
     expect(w.settlers.some((s) => s.kind === 'geologist' && s.errand)).toBe(true);
     // Goods lying on the ground (Settlers 4's piles: start goods, ruins), several kinds of them.
     expect(new Set([...w.stacks].map((i) => w.map.goods[i])).size).toBeGreaterThanOrEqual(4);
+    // Filled towers, and recruits made by order standing free by the barracks (Settlers 4).
+    expect(all.filter((b) => b.owner === 1 && b.garrison.length > 1).length).toBeGreaterThanOrEqual(3);
+    const barracks = all.find((b) => b.type === 'barracks' && b.done)!;
+    expect(w.stats.trained).toBeGreaterThanOrEqual(3);
+    expect(
+      w.settlers.some((s) => (s.kind === 'soldier' || s.kind === 'archer') && s.home === null && !s.post && Math.hypot(s.x - barracks.door.x, s.y - barracks.door.y) < 5),
+    ).toBe(true);
     // A field squad stands round its leader (direct army control).
     const leader = w.settlers.find((s) => s.kind === 'leader' && s.post);
     expect(leader).toBeDefined();

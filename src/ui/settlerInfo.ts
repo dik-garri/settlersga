@@ -124,6 +124,8 @@ export class SettlerInfoView implements View {
       if (s.inside !== null) return `внутри: ${at(s.inside)}`;
       if (s.fled !== undefined) return 'бродит без крова';
       if (s.errand) return s.kind === 'pioneer' ? 'идёт к границе' : s.kind === 'geologist' ? 'идёт к горе' : 'идёт на дело';
+      if (isFighter(s) && !s.post && s.home === null) return 'свободен: стоит, пока не позовёт башня или вы';
+      if (isFighter(s) && s.post) return 'стоит на позиции';
       const idle = s.stroll ? 'прогуливается' : s.chatWith !== null ? 'беседует' : 'без дела';
       return SENDABLE[s.kind] ? `${idle}, ждёт приказа` : idle;
     }
@@ -136,6 +138,7 @@ export class SettlerInfoView implements View {
         if (next?.t === 'build') return `идёт на стройку: ${at(next.b)}`;
         if (next?.t === 'dig') return `идёт расчищать: ${at(next.b)}`;
         if (next?.t === 'join') return `идёт в гарнизон: ${at(next.b)}`;
+        if (next?.t === 'recruit') return `идёт в казарму: ${at(next.b)}`;
         if (next?.t === 'assault') return `идёт в атаку: ${at(next.b)}`;
         if (next?.t === 'heal') return 'идёт в лазарет';
         if (next?.t === 'become') return `идёт работать: ${at(next.b)}`;
@@ -170,6 +173,8 @@ export class SettlerInfoView implements View {
         return 'берёт инструмент';
       case 'join':
         return `входит в гарнизон: ${at(t.b)}`;
+      case 'recruit':
+        return 'получает оружие';
       case 'assault':
         return `штурмует: ${at(t.b)}`;
       case 'hunt':

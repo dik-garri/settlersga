@@ -2,8 +2,8 @@
  * Computer players.
  *
  * Rules: an AI plays only through the same `World` commands a human uses (`placeBuilding`,
- * `sendGeologist`, `attack`, `demolish`, `setShare`, all with its own player id) and only reads what
- * its player can see:
+ * `sendGeologist`, `attack`, `demolish`, `setShare`, `orderRecruits`, `fillGarrison`, `orderGarrison`,
+ * all with its own player id) and only reads what its player can see:
  * - ore under a mountain counts only once its own geologist has prospected it;
  * - enemy buildings exist for it only where its fog is explored (`isExplored` on the door tile), and
  *   it counts their defenders only while they are in its buildings' sight (`inBuildingSight`) —
@@ -40,7 +40,7 @@ import {
   type AiLevel,
   type BuildingDef,
 } from './config';
-import { defend, hunt, sendScout, stageStrike, sweep, updateScout, updateStrike } from './aiField';
+import { defend, hunt, idleFighters, muster, sendScout, stageStrike, updateScout, updateStrike } from './aiField';
 import { ENDLESS } from './economy';
 import { inBuildingSight, visionRadius } from './fog';
 import { isCutOff, landAt, landOf } from './land';
@@ -82,6 +82,8 @@ export interface AiState {
   siegeStuck?: number;
   /** A fighter sent out to find an enemy castle (`sendScout`), and the tick of the next one allowed. */
   scout?: { id: number; until: number };
+  /** Where its free fighters last gathered (`muster`): behind its front. */
+  rally?: Point;
   nextScout?: number;
   /**
    * Trade with a piece of its land cut off from its warehouses: `anchor` is a workplace on that piece
@@ -182,7 +184,10 @@ function think(w: World, ai: AiState): void {
   const own = [...w.buildings.values()].filter((b) => b.owner === me);
   if (!ai.sharesSet) {
     for (const [res, weight] of Object.entries(AI.weaponShares) as [Resource, number][]) w.setShare(res, weight, me);
-    w.setRecruitLevel(AI.recruitLevel, me);
+    // Settlers 4's AI orders recruits of level 1 — on «normal» and «hard» also 2 and 3 —, no end to it:
+    // a barracks then makes the highest level its gold pays for.
+    const levels = AI_LEVELS[ai.level ?? 'medium'].recruitLevels;
+    for (const kind of AI.recruitKinds) for (let l = 0; l < levels; l++) w.orderRecruits(kind, l, ENDLESS, me);
     ai.sharesSet = true;
   }
   // As in Settlers 4 a new warehouse takes nothing in: it ticks every good (its own building's setting).
@@ -204,7 +209,7 @@ function think(w: World, ai: AiState): void {
   hunt(w, ai, own);
   const attacked = attackIfStrong(w, ai);
   scoutIfStuck(w, ai, own);
-  sweep(w, ai);
+  muster(w, ai, own, frontline(w, me, own), rallyPoint(w, me, own));
   tradeCheck(w, ai, own);
   if (w.tick >= (ai.nextSpecialists ?? 0)) {
     ai.nextSpecialists = w.tick + AI.specialistEvery;
@@ -354,6 +359,62 @@ function think(w: World, ai: AiState): void {
     ctx.frontier = true;
     if (placeMilitary(ctx, ai, order) === undefined) ai.blockedUntil.frontier = w.tick + RETRY_TICKS;
   }
+}
+
+/**
+ * The military buildings it fills (`muster`): those within `AI.fillRange` of a known enemy military
+ * building, and those at its border — land not its own (nobody's or another's) just beyond their
+ * own reach, sampled at `AI.borderSamples` points round them. Buildings deep inside its land keep the
+ * one fighter they call by themselves.
+ */
+function frontline(w: World, me: PlayerId, own: Building[]): Building[] {
+  const m = w.map;
+  const enemies = knownEnemies(w, me)
+    .filter(({ b }) => b.done && isMilitary(b))
+    .map(({ b }) => centerOf(b));
+  return own.filter((b) => {
+    const def = BUILDINGS[b.type];
+    if (!b.done || !def.garrison) return false;
+    const c = centerOf(b);
+    if (enemies.some((e) => Math.hypot(e.x - c.x, e.y - c.y) <= AI.fillRange)) return true;
+    const r = (def.territory ?? 0) + 2;
+    for (let k = 0; k < AI.borderSamples; k++) {
+      const a = (k / AI.borderSamples) * Math.PI * 2;
+      const x = Math.round(c.x + Math.cos(a) * r);
+      const y = Math.round(c.y + Math.sin(a) * r);
+      if (m.inBounds(x, y) && m.owner[m.idx(x, y)] !== me) return true;
+    }
+    return false;
+  });
+}
+
+/**
+ * Where its free fighters gather (`muster`): `AI.rallyBack` tiles from the door of its manned military
+ * building nearest an enemy goal (`siegeGoals`, else an unexplored start), back towards its home —
+ * near enough for attacks to find them (`ATTACK_RANGE`), behind the walls. With none, its home.
+ */
+function rallyPoint(w: World, me: PlayerId, own: Building[]): Point {
+  const home = w.homeOf(me);
+  const known = siegeGoals(w, me);
+  const goals: Point[] = known.length > 0 ? known : unexploredStarts(w, me);
+  let front: Building | null = null;
+  let best = Infinity;
+  for (const b of own) {
+    if (!b.done || !isMilitary(b) || b.garrison.length === 0) continue;
+    const c = centerOf(b);
+    for (const g of goals) {
+      const d = Math.hypot(g.x - c.x, g.y - c.y);
+      if (d < best || (d === best && front && b.id < front.id)) {
+        best = d;
+        front = b;
+      }
+    }
+  }
+  if (!front) return { x: home.x, y: home.y + 2 };
+  const d = front.door;
+  const len = Math.hypot(home.x - d.x, home.y - d.y);
+  const k = len > 0 ? Math.min(AI.rallyBack, len) / len : 0;
+  return { x: Math.round(d.x + (home.x - d.x) * k), y: Math.round(d.y + (home.y - d.y) * k) };
 }
 
 /**
@@ -731,16 +792,26 @@ function attackIfStrong(w: World, ai: AiState): boolean {
   // second (`duelWorth`), so the party's worth is the sum of its fighters'; the defenders' make-up
   // and strength it cannot know, so each counts as a level-1 swordsman at the base 100 %.
   const field = attackStrength(w, me) / 100;
+  // Enemy fighters standing free outdoors in its buildings' sight (Settlers 4: they take on attackers
+  // near them), counted against a target they stand by like its defenders.
+  const m = w.map;
+  const guards = w.settlers.filter((s) => {
+    if (s.inside !== null || w.allied(s.owner, me) || !isFighter(s) || w.dying.has(s.id)) return false;
+    const x = Math.round(s.x);
+    const y = Math.round(s.y);
+    return m.inBounds(x, y) && inBuildingSight(w, m.idx(x, y), me);
+  });
   let target: Building | null = null;
   let send = 0;
   let bestScore = -Infinity;
   for (const { b, defenders } of known) {
     if (!b.done || !isMilitary(b)) continue;
     const ready = w.attackerComposition(b.id, Infinity, me);
-    // Only swordsmen take a building: a party without one could only kill, never conquer.
-    if (!ready.some((s) => PROFESSIONS[s.kind].combat?.captures)) continue;
+    // Only swordsmen and archers take a building: a party without one could only kill, never conquer.
+    if (!ready.some((s) => PROFESSIONS[s.kind].combat?.captures && !PROFESSIONS[s.kind].combat?.fieldOnly)) continue;
     const power = ready.reduce((n, s) => n + duelWorth(s.kind, s.level, field), 0);
-    const defense = defenders;
+    const defense =
+      defenders + guards.filter((g) => g.owner === b.owner && Math.hypot(g.x - b.door.x, g.y - b.door.y) <= AI.guardRadius).length;
     if (ready.length < AI.minAttackers || power < t.attackRatio * defense + 1) continue;
     const c = centerOf(b);
     const goal = goals.get(b.owner);
@@ -1105,21 +1176,18 @@ class Context {
   }
 
   /**
-   * A new military building needs at least one fighter to claim land: a spare one from any military
-   * building (beyond what each keeps; empty outposts are manned from the nearest spares), a fighter
-   * without a garrison, or a recruit with a weapon. Only build one if every still-empty military building gets its first one too and
+   * A new military building needs at least one fighter to claim land: an idle one outdoors (free, or
+   * at the rally), a spare one of any military building (beyond what each keeps), or a recruit with a
+   * weapon. Only build one if every still-empty military building gets its first one too and
    * `AI.homeGuard` spares remain.
    */
   canMan(type: BuildingType): boolean {
     if (!BUILDINGS[type].garrison) return true;
     const military = this.own.filter((b) => b.done && isMilitary(b));
     const empty = military.filter((b) => b.garrison.length === 0).length;
-    // Spares in its buildings, and fighters with no garrison yet (the start fighters its start tower
-    // has no slot for): they walk into the next one with a free slot.
     let spare = military.reduce((n, b) => n + Math.max(0, b.garrison.length - keepOf(b)), 0);
-    for (const s of this.w.settlers) {
-      if (s.owner === this.me && isFighter(s) && s.home === null && !s.post && s.tasks.every((t) => t.t === 'wait')) spare++;
-    }
+    const ai = this.w.ai.find((a) => a.player === this.me);
+    if (ai) spare += idleFighters(this.w, ai).filter((s) => !PROFESSIONS[s.kind].combat?.fieldOnly).length;
     // Weapons only turn into fighters through a barracks.
     const trains = this.own.some((b) => b.done && BUILDINGS[b.type].barracks);
     const weapons = !trains ? 0 : FIGHTERS.reduce((n, k) => n + available(this.w, this.me, PROFESSIONS[k].tool!), 0);

@@ -76,7 +76,7 @@ export const UNREACHABLE_TICKS = 100;
  */
 export const BUILDER_STALL_TICKS = 120;
 
-/** Military buildings keep at least this many soldiers when sending others out (to attack or to man towers). */
+/** Military buildings keep at least this many soldiers when sending others out (to attack or to chase intruders). */
 export const GARRISON_KEEP = 1;
 /** Combat: soldiers within this distance (tiles, building centers) of the target can join an attack. */
 export const ATTACK_RANGE = 30;
@@ -102,12 +102,36 @@ export const WOUNDED_CHECK_EVERY = 20;
 /** Visual only: ticks an arrow is drawn in flight. */
 export const SHOT_TICKS = 5;
 /**
- * Default army make-up per player (weights, see `World.setShare`): the weaponsmith forges and the
- * barracks trains towards these proportions of fighters by weapon.
+ * Default weapon make-up per player (weights, see `World.setShare`): what the weaponsmith forges when
+ * nothing ordered is waiting (Settlers 4's weaponsmith «by shares» mode). Who is recruited is the
+ * player's barracks orders alone (`economy.ts` `recruitOrders`).
  */
 export const OUTPUT_SHARES: Partial<Record<Resource, number>> = { sword: 60, bow: 40, armor: 8 };
-/** A barracks only takes a recruit while the player keeps at least this many idle carriers. */
+/**
+ * Free carriers a barracks leaves alone when calling a recruit, until the player's own carrier reserve
+ * (`EconomyState.minCarriers`, Settlers 4's settlers menu) exists — then that is used.
+ */
 export const BARRACKS_MIN_IDLE = 2;
+/**
+ * Garrisons as in Settlers 4 (`CMilitaryBuildingRole`): every `every` ticks (S4: 15 of its ticks) a
+ * military building orders a free fighter while it holds fewer than it wishes (`Building.wish`; an
+ * empty one with no wish asks for one — a swordsman if there is one, else an archer), the highest
+ * level first, looking `rings` tiles round its door one ring after the other (S4: 20, 40 and 80 of its
+ * tiles); and it puts one fighter beyond its wish out of the door, only while no enemy fighter is
+ * within `enemyNear` tiles (S4: 10). `warnEvery`: the same warning («no free fighter», «no carrier
+ * for a recruit») reaches the player at most this often per building (ticks; our choice).
+ */
+export const GARRISON_ORDERS = {
+  every: Math.round(s4Ticks(15)),
+  rings: [20 / 3, 40 / 3, 80 / 3] as readonly number[],
+  enemyNear: 10 / 3,
+  warnEvery: 60 * TICKS_PER_SECOND,
+};
+/**
+ * The barracks looks at its owner's recruit orders this often (S4: every 13–15 of its ticks); a
+ * recruit is the nearest free carrier, his walk is the training (S4 has no training time).
+ */
+export const BARRACKS_EVERY = Math.round(s4Ticks(14));
 /** Spade strokes (one per `DIG_EVERY` ticks) to clear one footprint tile, on top of any levelling. */
 export const CLEAR_STROKES_PER_TILE = 6;
 /**
@@ -344,7 +368,7 @@ export const WORK_AREA = { maxShift: 1.5 };
  * intruder is caught and stands (`opponent` — a specialist cannot outrun a swordsman, and walking at the
  * same pace he otherwise never would be reached); adjacent, the fighter strikes at his own pace
  * (`combat.every`) with ordinary blows (`combat.ts`) — specialists do not fight back — until the intruder dies (his load is
- * lost) or is off that player's land; then the fighter looks for a garrison again. Radii and timings
+ * lost) or is off that player's land; then the fighter stands free until a building calls him. Radii and timings
  * are our approximations: the wiki gives no numbers (`exposedTicks` leaves a responder from
  * `respondRadius` time to arrive at the S4 walking pace).
  */
@@ -614,7 +638,8 @@ export const FISH_RESTOCK = 2;
  * - garrison: stays inside so the building claims territory;
  * - prospect: the geologist: examines mountain tiles on an errand, then waits with the idle crowd for
  *   the next one — or turns back into a carrier if there are more geologists than the player ordered;
- * - soldier: lives in a military building's garrison; looks for a free one when homeless;
+ * - soldier: lives in a military building's garrison, or stands free where he is (a military building
+ *   with room calls free fighters in, `military.ts`), or keeps a field post (`field.ts`);
  * - digger: levels sloped construction sites before the builders start.
  */
 export type Behavior =
@@ -682,12 +707,26 @@ export interface CombatDef {
   armor?: number;
   /**
    * Shoots from up to `range` tiles (point-blank too: an archer called out to a duel shoots). In a
-   * garrison his shots deal `tower` more damage, `towerDoor` more at enemies standing at its door
-   * (Settlers 4: the tower bowman's +1, the stone dropper's +2, not scaled by fighting strength).
+   * garrison he shoots from up to `towerRange` tiles, only at enemies standing on his side's land or
+   * nobody's, and his shots deal `tower` more damage, `towerDoor` more at enemies standing at its door
+   * (Settlers 4: `CTowerSoldier::SearchBowmanTarget`, 20 of its tiles; the tower bowman's +1, the
+   * stone dropper's +2, not scaled by fighting strength).
    */
-  ranged?: { range: number; tower: number; towerDoor: number };
-  /** Can take an empty enemy building (in Settlers 4 only swordsmen do; archers support). */
+  ranged?: { range: number; towerRange: number; tower: number; towerDoor: number };
+  /**
+   * Can take an empty enemy building: in Settlers 4 a swordsman or a bowman (warrior types 2 and 3,
+   * `CMilitaryBuildingRole::InsertTowerGuard`), never the squad leader.
+   */
   captures?: boolean;
+  /** Never goes into a garrison (the squad leader: Settlers 4's tower slots take only types 2 and 3). */
+  fieldOnly?: boolean;
+  /**
+   * Barracks order (Settlers 4 `CBarrackRole::LogicUpdate`): the satisfiable order of the highest
+   * `rank` goes first (default: level + 1; S4's squad leader 4), and between kinds of equal rank the
+   * `alternate` classes take turns (S4: swordsman 0, bowman 1, special fighter 2; none = no turn).
+   */
+  rank?: number;
+  alternate?: number;
   /**
    * Squad leader (Settlers 4): own fighters within `radius` tiles of him (not himself) deal
    * `morale` × damage, and soldiers ordered out with him follow him as a squad (`field.ts`). In S4 the
@@ -795,12 +834,14 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
       ],
       every: s4Ticks(13),
       captures: true,
+      alternate: 0,
     },
   },
   /**
    * Settlers 4: 75 / 120 / 160 hit points, 4 / 6 / 8 a shot every 20 of its ticks; on a tower +1 a
-   * shot, +2 at enemies at its door. Range: 10 S4 tiles, a third of ours in length
-   * (`S4_TILES_PER_TILE`): ≈ 3.3 of ours, 3.
+   * shot, +2 at enemies at its door. Range: 10 S4 tiles in the field, a third of ours in length
+   * (`S4_TILES_PER_TILE`): ≈ 3.3 of ours, 3; from a tower 20 S4 tiles ≈ 6.7 of ours. Takes an empty
+   * enemy building like a swordsman (S4).
    */
   archer: {
     name: 'Лучник',
@@ -813,25 +854,30 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
         { hp: 160, damage: 8 },
       ],
       every: s4Ticks(20),
-      ranged: { range: 3, tower: 1, towerDoor: 2 },
+      ranged: { range: 3, towerRange: 20 / 3, tower: 1, towerDoor: 2 },
+      captures: true,
+      alternate: 1,
     },
   },
   /**
-   * Squad leader, as in Settlers 4: made in the barracks from armour and a sword, a strong swordsman
-   * (215 hit points, 21 a blow every 13 ticks, armour 2; one level only) whose presence lifts the
-   * fighters around him (`combat.leads`: +10 % damage).
+   * Squad leader, as in Settlers 4: made in the barracks from armour, a sword and 3 gold (S4
+   * community: the leader costs 3 gold), a strong swordsman (215 hit points, 21 a blow every 13 ticks,
+   * armour 2; one level only) whose presence lifts the fighters around him (`combat.leads`: +10 %
+   * damage). He neither takes buildings nor goes into one (S4's tower slots take only swordsmen and
+   * bowmen); the barracks makes him first when it can (S4's priority level 4).
    */
   leader: {
     name: 'Командир',
     behavior: 'soldier',
     tool: 'armor',
-    kit: { sword: 1 },
+    kit: { sword: 1, gold: 3 },
     speed: 9 / 7,
     combat: {
       levels: [{ hp: 215, damage: 21 }],
       every: s4Ticks(13),
       armor: 2,
-      captures: true,
+      fieldOnly: true,
+      rank: 4,
       leads: { radius: 6, morale: 1.1 },
     },
   },
@@ -926,9 +972,11 @@ export interface BuildingDef {
   /** Mine: each recipe cycle also takes one unit of ore of this resource from a tile within `radius`. */
   mine?: { res: Resource; radius: number; favourite: Resource };
   /**
-   * Barracks: its worker is a recruit who, given a weapon from the building's pile, trains for
-   * `ticks` and leaves as the fighter whose tool that weapon is, at the level the player ordered
-   * (`SOLDIER_LEVELS[k].cost` gold from the pile). The only way to raise new fighters.
+   * Barracks (Settlers 4): works only by its owner's recruit orders (`economy.ts` `recruitOrders`, by
+   * kind and level). For an order its pile pays for (the weapon, the fighter's `kit`, the level's gold)
+   * it calls the nearest free carrier, who walks in, stays `ticks` inside (our short stand-in for
+   * going in and out) and comes out as that fighter, standing free by it. The only way to raise new
+   * fighters.
    */
   barracks?: { ticks: number };
   /** Sees this far (tiles from the center) once built, instead of its territory (lookout tower). */
@@ -949,15 +997,22 @@ export interface BuildingDef {
 /**
  * Military building: holds up to `capacity` soldiers and claims `territory` while at least one is
  * inside, or always if `claimsWhenEmpty`. Slots have a kind, as in Settlers 4:
- * `archers` of them are for ranged fighters, the rest for melee ones.
+ * `archers` of them are for ranged fighters, the rest for melee ones. How many it calls in is its
+ * owner's wish (`Building.wish`, see `GARRISON_ORDERS`): one by default, all with «fill».
  */
 export interface GarrisonDef {
   capacity: number;
   claimsWhenEmpty?: boolean;
-  /** Soldiers it never gives away to man other buildings or to attack (default `GARRISON_KEEP`). */
+  /** Soldiers it never gives away to attack or to chase intruders (default `GARRISON_KEEP`). */
   keep?: number;
   /** Slots for archers; the other `capacity − archers` slots are for swordsmen. */
   archers?: number;
+  /**
+   * Settlers 4's door (`CDoorRole`, `MaxTowerDoorHealth`): while the building is held, attackers must
+   * break its door (`hp` hit points, one back every `regenEvery` ticks while it stands) before they can
+   * call a defender out; broken, it is back only once the building is taken or manned again from empty.
+   */
+  door?: { hp: number; regenEvery: number };
 }
 
 /**
@@ -974,6 +1029,9 @@ export const MINING = { attempts: { favourite: 10, other: 2 }, sureAmount: 4, ch
  * the good waiting at the market.
  */
 export const TRADE = { donkeyLoad: 4, donkeysPerMarket: 3, stock: 8 };
+
+/** Settlers 4's tower door: `MaxTowerDoorHealth` 50, one hit point back every 15 of its ticks. */
+const TOWER_DOOR = { hp: 50, regenEvery: s4Ticks(15) };
 
 function mine(name: string, res: Resource, favourite: Resource, cost: Partial<Stock> = { plank: 4, stone: 1 }): BuildingDef {
   return {
@@ -1227,7 +1285,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     // Settlers 4: the first 3500 S4 tiles of a spiral round the tower, a circle of 31 S4 tiles ≈ 10.4 of ours.
     territory: 10,
     // As in Settlers 4: 1 swordsman + 2 archers.
-    garrison: { capacity: 3, keep: 1, archers: 2 },
+    garrison: { capacity: 3, keep: 1, archers: 2, door: TOWER_DOOR },
   },
   bigtower: {
     name: 'Большая башня',
@@ -1240,17 +1298,17 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     // Settlers 4: 4000 S4 tiles, a circle of 33 ≈ 11.1 of ours.
     territory: 11,
     // 3 swordsmen + 3 archers.
-    garrison: { capacity: 6, keep: 2, archers: 3 },
+    garrison: { capacity: 6, keep: 2, archers: 3, door: TOWER_DOOR },
   },
   barracks: {
     name: 'Казарма',
     w: 3,
     h: 3,
     cost: { plank: 4, stone: 5 },
-    worker: 'recruit',
+    worker: null,
     playerBuildable: true,
     category: 'military',
-    barracks: { ticks: 60 },
+    barracks: { ticks: 10 },
   },
   fortress: {
     // Settlers 4's castle («Burg»), «Замок» to Russian players; with no headquarters the name is free.
@@ -1264,7 +1322,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     // Settlers 4's castle: 5000 S4 tiles, a circle of 37 ≈ 12.4 of ours.
     territory: 12,
     // The Settlers 4 castle: 4 swordsmen + 5 archers.
-    garrison: { capacity: 9, keep: 3, archers: 5 },
+    garrison: { capacity: 9, keep: 3, archers: 5, door: TOWER_DOOR },
   },
   lookout: {
     name: 'Смотровая башня',
@@ -1523,9 +1581,25 @@ export const AI = {
    * and archers in a tower let its swordsman go on an attack (a tower keeps one fighter), so more bows
    * than it used to make; swordsmen still lead, as only they capture.
    */
-  weaponShares: { sword: 55, bow: 45 } as Partial<Record<Resource, number>>,
-  /** The level it orders recruits at (the barracks falls back to what the gold on hand pays for). */
-  recruitLevel: 2,
+  weaponShares: { sword: 55, bow: 45, armor: 0 } as Partial<Record<Resource, number>>,
+  /**
+   * The fighters it orders at its barracks, endlessly, at levels 1 to its difficulty's
+   * `recruitLevels` (`AI_LEVELS`; Settlers 4's AI: level 1, on «normal» and «hard» 2 and 3 as well).
+   */
+  recruitKinds: ['soldier', 'archer'] as readonly SettlerKind[],
+  /**
+   * Garrisons (`muster`): its military buildings within `fillRange` tiles of a known enemy military
+   * building, or at its border (land not its own at any of `borderSamples` points just beyond their
+   * reach), are filled; those deep inside keep the one fighter a building calls by itself. The rest of
+   * its fighters gather `rallyBack` tiles behind the door of its manned military building nearest the
+   * enemy, regrouped only when the point moves more than `rallySlack` tiles.
+   */
+  fillRange: 24,
+  borderSamples: 16,
+  rallyBack: 3,
+  rallySlack: 6,
+  /** Enemy fighters it sees standing outdoors this close (tiles) to a target's door count as its defenders. */
+  guardRadius: 8,
   /**
    * Materials it keeps back while nothing of its own still produces them (its stone deposits are
    * worked out): only producers of that material may use the reserve; border-pushing military
@@ -1630,6 +1704,8 @@ export const AI = {
 export type AiLevel = 'easy' | 'medium' | 'hard';
 export interface AiLevelDef {
   name: string;
+  /** Recruit levels it orders (1–3, `AI.recruitKinds`). */
+  recruitLevels: number;
   think: number;
   attack: number;
   peace: number;
@@ -1638,9 +1714,9 @@ export interface AiLevelDef {
   bonus: Partial<Stock>;
 }
 export const AI_LEVELS: Record<AiLevel, AiLevelDef> = {
-  easy: { name: 'Лёгкий', think: 2, attack: 1.6, peace: 1.6, cooldown: 2, sites: -1, bonus: {} },
-  medium: { name: 'Средний', think: 1, attack: 1, peace: 1, cooldown: 1, sites: 0, bonus: {} },
-  hard: { name: 'Тяжёлый', think: 0.6, attack: 0.85, peace: 0.7, cooldown: 0.75, sites: 1, bonus: { plank: 12, stone: 8, fish: 6, bread: 6 } },
+  easy: { name: 'Лёгкий', recruitLevels: 1, think: 2, attack: 1.6, peace: 1.6, cooldown: 2, sites: -1, bonus: {} },
+  medium: { name: 'Средний', recruitLevels: 3, think: 1, attack: 1, peace: 1, cooldown: 1, sites: 0, bonus: {} },
+  hard: { name: 'Тяжёлый', recruitLevels: 3, think: 0.6, attack: 0.85, peace: 0.7, cooldown: 0.75, sites: 1, bonus: { plank: 12, stone: 8, fish: 6, bread: 6 } },
 };
 export const AI_LEVEL_IDS = Object.keys(AI_LEVELS) as AiLevel[];
 

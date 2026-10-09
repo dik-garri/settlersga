@@ -35,8 +35,11 @@ export function maxHp(s: Settler): number {
   return hpOf(s.kind, s.level);
 }
 
-/** Damage of one attack from `hitter` on `victim`, `bonus` added after fighting strength (tower archers). */
-export function hitDamage(w: World, hitter: Settler, victim: Settler, bonus = 0): number {
+/**
+ * Damage of one attack from `hitter` on `victim` (null: a tower's door, which has no armour), `bonus`
+ * added after fighting strength (tower archers).
+ */
+export function hitDamage(w: World, hitter: Settler, victim: Settler | null, bonus = 0): number {
   const base = fighterLevel(hitter.kind, hitter.level)?.damage ?? 0;
   let damage = Math.max(1, Math.round(base * fieldFactor(w, hitter)));
   const extra = damage * (moraleOf(w, hitter) - 1);
@@ -45,7 +48,7 @@ export function hitDamage(w: World, hitter: Settler, victim: Settler, bonus = 0)
     damage += whole + (w.rng() < extra - whole ? 1 : 0);
   }
   damage += bonus;
-  return Math.max(1, damage - (combatOf(victim)?.armor ?? 0));
+  return Math.max(1, damage - (victim ? (combatOf(victim)?.armor ?? 0) : 0));
 }
 
 /** One attack: the victim loses the damage and dies at 0. True if he died. */

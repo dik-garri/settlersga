@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { costOf, GROUND, START_PLANKS, START_STONE } from '../src/sim/config';
+import { costOf, GROUND, START_CONDITIONS, START_PLANKS, START_STONE } from '../src/sim/config';
 import { RESOURCES, type BuildingType } from '../src/sim/types';
 import { findPath } from '../src/sim/pathfinding';
 import { World } from '../src/sim/world';
@@ -37,7 +37,16 @@ describe('World', () => {
     const tower = startTower(world);
     expect(tower.type).toBe('tower');
     expect(tower.done).toBe(true);
-    expect(tower.garrison.length).toBe(3);
+    // One swordsman holds it, as its first call for a fighter would bring; the rest stand free by it.
+    expect(tower.garrison.length).toBe(1);
+    expect(world.getSettler(tower.garrison[0])!.kind).toBe('soldier');
+    expect(tower.wish).toEqual({ melee: 1, ranged: 0 });
+    const free = world.settlers.filter((s) => s.owner === 1 && (s.kind === 'soldier' || s.kind === 'archer') && s.home === null);
+    expect(free.length).toBe(START_CONDITIONS.medium.soldiers + START_CONDITIONS.medium.archers - 1);
+    for (const s of free) {
+      expect(s.inside).toBeNull();
+      expect(Math.hypot(s.x - tower.door.x, s.y - tower.door.y)).toBeLessThan(6);
+    }
     expect(world.settlers.length).toBeGreaterThan(0);
     // No warehouse: the start goods lie round the tower, at most a pile of 8 per tile.
     expect([...world.buildings.values()].length).toBe(1);

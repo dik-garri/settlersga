@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { addBuilding } from '../src/sim/buildings';
 import { recomputeTerritory } from '../src/sim/territory';
+import { isFighter } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
 import { canProspect, claimable, SPECIALIST_ORDERS } from '../src/sim/specialists';
 import { Terrain, type Building, type Settler } from '../src/sim/types';
@@ -155,8 +156,8 @@ describe('specialists under direct control', () => {
     const w = new World(42);
     const pioneer = recruit(w, 'pioneer');
     const t = plainTile(w);
-    w.releaseFighters(startTower(w).id, 2);
-    const fighters = w.settlers.filter((s) => s.post && s.owner === 1 && s.kind !== 'pioneer').map((s) => s.id);
+    // The start fighters standing free by the start tower.
+    const fighters = w.settlers.filter((s) => s.owner === 1 && isFighter(s) && s.inside === null).map((s) => s.id);
     expect(fighters.length).toBeGreaterThan(0);
     const ids = [pioneer.id, ...fighters];
     expect(w.orderSpecialists(ids, t.x, t.y)).toBe(1);

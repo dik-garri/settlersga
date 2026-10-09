@@ -7,7 +7,7 @@ import { saveWorld } from '../src/sim/save';
 import { RESOURCES, type Settler } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { placeNear } from '../tools/scenario';
-import { base, dismissStandby, startTower, vacateStart } from './helpers';
+import { base, dismissStandby, startTower } from './helpers';
 
 function run(world: World, ticks: number) {
   for (let i = 0; i < ticks; i++) world.step();
@@ -182,25 +182,26 @@ describe('direct army control', () => {
     expect(moraleOf(w, lone)).toBe(1);
   });
 
-  it('a barracks makes a squad leader from armour and a sword', () => {
+  it('a barracks makes an ordered squad leader from armour, a sword and gold', () => {
     const w = new World(42);
-    // Room for a melee fighter: a free swordsman's slot in the start tower (`vacateStart`).
-    const c = vacateStart(w);
+    const c = startTower(w);
     c.output.plank = 80;
     c.output.stone = 40;
     const barracks = placeNear(w, 'barracks', base(w).x + 5, base(w).y - 1)!;
     run(w, 1500);
     expect(barracks.done).toBe(true);
-    w.setShare('sword', 0);
-    w.setShare('bow', 0);
-    w.setShare('armor', 100);
+    w.orderRecruits('leader', 0, 1);
     c.output.armor = 1;
     c.output.sword = 1;
-    run(w, 1200);
-    expect(w.settlers.some((s) => s.kind === 'leader')).toBe(true);
-    // Armour and sword both went into him.
+    c.output.gold = 3;
+    run(w, 1500);
+    const leader = w.settlers.find((s) => s.kind === 'leader');
+    expect(leader).toBeDefined();
+    // Armour, sword and gold all went into him; he stands free by the barracks.
     expect(c.output.armor + barracks.input.armor).toBe(0);
     expect(c.output.sword + barracks.input.sword).toBe(0);
+    expect(c.output.gold + barracks.input.gold).toBe(0);
+    expect(leader!.home).toBeNull();
   });
 
   it('field units survive save and load bit for bit', () => {

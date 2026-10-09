@@ -165,6 +165,19 @@ export interface Building {
   /** Of `garrisonInbound`, how many are archers (so recruiting fills archer slots only once). */
   garrisonArchersInbound: number;
   /**
+   * Military building: how many swordsmen (`melee`) and archers (`ranged`) its owner wants inside
+   * (Settlers 4's wish counts, `military.ts`): it calls free fighters in up to it and puts those
+   * beyond it out. Absent = none yet (an empty building then asks for one fighter).
+   */
+  wish?: { melee: number; ranged: number };
+  /** Military building with a `GarrisonDef.door`: its door's hit points while damaged (absent = whole). */
+  doorHp?: number;
+  /**
+   * Barracks: the kind class it last recruited (Settlers 4's `m_uU0`): kinds of equal rank take turns
+   * after it. Absent = 2, as S4 starts.
+   */
+  recruitClass?: number;
+  /**
    * Construction site: false until a digger has cleared it (and flattened it, on sloped ground);
    * builders wait, carriers already bring materials. Mines need no digger.
    */
@@ -226,6 +239,11 @@ export type Task =
   /** Soldier moves into a military building's garrison (reserved via `garrisonInbound`). */
   /** `archer`: which garrison role the slot was reserved for (see `garrisonArchersInbound`). */
   | { t: 'join'; b: number; archer?: boolean }
+  /**
+   * A carrier called by a barracks (`military.ts`): at its door he goes in for `n` ticks and comes out as
+   * a `kind` fighter of `level`. `paid`: the goods taken off its pile for him (back on `abort`).
+   */
+  | { t: 'recruit'; b: number; kind: SettlerKind; level: number; paid: Partial<Stock>; n: number }
   /** Soldier attacks an enemy military building: duel its defenders at the door, take it when empty. */
   | { t: 'assault'; b: number; n: number }
   /** Field unit closes in on and duels an enemy fighter in the open (`field.ts`); `n` counts to the next blow. */

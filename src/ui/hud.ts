@@ -1,5 +1,5 @@
 import { settlerIcon, wareIcon } from '../render/atlas';
-import { RESOURCE_INFO, TICKS_PER_SECOND } from '../sim/config';
+import { BUILDINGS, RESOURCE_INFO, TICKS_PER_SECOND } from '../sim/config';
 import { isFighter } from '../sim/military';
 import type { Resource } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
@@ -72,6 +72,8 @@ export class Hud {
   /** The end screen was shown (and possibly dismissed to keep watching). */
   private ended = false;
   private lastUpdate = 0;
+  /** Warnings of the simulation (`World.warnings`) already shown on the ticker. */
+  private readonly warned = new WeakSet<object>();
 
   constructor(
     root: HTMLElement,
@@ -218,6 +220,20 @@ export class Hud {
     }
   }
 
+  /**
+   * The local player's new warnings on the ticker (Settlers 4's messages): a military building that
+   * finds no free fighter, a barracks with no carrier for a recruit.
+   */
+  private showWarnings(): void {
+    for (const m of this.world.warnings) {
+      if (m.player !== LOCAL_PLAYER || this.warned.has(m)) continue;
+      this.warned.add(m);
+      const b = this.world.buildings.get(m.b);
+      const name = b ? BUILDINGS[b.type].name : 'Здание';
+      this.toast(m.kind === 'noFighter' ? `${name} пустует: нет свободных бойцов поблизости` : `${name}: нет свободного носильщика для новобранца`);
+    }
+  }
+
   /** A message on the ticker at the bottom of the view; it fades after a few seconds. */
   toast(text: string): void {
     const m = el('div', 'msg', text);
@@ -234,6 +250,7 @@ export class Hud {
     const outcome = world.outcome(LOCAL_PLAYER);
     if (outcome !== 'playing' && !this.ended) this.showEnd(outcome);
     this.stats.sample();
+    this.showWarnings();
 
     // The selected building's window replaces the open menu, as in Settlers 4.
     if (state.selected !== null && world.buildings.has(state.selected)) {

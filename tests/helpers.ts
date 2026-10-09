@@ -85,27 +85,13 @@ export function depot(w: World, p: PlayerId = 1, near?: Point, goods: readonly R
 }
 
 /**
- * Test setup: the start fighters standing by the start tower (it has no slot for them) are taken out,
- * so garrison room is what the test sets up. Returns how many there were.
+ * Test setup: the start fighters standing free by the start tower (it holds one swordsman, Settlers 4)
+ * are taken out, so the fighters a test needs are the ones it sets up. Returns how many there were.
  */
 export function dismissStandby(w: World, p: PlayerId = 1): number {
   const idle = w.settlers.filter((s) => s.owner === p && isFighter(s) && s.home === null && !w.dying.has(s.id));
   for (const s of idle) killSettler(w, s);
   return idle.length;
-}
-
-/**
- * Test setup: `dismissStandby`, then the start tower gives up its swordsman and one archer — one free
- * slot of each kind, one archer left holding it (a player with no occupied military building is out).
- */
-export function vacateStart(w: World, p: PlayerId = 1): Building {
-  dismissStandby(w, p);
-  const t = startTower(w, p);
-  for (const kind of ['soldier', 'archer']) {
-    const id = t.garrison.find((g) => w.getSettler(g)?.kind === kind);
-    if (id !== undefined) killSettler(w, w.getSettler(id)!);
-  }
-  return t;
 }
 
 /**

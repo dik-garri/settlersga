@@ -12,11 +12,11 @@ import {
 } from '../sim/config';
 import { available, chooseOutput, oreLeft, residents } from '../sim/buildings';
 import { diggersWanted } from '../sim/digging';
-import { keepOf, wantsRecruit } from '../sim/military';
+import { keepOf, recruitNeeds, FIGHTERS } from '../sim/military';
 import { hasGatherTargetNear } from '../sim/nature';
 import { RESOURCES, type Building, type BuildingType, type Resource, type Settler, type SettlerKind } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
-import { barracksRows, garrisonSlotRows, recruitLevelControls, shareControls, supportRows } from './armyPanel';
+import { barracksRows, garrisonControls, garrisonRows, recruitKey, recruitOrderControls, shareControls, supportRows } from './armyPanel';
 import { el, rowsTable, type View } from './dom';
 import { economyKey, economyRows, refreshStockCounts, stockText, toolOrderControls, warehouseControls } from './economyPanel';
 import { movableWorkArea, workRadius } from '../sim/workArea';
@@ -27,13 +27,8 @@ import type { GameState } from './state';
 /**
  * The selected building's window, shown in the side panel's content area as in Settlers 4: its
  * picture and name on top, then what it holds and does, and its commands (priority, demolish,
- * attack, weapon shares, recruit level, toolsmith orders, accepted goods).
+ * attack, garrison, recruit orders, weapon shares, toolsmith orders, accepted goods).
  */
-
-/** Weapons a barracks trains with (tools of the fighting professions). */
-export const BARRACKS_WEAPONS: readonly Resource[] = (Object.keys(PROFESSIONS) as SettlerKind[])
-  .filter((k) => PROFESSIONS[k].combat)
-  .map((k) => PROFESSIONS[k].tool!);
 
 const nameOf = (r: Resource) => RESOURCE_INFO[r].name;
 
@@ -116,14 +111,17 @@ export class InfoView implements View {
     } else if (def.residence) {
       rows.push(['Жители', `${b.spawned} / ${residents(this.world, b)}`]);
       rows.push(['Статус', b.spawned < residents(this.world, b) ? 'заселяется' : 'заселён']);
+    } else if (def.barracks) {
+      rows.push(['Статус', this.barracksStatus(b)]);
+      rows.push(...barracksRows(this.world, b));
     } else if (def.garrison || def.storage) {
       if (def.garrison) {
         rows.push(['Гарнизон', `${b.garrison.length} / ${def.garrison.capacity}`]);
         const members = b.garrison.map((id) => this.world.getSettler(id)).filter((s): s is Settler => !!s);
         if (members.length > 0) rows.push(['Состав', composition(members)]);
-        rows.push(...garrisonSlotRows(this.world, b));
-        rows.push(['Не покидают', String(keepOf(b))]);
-        if (b.garrisonInbound > 0) rows.push(['Идут в гарнизон', String(b.garrisonInbound)]);
+        if (members.length === 0 && b.garrisonInbound === 0) rows.push(['Статус', 'пусто: нет свободных бойцов рядом']);
+        rows.push(...garrisonRows(this.world, b));
+        rows.push(['В атаку не уходят', String(keepOf(b))]);
       }
       if (def.territory) rows.push(['Радиус земли', `${def.territory} клеток`]);
       for (const r of RESOURCES) if (def.storage && b.output[r] > 0) rows.push([nameOf(r), stockText(b, r)]);
@@ -138,19 +136,10 @@ export class InfoView implements View {
           ? 'идёт'
           : tool && available(this.world, b.owner, tool) === 0
             ? `нет инструмента: ${nameOf(tool).toLowerCase()}`
-            : def.barracks
-              ? '—'
-              : 'нет свободных носильщиков';
+            : 'нет свободных носильщиков';
       rows.push(['Работник', workerName]);
       rows.push(['Статус', this.status(b)]);
       const gather = gatheredBy(b.type);
-      if (def.barracks) {
-        for (const r of BARRACKS_WEAPONS) rows.push([`${nameOf(r)} (запас)`, `${b.input[r]} / ${INPUT_CAP}`]);
-        if (worker && worker.inside === b.id && BARRACKS_WEAPONS.some((r) => b.input[r] > 0)) {
-          rows.push(['Обучение', `${Math.floor((100 * Math.min(b.timer, def.barracks.ticks)) / def.barracks.ticks)}%`]);
-        }
-        rows.push(...barracksRows(this.world, b));
-      }
       const shared = this.sharedChoices(b);
       if (shared) {
         const total = shared.reduce((n, r) => n + this.world.shareOf(r), 0) || 1;
@@ -193,6 +182,8 @@ export class InfoView implements View {
       this.state.movingWorkArea === b.id,
       economyKey(this.world, b),
       tradeKey(this.world, b),
+      def.barracks ? recruitKey(this.world) : '',
+      def.garrison ? JSON.stringify(b.wish ?? null) : '',
     ]);
     if (key === this.infoKey) return;
     this.infoKey = key;
@@ -202,22 +193,8 @@ export class InfoView implements View {
       if (def.garrison && b.done) this.el.append(this.attackControls(b, canSend));
       return;
     }
-    if (def.garrison && b.done) {
-      // Direct army control: step spare fighters out into the field, then order them on the map.
-      const spare = Math.max(0, b.garrison.length - (def.garrison.keep ?? 1));
-      const out = el('div', 'info-actions');
-      const go = el('button', '', `🚩 Вывести бойцов (${spare})`);
-      go.disabled = spare === 0;
-      go.title = 'Свободные бойцы выйдут к двери; выделите их рамкой и командуйте правым щелчком';
-      go.onclick = () => {
-        const n = this.world.releaseFighters(b.id, spare);
-        this.toast(n > 0 ? `Вышли в поле: ${n}` : 'Свободных бойцов нет');
-        this.infoKey = '';
-        go.blur();
-      };
-      out.append(go);
-      this.el.append(out);
-    }
+    if (def.garrison && b.done) this.el.append(garrisonControls(this.world, b, () => (this.infoKey = '')));
+    if (def.barracks && b.done) this.el.append(recruitOrderControls(this.world, () => (this.infoKey = '')));
     if (movableWorkArea(b.type)) {
       // Settlers 4: the work area can be moved — choose a new centre with a click on the map.
       const area = el('div', 'info-actions');
@@ -249,7 +226,6 @@ export class InfoView implements View {
     if (orders) this.el.append(orders);
     const shared = this.sharedChoices(b);
     if (shared && shared.length >= 2) this.el.append(shareControls(this.world, shared, () => (this.infoKey = '')));
-    if (def.barracks) this.el.append(recruitLevelControls(this.world, () => (this.infoKey = '')));
     const actions = el('div', 'info-actions');
     if (!b.done || def.recipe || def.residence) {
       const prio = el('button', b.priority ? 'active' : '', b.priority ? '⬆ Приоритет: да' : '⬆ Приоритет');
@@ -303,9 +279,27 @@ export class InfoView implements View {
 
   /** Weapons whose proportions this building follows (share-controlled outputs), if any. */
   private sharedChoices(b: Building): readonly Resource[] | null {
-    const def = BUILDINGS[b.type];
-    const choices = def.barracks ? BARRACKS_WEAPONS : (def.recipe?.outputChoice ?? []);
+    const choices = BUILDINGS[b.type].recipe?.outputChoice ?? [];
     return choices.length > 0 && choices.every((r) => OUTPUT_SHARES[r] !== undefined) ? choices : null;
+  }
+
+  /** What a barracks is doing: no orders, goods missing for every order, or recruiting. */
+  private barracksStatus(b: Building): string {
+    const w = this.world;
+    let ordered = false;
+    let payable = false;
+    for (const kind of FIGHTERS) {
+      PROFESSIONS[kind].combat!.levels.forEach((_, level) => {
+        if (w.recruitOrder(kind, level, b.owner) === 0) return;
+        ordered = true;
+        const need = recruitNeeds(kind, level);
+        if ((Object.entries(need) as [Resource, number][]).every(([r, n]) => b.input[r] >= n)) payable = true;
+      });
+    }
+    if (!ordered) return 'нет заказов';
+    if (w.settlers.some((s) => s.tasks.some((t) => t.t === 'recruit' && t.b === b.id))) return 'набирает';
+    if (!payable) return 'ждёт оружия или золота';
+    return 'ждёт свободного носильщика';
   }
 
   private attackControls(b: Building, available: number): HTMLElement {
@@ -316,7 +310,7 @@ export class InfoView implements View {
     more.onclick = () => (this.attackCount = Math.min(available, this.attackCount + 1));
     const go = el('button', available > 0 ? 'danger' : '', `⚔ Атаковать (${Math.min(this.attackCount, available)})`);
     go.disabled = available === 0;
-    go.title = available > 0 ? 'Солдаты из ваших военных зданий поблизости' : 'Рядом нет свободных солдат';
+    go.title = available > 0 ? 'Свободные бойцы поблизости и лишние бойцы ваших военных зданий рядом' : 'Рядом нет свободных солдат';
     go.onclick = () => {
       const sent = this.world.attack(b.id, this.attackCount);
       this.toast(sent > 0 ? `В атаку: ${sent}` : 'Некого отправить');
@@ -327,11 +321,6 @@ export class InfoView implements View {
 
   private status(b: Building): string {
     const def = BUILDINGS[b.type];
-    if (def.barracks) {
-      if (!BARRACKS_WEAPONS.some((r) => b.input[r] > 0)) return 'нет оружия';
-      if (b.workerId === null) return wantsRecruit(this.world, b) ? 'ждёт новобранца' : 'гарнизоны полны';
-      return 'обучает';
-    }
     if (b.workerId === null) return 'ждёт работника';
     const behavior = PROFESSIONS[def.worker!].behavior;
     const w = this.world.getSettler(b.workerId);

@@ -136,7 +136,7 @@ describe('fog of war', () => {
     expect(ownBuildings(w, 1).length).toBe(1);
   });
 
-  it('puts a lookout tower at a border with foreign land and so finds the enemy start tower', { timeout: LONG }, () => {
+  it('finds the enemy start tower (towers, lookouts, pioneers, scouts)', { timeout: LONG }, () => {
     const w = new World(42, { players: 2, ai: [2] });
     const enemy = startTower(w, 1);
     let found = -1;
@@ -144,12 +144,12 @@ describe('fog of war', () => {
       w.step();
       if (t % 100 === 0 && knownEnemies(w, 2).some((e) => e.b === enemy)) found = t;
     }
-    expect(ownBuildings(w, 2).some((b) => b.type === 'lookout')).toBe(true);
     expect(found).toBeGreaterThan(0);
     // Without lookouts it never finds it on this map (its towers stop ~25 tiles short). Since 2.5
     // the guaranteed far mountains draw its first towers elsewhere: ~41 minutes (31 before); with
     // Settlers 4's production times (docs/TIMINGS.md) ~79; with S4 footprints (the old 4×4 castle, 15×15
-    // start meadow) ~122 while its pioneer was stuck on an unreachable tile, ~75 since that is fixed.
+    // start meadow) ~122 while its pioneer was stuck on an unreachable tile, ~75 since that is fixed;
+    // since its towers hold one fighter unless filled (Settlers 4) its towers alone reach it, ~34.
     expect(found).toBeLessThan(88 * MINUTE);
   });
 });
@@ -247,6 +247,9 @@ describe('AI ore prospecting', () => {
       if (res === 'coal' || res === 'goldore' || res === 'stone') w.map.oreAmount[i] = 0;
     }
     for (const b of own()) if (b.type === 'coalmine') w.demolish(b.id, 2);
+    // Materials to pay for a mine, so only the missing ore holds it up (test setup).
+    startTower(w, 2).output.plank += 20;
+    startTower(w, 2).output.stone += 20;
     for (let t = 0; t < 5 * MINUTE; t++) w.step();
     const firstMine = AI_PLAN.find((s) => BUILDINGS[s.type].mine)!;
     expect(w.ai[0].wantOre).toBe(BUILDINGS[firstMine.type].mine!.res);

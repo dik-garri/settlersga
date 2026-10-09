@@ -26,7 +26,7 @@ function intruder(w: World, kind: 'pioneer' | 'geologist' | 'thief', off: number
 }
 
 describe('specialists on hostile land (Settlers 4)', () => {
-  it('a pioneer on enemy land attracts a swordsman from a nearby garrison and dies', () => {
+  it('a pioneer on enemy land is cut down by the fighters standing nearby', () => {
     const w = new World(42, { players: 2 });
     const tower = startTower(w, 1);
     const before = tower.garrison.length;
@@ -34,7 +34,7 @@ describe('specialists on hostile land (Settlers 4)', () => {
     run(w, 400);
     expect(w.settlers.includes(p)).toBe(false);
     expect(w.stats.intrudersKilled).toBe(1);
-    // The responder goes back into a garrison afterwards.
+    // Nobody leaves the tower for good: it still holds its fighter.
     run(w, 600);
     expect(tower.garrison.length).toBe(before);
   });

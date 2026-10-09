@@ -1,4 +1,4 @@
-import { BUILDINGS, ORDERABLE, START_CONDITIONS, type StartLevel } from './config';
+import { BUILDINGS, ORDERABLE, PROFESSIONS, START_CONDITIONS, type StartLevel } from './config';
 import { nearestStorage } from './buildings';
 import { landOf } from './land';
 import { RESOURCES, type Building, type BuildingType, type PlayerId, type Resource, type SettlerKind, type Task } from './types';
@@ -13,11 +13,14 @@ import type { World } from './world';
  *   without orders are forged automatically, by need (`chooseOutput`);
  * - `distribution`: per good, weights between the building types that consume it; a good without an
  *   entry is shared fairly (least-stocked consumer first). `tally` counts units handed out per type,
- *   so deliveries follow the weights over time.
+ *   so deliveries follow the weights over time;
+ * - `recruitOrders`: Settlers 4's barracks orders — per fighting profession, per level (index), how
+ *   many recruits are still wanted, or `ENDLESS`. None by default: a barracks recruits nobody unasked.
  */
 export interface EconomyState {
   orders: Partial<Record<SettlerKind, number>>;
   toolOrders: Partial<Record<Resource, number>>;
+  recruitOrders?: Partial<Record<SettlerKind, number[]>>;
   distribution: Partial<Record<Resource, Partial<Record<BuildingType, number>>>>;
   tally: Partial<Record<Resource, Partial<Record<BuildingType, number>>>>;
 }
@@ -28,7 +31,13 @@ export const ENDLESS = -1;
 /** Fresh settings for a player starting with `start`'s workers. */
 export function createEconomy(start: StartLevel): EconomyState {
   const s = START_CONDITIONS[start];
-  return { orders: { builder: s.builders, digger: s.diggers, geologist: s.geologists }, toolOrders: {}, distribution: {}, tally: {} };
+  return {
+    orders: { builder: s.builders, digger: s.diggers, geologist: s.geologists },
+    toolOrders: {},
+    recruitOrders: {},
+    distribution: {},
+    tally: {},
+  };
 }
 
 export function economyOf(w: World, player: PlayerId): EconomyState {
@@ -110,6 +119,54 @@ export function toolMade(w: World, player: PlayerId, res: Resource): void {
   if (n === undefined || n === ENDLESS) return;
   if (n <= 1) delete orders[res];
   else orders[res] = n - 1;
+}
+
+// ---------------------------------------------------------------- barracks orders
+
+/** Settlers 4 shows an endless recruit order as 100: steps below it count down from there. */
+const RECRUIT_ENDLESS_AT = 100;
+
+/** Recruits of `kind` at `level` the player still orders (`ENDLESS` = no end, 0 = none). */
+export function recruitOrder(w: World, player: PlayerId, kind: SettlerKind, level: number): number {
+  return economyOf(w, player).recruitOrders?.[kind]?.[level] ?? 0;
+}
+
+/**
+ * Player command (Settlers 4's barracks menu): `count` more recruits of `kind` at `level` (index into
+ * its `combat.levels`) — `ENDLESS` for no end, 0 to clear. As in S4 an endless order stands for 100:
+ * reaching 100 makes it endless. False for non-fighters or levels the profession does not have.
+ */
+export function orderRecruits(w: World, player: PlayerId, kind: SettlerKind, level: number, count: number): boolean {
+  if (count !== ENDLESS && !(count >= 0)) return false;
+  return stepRecruits(w, player, kind, level, count === ENDLESS ? RECRUIT_ENDLESS_AT : count === 0 ? -Infinity : count);
+}
+
+/** Player command: `count` fewer recruits of `kind` at `level` ordered (an endless order counts as 100). */
+export function reduceRecruits(w: World, player: PlayerId, kind: SettlerKind, level: number, count: number): boolean {
+  if (!(count > 0)) return false;
+  return stepRecruits(w, player, kind, level, -count);
+}
+
+function stepRecruits(w: World, player: PlayerId, kind: SettlerKind, level: number, delta: number): boolean {
+  const levels = PROFESSIONS[kind].combat?.levels.length ?? 0;
+  if (!Number.isInteger(level) || level < 0 || level >= levels || Number.isNaN(delta)) return false;
+  const eco = economyOf(w, player);
+  const orders = (eco.recruitOrders ??= {});
+  const row = (orders[kind] ??= []);
+  while (row.length < levels) row.push(0);
+  const now = row[level] === ENDLESS ? RECRUIT_ENDLESS_AT : row[level];
+  const next = Math.max(0, Math.round(now + delta));
+  row[level] = next >= RECRUIT_ENDLESS_AT ? ENDLESS : next;
+  if (row.every((n) => n === 0)) delete orders[kind];
+  return true;
+}
+
+/** A recruit of `kind` at `level` was called: count him off the order (an endless one stays). */
+export function recruitCalled(w: World, player: PlayerId, kind: SettlerKind, level: number): void {
+  const row = economyOf(w, player).recruitOrders?.[kind];
+  if (!row || row[level] === ENDLESS || !(row[level] > 0)) return;
+  row[level]--;
+  if (row.every((n) => n === 0)) delete economyOf(w, player).recruitOrders![kind];
 }
 
 let orderables: Resource[] | null = null;

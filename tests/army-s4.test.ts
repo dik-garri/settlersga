@@ -2,12 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { knownEnemies } from '../src/sim/ai';
 import { centerOf, spawnSettler } from '../src/sim/buildings';
 import { BUILDINGS, FOG, PROFESSIONS, SOLDIER_LEVELS } from '../src/sim/config';
-import { enterGarrison, isArcher, killSettler, maxHp, slotsFree } from '../src/sim/military';
+import { enterGarrison, isArcher, isFighter, killSettler, maxHp, slotsFree } from '../src/sim/military';
+import { ENDLESS } from '../src/sim/economy';
 import { saveWorld } from '../src/sim/save';
 import type { Building, Settler } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { placeNear } from '../tools/scenario';
-import { base, dismissStandby, startTower, vacateStart } from './helpers';
+import { base, dismissStandby, startTower } from './helpers';
 
 function run(world: World, ticks: number) {
   for (let i = 0; i < ticks; i++) world.step();
@@ -31,9 +32,10 @@ function station(w: World, b: Building, kind: 'soldier' | 'archer'): Settler {
 
 const members = (w: World, b: Building) => b.garrison.map((id) => w.getSettler(id)!).filter(Boolean);
 
-/** A finished barracks next to the start tower, which has one free slot of each kind (`vacateStart`). */
+/** A finished barracks next to the start tower; the start fighters standing by are gone (`dismissStandby`). */
 function withBarracks(w = rich(new World(42))) {
-  const c = vacateStart(w);
+  const c = startTower(w);
+  dismissStandby(w);
   const barracks = placeNear(w, 'barracks', base(w).x + 5, base(w).y - 1)!;
   run(w, 1500);
   expect(barracks.done).toBe(true);
@@ -57,50 +59,60 @@ function frontLine(w = rich(new World(42, { players: 2 }))) {
 }
 
 describe('recruit levels (bought at the barracks, as in Settlers 4)', () => {
-  it('a recruit leaves at the ordered level and pays its gold; short of gold, at what the gold pays for', () => {
+  it('a recruit leaves at the ordered level and pays its gold; levels never change', () => {
     const { w, c, barracks } = withBarracks();
-    expect(w.setRecruitLevel(2)).toBe(true);
-    expect(w.recruitLevel()).toBe(2);
-    expect(w.setRecruitLevel(SOLDIER_LEVELS.length)).toBe(false);
-    c.output.gold = 3; // two for the first recruit (level 3), one left: the second leaves at level 2
+    expect(SOLDIER_LEVELS.map((l) => l.cost)).toEqual([0, 1, 2]);
+    w.orderRecruits('soldier', 2, 1);
+    w.orderRecruits('archer', 1, 1);
+    c.output.gold = 3;
     c.output.sword = 1;
     c.output.bow = 1;
-    run(w, 1500);
+    run(w, 2500);
     const trained = w.settlers.filter((s) => (s.kind === 'soldier' || s.kind === 'archer') && s.level > 0);
-    expect(trained.map((s) => s.level).sort()).toEqual([1, 2]);
+    expect(trained.map((s) => `${s.kind}${s.level}`).sort()).toEqual(['archer1', 'soldier2']);
     for (const s of trained) expect(maxHp(s)).toBe(PROFESSIONS[s.kind].combat!.levels[s.level].hp);
     expect(c.output.gold + barracks.input.gold + barracks.inbound.gold).toBe(0);
-    // Levels never change afterwards.
     c.output.gold = 5;
     run(w, 1500);
     expect(trained.map((s) => s.level).sort()).toEqual([1, 2]);
   });
 
-  it('at level 1 the barracks asks for no gold', () => {
-    const { w, c, barracks } = withBarracks();
-    c.output.gold = 2;
-    c.output.sword = 1;
-    run(w, 1200);
-    expect(barracks.input.gold).toBe(0);
-    expect(w.settlers.filter((s) => s.kind === 'soldier').every((s) => s.level === 0)).toBe(true);
+  it('short of gold for the higher level, the lower one ordered is made instead', () => {
+    const { w, barracks } = withBarracks();
+    barracks.input.sword = 2;
+    barracks.input.gold = 1;
+    w.orderRecruits('soldier', 0, ENDLESS);
+    w.orderRecruits('soldier', 2, ENDLESS);
+    run(w, 1500);
+    // Two gold for level 3 never came: both are level 1, the gold stays.
+    const made = w.settlers.filter((s) => s.kind === 'soldier' && s.home === null && s.level === 0);
+    expect(made.length).toBeGreaterThanOrEqual(2);
+    expect(w.settlers.some((s) => s.kind === 'soldier' && s.level === 2)).toBe(false);
+    expect(barracks.input.gold).toBe(1);
   });
 
-  it('the order survives save and load', () => {
-    const { w, c } = withBarracks();
-    w.setRecruitLevel(1);
-    c.output.gold = 2;
-    c.output.sword = 1;
-    run(w, 200);
-    const l = World.load(JSON.parse(JSON.stringify(saveWorld(w))));
-    expect(l.recruitLevel()).toBe(1);
-    run(w, 1000);
-    run(l, 1000);
-    expect(saveWorld(l)).toEqual(saveWorld(w));
+  it('the squad leader costs armour, a sword and 3 gold, and goes first (Settlers 4)', () => {
+    const { w, barracks } = withBarracks();
+    expect(PROFESSIONS.leader.kit).toEqual({ sword: 1, gold: 3 });
+    barracks.input.armor = 1;
+    barracks.input.sword = 2;
+    barracks.input.gold = 2;
+    w.orderRecruits('leader', 0, 1);
+    w.orderRecruits('soldier', 0, 1);
+    run(w, 900);
+    // Two gold do not pay for him: the swordsman is made, the leader waits.
+    expect(w.settlers.filter((s) => s.kind === 'leader')).toHaveLength(0);
+    expect(w.recruitOrder('soldier', 0)).toBe(0);
+    barracks.input.gold = 3;
+    run(w, 900);
+    const leader = w.settlers.find((s) => s.kind === 'leader')!;
+    expect(leader).toBeDefined();
+    expect(barracks.input.armor + barracks.input.sword + barracks.input.gold).toBe(0);
   });
 });
 
 describe('garrison slots by kind', () => {
-  it('a small tower takes one swordsman and two archers, never more swordsmen', () => {
+  it('filled, a small tower takes one swordsman and two archers, never more swordsmen', () => {
     const w = rich(new World(42));
     const c = startTower(w);
     // Archers standing by besides the start swordsmen (test setup).
@@ -108,6 +120,9 @@ describe('garrison slots by kind', () => {
     const tower = placeNear(w, 'tower', base(w).x + 6, base(w).y - 4, 5)!;
     run(w, 3000);
     expect(tower.done).toBe(true);
+    expect(w.fillGarrison(tower.id)).toBe(true);
+    expect(tower.wish).toEqual({ melee: 1, ranged: 2 });
+    run(w, 600);
     const inside = members(w, tower);
     expect(inside.filter((s) => !isArcher(s))).toHaveLength(1);
     expect(inside.filter(isArcher)).toHaveLength(2);
@@ -119,42 +134,81 @@ describe('garrison slots by kind', () => {
   });
 });
 
-describe('capture', () => {
-  it('archers cannot take a building: they fight, then look for a garrison of their own', () => {
+describe('capture (Settlers 4)', () => {
+  /** Player 2 left with its start tower's swordsman only: their tower out front stands empty. */
+  function emptyEnemy() {
     const { w, ours, theirs } = frontLine();
-    // Player 2 keeps one fighter, holding its start tower (else it would be out): none to spare.
     const keeper = startTower(w, 2).garrison[0];
-    for (const s of w.settlers.filter((x) => x.owner === 2 && (x.kind === 'soldier' || x.kind === 'archer') && x.id !== keeper)) killSettler(w, s);
+    for (const s of w.settlers.filter((x) => x.owner === 2 && isFighter(x) && x.id !== keeper)) killSettler(w, s);
     w.step();
     expect(theirs.garrison).toHaveLength(0);
-    // Only archers in our tower: the swordsman leaves, three archers hold it.
+    return { w, ours, theirs };
+  }
+
+  it('an archer takes an empty building like a swordsman, alone', () => {
+    const { w, ours, theirs } = emptyEnemy();
+    dismissStandby(w, 1);
+    // Only archers in our tower: three hold it, its swordsman is gone.
     for (let i = 0; i < 3; i++) station(w, ours, 'archer');
     for (const s of members(w, ours)) if (!isArcher(s)) killSettler(w, s);
     w.step();
-    const sent = w.attack(theirs.id, 9);
-    expect(sent).toBeGreaterThan(0);
+    const sent = w.attack(theirs.id, 2);
+    expect(sent).toBe(2);
     const party = w.settlers.filter((s) => s.tasks.some((t) => t.t === 'assault'));
     expect(party.every(isArcher)).toBe(true);
     run(w, 1500);
-    expect(theirs.owner).toBe(2);
-    // The archers went back to a garrison of ours.
-    for (const s of party) expect(s.home === null || w.buildings.get(s.home)!.owner === 1).toBe(true);
-    // A swordsman takes it.
-    station(w, ours, 'soldier');
-    station(w, ours, 'soldier');
-    expect(w.attack(theirs.id, 1)).toBe(1);
-    run(w, 1500);
     expect(theirs.owner).toBe(1);
+    // One went in; the other stays outside, free.
+    expect(theirs.garrison).toHaveLength(1);
+    expect(theirs.wish).toEqual({ melee: 0, ranged: 1 });
+    const out = party.filter((s) => !theirs.garrison.includes(s.id));
+    expect(out).toHaveLength(1);
+    expect(out[0].home).toBeNull();
+  });
+
+  it('the squad leader neither takes a building nor goes into one', () => {
+    const { w, ours, theirs } = emptyEnemy();
+    expect(PROFESSIONS.leader.combat!.captures).toBeFalsy();
+    const leader = spawnSettler(w, 'leader', ours);
+    leader.inside = null;
+    expect(w.orderAttack([leader.id], theirs.id)).toBe(1);
+    run(w, 1500);
+    expect(theirs.owner).toBe(2);
+    expect(leader.home).toBeNull();
+    // Nor sent in by hand.
+    expect(w.orderGarrison([leader.id], ours.id)).toBe(0);
+    expect(ours.garrison.includes(leader.id)).toBe(false);
+  });
+
+  it('attackers first break the door of a held building', () => {
+    const { w, ours, theirs } = frontLine();
+    const door = BUILDINGS.tower.garrison!.door!;
+    expect(door.hp).toBe(50);
+    for (let i = 0; i < 3; i++) station(w, ours, 'soldier');
+    expect(theirs.garrison.length).toBeGreaterThan(0);
+    w.attack(theirs.id, 2);
+    let broken = false;
+    let calledOut = false;
+    for (let i = 0; i < 1500 && !calledOut; i++) {
+      w.step();
+      if ((theirs.doorHp ?? door.hp) === 0) broken = true;
+      if (w.settlers.some((s) => s.owner === 2 && s.opponent !== null && s.home === theirs.id)) {
+        calledOut = true;
+        // Nobody was called out before the door fell.
+        expect(broken).toBe(true);
+      }
+    }
+    expect(broken).toBe(true);
   });
 });
 
 describe('infirmary', () => {
-  it('wounded fighters heal only in an infirmary, then go back to a garrison', () => {
+  it('wounded fighters heal only in an infirmary, then their tower calls them back', () => {
     const w = rich(new World(42));
     const c = startTower(w);
-    // Nobody standing by to take the wounded's slots while they are away (test setup).
     dismissStandby(w);
-    const wounded = members(w, c).slice(0, 2);
+    // Two archers in the start tower (it wishes them: they were let in).
+    const wounded = [station(w, c, 'archer'), station(w, c, 'archer')];
     for (const s of wounded) s.hp = 10;
     run(w, 600);
     // No infirmary: nobody heals, nobody leaves.
@@ -168,9 +222,8 @@ describe('infirmary', () => {
     expect(inf.done).toBe(true);
     expect(wasInBed).toBe(true);
     for (const s of wounded) expect(s.hp).toBe(maxHp(s));
-    run(w, 600);
-    for (const s of wounded) expect(s.home).not.toBeNull();
-    expect(c.garrison.length).toBeGreaterThanOrEqual(BUILDINGS.tower.garrison!.keep!);
+    run(w, 900);
+    for (const s of wounded) expect(s.home).toBe(c.id);
   });
 
   it('a stay in the infirmary continues identically after save and load', () => {
@@ -179,7 +232,7 @@ describe('infirmary', () => {
     const inf = placeNear(w, 'infirmary', base(w).x + 5, base(w).y + 3)!;
     run(w, 2000);
     expect(inf.done).toBe(true);
-    members(w, c)[0].hp = 5;
+    station(w, c, 'archer').hp = 5;
     for (let i = 0; i < 2000 && !w.settlers.some((s) => s.inside === inf.id); i++) w.step();
     expect(w.settlers.some((s) => s.inside === inf.id)).toBe(true);
     const l = World.load(JSON.parse(JSON.stringify(saveWorld(w))));

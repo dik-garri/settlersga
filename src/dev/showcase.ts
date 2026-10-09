@@ -156,8 +156,9 @@ export function buildShowcase(): World {
     depot.output.plank += 400;
     depot.output.stone += 400;
   }
-  // Fighters with no garrison yet: they man the towers as they are finished.
-  for (let i = 0; i < 48; i++) spawnSettler(w, 'soldier', c).inside = null;
+  // Free fighters standing by (Settlers 4): each finished tower calls one in, the filled ones more.
+  for (let i = 0; i < 36; i++) spawnSettler(w, 'soldier', c).inside = null;
+  for (let i = 0; i < 24; i++) spawnSettler(w, 'archer', c).inside = null;
   for (let i = 0; i < 64; i++) spawnSettler(w, 'carrier', c);
   for (let i = 0; i < 4; i++) spawnSettler(w, 'digger', c);
   // Builders and diggers come only as ordered (as in Settlers 4): order plenty.
@@ -182,6 +183,8 @@ export function buildShowcase(): World {
     placeNear(w, 'bigtower', cx + Math.cos(a) * 19, cy + Math.sin(a) * 19);
   }
   run(w, 5000);
+  // The towers are filled by order («Заполнить»): the free fighters walk in.
+  for (const b of w.buildings.values()) if (b.owner === LOCAL_PLAYER && b.done && BUILDINGS[b.type].garrison) w.fillGarrison(b.id);
 
   // Every building type, finished and staffed, in a ring around the start.
   const types = (Object.keys(BUILDINGS) as BuildingType[]).filter((t) => BUILDINGS[t].playerBuildable && t !== 'tower');
@@ -191,6 +194,9 @@ export function buildShowcase(): World {
     placeNear(w, type, cx + Math.cos(a) * r, cy + Math.sin(a) * r);
   });
   run(w, 9000);
+  // Recruits ordered at the barracks (Settlers 4: nobody unasked); they come out and stand by it.
+  w.orderRecruits('soldier', 0, 2);
+  w.orderRecruits('archer', 2, 1);
   // A site on a slope takes its diggers a while at Settlers 4's walking pace: give stragglers time.
   for (let k = 0; k < 12 && [...w.buildings.values()].some((b) => !b.done && b.owner === LOCAL_PLAYER); k++) run(w, 1000);
 

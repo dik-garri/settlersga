@@ -1,8 +1,9 @@
 /**
- * Direct army control, as in Settlers 3/4: fighters ordered out of their buildings become field units.
+ * Direct army control, as in Settlers 3/4: fighters given an order become field units, and fighters
+ * without one stand free (Settlers 4).
  *
- * A field unit is an ordinary fighter with a `Settler.post`: instead of looking for a garrison when
- * idle (`soldierIdle`), it walks to its post and stays there, engaging enemy fighters that come within
+ * A field unit is an ordinary fighter with a `Settler.post`: when idle (`soldierIdle`) it walks to its
+ * post and stays there — military buildings never call it in —, engaging enemy fighters that come within
  * `FIELD.engageRadius` (swordsmen close in and duel with the `engage` task; archers shoot from where
  * they stand). Orders are public player commands (`World.orderMove`, `orderAttack`, `orderGarrison`,
  * `orderHold`, `releaseFighters`), usable by the AI as well. A squad leader (`combat.leads`) lifts the
@@ -14,10 +15,22 @@
  * map. Field units occupy no tiles, like every settler.
  */
 import { duelTick, startDuel } from './combat';
-import { FIELD, PROFESSIONS } from './config';
-import { nearestIntruder } from './intruders';
+import { FIELD, INTRUDERS, PROFESSIONS } from './config';
+import { chasers, nearestIntruder } from './intruders';
 import { abort } from './settlers';
-import { isFighter, leaveGarrison, shoot, slotsFree, isArcher, isMilitary, keepOf } from './military';
+import {
+  canGarrison,
+  garrisonCounts,
+  isArcher,
+  isFighter,
+  isMilitary,
+  keepOf,
+  leaveGarrison,
+  raiseWish,
+  shoot,
+  slotsFree,
+  wishOf,
+} from './military';
 import type { Building, FieldPost, PlayerId, Point, Settler, Task } from './types';
 import type { World } from './world';
 
@@ -175,35 +188,60 @@ export function orderAttack(w: World, ids: readonly number[], targetId: number, 
 }
 
 /**
- * Player command: fighters go into an own military building with free slots of their kind (or, with
- * none given, each into the nearest one with room, as homeless fighters do). Returns how many went.
+ * Player command: fighters go into an own military building with free slots of their kind — or, with
+ * none given, each into the nearest one with a free slot of his kind (with none, or for the squad
+ * leader, who never goes in, he leaves his post and stands free). As in Settlers 4 a fighter sent in
+ * by hand raises the building's wish to cover him (`raiseWish`). Returns how many obeyed.
  */
 export function orderGarrison(w: World, ids: readonly number[], buildingId: number | null, player: PlayerId): number {
-  const units = orderable(w, ids, player);
-  const b = buildingId !== null ? w.buildings.get(buildingId) : undefined;
-  if (buildingId !== null && (!b || b.owner !== player || !isMilitary(b) || !b.done)) return 0;
+  const units = orderable(w, ids, player).filter((s) => buildingId === null || canGarrison(s));
+  const given = buildingId !== null ? w.buildings.get(buildingId) : undefined;
+  if (buildingId !== null && (!given || given.owner !== player || !isMilitary(given) || !given.done)) return 0;
   let n = 0;
   for (const s of units) {
-    if (b && slotsFree(w, b, isArcher(s)) <= 0) continue;
+    const archer = isArcher(s);
+    const b = given ?? (canGarrison(s) ? nearestWithRoom(w, s, archer) : undefined);
+    if (!b && !given) {
+      // Nowhere with room: he leaves his post and stands free (a military building may call him in).
+      clearOrders(w, s);
+      s.post = null;
+      n++;
+      continue;
+    }
+    if (!b || slotsFree(w, b, archer) <= 0) continue;
     clearOrders(w, s);
     s.post = null;
-    if (b) {
-      b.garrisonInbound++;
-      if (isArcher(s)) b.garrisonArchersInbound++;
-      s.tasks = [
-        { t: 'goto', x: b.door.x, y: b.door.y },
-        { t: 'join', b: b.id, archer: isArcher(s) },
-      ];
-    }
-    // Without a building, the empty queue lets `soldierIdle` find the nearest garrison.
+    raiseWish(w, b, archer);
+    b.garrisonInbound++;
+    if (archer) b.garrisonArchersInbound++;
+    s.tasks = [
+      { t: 'goto', x: b.door.x, y: b.door.y },
+      { t: 'join', b: b.id, archer },
+    ];
     n++;
   }
   return n;
 }
 
+/** The player's finished military building nearest the fighter with a free slot of his kind. */
+function nearestWithRoom(w: World, s: Settler, archer: boolean): Building | undefined {
+  let best: Building | undefined;
+  let bestD = Infinity;
+  for (const b of w.buildings.values()) {
+    if (b.owner !== s.owner || !b.done || !isMilitary(b) || slotsFree(w, b, archer) <= 0) continue;
+    const d = Math.hypot(b.door.x - s.x, b.door.y - s.y);
+    if (d < bestD || (d === bestD && best && b.id < best.id)) {
+      best = b;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
 /**
  * Player command: send up to `count` of a military building's spare fighters (beyond what it keeps,
- * `keep`) out of the door as field units, in formation before it. Returns how many came out.
+ * `keep`) out of the door as field units, in formation before it; its wish drops to who is left (and
+ * still coming), so it does not call others in. Returns how many came out.
  */
 export function releaseFighters(w: World, buildingId: number, count: number, player: PlayerId): number {
   const b = w.buildings.get(buildingId);
@@ -221,6 +259,12 @@ export function releaseFighters(w: World, buildingId: number, count: number, pla
     const spot = spots[Math.min(k, spots.length - 1)] ?? b.door;
     s.post = { x: spot.x, y: spot.y };
   });
+  if (ready.length > 0) {
+    const wish = wishOf(b);
+    const c = garrisonCounts(w, b);
+    wish.melee = Math.min(wish.melee, c.melee + c.inMelee);
+    wish.ranged = Math.min(wish.ranged, c.ranged + c.inRanged);
+  }
   return ready.length;
 }
 
@@ -288,6 +332,36 @@ export function fieldIdle(w: World, s: Settler): void {
   }
   const p = postOf(w, s);
   if (dist(s, p) > FIELD.slack) s.tasks = [{ t: 'goto', x: p.x, y: p.y }];
+}
+
+/**
+ * Idle behaviour of a free fighter (no garrison, no post; Settlers 4's soldiers standing about): he
+ * stays where he is, and every `FIELD.scanEvery` ticks takes on the nearest enemy fighter within
+ * `FIELD.engageRadius` (an archer shoots one within his range), else an intruding specialist there.
+ */
+export function freeIdle(w: World, s: Settler): void {
+  const ranged = PROFESSIONS[s.kind].combat?.ranged;
+  if (ranged && s.reload > 0) s.reload--;
+  if ((w.tick + s.id) % FIELD.scanEvery !== 0) return;
+  if (ranged) {
+    if (s.reload > 0) return;
+    const target = nearestEnemy(w, s, ranged.range) ?? nearestIntruder(w, s, ranged.range);
+    if (target) {
+      s.working = true;
+      shoot(w, s, target, s);
+    }
+    return;
+  }
+  const target = nearestEnemy(w, s, FIELD.engageRadius);
+  if (target) {
+    s.tasks = [{ t: 'engage', s: target.id, n: 0 }];
+    return;
+  }
+  // An intruding specialist (`intruders.ts`), unless enough comrades go for him already.
+  const intruder = nearestIntruder(w, s, FIELD.engageRadius);
+  if (intruder && intruder.opponent === null && chasers(w, intruder) < INTRUDERS.responders) {
+    s.tasks = [{ t: 'chase', s: intruder.id, n: 0 }];
+  }
 }
 
 /**

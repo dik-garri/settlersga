@@ -13,7 +13,7 @@ import {
   type Recipe,
 } from './config';
 import { accepts, orderedOutput, toolMade, workerOrder, workersOf } from './economy';
-import { fightersWith, mostBehindShare } from './military';
+import { fightersWith, mostBehindShare, recruitsAwaiting } from './military';
 import {
   emptyStock,
   RESOURCES,
@@ -186,35 +186,21 @@ export function available(w: World, owner: PlayerId, res: Resource): number {
   return n;
 }
 
-/** Workplaces, ordered workers not yet there (builders, diggers) and garrison slots waiting for this tool. */
+/**
+ * Workplaces, ordered workers not yet there (builders, diggers, specialists) and recruit orders
+ * (`recruitsAwaiting`) waiting for this tool.
+ */
 export function waitingFor(w: World, owner: PlayerId, tool: Resource): number {
   let n = 0;
   for (const b of w.buildings.values()) {
     if (b.owner !== owner) continue;
     const worker = BUILDINGS[b.type].worker;
     if (worker && b.done && b.workerId === null && !b.workerRequested && PROFESSIONS[worker].tool === tool) n++;
-    n += garrisonSlotsFor(w, b, tool);
   }
   for (const kind of ORDERABLE) {
     if (PROFESSIONS[kind].tool === tool) n += Math.max(0, workerOrder(w, owner, kind) - workersOf(w, owner, kind));
   }
-  return n;
-}
-
-/** Empty garrison slots that would take a fighter whose weapon is `tool` (archer slots want bows). */
-function garrisonSlotsFor(w: World, b: Building, tool: Resource): number {
-  const g = BUILDINGS[b.type].garrison;
-  if (!g || !b.done) return 0;
-  const space = g.capacity - b.garrison.length - b.garrisonInbound;
-  if (space <= 0) return 0;
-  const fighter = (Object.keys(PROFESSIONS) as SettlerKind[]).find((k) => PROFESSIONS[k].combat && PROFESSIONS[k].tool === tool);
-  if (!fighter) return 0;
-  const archersIn = b.garrison.filter((id) => {
-    const kind = w.getSettler(id)?.kind;
-    return kind !== undefined && !!PROFESSIONS[kind].combat?.ranged;
-  }).length;
-  const archerSlots = Math.min(space, Math.max(0, (g.archers ?? 0) - archersIn - b.garrisonArchersInbound));
-  return PROFESSIONS[fighter].combat!.ranged ? archerSlots : space - archerSlots;
+  return n + recruitsAwaiting(w, owner, tool);
 }
 
 /**
@@ -232,10 +218,11 @@ export function chooseOutput(w: World, b: Building, recipe: Recipe): Resource | 
     (r) => b.output[r] < OUTPUT_CAP && waitingFor(w, b.owner, r) + (recipe.keepInStock ?? 0) - available(w, b.owner, r) > 0,
   );
   if (awaited.length === 0) return null;
-  // Share-controlled outputs (weapons): something is wanted, so make whichever the player's army is
-  // furthest below its target share in (units in stock plus fighters carrying it).
-  const room = choices.filter((r) => b.output[r] < OUTPUT_CAP);
-  const byShare = mostBehindShare(w, b.owner, room, choices, (r) => available(w, b.owner, r) + fightersWith(w, b.owner, r));
+  // Share-controlled outputs (weapons): what orders wait for beyond the stock first (recruit orders),
+  // else the reserve; of those, whichever the player's army is furthest below its target share in
+  // (units in stock plus fighters carrying it).
+  const urgent = awaited.filter((r) => waitingFor(w, b.owner, r) - available(w, b.owner, r) > 0);
+  const byShare = mostBehindShare(w, b.owner, urgent.length > 0 ? urgent : awaited, choices, (r) => available(w, b.owner, r) + fightersWith(w, b.owner, r));
   if (byShare) return byShare;
   let best: Resource | null = null;
   let bestNeed = 0;

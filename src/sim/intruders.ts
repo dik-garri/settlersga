@@ -48,13 +48,10 @@ function watchedBy(w: World, s: Settler, host: PlayerId, r: number): boolean {
   return false;
 }
 
-/** Fighters already going for `target` (their head task is a `chase` of him). */
-function chasers(w: World, target: Settler): number {
+/** Fighters already going for `target` (a `chase` of him in their tasks). */
+export function chasers(w: World, target: Settler): number {
   let n = 0;
-  for (const f of outdoorFighters(w)) {
-    const t = f.tasks[0];
-    if (t?.t === 'chase' && t.s === target.id) n++;
-  }
+  for (const f of outdoorFighters(w)) if (f.tasks.some((t) => t.t === 'chase' && t.s === target.id)) n++;
   return n;
 }
 

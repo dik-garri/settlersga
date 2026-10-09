@@ -19,7 +19,7 @@ import {
 } from './config';
 import { clearStrokes, diggersWanted, leaveSite, levelStep } from './digging';
 import { engageTick } from './field';
-import { assaultTick, healTick, joinTick, releaseJoin, soldierIdle } from './military';
+import { assaultTick, healTick, joinTick, recruitTick, releaseJoin, releaseRecruit, soldierIdle } from './military';
 import { canPlant, findGatherTarget, findPlotFor, harvest, isGatherTarget, plant, type Target } from './nature';
 import { findPath } from './pathfinding';
 import { sameRegion } from './regions';
@@ -169,6 +169,8 @@ export function updateSettler(w: World, s: Settler): void {
       return;
     case 'join':
       return joinTick(w, s, task);
+    case 'recruit':
+      return recruitTick(w, s, task);
     case 'hunt':
       return huntTick(w, s, task);
     case 'chase':
@@ -385,6 +387,9 @@ export function abort(w: World, s: Settler): void {
         break;
       case 'join':
         if (b) releaseJoin(b, task);
+        break;
+      case 'recruit':
+        releaseRecruit(w, s, task);
         break;
       case 'hunt':
         releaseHunt(w, task);

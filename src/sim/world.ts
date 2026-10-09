@@ -12,7 +12,6 @@ import {
   GROUND,
   MAP_SIZE,
   OUTPUT_SHARES,
-  SOLDIER_LEVELS,
   START_CONDITIONS,
   type StartLevel,
   totalCost,
@@ -28,10 +27,21 @@ import {
   sendPioneer,
   sendThief,
 } from './specialists';
-import { orderAttack, orderGarrison, orderHold, orderMove, releaseFighters } from './field';
+import { formationSpots, orderAttack, orderGarrison, orderHold, orderMove, releaseFighters } from './field';
 import { updateIntruders } from './intruders';
 import { attackStrength } from './strength';
-import { createEconomy, ENDLESS, orderTool, orderWorkers, setAccepts, setDistribution, type EconomyState } from './economy';
+import {
+  createEconomy,
+  ENDLESS,
+  orderRecruits,
+  orderTool,
+  orderWorkers,
+  recruitOrder,
+  reduceRecruits,
+  setAccepts,
+  setDistribution,
+  type EconomyState,
+} from './economy';
 import { rebuildWorn, updatePaths } from './paths';
 import { setWorkArea } from './workArea';
 import { dispatch } from './logistics';
@@ -42,15 +52,18 @@ import {
   attack,
   attackerComposition,
   availableAttackers,
+  changeGarrison,
   enterGarrison,
+  fillGarrison,
   isFighter,
   isMilitary,
   leaveGarrison,
   pruneShots,
   removeDead,
-  slotsFree,
   updateBarracks,
   updateGarrison,
+  withdrawGarrison,
+  type Warning,
 } from './military';
 import { generateMap, type GameMap } from './map';
 import { createFog, ensureVision, isExplored, isVisible, resetSightMasks, updateFog, type FogState } from './fog';
@@ -101,8 +114,6 @@ export interface Player {
   home: Point;
   /** The player's weights for share-controlled outputs (weapons); missing ones use `OUTPUT_SHARES`. */
   shares?: Partial<Record<Resource, number>>;
-  /** Level (index into `SOLDIER_LEVELS`) its barracks train recruits at; default 0. */
-  recruitLevel?: number;
   /** Alliance: players with the same team never fight and win together; none = on its own. */
   team?: number;
   /** Worker orders, toolsmith queue, goods distribution (`economy.ts`). */
@@ -183,6 +194,12 @@ export class World {
   readonly dying = new Set<number>();
   /** Arrows in flight, for drawing only: damage is applied when shot. Derived, not saved. */
   shots: { x0: number; y0: number; x1: number; y1: number; tick: number; owner: PlayerId }[] = [];
+  /**
+   * Recent warnings for players (an empty military building with no free fighter, a barracks with no
+   * carrier; `military.ts`), oldest first, kept `GARRISON_ORDERS.warnEvery` ticks. Messages only: the
+   * HUD shows the local player's, nothing in the simulation reads them, so they are not saved.
+   */
+  readonly warnings: Warning[] = [];
   /** Computer players' state (saved). */
   readonly ai: AiState[] = [];
   /** Players with no occupied military building left (`DEFEAT`), in order of defeat (saved). */
@@ -237,9 +254,9 @@ export class World {
 
   /**
    * A new player at start position `st`, as in Settlers 4 (`StartResources.txt`): the start level's
-   * building (a small tower), finished, centred on the start and manned by its fighters as far as
-   * its slots of their kind go (the others stand by it); its people; and its goods on the ground
-   * round it, pile by pile (`ground.ts`).
+   * building (a small tower), finished and centred on the start, held by one swordsman (what its
+   * first call for a fighter brings, `GARRISON_ORDERS`; the others stand free by it); its people; and
+   * its goods on the ground round it, pile by pile (`ground.ts`).
    */
   private addPlayer(st: Point, start: StartLevel): Player {
     const id = this.players.length + 1;
@@ -255,13 +272,22 @@ export class World {
       ['soldier', def.soldiers],
       ['archer', def.archers],
     ];
+    const free: Settler[] = [];
     for (const [kind, n] of fighters) {
       for (let i = 0; i < n; i++) {
         const s = spawnSettler(this, kind, tower);
-        if (slotsFree(this, tower, kind === 'archer') > 0) enterGarrison(this, tower, s);
-        else s.inside = null;
+        if (tower.garrison.length === 0 && kind === 'soldier') enterGarrison(this, tower, s);
+        else free.push(s);
       }
     }
+    // The rest stand free in front of the tower, spread out.
+    const spots = formationSpots(this, tower.door.x, tower.door.y + 2, free.length);
+    free.forEach((s, k) => {
+      const at = spots[Math.min(k, spots.length - 1)] ?? tower.door;
+      s.inside = null;
+      s.x = s.px = at.x;
+      s.y = s.py = at.y;
+    });
     claimChanged(this, tower);
     const people: [SettlerKind, number][] = [
       ['carrier', def.carriers],
@@ -433,8 +459,8 @@ export class World {
   // --------------------------------------------------------------- commands
 
   /**
-   * Player command: the weight (0–100) of a share-controlled output (`OUTPUT_SHARES`: swords, bows)
-   * in what the weaponsmith forges and the barracks trains. False for other resources.
+   * Player command: the weight (0–100) of a share-controlled output (`OUTPUT_SHARES`: swords, bows,
+   * armour) in what the weaponsmith forges. False for other resources.
    */
   setShare(res: Resource, weight: number, player: PlayerId = LOCAL_PLAYER): boolean {
     const p = this.players.find((q) => q.id === player);
@@ -450,19 +476,40 @@ export class World {
   }
 
   /**
-   * Player command: the level (index into `SOLDIER_LEVELS`) its barracks train recruits at. A level
-   * costs `SOLDIER_LEVELS[k].cost` gold per recruit; short of gold, a barracks trains at the highest
-   * level the gold on its pile pays for.
+   * Player command (Settlers 4's barracks orders): `count` more recruits of a fighting profession at a
+   * level (index into its `combat.levels`), `ENDLESS` for no end, 0 to clear. The player's barracks
+   * recruit nobody else (`military.ts`).
    */
-  setRecruitLevel(level: number, player: PlayerId = LOCAL_PLAYER): boolean {
-    const p = this.players.find((q) => q.id === player);
-    if (!p || !Number.isInteger(level) || level < 0 || level >= SOLDIER_LEVELS.length) return false;
-    p.recruitLevel = level;
-    return true;
+  orderRecruits(kind: SettlerKind, level: number, count: number, player: PlayerId = LOCAL_PLAYER): boolean {
+    return orderRecruits(this, player, kind, level, count);
   }
 
-  recruitLevel(player: PlayerId = LOCAL_PLAYER): number {
-    return this.players.find((q) => q.id === player)?.recruitLevel ?? 0;
+  /** Player command: `count` fewer recruits of `kind` at `level` ordered (an endless order counts as 100). */
+  reduceRecruits(kind: SettlerKind, level: number, count: number, player: PlayerId = LOCAL_PLAYER): boolean {
+    return reduceRecruits(this, player, kind, level, count);
+  }
+
+  /** Recruits of `kind` at `level` the player still orders (`ENDLESS`, or a count; 0 = none). */
+  recruitOrder(kind: SettlerKind, level: number, player: PlayerId = LOCAL_PLAYER): number {
+    return recruitOrder(this, player, kind, level);
+  }
+
+  /** Player command (Settlers 4 «fill»): the military building calls fighters in for every slot. */
+  fillGarrison(id: number, player: PlayerId = LOCAL_PLAYER): boolean {
+    return fillGarrison(this, id, player);
+  }
+
+  /**
+   * Player command: one swordsman (`archer` false) or archer more (`delta` 1) or fewer (−1) wished in
+   * the military building — never below one fighter in all (Settlers 4).
+   */
+  changeGarrison(id: number, archer: boolean, delta: number, player: PlayerId = LOCAL_PLAYER): boolean {
+    return changeGarrison(this, id, archer, delta, player);
+  }
+
+  /** Player command (Settlers 4 «withdraw»): the military building keeps one fighter, the rest step out. */
+  withdrawGarrison(id: number, player: PlayerId = LOCAL_PLAYER): boolean {
+    return withdrawGarrison(this, id, player);
   }
 
   /** Player command: how many of an orderable profession (builders, diggers) to have in all. */
@@ -604,7 +651,7 @@ export class World {
 
   /**
    * Removes a building with no ownership checks (demolition, burning after a conquest): aborts every
-   * job involving it, sends its worker back to carrying and its soldiers to find another garrison,
+   * job involving it, sends its worker back to carrying and its soldiers out to stand free,
    * frees the tiles and leaves its ruin's goods on and around the footprint (`ruinGoods`: `demolish`
    * gives back `GROUND.demolishShare` of its materials, `burn` `GROUND.burnShare`; `none` nothing).
    */

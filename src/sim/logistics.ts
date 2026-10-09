@@ -2,7 +2,7 @@ import { canTakeUp, isReachable, isReadyWorker, nearestStorage } from './buildin
 import { freeGoods, goodsOn, reserveGoods, stackTiles } from './ground';
 import { landAt, landOf } from './land';
 import { dispatchTrade, marketWants } from './trade';
-import { goldWanted, staffGarrisons, wantsRecruit, weaponsWanted } from './military';
+import { goldWanted, weaponsWanted } from './military';
 import { BUILDINGS, costOf, INPUT_CAP, ORDERABLE, PROFESSIONS, RESOURCE_INFO } from './config';
 import { countDelivery, distributionKey, economyOf, recountWorkers, workerOrder, workersOf } from './economy';
 import { RESOURCES, type Building, type PlayerId, type Point, type Resource, type Settler, type SettlerKind } from './types';
@@ -110,8 +110,6 @@ function dispatchFor(w: World, owner: PlayerId): void {
   for (const b of own) {
     const kind = BUILDINGS[b.type].worker;
     if (!kind || !b.done || b.workerId !== null || b.workerRequested || !isReachable(w, b)) continue;
-    // A barracks calls its next recruit only when there is a weapon for him and room for a new fighter.
-    if (BUILDINGS[b.type].barracks && !wantsRecruit(w, b)) continue;
     const r = ready.length > 0 ? takeReady(w, ready, kind, b, pieceOf(b), owner) : undefined;
     if (r) {
       b.workerRequested = true;
@@ -133,7 +131,6 @@ function dispatchFor(w: World, owner: PlayerId): void {
     s.tasks.push({ t: 'goto', x: b.door.x, y: b.door.y }, { t: 'become', b: b.id, kind });
   }
 
-  staffGarrisons(w, own);
   if (idle.length === 0) return;
 
   // Workers the player ordered (builders, diggers — as in Settlers 4, never more than ordered):

@@ -116,7 +116,7 @@ describe('computer player: field orders', () => {
     return out;
   }
 
-  it('meets enemy field units near its land with a field squad, then goes back inside', () => {
+  it('meets enemy field units near its land with a field squad, then goes back to its rally', () => {
     const w = new World(42, { players: 2, ai: [2] });
     const c2 = startTower(w, 2);
     // Extra swordsmen inside (test setup beyond the tower's slots; in play a fortress would hold them).
@@ -138,36 +138,39 @@ describe('computer player: field orders', () => {
     run(w, 100);
     run(copy, 100);
     expect(saveWorld(copy)).toEqual(saveWorld(w));
-    // The intruders gone, the squad goes back into garrisons.
+    // The intruders gone, the squad joins the others at its rally point (Settlers 4: free fighters
+    // stand about; its towers call in whom they wish).
     for (const s of enemy) killSettler(w, s);
     run(w, AI.thinkEvery * 2 + 600);
     expect(ai.defense).toBeUndefined();
+    const rally = ai.rally!;
     const out = w.settlers.filter((s) => s.owner === 2 && isFighter(s) && s.post);
-    expect(out).toEqual([]);
+    expect(out.length).toBeGreaterThan(0);
+    for (const s of out) expect(Math.hypot(s.post!.x - rally.x, s.post!.y - rally.y)).toBeLessThanOrEqual(AI.rallySlack + 2);
   });
 
   it('stays behind its walls when it cannot match them in the open', () => {
     const w = new World(42, { players: 2, ai: [2] });
-    for (const s of intruders(w, 12)) s.hp = 1e9;
+    // More of them than all its fighters outside its start tower.
+    for (const s of intruders(w, 16)) s.hp = 1e9;
     run(w, AI.thinkEvery * 2);
-    expect(w.ai[0].defense).toBeUndefined();
-    // Nobody sent out into the field (the start fighters the tower has no slot for stand by it).
-    expect(w.settlers.filter((s) => s.owner === 2 && isFighter(s) && s.post)).toEqual([]);
+    const ai = w.ai[0];
+    expect(ai.defense).toBeUndefined();
+    // Nobody sent against them: its free fighters only gather at its rally point.
+    for (const s of w.settlers.filter((q) => q.owner === 2 && isFighter(q) && q.post)) {
+      expect(Math.hypot(s.post!.x - ai.rally!.x, s.post!.y - ai.rally!.y)).toBeLessThanOrEqual(AI.rallySlack + 2);
+    }
   });
 
-  it('takes its squad leader along when he is among the spares, and the squad forms round him', () => {
+  it('takes a free squad leader along, and the squad forms round him', () => {
     const w = new World(42, { players: 2, ai: [2] });
     const c2 = startTower(w, 2);
     for (const s of w.settlers.filter((q) => q.owner === 2 && isFighter(q))) killSettler(w, s);
     w.step();
-    const join = (kind: 'soldier' | 'leader') => {
-      const s = spawnSettler(w, kind, c2);
-      enterGarrison(w, c2, s);
-      return s;
-    };
-    for (let k = 0; k < 4; k++) join('soldier');
-    const leader = join('leader');
-    for (let k = 0; k < 4; k++) join('soldier');
+    for (let k = 0; k < 8; k++) enterGarrison(w, c2, spawnSettler(w, 'soldier', c2));
+    // The leader never goes into a building: he stands by it.
+    const leader = spawnSettler(w, 'leader', c2);
+    leader.inside = null;
     // An enemy tower a walk away from the start tower.
     const def = BUILDINGS.tower;
     let target: Building | undefined;
@@ -184,7 +187,8 @@ describe('computer player: field orders', () => {
     }
     enterGarrison(w, target!, spawnSettler(w, 'soldier', startTower(w, 1)));
     const ai = w.ai[0];
-    expect(stageStrike(w, ai, target!, 3)).toBe(5);
+    // Three spares out of the tower, and the leader comes along.
+    expect(stageStrike(w, ai, target!, 3)).toBe(4);
     expect(ai.strike!.ids).toContain(leader.id);
     for (const id of ai.strike!.ids) {
       if (id !== leader.id) expect(w.getSettler(id)!.post!.leader).toBe(leader.id);
