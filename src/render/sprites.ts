@@ -3,6 +3,7 @@
  * see atlas.ts for packing into a single texture.
  */
 import type { BuildingType, Resource } from '../sim/types';
+import { CROP_STUBBLE } from '../sim/config';
 import { createRng } from '../sim/rng';
 import { HALF_H, HALF_W } from './iso';
 
@@ -1701,16 +1702,17 @@ export function paintPath(ctx: Ctx, level: number, variant: number): void {
   }
 }
 
-/** Grain field on one tile, 66×40 with the tile center at (33, 24). Stage 1 sown … 4 ripe. */
+/** Grain field on one tile, 66×40 with the tile center at (33, 24). Stage 1 sown … 4 ripe, 5 stubble. */
 export function paintField(ctx: Ctx, stage: number): void {
   ctx.translate(33, 24);
+  const stubble = stage === CROP_STUBBLE;
   ctx.beginPath();
   ctx.moveTo(0, -15);
   ctx.lineTo(30, 0);
   ctx.lineTo(0, 15);
   ctx.lineTo(-30, 0);
   ctx.closePath();
-  ctx.fillStyle = stage <= 2 ? '#8a6a42' : stage === 3 ? '#6f7d3a' : '#a08a3a';
+  ctx.fillStyle = stubble ? '#97804c' : stage <= 2 ? '#8a6a42' : stage === 3 ? '#6f7d3a' : '#a08a3a';
   ctx.fill();
   ctx.save();
   ctx.clip();
@@ -1726,6 +1728,7 @@ export function paintField(ctx: Ctx, stage: number): void {
     ctx.stroke();
   }
   ctx.restore();
+  if (stubble) return paintStubble(ctx);
   if (stage === 1) return;
   const rng = createRng(31 + stage);
   const color = stage === 2 ? '#7fb04f' : stage === 3 ? '#5f9a35' : '#e2c25a';
@@ -1742,6 +1745,29 @@ export function paintField(ctx: Ctx, stage: number): void {
       ctx.fillStyle = '#f0d77a';
       ctx.fillRect(x - 1, y - height - 1, 2, 2);
     }
+  }
+}
+
+/**
+ * Stubble of a reaped field (`CROP_STUBBLE`): short pale stalks and a little straw over the furrows, drawn
+ * around the tile centre (the caller translates there). The 3D art draws it over its sown-field frame
+ * until `art/textures/ground.py` renders a stubble frame of its own.
+ */
+export function paintStubble(ctx: Ctx): void {
+  const rng = createRng(97);
+  for (let k = 0; k < 60; k++) {
+    const [x, y] = P(rng() - 0.5, rng() - 0.5, 0);
+    ctx.strokeStyle = rng() < 0.5 ? '#d8c27a' : '#b89c58';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + (rng() - 0.5) * 1.5, y - 2 - rng() * 1.5);
+    ctx.stroke();
+  }
+  ctx.fillStyle = 'rgba(226, 204, 130, 0.55)';
+  for (let k = 0; k < 14; k++) {
+    const [x, y] = P(rng() - 0.5, rng() - 0.5, 0);
+    ctx.fillRect(x - 2, y - 0.5, 4, 1);
   }
 }
 

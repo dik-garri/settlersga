@@ -5,7 +5,7 @@ import type { Building, PlayerId, Settler } from './types';
 import type { Player, World } from './world';
 
 /** Bump when the save layout changes incompatibly. */
-export const SAVE_VERSION = 30;
+export const SAVE_VERSION = 31;
 
 const MAP_LAYERS = [
   'terrain',
@@ -13,6 +13,7 @@ const MAP_LAYERS = [
   'stone',
   'crop',
   'cropKind',
+  'growth',
   'fish',
   'ore',
   'oreAmount',
@@ -54,7 +55,7 @@ export interface SaveData {
   idleRngState: number;
 }
 
-function encode(a: Uint8Array | Int32Array): string {
+function encode(a: Uint8Array | Uint16Array | Int32Array): string {
   const bytes = new Uint8Array(a.buffer, a.byteOffset, a.byteLength);
   let bin = '';
   for (let i = 0; i < bytes.length; i += 0x8000) {
@@ -63,7 +64,7 @@ function encode(a: Uint8Array | Int32Array): string {
   return btoa(bin);
 }
 
-function decodeInto(text: string, target: Uint8Array | Int32Array): void {
+function decodeInto(text: string, target: Uint8Array | Uint16Array | Int32Array): void {
   const bin = atob(text);
   const bytes = new Uint8Array(target.buffer, target.byteOffset, target.byteLength);
   if (bin.length !== bytes.length) throw new Error('corrupt save: map layer size mismatch');

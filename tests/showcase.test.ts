@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildShowcase } from '../src/dev/showcase';
 import { isReadyWorker } from '../src/sim/buildings';
-import { BUILDINGS, ORE_RESOURCES } from '../src/sim/config';
+import { BUILDINGS, CROP_STUBBLE, ORE_RESOURCES } from '../src/sim/config';
 import { hasSign, signLevel } from '../src/sim/specialists';
 import { isCutOff } from '../src/sim/land';
 import { pathLevel } from '../src/sim/paths';
@@ -62,6 +62,8 @@ describe('dev showcase (?demo)', () => {
     expect(all.some((b) => b.stopped && b.done)).toBe(true);
     expect(all.some((b) => b.stopped && !b.done)).toBe(true);
     expect(w.settlers.some((s) => isReadyWorker(s) && s.kind === 'woodcutter')).toBe(true);
+    // Fields at every stage, stubble after the harvest included (Settlers 4's growth, audit item 16).
+    for (let stage = 1; stage <= CROP_STUBBLE; stage++) expect(w.map.crop.includes(stage), `field stage ${stage}`).toBe(true);
     // A field squad stands round its leader (direct army control).
     const leader = w.settlers.find((s) => s.kind === 'leader' && s.post);
     expect(leader).toBeDefined();

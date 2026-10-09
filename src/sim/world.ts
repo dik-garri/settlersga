@@ -75,7 +75,7 @@ import {
 } from './military';
 import { generateMap, type GameMap } from './map';
 import { createFog, ensureVision, isExplored, isVisible, resetSightMasks, updateFog, type FogState } from './fog';
-import { updateNature } from './nature';
+import { rebuildGrowing, updateNature } from './nature';
 import { findPath, staysConnected } from './pathfinding';
 import { createRng, type Rng } from './rng';
 import { mapFromSave, restoreWorld, type SaveData } from './save';
@@ -196,8 +196,8 @@ export class World {
   readonly reservedTargets = new Set<number>();
   /** Tiles a planter is on the way to plant. */
   readonly reservedPlots = new Set<number>();
-  /** Tiles with a grain field; derived from `map.crop`, so not saved. */
-  readonly fields = new Set<number>();
+  /** Saplings, unripe fields and stubble whose growth timer runs (`nature.ts`); derived, rebuilt on load. */
+  readonly growing = new Set<number>();
   /** Tiles with path wear (`paths.ts`); derived from `map.wear`, so not saved. */
   readonly worn = new Set<number>();
   /** Settlers killed this tick; dropped from `settlers` at its end (see `killSettler`). */
@@ -235,7 +235,7 @@ export class World {
     if (opts.from) {
       this.map = mapFromSave(opts.from);
       restoreWorld(this, opts.from);
-      for (let i = 0; i < this.map.crop.length; i++) if (this.map.crop[i] > 0) this.fields.add(i);
+      rebuildGrowing(this);
       rebuildWorn(this);
       rebuildStacks(this);
       return;
@@ -243,6 +243,7 @@ export class World {
     const size = opts.size ?? MAP_SIZE;
     const starts = startPositions(size, opts.players ?? 1);
     this.map = generateMap(seed, size, starts);
+    rebuildGrowing(this);
     for (const st of starts) this.addPlayer(st, opts.start ?? 'medium');
     opts.teams?.forEach((team, k) => {
       if (this.players[k] && Number.isFinite(team)) this.players[k].team = team;

@@ -115,18 +115,21 @@ describe('fishing', () => {
 });
 
 describe('logistics fairness', () => {
-  it('shares a scarce input between consumers instead of filling the oldest first', () => {
+  it('serves the consumer whose pile is emptier first, not the oldest (Settlers 4’s urgency)', () => {
     const w = richWorld();
     const c = base(w);
     const a = placeNear(w, 'sawmill', c.x + 5, c.y - 2)!;
     const b = placeNear(w, 'sawmill', c.x - 5, c.y - 2)!;
     run(w, 1500);
     expect(a.done && b.done).toBe(true);
+    // The older mill already holds 4 logs: its urgency (16 − 2 × 4 = 8, over the distance) stays below
+    // the empty one's (16, then 15) at a similar distance.
+    a.input.log = 4;
     startTower(w).output.log = 2;
     run(w, 10); // one dispatch round
     // Promised or already delivered to each mill.
     const got = (m: typeof a) => m.input.log + m.inbound.log;
-    expect(got(a)).toBe(1);
-    expect(got(b)).toBe(1);
+    expect(got(a)).toBeLessThanOrEqual(4);
+    expect(got(b)).toBe(2);
   });
 });

@@ -32,7 +32,9 @@ describe('smelting', () => {
     expect(smelter.done && gold.done).toBe(true);
     c.output.ironore = 3;
     c.output.goldore = 2;
-    c.output.coal = 5;
+    // Coal goes by Settlers 4's urgency over distance: the nearer smelter fills its pile first, so
+    // enough for both piles, not just for the bars.
+    c.output.coal = 12;
     run(w, 2500);
     expect(w.stats.produced.iron).toBe(3);
     expect(w.stats.produced.gold).toBe(2);

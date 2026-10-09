@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { habitable } from '../src/sim/animals';
-import { ANIMAL_KINDS, ANIMAL_START_CLEARANCE, ANIMALS } from '../src/sim/config';
+import { animalCap, habitable } from '../src/sim/animals';
+import { ANIMAL_KINDS, ANIMAL_SPAWN, ANIMAL_START_CLEARANCE, ANIMALS, TREE_MATURE } from '../src/sim/config';
 import { saveWorld } from '../src/sim/save';
 import { World } from '../src/sim/world';
 import { base } from './helpers';
@@ -47,8 +47,10 @@ describe('wild animals', () => {
       }
     }
     expect(bad).toBe(0);
-    const moved = w.animals.filter((a, i) => Math.hypot(a.x - start[i][0], a.y - start[i][1]) > 0.5).length;
-    expect(moved).toBeGreaterThan(w.animals.length / 2);
+    // Those of the map's start (newborn game is appended, `ANIMAL_SPAWN`).
+    const first = w.animals.slice(0, start.length);
+    const moved = first.filter((a, i) => Math.hypot(a.x - start[i][0], a.y - start[i][1]) > 0.5).length;
+    expect(moved).toBeGreaterThan(first.length / 2);
     for (const a of w.animals) expect(Math.hypot(a.x - a.hx, a.y - a.hy)).toBeLessThanOrEqual(ANIMALS[a.kind].roam * 1.5 + 2);
   });
 
@@ -74,5 +76,36 @@ describe('wild animals', () => {
     run(l, 1500);
     expect(saveWorld(l)).toEqual(saveWorld(w));
     expect(l.animals.length).toBeGreaterThan(0);
+  });
+
+  it('game is born as in Settlers 4: in wooded squares without animals, up to LAND_POP per 100 squares of land', () => {
+    expect(ANIMAL_SPAWN.square).toBe(5);
+    const w = new World(42);
+    const cap = animalCap(w.map);
+    // 12 × 12 squares of mostly land: 8 × land % × 144 / 10000.
+    expect(cap).toBeGreaterThanOrEqual(8);
+    expect(cap).toBeLessThanOrEqual(11);
+    const big = new World(42, { size: 128 });
+    expect(animalCap(big.map)).toBeGreaterThan(cap * 3.5);
+    // Hunt every deer: the manager breeds new ones up to the cap, never more.
+    const deer = () => w.animals.filter((a) => a.kind === 'deer');
+    for (const a of deer()) w.animals.splice(w.animals.indexOf(a), 1);
+    const S = ANIMAL_SPAWN.square;
+    for (let t = 0; t < 3000; t++) {
+      const before = new Set(w.animals.map((a) => a.id));
+      w.step();
+      for (const a of w.animals) {
+        if (before.has(a.id)) continue;
+        // A newborn: by a mature tree, alone in its square when born.
+        const near = [-1, 0, 1].some((dy) => [-1, 0, 1].some((dx) => w.map.tree[w.map.idx(a.x + dx, a.y + dy)] === TREE_MATURE));
+        expect(near).toBe(true);
+        const qx = Math.floor(a.x / S);
+        const qy = Math.floor(a.y / S);
+        const others = w.animals.filter((o) => o !== a && before.has(o.id) && Math.floor(o.x / S) === qx && Math.floor(o.y / S) === qy);
+        expect(others.length).toBe(0);
+      }
+      expect(deer().length).toBeLessThanOrEqual(cap);
+    }
+    expect(deer().length).toBe(cap);
   });
 });

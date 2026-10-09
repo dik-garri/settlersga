@@ -1,4 +1,14 @@
-import { ANIMAL_KINDS, ANIMAL_START_CLEARANCE, ANIMALS, type AnimalDef, type AnimalKind, TERRAIN } from './config';
+import {
+  ANIMAL_KINDS,
+  ANIMAL_SPAWN,
+  ANIMAL_START_CLEARANCE,
+  ANIMALS,
+  type AnimalDef,
+  type AnimalKind,
+  type ForestDensity,
+  TERRAIN,
+  TREE_MATURE,
+} from './config';
 import type { GameMap } from './map';
 import { randInt, type Rng } from './rng';
 import { Terrain } from './types';
@@ -132,38 +142,106 @@ export function spawnAnimals(w: World, starts: { x: number; y: number }[]): void
   }
 }
 
-/** Initial number of animals of a kind on a map of this size (what game grows back to). */
-export function stockOf(map: GameMap, def: AnimalDef): number {
-  return Math.round(def.herds * ((map.w * map.h) / (64 * 64)) * ((def.herd[0] + def.herd[1]) / 2));
+/** Spawn squares across and down the map (`ANIMAL_SPAWN.square`; S4's `XYToVW`). */
+function squaresOf(map: GameMap): [number, number] {
+  return [Math.floor(map.w / ANIMAL_SPAWN.square), Math.floor(map.h / ANIMAL_SPAWN.square)];
+}
+
+const caps = new WeakMap<GameMap, number>();
+
+/**
+ * How many counted animals (`AnimalDef.spawn`) the map holds at most: S4's `CAnimalMgr::Init`,
+ * LAND_POP × land % (at least 1) × squares / 10000, never above `ANIMAL_SPAWN.max`. Terrain never
+ * changes at runtime, so it is worked out once per map (derived).
+ */
+export function animalCap(map: GameMap): number {
+  let cap = caps.get(map);
+  if (cap === undefined) {
+    let land = 0;
+    for (let i = 0; i < map.terrain.length; i++) if (!TERRAIN[map.terrain[i] as Terrain].water) land++;
+    const percent = Math.max(1, Math.floor((100 * land) / (map.w * map.h)));
+    const [sx, sy] = squaresOf(map);
+    cap = Math.min(ANIMAL_SPAWN.max, Math.floor((ANIMAL_SPAWN.landPop * percent * sx * sy) / 10000));
+    caps.set(map, cap);
+  }
+  return cap;
+}
+
+/** Spawn attempts this tick: one per S4 tick, spread evenly over ours (no randomness). */
+function attemptsAt(tick: number): number {
+  const r = ANIMAL_SPAWN.attemptsPerTick;
+  return Math.floor((tick + 1) * r + 1e-9) - Math.floor(tick * r + 1e-9);
+}
+
+/** The density class of a square by its mature trees, or null for open land or one with a building. */
+function densityOf(map: GameMap, x0: number, y0: number): ForestDensity | null {
+  const S = ANIMAL_SPAWN.square;
+  let trees = 0;
+  for (let y = y0; y < y0 + S; y++) {
+    for (let x = x0; x < x0 + S; x++) {
+      const i = map.idx(x, y);
+      // S4 breeds no game in a square of the town (`SpawnAnimalInTown` has no Roman kinds).
+      if (map.building[i] !== 0) return null;
+      if (map.tree[i] === TREE_MATURE) trees++;
+    }
+  }
+  const t = ANIMAL_SPAWN.trees;
+  return trees >= t.deep ? 'deep' : trees >= t.light ? 'light' : trees >= t.plain ? 'plain' : null;
 }
 
 /**
- * Hunted game comes back: every `respawnEvery` ticks (per 64×64 of map, so a bigger map is not a
- * slower world) one animal is born at a living member's herd home while the kind is below its stock.
+ * Settlers 4's animal manager (`ANIMAL_SPAWN`): while the map holds fewer counted animals than its cap,
+ * each attempt picks a random square; one with no animal in it and a fitting kind gets a newborn on a
+ * habitable tile by a tree (the square scanned from a random tile, as `SpawnAnimalBehindTree` does),
+ * which makes that spot its home.
  */
-function respawn(w: World): void {
-  const area = (w.map.w * w.map.h) / (64 * 64);
-  for (const kind of ANIMAL_KINDS) {
+function spawnGame(w: World): void {
+  let n = attemptsAt(w.tick);
+  if (n === 0) return;
+  const { map } = w;
+  const rng = w.animalRng;
+  const [sx, sy] = squaresOf(map);
+  if (sx === 0 || sy === 0) return;
+  const cap = animalCap(map);
+  let counted = 0;
+  let other = 0;
+  for (const a of w.animals) {
+    const def: AnimalDef = ANIMALS[a.kind];
+    if (!def.spawn) continue;
+    counted++;
+    if (!def.game) other++;
+  }
+  if (counted >= cap) return;
+  const S = ANIMAL_SPAWN.square;
+  const occupied = new Set<number>();
+  for (const a of w.animals) {
+    const qx = Math.floor(a.x / S);
+    const qy = Math.floor(a.y / S);
+    if (qx < sx && qy < sy) occupied.add(qy * sx + qx);
+  }
+  for (; n > 0 && counted < cap; n--) {
+    const qx = randInt(rng, sx);
+    const qy = randInt(rng, sy);
+    if (occupied.has(qy * sx + qx)) continue;
+    const density = densityOf(map, qx * S, qy * S);
+    if (!density) continue;
+    const kinds = ANIMAL_KINDS.filter((k) => (ANIMALS[k] as AnimalDef).spawn?.includes(density));
+    if (kinds.length === 0) continue;
+    const kind = kinds[randInt(rng, kinds.length)];
     const def: AnimalDef = ANIMALS[kind];
-    if (!def.respawnEvery) continue;
-    const every = Math.max(1, Math.round(def.respawnEvery / area));
-    if (w.tick % every !== 0) continue;
-    const herd = w.animals.filter((a) => a.kind === kind);
-    if (herd.length === 0 || herd.length >= stockOf(w.map, def)) continue;
-    const mother = herd[randInt(w.animalRng, herd.length)];
-    w.animals.push({
-      id: w.nextAnimalId++,
-      kind,
-      x: mother.x,
-      y: mother.y,
-      px: mother.x,
-      py: mother.y,
-      tx: mother.x,
-      ty: mother.y,
-      rest: restTicks(w.animalRng, def),
-      hx: mother.hx,
-      hy: mother.hy,
-    });
+    if (!def.game && other >= cap * ANIMAL_SPAWN.otherShare) continue;
+    const start = randInt(rng, S * S);
+    for (let k = 0; k < S * S; k++) {
+      const j = (start + k) % (S * S);
+      const x = qx * S + (j % S);
+      const y = qy * S + Math.floor(j / S);
+      if (!habitable(map, def, x, y) || !nearTree(map, x, y, 1)) continue;
+      w.animals.push({ id: w.nextAnimalId++, kind, x, y, px: x, py: y, tx: x, ty: y, rest: restTicks(rng, def), hx: x, hy: y });
+      occupied.add(qy * sx + qx);
+      counted++;
+      if (!def.game) other++;
+      break;
+    }
   }
 }
 
@@ -171,7 +249,7 @@ function respawn(w: World): void {
 export function updateAnimals(w: World): void {
   const { map } = w;
   const rng = w.animalRng;
-  respawn(w);
+  spawnGame(w);
   for (const a of w.animals) {
     a.px = a.x;
     a.py = a.y;
