@@ -11,12 +11,14 @@ import {
   GROUND,
   MAP_SIZE,
   OUTPUT_SHARES,
+  SITE,
   SOLDIER_LEVELS,
   START_CONDITIONS,
   type StartLevel,
   totalCost,
 } from './config';
 import { dropGoods, rebuildStacks } from './ground';
+import { landOf } from './land';
 import { levelTarget, needsDigger, needsLevelling } from './digging';
 import {
   dismissSpecialist,
@@ -30,7 +32,18 @@ import {
 import { orderAttack, orderGarrison, orderHold, orderMove, releaseFighters } from './field';
 import { updateIntruders } from './intruders';
 import { attackStrength } from './strength';
-import { createEconomy, ENDLESS, orderTool, orderWorkers, setAccepts, setDistribution, type EconomyState } from './economy';
+import {
+  createEconomy,
+  ENDLESS,
+  moveTransport,
+  orderTool,
+  orderWorkers,
+  setAccepts,
+  setCarrierReserve,
+  setDistribution,
+  type EconomyState,
+  type TransportMove,
+} from './economy';
 import { rebuildWorn, updatePaths } from './paths';
 import { setWorkArea } from './workArea';
 import { dispatch } from './logistics';
@@ -452,6 +465,16 @@ export class World {
     return orderWorkers(this, player, kind, count);
   }
 
+  /** Player command: carriers kept free — none takes up a job below this (Settlers 4's reserve, `CARRIER_RESERVE`). */
+  setCarrierReserve(count: number, player: PlayerId = LOCAL_PLAYER): boolean {
+    return setCarrierReserve(this, player, count);
+  }
+
+  /** Player command: move a good up or down the transport priority (or to its top or bottom). */
+  moveTransport(res: Resource, how: TransportMove, player: PlayerId = LOCAL_PLAYER): boolean {
+    return moveTransport(this, player, res, how);
+  }
+
   /** Player command: queue `count` more of a tool at the toolsmiths (`ENDLESS` = keep making, 0 = clear). */
   orderTool(res: Resource, count: number, player: PlayerId = LOCAL_PLAYER): boolean {
     return orderTool(this, player, res, count);
@@ -521,10 +544,20 @@ export class World {
     return true;
   }
 
-  /** Player command: serve this building first (materials, inputs, builders). */
+  /**
+   * Player command: serve this building first (materials, inputs, builders and diggers). For a site it
+   * is Settlers 4's hard priority (`SITE`): while it needs a material nobody else on its piece of land
+   * gets any; at most `SITE.maxPriority` prioritised sites per piece, the flag goes once it is built.
+   */
   setPriority(id: number, on: boolean, player: PlayerId = LOCAL_PLAYER): boolean {
     const b = this.buildings.get(id);
     if (!b || b.owner !== player) return false;
+    if (on && !b.priority && !b.done) {
+      const piece = landOf(this, b);
+      let n = 0;
+      for (const o of this.buildings.values()) if (o.owner === player && o.priority && !o.done && landOf(this, o) === piece) n++;
+      if (n >= SITE.maxPriority) return false;
+    }
     b.priority = on;
     return true;
   }
@@ -696,7 +729,7 @@ export class World {
     if (this.map.isWalkable(from.x, from.y) && !findPath(this.map, from.x, from.y, door.x, door.y)) return null;
     const b = addBuilding(this, type, x, y, player, false);
     if (needsDigger(type)) {
-      // Diggers clear every site first (and flatten a sloped one); carriers bring materials meanwhile.
+      // Diggers clear every site first (and flatten a sloped one); carriers bring materials once one is on his way.
       b.levelled = false;
       b.levelTo = needsLevelling(this.map, type, x, y) ? levelTarget(this.map, b) : -1;
     }

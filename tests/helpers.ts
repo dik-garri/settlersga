@@ -35,7 +35,10 @@ export function groundUnits(w: World, res: Resource, owner?: PlayerId): number {
 /** Units of `res` that exist as goods: in piles, finished buildings' inputs, on the ground and in hands. */
 export function goodsInWorld(w: World, res: Resource): number {
   let n = groundUnits(w, res);
-  for (const s of w.settlers) if (s.carrying === res) n += s.load ?? 1;
+  for (const s of w.settlers) {
+    if (s.carrying === res) n += s.load ?? 1;
+    if (s.pack2?.res === res) n += s.pack2.n; // a donkey's second pack
+  }
   for (const b of w.buildings.values()) n += b.output[res] + (b.done ? b.input[res] : 0);
   return n;
 }

@@ -1,6 +1,7 @@
 import { settlerIcon } from '../render/atlas';
 import { BUILDINGS, PROFESSIONS, RESOURCE_INFO, SOLDIER_LEVELS } from '../sim/config';
 import { isFighter, maxHp } from '../sim/military';
+import { packsOf } from '../sim/trade';
 import type { Building, Settler, SettlerKind, Task } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { button, el, rowsTable, type View } from './dom';
@@ -69,7 +70,11 @@ export class SettlerInfoView implements View {
     const ally = s.owner !== LOCAL_PLAYER && this.world.allied(s.owner, LOCAL_PLAYER);
     rows.push(['Владелец', s.owner === LOCAL_PLAYER ? 'вы' : `игрок ${s.owner}${ally ? ' (союзник)' : ''}`]);
     rows.push(['Занят', this.doing(s)]);
-    if (s.carrying) rows.push(['Несёт', RESOURCE_INFO[s.carrying].name]);
+    if (s.carrying) {
+      // A pack donkey carries up to two packs; a carrier one unit.
+      const packs = packsOf(s).map((p) => (s.load === undefined && !s.pack2 ? RESOURCE_INFO[p.res].name : `${RESOURCE_INFO[p.res].name} × ${p.n}`));
+      rows.push(['Несёт', packs.join(', ')]);
+    }
     if (isFighter(s)) {
       rows.push(['Уровень', `${s.level + 1} из ${SOLDIER_LEVELS.length}`]);
       rows.push(['Здоровье', `${Math.max(0, Math.round(s.hp))} / ${Math.round(maxHp(s))}`]);
@@ -87,7 +92,8 @@ export class SettlerInfoView implements View {
       const from = load && 'b' in load ? name(load.b) : 'в пути';
       const to = unload && 'b' in unload ? name(unload.b) : '—';
       rows.push(['Маршрут', `${from} → ${to}`]);
-      if (load && load.t === 'load') rows.push(['Заберёт', `${RESOURCE_INFO[load.res].name} × ${load.n}`]);
+      const loads = s.tasks.filter((t) => t.t === 'load');
+      if (loads.length > 0) rows.push(['Заберёт', loads.map((t) => (t.t === 'load' ? `${RESOURCE_INFO[t.res].name} × ${t.n}` : '')).join(', ')]);
     }
     return rows;
   }

@@ -20,9 +20,9 @@
  */
 import { centerOf, claimsTerritory, recomputeTerritory } from './buildings';
 import { leaveSite } from './digging';
+import { spareCarriers } from './economy';
 import {
   ATTACK_RANGE,
-  BARRACKS_MIN_IDLE,
   BUILDINGS,
   INPUT_CAP,
   OUTPUT_SHARES,
@@ -247,10 +247,10 @@ export function mostBehindShare(
 
 /**
  * The player's army room: free garrison slots of each kind (archer / melee) minus fighters of that
- * kind already looking for one, recruits in training (or on their way to a barracks) and idle carriers.
+ * kind already looking for one, and recruits in training (or on their way to a barracks).
  */
-function armyRoom(w: World, owner: PlayerId): { archer: number; melee: number; training: number; idle: number } {
-  const out = { archer: 0, melee: 0, training: 0, idle: 0 };
+function armyRoom(w: World, owner: PlayerId): { archer: number; melee: number; training: number } {
+  const out = { archer: 0, melee: 0, training: 0 };
   for (const o of w.buildings.values()) {
     if (o.owner !== owner || !o.done || !isMilitary(o)) continue;
     out.archer += slotsFree(w, o, true);
@@ -258,8 +258,7 @@ function armyRoom(w: World, owner: PlayerId): { archer: number; melee: number; t
   }
   for (const s of w.settlers) {
     if (s.owner !== owner || w.dying.has(s.id)) continue;
-    if (s.kind === 'carrier' && s.tasks.length === 0) out.idle++;
-    else if (s.kind === 'recruit' || s.tasks.some((t) => t.t === 'become' && t.kind === 'recruit')) out.training++;
+    if (s.kind === 'recruit' || s.tasks.some((t) => t.t === 'become' && t.kind === 'recruit')) out.training++;
     else if (isFighter(s) && s.home === null && !s.post && !s.tasks.some((t) => t.t === 'join' || t.t === 'heal')) {
       if (isArcher(s)) out.archer--;
       else out.melee--;
@@ -282,13 +281,13 @@ function trainable(w: World, b: Building, room = armyRoom(w, b.owner)): Resource
 
 /**
  * Whether a barracks should call in a recruit now: it has a weapon whose fighters find a free slot of
- * their kind, the player keeps `BARRACKS_MIN_IDLE` idle carriers, and there is more free garrison
- * room than recruits already in training.
+ * their kind, the player has a carrier to spare above the carrier reserve (`spareCarriers`), and there
+ * is more free garrison room than recruits already in training.
  */
 export function wantsRecruit(w: World, b: Building): boolean {
   if (!WEAPONS.some((r) => b.input[r] > 0)) return false;
+  if (spareCarriers(w, b.owner) <= 0) return false;
   const room = armyRoom(w, b.owner);
-  if (room.idle < BARRACKS_MIN_IDLE) return false;
   return trainable(w, b, room).length > 0 && Math.max(0, room.archer) + Math.max(0, room.melee) > room.training;
 }
 
@@ -706,6 +705,8 @@ export function killSettler(w: World, s: Settler): void {
   }
   // What he carried is lost with him; dropped first, so `abort` reserves no trip home for it.
   if (s.carrying) w.stats.lost[s.carrying] += s.load ?? 1;
+  if (s.pack2) w.stats.lost[s.pack2.res] += s.pack2.n;
+  delete s.pack2;
   s.carrying = null;
   abort(w, s);
   s.tasks = [];

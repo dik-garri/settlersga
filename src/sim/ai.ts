@@ -47,6 +47,7 @@ import { isCutOff, landAt, landOf } from './land';
 import { claimable, isFreeSpecialist, robbable } from './specialists';
 import { FIGHTERS, isFighter, isMilitary, keepOf } from './military';
 import { hasGatherTargetNear, isGatherTarget } from './nature';
+import { packsOf } from './trade';
 import { RESOURCES, Terrain, type Building, type BuildingType, type PlayerId, type Point, type Resource } from './types';
 import { startPositions, type World } from './world';
 
@@ -545,8 +546,8 @@ function tradeCheck(w: World, ai: AiState, own: Building[]): void {
     if (ordered === ENDLESS) continue;
     let pending = ordered + away.output[r] - away.outReserved[r];
     for (const s of w.settlers) {
-      if (s.owner === me && s.carrying === r && PROFESSIONS[s.kind].behavior === 'donkey' && s.tasks.some((k) => k.t === 'unload' && k.b === away.id)) {
-        pending += s.load ?? 1;
+      if (s.owner === me && PROFESSIONS[s.kind].behavior === 'donkey' && s.tasks.some((k) => k.t === 'unload' && k.b === away.id)) {
+        for (const pack of packsOf(s)) if (pack.res === r) pending += pack.n;
       }
     }
     const more = need[r]! - pending;

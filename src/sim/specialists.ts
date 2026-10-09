@@ -1,6 +1,6 @@
 import { nearestStorage } from './buildings';
 import { FIELD, GEOLOGIST, GEOLOGIST_SIGN, ORDERABLE, PIONEER, PROFESSIONS, THIEF } from './config';
-import { recountWorkers, workerOrder, workersOf } from './economy';
+import { recountWorkers, spareCarriers, workerOrder, workersOf } from './economy';
 import { restIdle } from './idle';
 import { formationSpots } from './field';
 import { freeGoods, goodsOn, reserveGoods, stackTiles } from './ground';
@@ -498,6 +498,8 @@ export function sendGeologist(w: World, x: number, y: number, player: PlayerId):
     waiting.errand = { x, y };
     return true;
   }
+  // Taking a carrier for it respects the carrier reserve, like any recruitment (`spareCarriers`).
+  if (spareCarriers(w, player) <= 0) return false;
   const tool = PROFESSIONS.geologist.tool;
   const from = tool ? toolPileNear(w, player, x, y) : undefined;
   if (tool && !from) return false;

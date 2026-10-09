@@ -1,4 +1,4 @@
-import { BUILDINGS, ORDERABLE, START_CONDITIONS, type StartLevel } from './config';
+import { BUILDINGS, CARRIER_RESERVE, ORDERABLE, START_CONDITIONS, TRANSPORT_PRIORITY, type StartLevel } from './config';
 import { nearestStorage } from './buildings';
 import { landOf } from './land';
 import { RESOURCES, type Building, type BuildingType, type PlayerId, type Resource, type SettlerKind, type Task } from './types';
@@ -13,13 +13,18 @@ import type { World } from './world';
  *   without orders are forged automatically, by need (`chooseOutput`);
  * - `distribution`: per good, weights between the building types that consume it; a good without an
  *   entry is shared fairly (least-stocked consumer first). `tally` counts units handed out per type,
- *   so deliveries follow the weights over time.
+ *   so deliveries follow the weights over time;
+ * - `minCarriers`: the free-carrier reserve (`CARRIER_RESERVE`): no carrier takes up a job while the
+ *   player has no more carriers than this;
+ * - `transport`: the transport priority, every good once, most urgent first (`TRANSPORT_PRIORITY`).
  */
 export interface EconomyState {
   orders: Partial<Record<SettlerKind, number>>;
   toolOrders: Partial<Record<Resource, number>>;
   distribution: Partial<Record<Resource, Partial<Record<BuildingType, number>>>>;
   tally: Partial<Record<Resource, Partial<Record<BuildingType, number>>>>;
+  minCarriers: number;
+  transport: Resource[];
 }
 
 /** A tool order that never runs out. */
@@ -28,7 +33,14 @@ export const ENDLESS = -1;
 /** Fresh settings for a player starting with `start`'s workers. */
 export function createEconomy(start: StartLevel): EconomyState {
   const s = START_CONDITIONS[start];
-  return { orders: { builder: s.builders, digger: s.diggers }, toolOrders: {}, distribution: {}, tally: {} };
+  return {
+    orders: { builder: s.builders, digger: s.diggers },
+    toolOrders: {},
+    distribution: {},
+    tally: {},
+    minCarriers: CARRIER_RESERVE.default,
+    transport: [...TRANSPORT_PRIORITY],
+  };
 }
 
 export function economyOf(w: World, player: PlayerId): EconomyState {
@@ -78,6 +90,55 @@ export function recountWorkers(w: World): void {
 export function orderWorkers(w: World, player: PlayerId, kind: SettlerKind, count: number): boolean {
   if (!ORDERABLE.includes(kind) || !Number.isFinite(count)) return false;
   economyOf(w, player).orders[kind] = Math.max(0, Math.min(999, Math.round(count)));
+  return true;
+}
+
+// ------------------------------------------------------------------ carrier reserve
+
+/** The player's free-carrier reserve. */
+export function carrierReserve(w: World, player: PlayerId): number {
+  return economyOf(w, player).minCarriers;
+}
+
+/** Player command: set the carrier reserve (clamped to `CARRIER_RESERVE.min`…`max`). */
+export function setCarrierReserve(w: World, player: PlayerId, count: number): boolean {
+  if (!Number.isFinite(count)) return false;
+  economyOf(w, player).minCarriers = Math.max(CARRIER_RESERVE.min, Math.min(CARRIER_RESERVE.max, Math.round(count)));
+  return true;
+}
+
+/**
+ * How many of the player's carriers may still take up a job (worker, builder, digger, specialist,
+ * recruit), as in Settlers 4 (`OrderWorker`: `MinCarrier < carriers − carriers with a job order`):
+ * its carriers, busy or idle, minus those already on their way to a new job, minus the reserve.
+ */
+export function spareCarriers(w: World, player: PlayerId): number {
+  let n = 0;
+  for (const s of w.settlers) {
+    if (s.owner !== player || s.kind !== 'carrier' || w.dying.has(s.id)) continue;
+    if (!s.tasks.some((t) => t.t === 'become' || t.t === 'retool')) n++;
+  }
+  return n - carrierReserve(w, player);
+}
+
+// ---------------------------------------------------------------- transport priority
+
+/** The player's transport priority: every good once, most urgent first. */
+export function transportOrder(w: World, player: PlayerId): readonly Resource[] {
+  return economyOf(w, player).transport;
+}
+
+export type TransportMove = 'up' | 'down' | 'top' | 'bottom';
+
+/** Player command: move a good one place up or down the transport priority, or to its top or bottom. */
+export function moveTransport(w: World, player: PlayerId, res: Resource, how: TransportMove): boolean {
+  const list = economyOf(w, player).transport;
+  const i = list.indexOf(res);
+  if (i < 0) return false;
+  const to = how === 'up' ? i - 1 : how === 'down' ? i + 1 : how === 'top' ? 0 : how === 'bottom' ? list.length - 1 : -1;
+  if (to < 0 || to >= list.length) return to === i;
+  list.splice(i, 1);
+  list.splice(to, 0, res);
   return true;
 }
 

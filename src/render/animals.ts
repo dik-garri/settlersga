@@ -52,6 +52,8 @@ interface UnitView extends View {
   owner: number;
   pack: Sprite;
   ware: Sprite;
+  /** The second pack's good (`Settler.pack2`), beside the first. */
+  ware2: Sprite;
 }
 
 /**
@@ -94,9 +96,12 @@ export class AnimalLayer {
       const ware = new Sprite();
       ware.scale.set(0.8);
       ware.position.set(0, -PACK.back * ANIMAL_SCALE[kind] - 4);
+      const ware2 = new Sprite();
+      ware2.scale.set(0.8);
+      ware2.position.set(5, -PACK.back * ANIMAL_SCALE[kind] - 2);
       sprite.scale.set(ANIMAL_SCALE[kind]);
-      root.addChild(sprite, pack, ware);
-      v = { root, sprite, pack, ware, owner: s.owner, dir: (s.id * 3) % DIRS.length, walked: 0, lastX: s.x, lastY: s.y };
+      root.addChild(sprite, pack, ware, ware2);
+      v = { root, sprite, pack, ware, ware2, owner: s.owner, dir: (s.id * 3) % DIRS.length, walked: 0, lastX: s.x, lastY: s.y };
       this.units.set(s.id, v);
     }
     const x = s.px + (s.x - s.px) * alpha;
@@ -121,16 +126,21 @@ export class AnimalLayer {
     }
     if (!onScreen) return;
     this.pose(kind, s, v, timeMs, s.tasks.length === 0);
-    v.ware.visible = s.carrying !== null;
-    if (s.carrying) {
-      const t = this.wareTex[s.carrying];
-      if (v.ware.texture !== t) {
-        v.ware.texture = t;
-        v.ware.anchor.copyFrom(t.defaultAnchor!);
-      }
-    }
+    this.showWare(v.ware, s.carrying);
+    // A second pack of another good shows beside the first.
+    this.showWare(v.ware2, s.pack2 && s.pack2.res !== s.carrying ? s.pack2.res : null);
     v.root.position.set(px, py);
     v.root.zIndex = depthOf(x, y) + 0.01;
+  }
+
+  private showWare(sprite: Sprite, res: Resource | null): void {
+    sprite.visible = res !== null;
+    if (!res) return;
+    const t = this.wareTex[res];
+    if (sprite.texture !== t) {
+      sprite.texture = t;
+      sprite.anchor.copyFrom(t.defaultAnchor!);
+    }
   }
 
   /** The view root of a settler drawn as an animal, if it is on screen (for selection markers). */

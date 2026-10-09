@@ -1,13 +1,16 @@
 import { buildingIcon, settlerIcon, wareIcon } from '../render/atlas';
-import { BUILDINGS, ORDERABLE, PROFESSIONS, RESOURCE_INFO } from '../sim/config';
+import { BUILDINGS, CARRIER_RESERVE, ORDERABLE, PROFESSIONS, RESOURCE_INFO } from '../sim/config';
 import {
+  carrierReserve,
   consumersOf,
   distributableGoods,
   distributionWeight,
   economyOf,
   ENDLESS,
+  transportOrder,
   workerOrder,
   workersOf,
+  type TransportMove,
 } from '../sim/economy';
 import type { Building, Resource } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
@@ -33,10 +36,31 @@ export class WorkersView implements View {
   update(): void {
     const w = this.world;
     const workers = ORDERABLE.map((k) => [workersOf(w, LOCAL_PLAYER, k), workerOrder(w, LOCAL_PLAYER, k)]);
-    const key = JSON.stringify(workers);
+    const reserve = carrierReserve(w, LOCAL_PLAYER);
+    const key = JSON.stringify([workers, reserve]);
     if (key === this.key) return;
     this.key = key;
     this.el.innerHTML = '';
+    // Settlers 4's carrier reserve: no carrier takes up a job while no more than this are left.
+    this.el.append(el('h4', '', 'Резерв носильщиков'));
+    this.el.append(
+      el('p', 'muted', `Столько носильщиков никогда не станут рабочими, строителями, специалистами или солдатами (от ${CARRIER_RESERVE.min}).`),
+    );
+    const keep = el('div', 'eco-row carrier-reserve');
+    const setReserve = (n: number) => {
+      w.setCarrierReserve(n);
+      this.update();
+    };
+    keep.append(
+      settlerIcon('carrier', 28),
+      el('span', 'eco-name', PROFESSIONS.carrier.name),
+      el('b', '', String(reserve)),
+      button('−5', 'На пятерых меньше', () => setReserve(reserve - 5)),
+      button('−1', 'На одного меньше', () => setReserve(reserve - 1)),
+      button('+1', 'На одного больше', () => setReserve(reserve + 1)),
+      button('+5', 'На пятерых больше', () => setReserve(reserve + 5)),
+    );
+    this.el.append(keep);
     this.el.append(el('h4', '', 'Заказ рабочих'));
     this.el.append(
       el('p', 'muted', 'Строители, землекопы и специалисты набираются из свободных носильщиков с инструментом — сколько заказано.'),
@@ -60,6 +84,47 @@ export class WorkersView implements View {
       );
       this.el.append(row);
     });
+  }
+}
+
+/**
+ * Goods menu, transport part: the order in which carriers move goods when they are short (Settlers
+ * 4's transport priority list); each good moves a place up or down, or to the top or bottom.
+ */
+export class TransportView implements View {
+  readonly el = el('div', 'view transport-view');
+  private key = '';
+
+  constructor(private readonly world: World) {}
+
+  update(): void {
+    const w = this.world;
+    const order = transportOrder(w, LOCAL_PLAYER);
+    const key = order.join();
+    if (key === this.key) return;
+    this.key = key;
+    this.el.innerHTML = '';
+    this.el.append(el('h4', '', 'Порядок перевозки'));
+    this.el.append(el('p', 'muted', 'Когда носильщиков не хватает, товары выше по списку везут первыми.'));
+    const list = el('div', 'transport-list');
+    const move = (res: Resource, how: TransportMove) => {
+      w.moveTransport(res, how);
+      this.update();
+    };
+    order.forEach((res, i) => {
+      const row = el('div', 'eco-row transport-row');
+      const first = i === 0;
+      const last = i === order.length - 1;
+      const up = button('↑', 'На одно место выше', () => move(res, 'up'));
+      const top = button('⤒', 'В начало списка', () => move(res, 'top'));
+      const down = button('↓', 'На одно место ниже', () => move(res, 'down'));
+      const bottom = button('⤓', 'В конец списка', () => move(res, 'bottom'));
+      up.disabled = top.disabled = first;
+      down.disabled = bottom.disabled = last;
+      row.append(el('span', 'transport-rank', String(i + 1)), wareIcon(res, 18), el('span', 'eco-name', nameOf(res)), top, up, down, bottom);
+      list.append(row);
+    });
+    this.el.append(list);
   }
 }
 

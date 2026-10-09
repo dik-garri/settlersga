@@ -4,7 +4,9 @@ import { groundStock } from '../sim/ground';
 import { RESOURCES, type Resource } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { button, el, type View } from './dom';
-import { DistributionView } from './economyPanel';
+import { DistributionView, TransportView } from './economyPanel';
+
+type Page = 'stock' | 'distribution' | 'transport';
 
 /**
  * Total of `res` in the local player's warehouses and lying on the ground of its land (the start
@@ -20,19 +22,21 @@ export function inStorage(world: World, res: Resource): number {
 
 /**
  * The goods menu (Settlers 4's goods and production overviews): every good in the player's
- * warehouses and on the ground of its land by group, and on the second page the distribution of
- * goods between consumers.
+ * warehouses and on the ground of its land by group, on the second page the distribution of goods
+ * between consumers and on the third the transport priority.
  */
 export class GoodsView implements View {
   readonly el = el('div', 'view goods-view');
   private readonly stock = el('div');
   private readonly distribution: DistributionView;
+  private readonly transport: TransportView;
   private readonly values: [Resource, HTMLElement][] = [];
-  private page: 'stock' | 'distribution' = 'stock';
-  private readonly pageButtons: Record<'stock' | 'distribution', HTMLButtonElement>;
+  private page: Page = 'stock';
+  private readonly pageButtons: Record<Page, HTMLButtonElement>;
 
   constructor(private readonly world: World) {
     this.distribution = new DistributionView(world);
+    this.transport = new TransportView(world);
     for (const [group, title] of Object.entries(RESOURCE_GROUPS) as [ResourceGroup, string][]) {
       this.stock.append(el('h4', '', title));
       const grid = el('div', 'stock-grid');
@@ -51,24 +55,29 @@ export class GoodsView implements View {
     this.pageButtons = {
       stock: button('Склад', 'Все товары на складах и на земле', () => this.show('stock')),
       distribution: button('Распределение', 'Кому сколько товара', () => this.show('distribution')),
+      transport: button('Перевозка', 'Какие товары носильщики везут первыми', () => this.show('transport')),
     };
-    pages.append(this.pageButtons.stock, this.pageButtons.distribution);
-    this.el.append(pages, this.stock, this.distribution.el);
+    pages.append(this.pageButtons.stock, this.pageButtons.distribution, this.pageButtons.transport);
+    this.el.append(pages, this.stock, this.distribution.el, this.transport.el);
     this.show('stock');
   }
 
-  private show(page: 'stock' | 'distribution'): void {
+  private show(page: Page): void {
     this.page = page;
     this.stock.hidden = page !== 'stock';
     this.distribution.el.hidden = page !== 'distribution';
-    this.pageButtons.stock.classList.toggle('active', page === 'stock');
-    this.pageButtons.distribution.classList.toggle('active', page === 'distribution');
+    this.transport.el.hidden = page !== 'transport';
+    for (const p of Object.keys(this.pageButtons) as Page[]) this.pageButtons[p].classList.toggle('active', page === p);
     this.update();
   }
 
   update(): void {
     if (this.page === 'distribution') {
       this.distribution.update();
+      return;
+    }
+    if (this.page === 'transport') {
+      this.transport.update();
       return;
     }
     for (const [r, value] of this.values) {

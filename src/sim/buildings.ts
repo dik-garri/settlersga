@@ -269,25 +269,24 @@ export function oreLeft(w: World, b: Building): number {
   return n;
 }
 
-/** Ore tiles of the mine's kind within its radius, in scan order. */
-function oreTiles(w: World, b: Building, def: BuildingDef): number[] {
-  const { res, radius } = def.mine!;
+/** Tiles a mine digs in, in scan order: every map tile within its radius, ore or not. */
+function mineTiles(w: World, b: Building, def: BuildingDef): number[] {
+  const { radius } = def.mine!;
   const c = centerOf(b);
   const out: number[] = [];
   for (let y = Math.floor(c.y - radius); y <= Math.ceil(c.y + radius); y++) {
     for (let x = Math.floor(c.x - radius); x <= Math.ceil(c.x + radius); x++) {
-      if (!w.map.inBounds(x, y) || Math.hypot(x - c.x, y - c.y) > radius) continue;
-      const i = w.map.idx(x, y);
-      if (w.map.oreAmount[i] > 0 && oreOf(w.map.ore[i]) === res) out.push(i);
+      if (w.map.inBounds(x, y) && Math.hypot(x - c.x, y - c.y) <= radius) out.push(w.map.idx(x, y));
     }
   }
   return out;
 }
 
 /**
- * A mine as in Settlers 4: one food buys digging attempts (more for the mine's favourite food, see
- * `MINING`); each attempt, every `recipe.ticks`, picks an ore tile in range at random and yields one
- * unit — surely while the tile is rich, by chance once it runs low.
+ * A mine as in Settlers 4 (`CMineRole`): one food buys digging attempts (more for the mine's
+ * favourite food, see `MINING`); each attempt, every `recipe.ticks`, picks a tile in range at random
+ * — a tile without its ore is a miss — and yields one unit from an ore tile: surely while the tile is
+ * rich, by chance once it runs low. A worked-out mine goes on eating and missing.
  */
 function runMine(w: World, b: Building, def: BuildingDef, recipe: Recipe): void {
   const { res, favourite } = def.mine!;
@@ -296,8 +295,6 @@ function runMine(w: World, b: Building, def: BuildingDef, recipe: Recipe): void 
   if (!b.attempts && !foods.some((r) => b.input[r] > 0)) return;
   if (++b.timer < recipe.ticks) return;
   b.timer = 0;
-  const tiles = oreTiles(w, b, def);
-  if (tiles.length === 0) return; // worked out
   if (!b.attempts) {
     // The favourite if there is any, else whichever food is most plentiful.
     const pick = b.input[favourite] > 0 ? favourite : foods.reduce((a, r) => (b.input[r] > b.input[a] ? r : a));
@@ -305,8 +302,10 @@ function runMine(w: World, b: Building, def: BuildingDef, recipe: Recipe): void 
     b.attempts = pick === favourite ? MINING.attempts.favourite : MINING.attempts.other;
   }
   b.attempts--;
+  const tiles = mineTiles(w, b, def);
   const i = tiles[Math.floor(w.rng() * tiles.length)];
-  const amount = w.map.oreAmount[i];
+  const amount = oreOf(w.map.ore[i]) === res ? w.map.oreAmount[i] : 0;
+  if (amount === 0) return; // a miss: no ore of its kind there (any more)
   if (amount < MINING.sureAmount && w.rng() >= MINING.chancePerUnit * amount) return; // nothing this time
   if (--w.map.oreAmount[i] === 0) w.map.touch(i);
   b.output[res]++;
@@ -347,12 +346,15 @@ export function updateBuilding(w: World, b: Building): void {
     const pick = recipe.inputsAnyOf.reduce((a, r) => (b.input[r] > b.input[a] ? r : a));
     b.input[pick]--;
   }
+  // The inputs are always used up; the outputs come with `outputChance` (an animal ranch's feeding).
+  const yields = recipe.outputChance === undefined || w.rng() < recipe.outputChance;
   for (const r of RESOURCES) {
-    const made = recipe.outputs[r] ?? 0;
+    const made = yields ? (recipe.outputs[r] ?? 0) : 0;
     b.input[r] -= recipe.inputs[r] ?? 0;
     b.output[r] += made;
     w.stats.produced[r] += made;
   }
+  if (!yields) return;
   if (def.breeds) spawnSettler(w, def.breeds, b);
   const chosen = recipe.outputChoice ? chooseOutput(w, b, recipe) : null;
   if (chosen) {

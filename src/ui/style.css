@@ -506,6 +506,17 @@ button.wide {
   padding: 1px 5px !important;
 }
 
+.transport-rank {
+  width: 18px;
+  text-align: right;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.transport-row button:disabled {
+  opacity: 0.35;
+}
+
 .eco-dist {
   margin-bottom: 6px;
 }

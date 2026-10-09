@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { BUILDINGS, MINING, oreOf } from '../src/sim/config';
+import { BUILDINGS, MINING, ORE_RESOURCES, oreOf } from '../src/sim/config';
 import { available } from '../src/sim/buildings';
 import { workerOrder, workersOf } from '../src/sim/economy';
 import { saveWorld } from '../src/sim/save';
-import { Terrain } from '../src/sim/types';
+import { Terrain, type Building } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { placeNear } from '../tools/scenario';
 import { clearGround, depot, startTower } from './helpers';
@@ -37,6 +37,20 @@ function ownedOre(w: World, res: 'coal' | 'ironore') {
     if (w.owns(x, y) && w.map.oreAmount[i] > 0 && oreOf(w.map.ore[i]) === res) tiles.push({ x, y });
   }
   return tiles;
+}
+
+/** Every map tile within the mine's reach (its footprint centre ± `mine.radius`), ore or not. */
+function reachOf(w: World, mine: Building): number[] {
+  const r = BUILDINGS[mine.type].mine!.radius;
+  const cx = mine.x + (mine.w - 1) / 2;
+  const cy = mine.y + (mine.h - 1) / 2;
+  const out: number[] = [];
+  for (let y = Math.floor(cy - r); y <= Math.ceil(cy + r); y++) {
+    for (let x = Math.floor(cx - r); x <= Math.ceil(cx + r); x++) {
+      if (w.map.inBounds(x, y) && Math.hypot(x - cx, y - cy) <= r) out.push(w.map.idx(x, y));
+    }
+  }
+  return out;
 }
 
 function oreLeft(w: World, res: 'coal' | 'ironore') {
@@ -94,14 +108,17 @@ describe('mines', () => {
   });
 
   it('rich tiles always yield, poor ones by chance', () => {
-    // A rich deposit gives exactly one unit per attempt.
+    // A mine whose whole reach is rich coal gives exactly one unit per attempt.
     const w = richWorld();
     const [spot] = ownedOre(w, 'coal');
     const mine = placeNear(w, 'coalmine', spot.x, spot.y, 4)!;
     run(w, 3000);
     expect(mine.done).toBe(true);
     depot(w, 1, undefined, ['coal']);
-    for (let i = 0; i < w.map.oreAmount.length; i++) if (oreOf(w.map.ore[i]) === 'coal') w.map.oreAmount[i] = MINING.sureAmount + 20;
+    for (const i of reachOf(w, mine)) {
+      w.map.ore[i] = ORE_RESOURCES.indexOf('coal') + 1;
+      w.map.oreAmount[i] = MINING.sureAmount + 20;
+    }
     startTower(w).output.bread = 1;
     run(w, 3000);
     expect(w.stats.produced.coal).toBe(MINING.attempts.favourite);
@@ -119,6 +136,41 @@ describe('mines', () => {
     expect(startTower(v).output.bread).toBe(0);
     expect(v.stats.produced.coal).toBeGreaterThan(0);
     expect(v.stats.produced.coal).toBeLessThan(4 * MINING.attempts.favourite * 0.6);
+  });
+
+  it('miss on tiles without their ore, as in Settlers 4: an attempt picks any tile in reach', () => {
+    const w = richWorld();
+    const [spot] = ownedOre(w, 'coal');
+    const mine = placeNear(w, 'coalmine', spot.x, spot.y, 4)!;
+    run(w, 3000);
+    expect(mine.done).toBe(true);
+    depot(w, 1, undefined, ['coal']);
+    // Half the reach rich coal, the other half nothing: about half the attempts find coal.
+    const reach = reachOf(w, mine);
+    reach.forEach((i, k) => {
+      w.map.ore[i] = k % 2 === 0 ? ORE_RESOURCES.indexOf('coal') + 1 : 0;
+      w.map.oreAmount[i] = k % 2 === 0 ? MINING.sureAmount + 20 : 0;
+    });
+    startTower(w).output.bread = 6;
+    run(w, 9000);
+    expect(startTower(w).output.bread).toBe(0);
+    const attempts = 6 * MINING.attempts.favourite;
+    expect(w.stats.produced.coal).toBeGreaterThan(attempts * 0.3);
+    expect(w.stats.produced.coal).toBeLessThan(attempts * 0.75);
+  });
+
+  it('a worked-out mine goes on eating: every attempt a miss', () => {
+    const w = richWorld();
+    const [spot] = ownedOre(w, 'coal');
+    const mine = placeNear(w, 'coalmine', spot.x, spot.y, 4)!;
+    run(w, 3000);
+    expect(mine.done).toBe(true);
+    for (const i of reachOf(w, mine)) w.map.oreAmount[i] = 0;
+    startTower(w).output.bread = 2;
+    run(w, 4000);
+    expect(startTower(w).output.bread).toBe(0);
+    expect(mine.input.bread).toBe(0);
+    expect(w.stats.produced.coal).toBe(0);
   });
 
   it('stop when the ore within reach runs out', () => {
