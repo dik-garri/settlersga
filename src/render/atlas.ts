@@ -611,7 +611,8 @@ function addArt3d(a: AtlasBuilder, art: Art3d): void {
     const strip = art.images.get(`fields-${kind}`)!;
     const f = FIELD_FRAME;
     for (let s = 1; s <= stages; s++) a.add(`field:${kind}:${s}`, f.w, f.h, f.ax, f.ay, (ctx) => drawFrame(ctx, strip, s - 1, f.w, f.h));
-    // Stubble after the harvest: no frame of its own yet, so stalks painted over the sown field.
+    // Stubble after the harvest is the strip's last frame (`CROP_STUBBLE`); a strip that stops at the
+    // ripe stage gets stalks painted over its sown field instead.
     if (stages < CROP_STUBBLE) {
       a.add(`field:${kind}:${CROP_STUBBLE}`, f.w, f.h, f.ax, f.ay, (ctx) => {
         drawFrame(ctx, strip, 0, f.w, f.h);

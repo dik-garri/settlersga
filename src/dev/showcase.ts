@@ -234,6 +234,17 @@ export function buildShowcase(): World {
   if (stopSite) w.setStopped(stopSite.id, true);
   const jobless = spawnSettler(w, 'woodcutter', c);
   jobless.inside = null;
+  // A spare healer and watchman by their buildings, so their looks are seen outdoors (the ones at work
+  // stay inside).
+  for (const [kind, type] of [['healer', 'infirmary'], ['watchman', 'lookout']] as const) {
+    const home = [...w.buildings.values()].find((b) => b.owner === LOCAL_PLAYER && b.type === type && b.done);
+    if (!home) continue;
+    const s = spawnSettler(w, kind, c);
+    s.inside = null;
+    const at = openGround(w, home.door.x + 1, home.door.y + 2);
+    s.x = s.px = at.x;
+    s.y = s.py = at.y;
+  }
 
   // A full storage yard (Settlers 4: 8 piles of 8; the 3D yard shows its piles on the platform),
   // coal on two of them; frozen so the stock is not hauled away.

@@ -329,9 +329,10 @@ def plot(img, x, y, col):
 
 
 def fields(rng):
-    """Grain field decals for stages 1 (sown) … 4 (ripe), as a strip of 66×40 frames with the tile
-    centre at (33, 24) (the `field:grain:<stage>` convention): tilled earth in furrows along the
-    tile's x, plants standing in the rows, green while growing and golden when ripe."""
+    """Grain field decals for stages 1 (sown) … 4 (ripe) and 5 (stubble after the harvest,
+    `CROP_STUBBLE`), as a strip of 66×40 frames with the tile centre at (33, 24) (the
+    `field:grain:<stage>` convention): tilled earth in furrows along the tile's x, plants standing in
+    the rows, green while growing and golden when ripe, then cut stalks and loose straw."""
     W, H, CY = 66, 40, 24
     w, h = W * SCALE, H * SCALE
     mask = diamond_mask(w, h, 33, CY, 31, 15.5)
@@ -370,7 +371,49 @@ def fields(rng):
                         if stage == 4 and t > 0.65:
                             plot(img, sx + lean * hgt * t + 1, y - hgt * t, (224, 188, 76))
         frames.append(np.clip(img, 0, 255).astype(np.uint8))
+    frames.append(stubble(earth, mask, CY, w, h))
     return np.concatenate(frames, axis=1)
+
+
+def stubble(earth, mask, cy, w, h):
+    """The reaped field: the furrowed earth dried paler, short stalks cut off in the rows (pale gold,
+    a darker cut end), straw left lying along the furrows and a few green weeds coming up. Its own
+    random stream, so the frames and decals generated after it stay as they were."""
+    rng = np.random.default_rng(78)
+    img = np.zeros((h, w, 4))
+    img[..., :3] = earth * 0.72 + np.array((168, 134, 84)) * 0.28
+    img[..., 3] = mask * 255
+    # Loose straw first, so the standing stalks are drawn over it: short strokes along the furrows
+    # (the tile's x axis runs down-right on screen, 2:1), a little scattered in direction.
+    for _ in range(46):
+        x, y = tile_to_px(rng.uniform(0.04, 0.96), rng.uniform(0.04, 0.96), cy)
+        ang = np.arctan2(1, 2) + rng.uniform(-0.6, 0.6)
+        length = rng.uniform(3.0, 6.0) * SCALE
+        col = np.array((226, 204, 132)) * rng.uniform(0.85, 1.05)
+        for t in np.linspace(-0.5, 0.5, int(length) + 2):
+            plot(img, x + np.cos(ang) * length * t, y + np.sin(ang) * length * t, col)
+    # Straw lies on the ground: none outside the tile (stalks may stand above its top edge).
+    img[..., 3] = np.where(mask > 0, img[..., 3], 0)
+    rows, per_row = 6, 9
+    for r in range(rows):
+        vv = (r + 0.5) / rows
+        for k in range(per_row):
+            uu = (k + 0.5 + rng.uniform(-0.25, 0.25)) / per_row
+            x, y = tile_to_px(uu, vv, cy)
+            for _ in range(4):
+                sx = x + rng.uniform(-3, 3)
+                hgt = rng.uniform(1.2, 2.6) * SCALE
+                lean = rng.uniform(-0.3, 0.3)
+                for t in np.linspace(0, 1, int(hgt) + 2):
+                    col = np.array((176, 146, 80)) * (1 - t) + np.array((222, 198, 120)) * t
+                    plot(img, sx + lean * hgt * t, y - hgt * t, col)
+                plot(img, sx + lean * hgt, y - hgt - 1, (150, 118, 60))
+    # A few weeds sprouting between the rows.
+    for _ in range(9):
+        x, y = tile_to_px(rng.uniform(0.1, 0.9), rng.uniform(0.1, 0.9), cy)
+        for _ in range(3):
+            plot(img, x + rng.uniform(-1.5, 1.5), y + rng.uniform(-1.5, 0.5), (92, 142, 44))
+    return np.clip(img, 0, 255).astype(np.uint8)
 
 
 def paths(rng, variants=4):
@@ -447,7 +490,7 @@ def main():
     for level, strip in paths(rng).items():
         save_png(strip, os.path.join(OUT, f'path-{level}.png'))
     with open(os.path.join(OUT, 'ground.json'), 'w') as f:
-        json.dump({'frame': [FRAME_W, FRAME_H], 'kinds': periods, 'fields': {'grain': 4},
+        json.dump({'frame': [FRAME_W, FRAME_H], 'kinds': periods, 'fields': {'grain': 5},
                    'paths': {'levels': 2, 'variants': 4}}, f)
     print('ground textures:', ', '.join(periods))
 

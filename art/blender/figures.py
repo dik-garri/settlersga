@@ -33,18 +33,20 @@ PAGE = 2048  # atlas page size in pixels (at lib.RESOLUTION)
 
 # Mirrors src/render/animConfig.ts: tool shapes, hat styles and the work actions with their tool
 # and near-arm angles (turns of π: 0 hanging down, 0.5 forward, 1 straight up) and bow pull.
-TOOLS = ['none', 'axe', 'hammer', 'pick', 'shovel', 'scythe', 'rod', 'bucket', 'sword', 'bow', 'carry']
-HAT_STYLES = ['cap', 'straw', 'helmet', 'hood', 'chef', 'bare', 'plume', 'galea1', 'galea2', 'galea3']
+TOOLS = ['none', 'axe', 'hammer', 'pick', 'shovel', 'scythe', 'rod', 'bucket', 'sword', 'bow', 'carry', 'spear']
+HAT_STYLES = ['cap', 'straw', 'helmet', 'hood', 'chef', 'bare', 'plume', 'galea1', 'galea2', 'galea3', 'coif']
 
-#: Outfits (src/render/animConfig.ts `Outfit`): what fighters wear over the tunic, rendered as their
-#: own pose groups `hold:<tool>@<outfit>` and `work:<action>@<outfit>`.
+#: Outfits (src/render/animConfig.ts `Outfit`): what a profession wears over the tunic, rendered as
+#: its own pose groups `hold:<tool>@<outfit>` and `work:<action>@<outfit>`.
 OUTFITS = {
     'legion': (['sword'], ['sword']),  # swordsman: plated armour, big curved shield
     'archer': (['bow'], ['shoot']),  # bowman: leather armour, quiver
     'leader': (['sword'], ['sword']),  # squad leader: gilded cuirass, round golden shield, cloak
+    'healer': (['none'], []),  # infirmary's healer: long linen robe, stole, satchel of herbs
+    'watch': (['spear'], []),  # lookout's watchman: short wool cape, horn at the hip (and his spear)
 }
 #: Bumped when a look changes, so its cached groups are rendered again.
-LOOK_REV = {'legion': 1, 'archer': 1, 'leader': 2}
+LOOK_REV = {'legion': 1, 'archer': 1, 'leader': 2, 'healer': 1, 'watch': 1}
 ACTIONS = {
     'chop': ('axe', [0.95, 0.62, 0.2, 0.1], None),
     'hammer': ('hammer', [0.82, 0.5, 0.16, 0.34], None),
@@ -73,6 +75,8 @@ HOLD = {
     'sword': (0.16, 155),
     'bow': (None, 0),
     'carry': (None, 0),
+    # Upright at the side, the butt near the ground: the tilt cancels the arm's angle.
+    'spear': (0.06, 7),
 }
 #: At work the tool continues the arm, its head at the far end.
 WORK_TILT = 180
@@ -241,6 +245,12 @@ class Figure:
                                       rot=(0, -1.6 * t, 0), verts=6))
         stave.append(lib.cylinder((-0.005, 0, 0), 0.003, 0.5, self.dark, verts=4))
         self.tool('bow', l, stave)
+        # The watchman's spear: a long ash shaft, butt near the ground, a leaf-shaped iron head.
+        self.tool('spear', r, [
+            lib.cylinder((0, 0, 0.16), 0.014, 0.92, W, verts=8),
+            lib.cylinder((0, 0, 0.625), 0.02, 0.03, M, verts=8),
+            lib.sphere((0, 0, 0.69), 0.032, M, scale=(1, 0.35, 2.6)),
+        ])
         self.build_outfits()
 
     def build_outfits(self):
@@ -318,10 +328,55 @@ class Figure:
         round_shield = on_grip([lib.cylinder((0.11, 0, 0.02), 0.17, 0.026, gold, rot=(0, math.pi / 2, 0), verts=28),
                                 lib.sphere((0.124, 0, 0.02), 0.06, gold, scale=(0.5, 1, 1))])
 
+        # The healer: a long linen robe to the ankles over the tunic, a stole in the player's colour
+        # round the neck and down the front, a rope girdle, a leather satchel of herbs at the hip and
+        # a small clay flask on the other side.
+        linen = lib.mat_grain('linen', (0.84, 0.8, 0.7), (0.97, 0.95, 0.88), scale=16, stretch=(1, 1, 5), bump=0.4)
+        rope = lib.mat_grain('rope', (0.55, 0.42, 0.24), (0.78, 0.64, 0.4), scale=40, stretch=(1, 1, 1), bump=0.6)
+        herbs = lib.mat_grain('herbs', (0.2, 0.38, 0.12), (0.42, 0.62, 0.22), scale=30, stretch=(1, 1, 1), bump=0.6)
+        clay = lib.mat_flat('clay', (0.66, 0.36, 0.2), rough=0.6)
+        robe = on_body([lib.cylinder((0, 0, 0.36), 0.185, 0.56, linen, radius2=0.122, verts=24),
+                        lib.cylinder((0, 0, 0.645), 0.122, 0.05, linen, radius2=0.092, verts=24),
+                        lib.cylinder((0, 0, 0.455), 0.15, 0.026, rope, verts=24)])
+        stole = on_body([masked(lib.cylinder((0, 0, 0.64), 0.124, 0.035, self.tunic, radius2=0.098, verts=20))] +
+                        [masked(lib.box((0.141, side * 0.052, 0.47), (0.018, 0.045, 0.34), self.tunic,
+                                        rot=(0, -math.atan(0.12), 0))) for side in (-1, 1)])
+        satchel = on_body([lib.box((0.0, 0.17, 0.4), (0.12, 0.05, 0.1), L, bevel=0.015),
+                           lib.box((0.0, 0.198, 0.425), (0.122, 0.012, 0.06), L, bevel=0.005),
+                           # The strap, a ring slanting across the chest from the far shoulder.
+                           lib.cylinder((0, 0, 0.52), 0.152, 0.022, L, rot=(-0.55, 0, 0), verts=24)] +
+                          [lib.lumpy((-0.03 + 0.03 * k, 0.168, 0.46 + 0.012 * (k % 2)), 0.026, herbs, scale=(1, 0.8, 1.3),
+                                     strength=0.4, noise=2.0, seed=31 + k, subdiv=2) for k in range(3)] +
+                          [lib.sphere((0.02, -0.16, 0.39), 0.04, clay, scale=(1, 1, 1.15)),
+                           lib.cylinder((0.02, -0.16, 0.44), 0.014, 0.04, clay, verts=8),
+                           lib.cylinder((0.02, -0.16, 0.465), 0.016, 0.015, rope, verts=8)])
+
+        # The watchman: no armour, a wool shoulder cape with its hood thrown back, and
+        # a curved horn on a strap at the hip to sound the alarm.
+        wool = lib.mat_grain('wool', (0.24, 0.24, 0.16), (0.38, 0.36, 0.24), scale=26, stretch=(1, 1, 2), bump=0.5)
+        ivory = lib.mat_flat('ivory', (0.92, 0.86, 0.7), rough=0.45)
+        cape = on_body([lib.cylinder((0, 0, 0.565), 0.178, 0.15, wool, radius2=0.112, verts=24),
+                        lib.cylinder((0, 0, 0.495), 0.18, 0.012, wool, verts=24),
+                        lib.sphere((-0.13, 0, 0.655), 0.075, wool, scale=(0.75, 1.3, 0.7))])
+        horn = []
+        n = 6
+        for k in range(n):
+            t = k / (n - 1)
+            a = t * 2.2  # the horn bends round in an arc
+            x = 0.05 - 0.085 * math.sin(a)
+            z = 0.34 + 0.085 * (1 - math.cos(a))
+            horn.append(lib.cylinder((x, 0.17, z), 0.013 + 0.022 * t, 0.045, ivory, rot=(0, a - math.pi / 2, 0), verts=10))
+        horn.append(lib.cylinder((0.05 - 0.085 * math.sin(2.2), 0.17, 0.34 + 0.085 * (1 - math.cos(2.2))), 0.038, 0.016,
+                                 brass, rot=(0, 2.2 - math.pi / 2, 0), verts=12))
+        horn.append(lib.cylinder((0, 0, 0.47), 0.145, 0.022, L, rot=(-0.5, 0, 0), verts=24))
+        horn = on_body(horn)
+
         self.extras = {
             'legion': bands + pauldrons + kilt + belt + scutum,
             'archer': jerkin + quiver + kilt + belt,
             'leader': cuirass + kilt + cloak + round_shield,
+            'healer': robe + stole + satchel,
+            'watch': cape + horn,
         }
 
     def show(self, shape, outfit=None):
@@ -723,6 +778,9 @@ def build_hat(style, fig):
         'chef': lambda: [lib.cylinder((-0.01, 0, z + 0.14), 0.12, 0.2, white, radius2=0.14, verts=18),
                          lib.sphere((-0.01, 0, z + 0.25), 0.15, white, scale=(1, 1, 0.5))],
         'bare': lambda: [],
+        # The healer's linen coif: a close cap over the hair, the face left open, a flap at the nape.
+        'coif': lambda: [lib.sphere((-0.04, 0, z + 0.06), 0.14, white, scale=(1.05, 1.08, 0.75)),
+                         lib.box((-0.115, 0, z - 0.045), (0.05, 0.19, 0.13), white, rot=(0, 0.28, 0), bevel=0.02)],
         # Squad leader: a gilded helmet with a very tall crest.
         'plume': lambda: galea(gilt, crest_size=1.35),
         # Fighters' helmets (galea) by level: no crest, a small crest, a big crest.
