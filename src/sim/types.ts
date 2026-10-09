@@ -350,6 +350,11 @@ export interface Settler {
   /** Donkey: its second pack (`TRADE.packs`), when it carries one. */
   pack2?: { res: Resource; n: number };
   /**
+   * Donkey on a trip: where it stood when it was hired (Settlers 4's `m_iStartPosition`); after
+   * unloading it walks back there if that spot is on the piece of land it stands on (`TryToGoHome`).
+   */
+  hiredAt?: Point;
+  /**
    * Field unit (`field.ts`, direct army control as in Settlers 4): a fighter ordered out into the open
    * stays at this post instead of looking for a garrison, and engages enemies that come near. With
    * `leader`, the post follows that squad leader at offset (`dx`, `dy`). Absent or null otherwise.

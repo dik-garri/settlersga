@@ -1,6 +1,6 @@
 import { addBuilding, spawnSettler } from '../sim/buildings';
 import { recomputeTerritory } from '../sim/territory';
-import { BUILD_TICKS_PER_UNIT, BUILDINGS, costOf, hpOf, ORE_RESOURCES, totalCost } from '../sim/config';
+import { BUILD_TICKS_PER_UNIT, BUILDINGS, costOf, CROP_KINDS, CROP_RIPE, CROP_STUBBLE, hpOf, ORE_RESOURCES, totalCost } from '../sim/config';
 import { clearStrokes } from '../sim/digging';
 import { ENDLESS } from '../sim/economy';
 import { formationSpots } from '../sim/field';
@@ -395,5 +395,25 @@ export function buildShowcase(): World {
   }
   // Long enough for the squad to reach its formation at Settlers 4's walking pace.
   run(w, 450);
+  // A row of fields by a farm at every stage, from sown to ripe, and stubble after the harvest (they
+  // grow on from here on Settlers 4's timers).
+  const farm = [...w.buildings.values()].find((b) => b.owner === LOCAL_PLAYER && b.type === 'farm' && b.done);
+  if (farm) {
+    const m = w.map;
+    const free: number[] = [];
+    for (let r = 2; r <= 6 && free.length < CROP_STUBBLE; r++) {
+      for (let x = farm.door.x - r; x <= farm.door.x + r && free.length < CROP_STUBBLE; x++) {
+        const y = farm.door.y + r;
+        if (m.inBounds(x, y) && m.owner[m.idx(x, y)] === LOCAL_PLAYER && m.isPlantable(x, y) && !m.hasDoorNear(x, y)) free.push(m.idx(x, y));
+      }
+    }
+    free.forEach((i, k) => {
+      m.crop[i] = k + 1;
+      m.cropKind[i] = CROP_KINDS.indexOf('grain');
+      m.growth[i] = 0;
+      if (k + 1 !== CROP_RIPE) w.growing.add(i);
+      m.touch(i);
+    });
+  }
   return w;
 }

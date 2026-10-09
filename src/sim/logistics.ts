@@ -5,7 +5,18 @@ import { landAt, landOf } from './land';
 import { offered } from './stop';
 import { dispatchTrade, marketWants } from './trade';
 import { goldWanted, weaponsWanted } from './military';
-import { BUILD_TICKS_PER_UNIT, BUILDINGS, costOf, INPUT_CAP, ORDERABLE, PROFESSIONS, RESOURCE_INFO, SITE } from './config';
+import {
+  BUILD_TICKS_PER_UNIT,
+  BUILDINGS,
+  costOf,
+  INPUT_CAP,
+  ORDERABLE,
+  PRODUCER_DISTANCE_FACTOR,
+  PROFESSIONS,
+  RESOURCE_INFO,
+  SITE,
+  SURPLUS_KEEP,
+} from './config';
 import {
   countDelivery,
   distributionKey,
@@ -30,6 +41,8 @@ interface Supply {
   piece: number;
   b?: Building;
   tile?: number;
+  /** Its distance counts at this share (`PRODUCER_DISTANCE_FACTOR` for a producer's pile; else 1). */
+  factor?: number;
 }
 
 /** The player's ground stacks per good: tile, place and piece of land (built once per dispatch round). */
@@ -141,7 +154,14 @@ function dispatchFor(w: World, owner: PlayerId): void {
   for (const b of own) piece.set(b.id, landOf(w, b));
   const pieceOf = (b: Building) => piece.get(b.id)!;
   const ground = groundIndex(w, owner);
-  const supplyOf = (res: Resource, target: Building | null) => nearestSupply(w, own, res, target, pieceOf, ground);
+  // Every pile offering a good, listed once per round: what is offered only shrinks while jobs are handed out.
+  const supplies = new Map<Resource, Supply[]>();
+  const suppliesOf = (res: Resource): Supply[] => {
+    let list = supplies.get(res);
+    if (!list) supplies.set(res, (list = supplyList(w, own, res, pieceOf, ground)));
+    return list;
+  };
+  const supplyOf = (res: Resource, target: Building | null) => nearestSupply(w, suppliesOf(res), res, target, pieceOf);
   // Settlers 4's carrier reserve: no carrier takes up a job while no more than the reserve are left.
   let spare = spareCarriers(w, owner);
 
@@ -205,31 +225,39 @@ function dispatchFor(w: World, owner: PlayerId): void {
     }
   }
 
-  // Demands are served good by good in the player's transport priority (Settlers 4's list), one
-  // unit per round, least-stocked consumer first, so a scarce resource is shared fairly instead of the
-  // oldest building taking it all; for a good the player distributes (`economy.ts`), the consumer type
-  // furthest behind its weight goes first, and weight 0 gets none. A prioritised site is served first
-  // and, while it still needs the good, nobody else on its piece of land gets any (`SITE`).
+  // Demands are served good by good in the player's transport priority (Settlers 4's list), one unit
+  // at a time, as Settlers 4's `CEcoSector` does: for a good with several consumer types, the type
+  // furthest behind its distribution weight first (`economy.ts`; weight 0 gets none); then finished
+  // buildings before sites; among finished ones the most urgent (`urgencyOf`: an emptier pile, less on
+  // the way, a nearer supply); sites least-stocked first. A prioritised building is served first and,
+  // while a prioritised site still needs the good, nobody else on its piece of land gets any (`SITE`).
   const eco = economyOf(w, owner);
   const order = transportOrder(w, owner);
   /** Pieces of land with work but no carrier: one walks over from another piece (`relocate`). */
   const needy = new Set<number>();
   for (const res of order) {
     if (idle.length === 0) break;
-    const distributed = eco.distribution[res] !== undefined;
-    const key = (b: Building) => (distributed ? distributionKey(eco, res, b) : 0);
+    const key = (b: Building) => distributionKey(eco, res, b);
     let urgent: Set<number> | null = null;
     for (const b of own) {
       if (b.priority && siteNeeds(b, res) > 0 && isReachable(w, b)) (urgent ??= new Set()).add(pieceOf(b));
     }
     const allowed = (b: Building) => !urgent?.has(pieceOf(b)) || (b.priority && !b.done);
     let wanting = own.filter((b) => demand(w, b, res) > 0 && key(b) < Infinity && allowed(b));
+    const urgency = new Map<number, number>();
+    const rate = (b: Building) => {
+      if (b.done) urgency.set(b.id, urgencyOf(b, res, supplyOf(res, b)));
+    };
+    for (const b of wanting) rate(b);
+    const keys = new Map<number, number>();
     while (wanting.length > 0) {
+      for (const c of wanting) keys.set(c.id, key(c));
       wanting.sort(
         (a, b) =>
           Number(b.priority) - Number(a.priority) ||
-          key(a) - key(b) ||
-          stocked(a, res) - stocked(b, res) ||
+          keys.get(a.id)! - keys.get(b.id)! ||
+          Number(!a.done) - Number(!b.done) ||
+          (a.done ? urgency.get(b.id)! - urgency.get(a.id)! : stocked(a, res) - stocked(b, res)) ||
           a.id - b.id,
       );
       const b = wanting[0];
@@ -245,6 +273,9 @@ function dispatchFor(w: World, owner: PlayerId): void {
       }
       assignDelivery(w, s, from!, b, res);
       countDelivery(eco, res, b);
+      // A supply used up moves everyone's nearest one: rate them all again; else only the one served.
+      if (from!.b ? offered(from!.b, res) <= 0 : freeGoods(w, from!.tile!) <= 0) wanting.forEach(rate);
+      else rate(b);
       if (demand(w, b, res) <= 0) wanting.shift();
     }
   }
@@ -273,10 +304,13 @@ function dispatchFor(w: World, owner: PlayerId): void {
   // Surplus goes to the warehouses in the same transport priority, good by good — and so does what a
   // stopped building or site offers that no consumer took (`stop.ts`).
   const producers = own.filter((b) => (b.done || b.stopped) && !BUILDINGS[b.type].storage && isReachable(w, b));
+  // A working producer keeps its last unit for a consumer (`SURPLUS_KEEP`); a stopped one gives all.
+  const keeps = producers.map((b) => (isProductionPile(b) && !b.stopped ? SURPLUS_KEEP : 0));
   for (const res of order) {
     const limit = RESOURCE_INFO[res].storeLimit ?? Infinity;
-    for (const b of producers) {
-      while (offered(b, res) > 0 && storedOf(res) < limit) {
+    for (let k = 0; k < producers.length; k++) {
+      const b = producers[k];
+      while (offered(b, res) > keeps[k] && storedOf(res) < limit) {
         if (!hasIdle(pieceOf(b))) {
           if (pieceOf(b) !== 0) needy.add(pieceOf(b));
           break;
@@ -344,6 +378,27 @@ function stocked(b: Building, res: Resource): number {
   return (b.done ? b.input[res] : b.delivered[res]) + b.inbound[res];
 }
 
+/**
+ * How urgently a finished consumer wants `res`, as Settlers 4's `CPile::CalcUrgent` over the distance
+ * to its nearest supply: (2 × pile size − units on the way − 2 × units lying there) / distance; 0 with
+ * no supply. Sites rank after every finished building (S4 gives them a constant below any need).
+ */
+function urgencyOf(b: Building, res: Resource, from: Supply | undefined): number {
+  if (!from) return 0;
+  const need = 2 * INPUT_CAP - b.inbound[res] - 2 * b.input[res];
+  return need / Math.max(1, dist(from.at, b.door));
+}
+
+/**
+ * A producer's output pile (Settlers 4's production pile): a finished workplace — one with a worker or
+ * a recipe; a warehouse's or a market's piles are of other kinds. It counts at
+ * `PRODUCER_DISTANCE_FACTOR` of its distance and keeps `SURPLUS_KEEP` units back from the warehouses.
+ */
+function isProductionPile(b: Building): boolean {
+  const def = BUILDINGS[b.type];
+  return b.done && !def.storage && !def.market && !!(def.worker || def.recipe);
+}
+
 /** Goods some finished warehouse of the player takes in (so ground stacks of other goods are not even looked at). */
 function acceptedGoods(w: World, owner: PlayerId): Set<Resource> {
   const out = new Set<Resource>();
@@ -355,36 +410,44 @@ function acceptedGoods(w: World, owner: PlayerId): Set<Resource> {
 }
 
 /**
- * Nearest pile or ground stack holding unpromised `res` on the same piece of land as `target`
- * (distance from its door; ties: buildings first, then by id or tile), or any on land with carriers
- * when target is null.
+ * Every place holding unpromised `res` for the player's carriers: piles at finished buildings, what a
+ * stopped building or site offers (`stop.ts`), and ground stacks.
+ */
+function supplyList(w: World, own: Building[], res: Resource, pieceOf: (b: Building) => number, ground: GroundIndex): Supply[] {
+  const out: Supply[] = [];
+  for (const b of own) {
+    if ((!b.done && !b.stopped) || !isReachable(w, b) || offered(b, res) <= 0) continue;
+    out.push({ at: b.door, piece: pieceOf(b), b, factor: isProductionPile(b) ? PRODUCER_DISTANCE_FACTOR : 1 });
+  }
+  for (const sup of ground.get(res) ?? []) out.push(sup);
+  return out;
+}
+
+/**
+ * Nearest supply still holding unpromised `res` on the same piece of land as `target` (distance from
+ * its door, a producer's at `PRODUCER_DISTANCE_FACTOR`; ties: buildings first, then by id or tile), or
+ * any on land with carriers when target is null.
  */
 function nearestSupply(
   w: World,
-  own: Building[],
+  list: readonly Supply[],
   res: Resource,
   target: Building | null,
   pieceOf: (b: Building) => number,
-  ground: GroundIndex,
 ): Supply | undefined {
   const want = target ? pieceOf(target) : -1;
   if (want === 0) return undefined;
   let best: Supply | undefined;
   let bestD = Infinity;
-  const consider = (sup: Supply) => {
-    if (sup.piece === 0 || (want > 0 && sup.piece !== want)) return;
-    const d = target ? dist(sup.at, target.door) : 0;
+  for (const sup of list) {
+    if (sup.piece === 0 || (want > 0 && sup.piece !== want)) continue;
+    if (sup.b ? sup.b === target || offered(sup.b, res) <= 0 : freeGoods(w, sup.tile!) <= 0) continue;
+    const d = target ? dist(sup.at, target.door) * (sup.factor ?? 1) : 0;
     if (!best || d < bestD) {
       best = sup;
       bestD = d;
     }
-  };
-  for (const b of own) {
-    // Piles at finished buildings, and what a stopped site offers (`stop.ts`).
-    if (b === target || (!b.done && !b.stopped) || !isReachable(w, b) || offered(b, res) <= 0) continue;
-    consider({ at: b.door, piece: pieceOf(b), b });
   }
-  for (const sup of ground.get(res) ?? []) if (freeGoods(w, sup.tile!) > 0) consider(sup);
   return best;
 }
 

@@ -42,6 +42,19 @@ export const STORE_PILE = 8;
 export const INPUT_CAP = 8;
 
 export const DISPATCH_EVERY = 5;
+/**
+ * Where goods come from, as in Settlers 4 (`CProductionPileRole`): a producer's output pile counts at
+ * this share of its distance when a consumer looks for the nearest supply (`ReassessDistance` halves
+ * it), so goods go straight from workshop to workshop rather than through a warehouse; warehouses,
+ * markets and goods on the ground count at full distance.
+ */
+export const PRODUCER_DISTANCE_FACTOR = 0.5;
+/**
+ * A producer's surplus goes to a warehouse only while its pile holds more than this many available
+ * units: Settlers 4 asks for storage space only from 2 units on (`CProductionPileRole::LogicUpdate`),
+ * so the last unit waits at the producer for a consumer.
+ */
+export const SURPLUS_KEEP = 1;
 /** A free settler stands where its last job ended this long before it walks off to an idle crowd. */
 export const IDLE_GO_HOME_TICKS = 30;
 
@@ -682,10 +695,33 @@ export const MESSAGE_KEEP = 50;
  * with the S4 building costs, which ask about twice the stone ours did (`docs/PROPORTIONS.md`).
  */
 export const DEPOSIT_STONE: [number, number] = [8, 16];
-/** Grain field stages: 1 sown … CROP_RIPE harvestable. Fields grow every CROP_GROW_EVERY ticks with CROP_GROW_CHANCE. */
+/**
+ * Field stages in `map.crop`: 1 sown … `CROP_RIPE` harvestable, then `CROP_STUBBLE` after the harvest
+ * (`GrowthDef.stubbleTicks`: nothing can be sown there until it clears).
+ */
 export const CROP_RIPE = 4;
-export const CROP_GROW_EVERY = 10;
-export const CROP_GROW_CHANCE = 0.035;
+export const CROP_STUBBLE = CROP_RIPE + 1;
+
+/** How a planting grows (`nature.ts`). */
+export interface GrowthDef {
+  /** Ticks in each stage before the next one: sown or sapling (stage 1) to ripe or mature. */
+  stageTicks: number;
+  /** A harvested field stays stubble this long before the tile is free again; absent: freed at once. */
+  stubbleTicks?: number;
+}
+
+/**
+ * Growth on Settlers 4's deterministic timers, no randomness: a field (`CPlant::LogicUpdate`) spends 30
+ * updates of 31 S4 ticks in each of its three stages (2790 ticks ≈ 198 s from sowing to ripe), a ripe
+ * field never rots, and the harvested one is stubble for another 930 ticks (≈ 66 s); a tree
+ * (`CTree::LogicUpdate`) spends 40 updates in each stage (3720 ticks ≈ 264 s from sapling to mature).
+ * Timers advance in steps of `GROW_EVERY` ticks (`map.growth`, saved).
+ */
+export const GROWTH: Record<PlantKind, GrowthDef> = {
+  tree: { stageTicks: Math.round(s4Ticks(40 * 31)) },
+  grain: { stageTicks: Math.round(s4Ticks(30 * 31)), stubbleTicks: Math.round(s4Ticks(30 * 31)) },
+};
+export const GROW_EVERY = 10;
 /** Ore kinds stored in `map.ore` (index + 1; 0 = none) and the resource a mine extracts. */
 export const ORE_RESOURCES: readonly Resource[] = ['coal', 'ironore', 'goldore', 'stone'];
 export function oreOf(code: number): Resource | null {
@@ -723,7 +759,7 @@ export const TREE_SPREAD = 0;
  * - builder: works on construction sites;
  * - gather: walks out to a map tile, works it and brings one unit home;
  * - plant: walks out and plants (a tree, a field…);
- * - farm: harvests ripe plantings like a gatherer, otherwise plants new ones;
+ * - farm: harvests ripe plantings like a gatherer while its pile has room, otherwise plants new ones;
  * - workshop: stays inside and runs the building's recipe;
  * - garrison: stays inside so the building claims territory;
  * - prospect: the geologist: examines mountain tiles on an errand, then waits with the idle crowd for
@@ -892,12 +928,17 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
     tool: 'rod',
     gather: { res: 'fish', radius: 7, workTicks: 90, restTicks: 70, missChance: 0.33 },
   },
+  /**
+   * Settlers 4's farmer (`CFarmBuildingRole::LogicUpdate`): he reaps a ripe field while his pile holds
+   * fewer than 8 (`OUTPUT_CAP`), otherwise sows; his fields are limited only by free spots
+   * (`SearchGrainSeedPos`), so no `maxNearby`.
+   */
   farmer: {
     name: 'Фермер',
     behavior: 'farm',
     tool: 'scythe',
     gather: { res: 'grain', radius: 4, workTicks: 50, restTicks: 10 },
-    plant: { what: 'grain', radius: 4, workTicks: 40, restTicks: 10, maxNearby: 10 },
+    plant: { what: 'grain', radius: 4, workTicks: 40, restTicks: 10 },
   },
   /** As in Settlers 4 the hunter uses a bow (forged by the weaponsmith). */
   hunter: {
@@ -1597,6 +1638,9 @@ export const AI_PLAN: readonly { type: BuildingType; count: number; after?: Buil
   { type: 'forester', count: 1 },
   { type: 'woodcutter', count: 2 },
   { type: 'house_small', count: 1 },
+  // Grain ripens in 198 s (Settlers 4's timers): the first farm goes up while the start's planks
+  // last — later, cheaper steps would keep taking every plank before it.
+  { type: 'farm', count: 1 },
   // Settlers 4's rates: a woodcutter fells a tree a minute, a sawmill cuts three logs a minute; at
   // S4's building costs planks are what an economy waits for, so wood comes first.
   { type: 'woodcutter', count: 3 },
@@ -1991,9 +2035,36 @@ export interface AnimalDef {
   rest: [number, number];
   /** Game: what a hunter gets from it. */
   game?: Resource;
-  /** Game comes back: one animal every this many ticks per 64×64 while below the map's initial count. */
-  respawnEvery?: number;
+  /**
+   * Born during play by Settlers 4's animal manager (`ANIMAL_SPAWN`) in squares of these forest
+   * densities; only such kinds count towards its cap. Without it the kind lives only from the map's
+   * start (as S4's ambient animals, which its manager neither counts nor breeds).
+   */
+  spawn?: readonly ForestDensity[];
 }
+
+/** How wooded a spawn square is (`ANIMAL_SPAWN.trees`), as S4's `LAND_TYPE` 2/3/4 of an animal. */
+export type ForestDensity = 'plain' | 'light' | 'deep';
+
+/**
+ * Animals come back as in Settlers 4 (`CAnimalMgr::Update`, `SpawnAnimal`, `SpawnAnimalBehindTree`,
+ * `Init`, `LoadAnimalData`): once per S4 tick (`attemptsPerTick` of ours) a random square of `square`
+ * tiles a side (S4's 16, a third of that here) is tried; it gets an animal only while no animal and no
+ * building is in it, on a habitable tile by one of its trees; how many mature trees it holds decides
+ * its density (`trees`: S4's PLAIN 1, LIGHT 4, DEEP 8 — one of our trees counts as one of S4's), and
+ * the kind is drawn from those whose `spawn` lists it. The map holds at most `landPop` × land % ×
+ * squares / 10000 counted animals (S4's LAND_POP 8; ≈ 10 on a 64×64 map) and never more than `max`
+ * (MAX_ANIMALS 1000); kinds that are not game at most `otherShare` of that (100 − HUNT_PERCENT 50 %).
+ * The animals' own random stream only (`World.animalRng`).
+ */
+export const ANIMAL_SPAWN = {
+  square: Math.round(16 / S4_TILES_PER_TILE),
+  attemptsPerTick: 845 / 60 / TICKS_PER_SECOND,
+  trees: { plain: 1, light: 4, deep: 8 } as Record<ForestDensity, number>,
+  landPop: 8,
+  max: 1000,
+  otherShare: 0.5,
+};
 
 export const ANIMALS = {
   deer: {
@@ -2005,7 +2076,8 @@ export const ANIMALS = {
     roam: 6,
     rest: [30, 120],
     game: 'meat',
-    respawnEvery: 1200,
+    // S4's animal data (`LAND_TYPE` per kind) is not in our sources: deer are born in any wooded square.
+    spawn: ['plain', 'light', 'deep'],
   },
   donkey: { name: 'Осёл', habitat: 'meadow', speed: 0.2 * SETTLER_SPEED, herd: [1, 3], herds: 1, roam: 5, rest: [60, 200] },
   duck: { name: 'Утка', habitat: 'shore', speed: 0.16 * SETTLER_SPEED, herd: [2, 5], herds: 2, roam: 4, rest: [20, 90] },
@@ -2016,6 +2088,20 @@ export type AnimalKind = keyof typeof ANIMALS;
 export const ANIMAL_KINDS = Object.keys(ANIMALS) as AnimalKind[];
 /** Herds keep at least this far (tiles) from every start position. */
 export const ANIMAL_START_CLEARANCE = 12;
+
+/**
+ * Population limit as in Settlers 4 (`CResidenceBuildingRole::LogicUpdate`): a house releases a resident
+ * only while its owner has fewer than `cap` settlers of every kind (donkeys included) — with more than
+ * `manyPlayers` players, `total` shared among them — and its door stands on a piece of his land (S4
+ * also asks for a free spot on it, `SearchFreePositionInEcoSector`; our settlers take no room). A
+ * house held back tries again `retryTicks` later (S4 re-checks every 31 of its ticks).
+ */
+export const POPULATION = { cap: 2500, total: 10000, manyPlayers: 4, retryTicks: Math.round(s4Ticks(31)) };
+
+/** The most settlers a player's houses let him have (`POPULATION`). */
+export function populationCap(players: number): number {
+  return players > POPULATION.manyPlayers ? Math.floor(POPULATION.total / players) : POPULATION.cap;
+}
 
 /** Residents a house releases: its `capacity`, the same on every map size (Settlers 4's 10/20/50). */
 export function residentsOf(def: BuildingDef): number {

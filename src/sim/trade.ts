@@ -1,6 +1,7 @@
 import { BUILDINGS, costOf, HANDLE_TICKS, PROFESSIONS, TRADE } from './config';
 import { ENDLESS, transportOrder } from './economy';
 import { dropGoods } from './ground';
+import { landAt } from './land';
 import { type Building, type PlayerId, type Point, type Resource, type Settler, type Task } from './types';
 import type { World } from './world';
 
@@ -94,6 +95,7 @@ export function dispatchTrade(w: World, owner: PlayerId): void {
       for (let i = 1; i < idle.length; i++) if (dist(idle[i], m.door) < dist(idle[k], m.door)) k = i;
       const s = idle.splice(k, 1)[0];
       for (const l of loads) m.trade.loading[l.res] = (m.trade.loading[l.res] ?? 0) + l.n;
+      s.hiredAt = { x: Math.round(s.x), y: Math.round(s.y) };
       s.path = [];
       s.tasks = [{ t: 'goto', x: m.door.x, y: m.door.y }, ...loads, { t: 'goto', x: to.door.x, y: to.door.y }, { t: 'unload', b: to.id }];
     }
@@ -197,7 +199,21 @@ export function unloadTick(w: World, s: Settler, task: Extract<Task, { t: 'unloa
   emptyPacks(s);
   s.tasks.shift();
   s.tasks.unshift({ t: 'wait', n: HANDLE_TICKS });
+  goHome(w, s);
   return true;
+}
+
+/**
+ * Settlers 4's `CDonkeyRole::TryToGoHome`: an unloaded donkey walks back to where it was hired if that
+ * spot lies on the piece of land it stands on; otherwise it stays (and waits at the nearest market).
+ */
+function goHome(w: World, s: Settler): void {
+  const home = s.hiredAt;
+  delete s.hiredAt;
+  if (!home || s.tasks.length > 1) return;
+  const piece = landAt(w, home, s.owner);
+  if (piece === 0 || piece !== landAt(w, { x: Math.round(s.x), y: Math.round(s.y) }, s.owner)) return;
+  s.tasks.push({ t: 'goto', x: home.x, y: home.y });
 }
 
 /**

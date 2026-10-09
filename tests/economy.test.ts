@@ -79,15 +79,15 @@ describe('hunter', () => {
     expect(ANIMALS.deer.game).toBe('meat');
   });
 
-  it('game hunted below its stock grows back', () => {
+  it('hunted game comes back in the woods (Settlers 4’s animal manager)', () => {
     const w = new World(42);
     const deer = () => w.animals.filter((a) => a.kind === 'deer');
-    const before = deer().length;
-    expect(before).toBeGreaterThan(1);
-    // Hunt all but one.
-    for (const a of deer().slice(1)) w.animals.splice(w.animals.indexOf(a), 1);
-    run(w, ANIMALS.deer.respawnEvery * 2 + 1);
     expect(deer().length).toBeGreaterThan(1);
+    // Hunt them all: new deer are born by trees, up to the map's cap.
+    for (const a of deer()) w.animals.splice(w.animals.indexOf(a), 1);
+    run(w, 600);
+    expect(deer().length).toBeGreaterThan(1);
+    for (const a of deer()) expect(w.map.tree.some((t, i) => t > 0 && Math.hypot((i % w.map.w) - a.hx, Math.floor(i / w.map.w) - a.hy) < 1.5)).toBe(true);
   });
 });
 

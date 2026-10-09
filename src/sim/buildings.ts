@@ -8,6 +8,8 @@ import {
   ORDERABLE,
   OUTPUT_CAP,
   oreOf,
+  populationCap,
+  POPULATION,
   PROFESSIONS,
   residentsOf,
   type BuildingDef,
@@ -343,9 +345,35 @@ export function residents(_w: World, b: Building): number {
  * Residences release their settlers one by one; workshops run their recipe while the worker is inside
  * and materials and pile space allow.
  */
+/** Per world: settlers per player, counted once per tick when a house is due (derived, not saved). */
+const populations = new WeakMap<World, { tick: number; counts: Int32Array }>();
+
+/** Every living settler of the player, of any kind (`POPULATION`). */
+export function populationOf(w: World, owner: PlayerId): number {
+  let cached = populations.get(w);
+  if (!cached || cached.tick !== w.tick) {
+    const counts = new Int32Array(w.players.length + 2);
+    for (const s of w.settlers) if (!w.dying.has(s.id) && s.owner < counts.length) counts[s.owner]++;
+    cached = { tick: w.tick, counts };
+    populations.set(w, cached);
+  }
+  return cached.counts[owner] ?? 0;
+}
+
+/** Whether a house may release a resident now: below the owner's population cap, its door on his land. */
+function mayRelease(w: World, b: Building): boolean {
+  return populationOf(w, b.owner) < populationCap(w.players.length) && landOf(w, b) !== 0;
+}
+
 export function updateBuilding(w: World, b: Building): void {
   const home = BUILDINGS[b.type].residence;
   if (home && b.done && b.spawned < residents(w, b) && ++b.timer >= home.everyTicks) {
+    if (!mayRelease(w, b)) {
+      b.timer = Math.max(0, home.everyTicks - POPULATION.retryTicks);
+      return;
+    }
+    // Counted for this tick already: one more now (two houses due in one tick both see it).
+    populations.get(w)!.counts[b.owner]++;
     b.timer = 0;
     b.spawned++;
     spawnSettler(w, 'carrier', b);

@@ -11,9 +11,10 @@ import type { World } from './world';
  *   with the tool are recruited only up to that (`logistics.ts`);
  * - `toolOrders`: the toolsmith's order queue — units still to forge per tool, or `ENDLESS`; tools
  *   without orders are forged automatically, by need (`chooseOutput`);
- * - `distribution`: per good, weights between the building types that consume it; a good without an
- *   entry is shared fairly (least-stocked consumer first). `tally` counts units handed out per type,
- *   so deliveries follow the weights over time;
+ * - `distribution`: per good, weights between the building types that consume it (`DEFAULT_WEIGHT`
+ *   each unless set — Settlers 4 always shares a good with several consumer types by its distribution,
+ *   `CEcoSector` over `CBuildingSupplyPriority`; its default percentages are not in our sources, so they
+ *   are equal). `tally` counts units handed out per type, so deliveries follow the weights over time;
  * - `recruitOrders`: Settlers 4's barracks orders — per fighting profession, per level (index), how
  *   many recruits are still wanted, or `ENDLESS`. None by default: a barracks recruits nobody unasked.
  * - `minCarriers`: the free-carrier reserve (`CARRIER_RESERVE`): no carrier takes up a job while the
@@ -74,6 +75,7 @@ export function workersOf(w: World, player: PlayerId, kind: SettlerKind): number
   if (!cached || cached.tick !== w.tick) {
     const counts = new Int32Array((w.players.length + 1) * ORDERABLE.length);
     for (const s of w.settlers) {
+      if (w.dying.has(s.id)) continue;
       let j = ORDERABLE.indexOf(s.kind);
       if (j < 0 && s.kind === 'carrier') {
         for (const t of s.tasks) if (t.t === 'retool') j = ORDERABLE.indexOf(t.kind);
@@ -276,20 +278,20 @@ export function setDistribution(w: World, player: PlayerId, res: Resource, type:
 }
 
 /**
- * Ordering key of a consumer for a distributed good: units handed to its type so far over the type's
- * weight (lower is served first); 0 for goods without a distribution, Infinity for weight 0.
+ * Ordering key of a consumer for a good with several consumer types (`distributableGoods`): units
+ * handed to its type so far over the type's weight (lower is served first; S4's `(delivered << 8 +
+ * 128) / percent`); 0 for other goods and for sites, Infinity for weight 0.
  */
 export function distributionKey(eco: EconomyState, res: Resource, b: Building): number {
-  const d = eco.distribution[res];
-  if (!d || !b.done) return 0;
-  const weight = d[b.type] ?? DEFAULT_WEIGHT;
+  if (!b.done || consumersOf(res).length < 2) return 0;
+  const weight = eco.distribution[res]?.[b.type] ?? DEFAULT_WEIGHT;
   if (weight <= 0) return Infinity;
   return (eco.tally[res]?.[b.type] ?? 0) / weight;
 }
 
 /** A unit of a distributed good was handed to a consumer. */
 export function countDelivery(eco: EconomyState, res: Resource, b: Building): void {
-  if (!eco.distribution[res] || !b.done) return;
+  if (!b.done || consumersOf(res).length < 2) return;
   const t = (eco.tally[res] ??= {});
   t[b.type] = (t[b.type] ?? 0) + 1;
 }

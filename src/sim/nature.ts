@@ -1,9 +1,10 @@
 import {
   CROP_KINDS,
-  CROP_GROW_CHANCE,
-  CROP_GROW_EVERY,
   CROP_RIPE,
+  CROP_STUBBLE,
   FISH_MAX,
+  GROW_EVERY,
+  GROWTH,
   FISH_RESTOCK,
   TERRAIN,
   TREE_MATURE,
@@ -37,6 +38,7 @@ const GATHER_RULES: Partial<Record<Resource, GatherRule>> = {
     isTarget: (m, i) => m.tree[i] === TREE_MATURE,
     take: (w, i) => {
       w.map.tree[i] = 0;
+      w.map.growth[i] = 0;
       w.map.touch(i);
       markWalkable(w.map, i % w.map.w, Math.floor(i / w.map.w));
     },
@@ -62,25 +64,37 @@ const GATHER_RULES: Partial<Record<Resource, GatherRule>> = {
   },
   grain: {
     isTarget: (m, i) => m.crop[i] === CROP_RIPE && m.cropKind[i] === CROP_KINDS.indexOf('grain'),
-    take: (w, i) => {
-      w.map.crop[i] = 0;
-      w.map.touch(i);
-      w.fields.delete(i);
-    },
+    take: (w, i) => reap(w, i),
   },
 };
+
+/** A ripe field is reaped: stubble while its kind has some (`GrowthDef.stubbleTicks`), else bare at once. */
+function reap(w: World, i: number): void {
+  const m = w.map;
+  const def = GROWTH[CROP_KINDS[m.cropKind[i]]];
+  m.growth[i] = 0;
+  if (def.stubbleTicks) {
+    m.crop[i] = CROP_STUBBLE;
+    w.growing.add(i);
+  } else {
+    m.crop[i] = 0;
+    m.cropKind[i] = 0;
+  }
+  m.touch(i);
+}
 
 function field(kind: PlantKind): PlantRule {
   const code = CROP_KINDS.indexOf(kind);
   return {
     // Fields stay walkable.
     isSafe: () => true,
-    counts: (m, i) => m.crop[i] > 0 && m.cropKind[i] === code,
+    counts: (m, i) => m.crop[i] > 0 && m.crop[i] <= CROP_RIPE && m.cropKind[i] === code,
     plant: (w, i) => {
       w.map.crop[i] = 1;
       w.map.cropKind[i] = code;
+      w.map.growth[i] = 0;
       w.map.touch(i);
-      w.fields.add(i);
+      w.growing.add(i);
     },
   };
 }
@@ -100,7 +114,9 @@ const PLANT_RULES: Record<PlantKind, PlantRule> = {
     counts: (m, i) => m.tree[i] > 0,
     plant: (w, i) => {
       w.map.tree[i] = 1;
+      w.map.growth[i] = 0;
       w.map.touch(i);
+      w.growing.add(i);
       w.stats.treesPlanted++;
     },
   },
@@ -238,18 +254,60 @@ function scaled(w: World, perReferenceArea: number, attempt: () => void): void {
   }
 }
 
-/** Trees grow (and seed, `TREE_SPREAD`), fields ripen, fish restock (`FISH_RESTOCK`; both 0 as in Settlers 4). */
+/**
+ * Whether the tile holds a planting whose timer runs: a sapling, an unripe field or stubble.
+ * (`World.growing` lists exactly these; derived, rebuilt by `rebuildGrowing`.)
+ */
+function isGrowing(m: GameMap, i: number): boolean {
+  if (m.tree[i] > 0) return m.tree[i] < TREE_MATURE;
+  return m.crop[i] > 0 && m.crop[i] !== CROP_RIPE;
+}
+
+/** Collects the growing plantings from the map: at generation (young trees) and after a load. */
+export function rebuildGrowing(w: World): void {
+  w.growing.clear();
+  const m = w.map;
+  for (let i = 0; i < m.tree.length; i++) if (isGrowing(m, i)) w.growing.add(i);
+}
+
+/**
+ * One timer step (`GROW_EVERY` ticks) for a growing planting: Settlers 4's fixed stage times
+ * (`GROWTH`), no randomness. A tree or field moves to its next stage and stops once mature or ripe (a
+ * ripe field never rots); stubble clears the tile once its time is up.
+ */
+function grow(w: World, i: number): void {
+  const m = w.map;
+  if (!isGrowing(m, i)) {
+    w.growing.delete(i);
+    return;
+  }
+  const tree = m.tree[i] > 0;
+  const def = GROWTH[tree ? 'tree' : CROP_KINDS[m.cropKind[i]]];
+  m.growth[i] += GROW_EVERY;
+  if (!tree && m.crop[i] === CROP_STUBBLE) {
+    if (m.growth[i] < (def.stubbleTicks ?? 0)) return;
+    m.crop[i] = 0;
+    m.cropKind[i] = 0;
+  } else {
+    if (m.growth[i] < def.stageTicks) return;
+    if (tree) m.tree[i]++;
+    else m.crop[i]++;
+  }
+  m.growth[i] = 0;
+  m.touch(i);
+  if (!isGrowing(m, i)) w.growing.delete(i);
+}
+
+/**
+ * Plantings grow on their timers (`GROWTH`; the cost follows the number of growing plantings, never
+ * the map area), trees seed (`TREE_SPREAD`), fish restock (`FISH_RESTOCK`; both 0 as in Settlers 4).
+ */
 export function updateNature(w: World): void {
   const m = w.map;
   const n = m.w * m.h;
 
-  scaled(w, 20, () => {
-    const i = randInt(w.rng, n);
-    if (m.tree[i] > 0 && m.tree[i] < TREE_MATURE && w.rng() < 0.3) {
-      m.tree[i]++;
-      m.touch(i);
-    }
-  });
+  // No RNG and every tile on its own: the set's order (insertion, or index after a load) does not matter.
+  if (w.tick % GROW_EVERY === 0) for (const i of w.growing) grow(w, i);
 
   scaled(w, TREE_SPREAD, () => {
     const i = randInt(w.rng, n);
@@ -258,22 +316,15 @@ export function updateNature(w: World): void {
     const y = Math.floor(i / m.w) + randInt(w.rng, 5) - 2;
     if (!m.isPlantable(x, y) || m.hasDoorNear(x, y) || settlerNear(w, x, y)) return;
     if (treesAround(m, x, y) >= 5 || !staysConnected(m, x, y)) return;
-    m.tree[m.idx(x, y)] = 1;
-    m.touch(m.idx(x, y));
+    const j = m.idx(x, y);
+    m.tree[j] = 1;
+    m.growth[j] = 0;
+    m.touch(j);
+    w.growing.add(j);
   });
 
   scaled(w, FISH_RESTOCK, () => {
     const i = randInt(w.rng, n);
     if (TERRAIN[m.terrain[i] as Terrain].water && m.fish[i] < FISH_MAX && w.rng() < 0.5) m.fish[i]++;
   });
-
-  if (w.tick % CROP_GROW_EVERY === 0 && w.fields.size > 0) {
-    // Sorted so the RNG is consumed in the same order after a save/load.
-    for (const i of [...w.fields].sort((a, b) => a - b)) {
-      if (m.crop[i] < CROP_RIPE && w.rng() < CROP_GROW_CHANCE) {
-        m.crop[i]++;
-        m.touch(i);
-      }
-    }
-  }
 }

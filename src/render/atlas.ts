@@ -1,5 +1,5 @@
 import { CanvasSource, Rectangle, Texture } from 'pixi.js';
-import { ORE_RESOURCES, oreOf, PATHS, SOLDIER_LEVELS, type AnimalKind } from '../sim/config';
+import { CROP_STUBBLE, ORE_RESOURCES, oreOf, PATHS, SOLDIER_LEVELS, type AnimalKind } from '../sim/config';
 import { RESOURCES, type BuildingType, type Resource, type SettlerKind } from '../sim/types';
 import {
   BUILDING_CANVAS,
@@ -11,6 +11,7 @@ import {
   paintCutOff,
   paintStopped,
   paintField,
+  paintStubble,
   paintPath,
   PATH_VARIANTS,
   paintSign,
@@ -229,7 +230,7 @@ export class SpriteAtlas {
         }
       }
     }
-    for (let v = 1; v <= 4; v++) {
+    for (let v = 1; v <= CROP_STUBBLE; v++) {
       a.add(`field:grain:${v}`, 66, 40, 33, 24, (ctx) => paintField(ctx, v));
     }
     for (let level = 1; level <= PATHS.levels.length; level++) {
@@ -610,6 +611,14 @@ function addArt3d(a: AtlasBuilder, art: Art3d): void {
     const strip = art.images.get(`fields-${kind}`)!;
     const f = FIELD_FRAME;
     for (let s = 1; s <= stages; s++) a.add(`field:${kind}:${s}`, f.w, f.h, f.ax, f.ay, (ctx) => drawFrame(ctx, strip, s - 1, f.w, f.h));
+    // Stubble after the harvest: no frame of its own yet, so stalks painted over the sown field.
+    if (stages < CROP_STUBBLE) {
+      a.add(`field:${kind}:${CROP_STUBBLE}`, f.w, f.h, f.ax, f.ay, (ctx) => {
+        drawFrame(ctx, strip, 0, f.w, f.h);
+        ctx.translate(f.ax, f.ay);
+        paintStubble(ctx);
+      });
+    }
   }
   const paths = art.ground.paths;
   for (let level = 1; level <= (paths?.levels ?? 0); level++) {

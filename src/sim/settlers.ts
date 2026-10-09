@@ -30,6 +30,7 @@ import { donkeyAbort, donkeyIdle, loadTick, marketOrdered, releaseLoad, unloadTi
 import { claimTick, geologistIdle, pioneerIdle, prospectTick, skipErrandTile, specialistPostIdle, stealTick, thiefIdle } from './specialists';
 import { chaseTick } from './intruders';
 import { houseBuilt } from './beds';
+import { recountWorkers, workerOrder, workersOf } from './economy';
 import { takeOffered } from './stop';
 import { fleeing } from './flee';
 import { findGame, huntTick, releaseHunt } from './hunting';
@@ -487,6 +488,21 @@ function setOuting(s: Settler, home: Building, target: Target, work: Task, rest:
   ];
 }
 
+/**
+ * Lowering the order dismisses, as in Settlers 4 (`CEcoSector::RecruiteWorker` with a negative worker
+ * delta): while the player has more builders or diggers than ordered (`workersOf` against
+ * `workerOrder`), a free one — idle, so on no site — turns back into a carrier and puts his tool down
+ * on the ground at his feet (`CSettler::ChangeType`); one at a time, the count is redone after each.
+ */
+function dismissedOverOrder(w: World, s: Settler): boolean {
+  if (workersOf(w, s.owner, s.kind) <= workerOrder(w, s.owner, s.kind)) return false;
+  const tool = PROFESSIONS[s.kind].tool;
+  s.kind = 'carrier';
+  recountWorkers(w);
+  if (tool) dropGoods(w, s, tool, 1);
+  return true;
+}
+
 function idle(w: World, s: Settler): void {
   s.idleTicks++;
   // Stranded on foreign land, or the player is out: wander off (and die), as in Settlers 4.
@@ -512,6 +528,7 @@ function idle(w: World, s: Settler): void {
       return donkeyIdle(w, s);
 
     case 'builder': {
+      if (dismissedOverOrder(w, s)) return;
       // Prefer sites that have material waiting, then the nearest.
       let best: Building | undefined;
       let bestScore = Infinity;
@@ -540,6 +557,7 @@ function idle(w: World, s: Settler): void {
     }
 
     case 'digger': {
+      if (dismissedOverOrder(w, s)) return;
       // Nearest sloped site nobody is levelling yet (priority first), otherwise rest like a builder.
       let best: Building | undefined;
       let bestScore = Infinity;

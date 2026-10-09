@@ -25,6 +25,11 @@ export class GameMap {
   /** Field stage, 0 = no field, and its kind (`CROP_KINDS` index). Fields are walkable but not buildable. */
   readonly crop: Uint8Array;
   readonly cropKind: Uint8Array;
+  /**
+   * Ticks a growing tree or field (stubble too) has spent in its current stage (`GROWTH`, `nature.ts`),
+   * in steps of `GROW_EVERY`; 0 once fully grown.
+   */
+  readonly growth: Uint16Array;
   /** Fish left in a water tile. */
   readonly fish: Uint8Array;
   /** Ore kind under a mountain tile (`ORE_RESOURCES` index + 1, 0 = none) and units left. */
@@ -88,6 +93,7 @@ export class GameMap {
     this.stone = new Uint8Array(n);
     this.crop = new Uint8Array(n);
     this.cropKind = new Uint8Array(n);
+    this.growth = new Uint16Array(n);
     this.fish = new Uint8Array(n);
     this.ore = new Uint8Array(n);
     this.oreAmount = new Uint8Array(n);
