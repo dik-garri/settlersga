@@ -30,10 +30,10 @@
 import { centerOf, claimsTerritory } from './buildings';
 import { claimChanged } from './territory';
 import { leaveSite } from './digging';
+import { spareCarriers } from './economy';
 import {
   ATTACK_RANGE,
   BARRACKS_EVERY,
-  BARRACKS_MIN_IDLE,
   BUILDINGS,
   FIELD,
   GARRISON_KEEP,
@@ -147,6 +147,18 @@ export function enterGarrison(w: World, b: Building, s: Settler): void {
   if (claimsTerritory(b) !== claimed) claimChanged(w, b);
 }
 
+/**
+ * A fighter sent out of the garrison by an order (an attack, a chase): he leaves and the building
+ * wishes one fewer of his kind, so it does not call him straight back (Settlers 4 `ThrowOutId`
+ * lowers the wish with the count).
+ */
+export function sendOut(w: World, b: Building, s: Settler): void {
+  const wish = wishOf(b);
+  const key = isArcher(s) ? 'ranged' : 'melee';
+  leaveGarrison(w, b, s);
+  wish[key] = Math.max(0, wish[key] - 1);
+}
+
 export function leaveGarrison(w: World, b: Building, s: Settler): void {
   const claimed = claimsTerritory(b);
   b.garrison = b.garrison.filter((id) => id !== s.id);
@@ -201,21 +213,33 @@ function warn(w: World, kind: Warning['kind'], b: Building): void {
 // ---------------------------------------------------------------- garrisons
 
 /**
- * A free fighter (Settlers 4's selectable soldier standing about): outdoors, no garrison, no field
- * post, not fighting, doing nothing but standing or walking. Military buildings call these in.
+ * A free fighter: outdoors, no garrison, no field post, not fighting, doing nothing but standing or
+ * walking (the army menu's «Свободны»; the AI's idle fighters).
  */
 export function isFreeFighter(w: World, s: Settler): boolean {
   if (s.inside !== null || s.home !== null || s.post || s.opponent !== null || w.dying.has(s.id) || !isFighter(s)) return false;
   return s.tasks.every((t) => t.t === 'goto' || t.t === 'wait');
 }
 
+/**
+ * A fighter a military building may call in: as Settlers 4's `CSettlerMgr::OrderWarrior` takes any
+ * fighter of the kind still `ENTITY_FLAG_Selectable` — the flag is cleared only when a soldier is
+ * attached to a building or vehicle (`CSoldierRole::ComeToWork`, boarding), not by move or attack
+ * orders —, any outdoor fighter without a garrison or one he is walking into, field units and
+ * attackers included. Not one in a duel (our duels link both sides; S4 would take him) [оценка].
+ */
+export function isCallable(w: World, s: Settler): boolean {
+  if (s.inside !== null || s.home !== null || s.opponent !== null || w.dying.has(s.id) || !canGarrison(s)) return false;
+  return !s.tasks.some((t) => t.t === 'join' || t.t === 'heal');
+}
+
 const freeCache = new WeakMap<World, { tick: number; list: Settler[] }>();
 
-/** Free fighters of every player, built once per tick (they are re-checked when picked). */
+/** Callable fighters of every player, built once per tick (they are re-checked when picked). */
 function freeFighters(w: World): Settler[] {
   const c = freeCache.get(w);
   if (c && c.tick === w.tick) return c.list;
-  const list = outdoorFighters(w).filter((s) => isFreeFighter(w, s) && canGarrison(s));
+  const list = outdoorFighters(w).filter((s) => isCallable(w, s));
   freeCache.set(w, { tick: w.tick, list });
   return list;
 }
@@ -228,7 +252,7 @@ function freeFighters(w: World): Settler[] {
 function findFreeFighter(w: World, b: Building, archer: boolean): Settler | undefined {
   const m = w.map;
   const door = m.idx(b.door.x, b.door.y);
-  const candidates = freeFighters(w).filter((s) => s.owner === b.owner && isArcher(s) === archer && isFreeFighter(w, s));
+  const candidates = freeFighters(w).filter((s) => s.owner === b.owner && isArcher(s) === archer && isCallable(w, s));
   if (candidates.length === 0) return undefined;
   const d = (s: Settler) => Math.hypot(s.x - b.door.x, s.y - b.door.y);
   for (const ring of GARRISON_ORDERS.rings) {
@@ -245,7 +269,10 @@ function findFreeFighter(w: World, b: Building, archer: boolean): Settler | unde
   return undefined;
 }
 
-function sendToJoin(s: Settler, b: Building): void {
+function sendToJoin(w: World, s: Settler, b: Building): void {
+  // Whatever he was doing ends (Settlers 4: the tower's call overrides a move or attack order).
+  abort(w, s);
+  s.post = null;
   const archer = isArcher(s);
   b.garrisonInbound++;
   if (archer) b.garrisonArchersInbound++;
@@ -281,7 +308,7 @@ function orderWarriors(w: World, b: Building): void {
   if ((c.melee + orderedMelee < wish.melee || none) && slotsOf(b, false) > 0) {
     const s = findFreeFighter(w, b, false);
     if (s) {
-      sendToJoin(s, b);
+      sendToJoin(w, s, b);
       orderedMelee++;
       if (none) wish.melee = 1;
     }
@@ -290,7 +317,7 @@ function orderWarriors(w: World, b: Building): void {
   if ((c.ranged + c.inRanged < wish.ranged || noneYet) && slotsOf(b, true) > 0) {
     const s = findFreeFighter(w, b, true);
     if (s) {
-      sendToJoin(s, b);
+      sendToJoin(w, s, b);
       if (noneYet) wish.ranged = 1;
     }
   }
@@ -450,13 +477,6 @@ export function recruitsAwaiting(w: World, owner: PlayerId, res: Resource): numb
 
 const pays = (b: Building, need: Partial<Stock>) => (Object.entries(need) as [Resource, number][]).every(([r, n]) => b.input[r] >= n);
 
-/** Free carriers a barracks leaves alone: the player's carrier reserve once it has one, else `BARRACKS_MIN_IDLE`. */
-function carrierReserve(w: World, owner: PlayerId): number {
-  // TODO(economy): `minCarriers` is Settlers 4's carrier reserve, added by the economy work in parallel.
-  const reserve = (economyOf(w, owner) as { minCarriers?: number }).minCarriers;
-  return reserve ?? BARRACKS_MIN_IDLE;
-}
-
 /**
  * Once every `BARRACKS_EVERY` ticks (Settlers 4 `CBarrackRole::LogicUpdate`): of its owner's recruit
  * orders whose goods lie on its pile, the highest rank (level; the squad leader above all) — kinds of
@@ -494,16 +514,16 @@ function recruitStep(w: World, b: Building): void {
   if (!best) return;
   const piece = landOf(w, b);
   if (piece === 0) return;
+  // Settlers 4 `CarrierForJobOrderAvailable`: only while the player has carriers above his reserve
+  // (`economy.minCarriers`, `spareCarriers`); then the nearest idle one on its land.
   let carrier: Settler | undefined;
-  let idle = 0;
   for (const s of w.settlers) {
     if (s.owner !== b.owner || s.kind !== 'carrier' || s.tasks.length > 0 || w.dying.has(s.id)) continue;
     if (landAt(w, s, b.owner) !== piece) continue;
-    idle++;
     const d = Math.hypot(s.x - b.door.x, s.y - b.door.y);
     if (!carrier || d < Math.hypot(carrier.x - b.door.x, carrier.y - b.door.y)) carrier = s;
   }
-  if (!carrier || idle <= carrierReserve(w, b.owner)) {
+  if (!carrier || spareCarriers(w, b.owner) <= 0) {
     warn(w, 'noCarrier', b);
     return;
   }
@@ -683,7 +703,7 @@ export function attack(w: World, targetId: number, count: number, player: Player
   for (const s of sent) {
     if (s.home !== null) {
       const from = w.buildings.get(s.home);
-      if (from) leaveGarrison(w, from, s);
+      if (from) sendOut(w, from, s);
     } else abort(w, s);
     s.tasks = [
       { t: 'goto', x: target.door.x, y: target.door.y, adj: true },
@@ -742,6 +762,9 @@ export function assaultTick(w: World, s: Settler, task: Extract<Task, { t: 'assa
     // Caught on the way by a field unit (`field.ts`): his `engage` task runs that duel.
     if (!b.garrison.includes(d.id)) return;
     duelTick(w, s, d);
+    // The last defender fell: he moves in at once (Settlers 4 `InsertTowerGuard` takes the building
+    // when its last guard dies), before the defeat check could find his owner's land empty.
+    if (w.dying.has(d.id) && !w.dying.has(s.id) && b.garrison.length === 0 && canCapture(s)) conquer(w, b, s);
     return;
   }
   const defenders = members(w, b);
@@ -781,11 +804,16 @@ export function assaultTick(w: World, s: Settler, task: Extract<Task, { t: 'assa
   // Defenders still out fighting other attackers: wait for the outcome.
   if (b.garrison.length > 0) return;
   // A swordsman or archer takes it; the squad leader cannot, his `assault` ends here.
-  if (!PROFESSIONS[s.kind].combat?.captures || !canGarrison(s)) {
+  if (!canCapture(s)) {
     s.tasks.shift();
     return;
   }
   conquer(w, b, s);
+}
+
+/** A fighter who can take an emptied enemy building (swordsman or archer; not the squad leader). */
+function canCapture(s: Settler): boolean {
+  return !!PROFESSIONS[s.kind].combat?.captures && canGarrison(s);
 }
 
 /** Settlers currently on an assault, keyed by the building they assault (built once per tick). */
@@ -972,6 +1000,8 @@ export function killSettler(w: World, s: Settler): void {
   }
   // What he carried is lost with him; dropped first, so `abort` reserves no trip home for it.
   if (s.carrying) w.stats.lost[s.carrying] += s.load ?? 1;
+  if (s.pack2) w.stats.lost[s.pack2.res] += s.pack2.n;
+  delete s.pack2;
   s.carrying = null;
   abort(w, s);
   s.tasks = [];

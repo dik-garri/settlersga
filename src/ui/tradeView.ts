@@ -109,7 +109,7 @@ export function tradeControls(world: World, b: Building): HTMLElement | null {
   box.append(routes);
 
   box.append(el('h4', '', 'Что возить'));
-  box.append(el('p', 'muted', `Носильщики приносят товар на рынок, ослы берут до ${TRADE.donkeyLoad} штук за раз.`));
+  box.append(el('p', 'muted', `Носильщики приносят товар на рынок, осёл берёт ${TRADE.packs} вьюка по ${TRADE.donkeyLoad} штук.`));
   box.append(
     goodsLists({
       inTitle: 'Возим',

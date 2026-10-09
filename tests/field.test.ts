@@ -68,23 +68,28 @@ describe('direct army control', () => {
     expect(fieldUnits(w, 1).length).toBeGreaterThanOrEqual(3);
   });
 
-  it('hold keeps them on their tile, garrison sends them back inside', () => {
+  it('hold keeps them on their tile; an empty tower calls one in (Settlers 4), garrison sends the other', () => {
     const w = new World(42);
-    // The start tower's swordsman falls (its archers hold it) and nobody stands by: one free
-    // swordsman's slot (test setup).
+    // The start tower's swordsman falls and nobody stands by (test setup): it is empty.
     dismissStandby(w);
     const t = startTower(w);
     killSettler(w, w.getSettler(t.garrison.find((id) => w.getSettler(id)!.kind === 'soldier')!)!);
-    const units = inTheField(w, 2);
+    // A swordsman and an archer (it still wishes its one swordsman).
+    const units = [...inTheField(w, 1), ...inTheField(w, 1, 'archer')];
     const ids = units.map((s) => s.id);
-    run(w, 60);
     expect(w.orderHold(ids)).toBe(2);
     for (const s of units) expect(s.post).toEqual({ x: Math.round(s.x), y: Math.round(s.y) });
-    expect(w.orderGarrison(ids, null)).toBe(2);
+    // As in S4 its call takes any fighter not in a building, field units at their posts too.
     run(w, 400);
-    // Both left the field; the start tower had a free swordsman's slot for one of them.
-    for (const s of units) expect(s.post).toBeNull();
-    expect(units.filter((s) => s.inside !== null).length).toBeGreaterThanOrEqual(1);
+    expect(t.garrison.filter((id) => ids.includes(id))).toHaveLength(1);
+    const other = units.find((s) => s.home === null)!;
+    expect(other.kind).toBe('archer');
+    expect(other.post).toBeTruthy();
+    // Sent in by hand, the other goes in too (the wish grows to cover him).
+    expect(w.orderGarrison([other.id], null)).toBe(1);
+    run(w, 400);
+    expect(other.post).toBeNull();
+    expect(other.home).toBe(t.id);
   });
 
   it('field swordsmen engage enemy fighters that come near', () => {

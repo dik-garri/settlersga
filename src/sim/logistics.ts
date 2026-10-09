@@ -3,8 +3,17 @@ import { freeGoods, goodsOn, reserveGoods, stackTiles } from './ground';
 import { landAt, landOf } from './land';
 import { dispatchTrade, marketWants } from './trade';
 import { goldWanted, weaponsWanted } from './military';
-import { BUILDINGS, costOf, INPUT_CAP, ORDERABLE, PROFESSIONS, RESOURCE_INFO } from './config';
-import { countDelivery, distributionKey, economyOf, recountWorkers, workerOrder, workersOf } from './economy';
+import { BUILD_TICKS_PER_UNIT, BUILDINGS, costOf, INPUT_CAP, ORDERABLE, PROFESSIONS, RESOURCE_INFO, SITE } from './config';
+import {
+  countDelivery,
+  distributionKey,
+  economyOf,
+  recountWorkers,
+  spareCarriers,
+  transportOrder,
+  workerOrder,
+  workersOf,
+} from './economy';
 import { RESOURCES, type Building, type PlayerId, type Point, type Resource, type Settler, type SettlerKind } from './types';
 import type { World } from './world';
 
@@ -38,10 +47,37 @@ function groundIndex(w: World, owner: PlayerId): GroundIndex {
   return out;
 }
 
-/** Units of `res` the building still wants delivered: site materials or workshop inputs. */
+/** Units of `res` a site still has to be brought in all (delivered or on the way do not count). */
+export function siteNeeds(b: Building, res: Resource): number {
+  return b.done ? 0 : costOf(b.type)[res] - b.delivered[res] - b.inbound[res];
+}
+
+/**
+ * Units of `res` lying at a site, not yet built in. Builders use up the delivered materials in
+ * `RESOURCES` order (planks before stone, as Settlers 4 builds them), as `ruinGoods` counts them.
+ */
+export function sitePile(b: Building, res: Resource): number {
+  let used = Math.floor(b.progress / BUILD_TICKS_PER_UNIT);
+  for (const r of RESOURCES) {
+    const built = Math.min(b.delivered[r], used);
+    if (r === res) return b.delivered[r] - built;
+    used -= built;
+  }
+  return 0;
+}
+
+/**
+ * Units of `res` the building still wants delivered: site materials or workshop inputs. A site asks,
+ * as in Settlers 4, only once a digger is on his way to it (or it is levelled) and only while its pile
+ * of the material plus what is on the way stays under `SITE.pile`.
+ */
 export function demand(w: World, b: Building, res: Resource): number {
   if (!isReachable(w, b)) return 0;
-  if (!b.done) return costOf(b.type)[res] - b.delivered[res] - b.inbound[res];
+  if (!b.done) {
+    const needs = siteNeeds(b, res);
+    if (needs <= 0 || (!b.levelled && b.diggerIds.length === 0)) return 0;
+    return Math.min(needs, SITE.pile - sitePile(b, res) - b.inbound[res]);
+  }
   const recipe = BUILDINGS[b.type].recipe;
   if (recipe?.inputs[res]) return INPUT_CAP - b.input[res] - b.inbound[res];
   // Every input the building uses, alternatives included, has its own pile of up to INPUT_CAP units.
@@ -102,6 +138,8 @@ function dispatchFor(w: World, owner: PlayerId): void {
   const pieceOf = (b: Building) => piece.get(b.id)!;
   const ground = groundIndex(w, owner);
   const supplyOf = (res: Resource, target: Building | null) => nearestSupply(w, own, res, target, pieceOf, ground);
+  // Settlers 4's carrier reserve: no carrier takes up a job while no more than the reserve are left.
+  let spare = spareCarriers(w, owner);
 
   // Ready-made workers waiting for a workplace (Settlers 4's start smiths and miners).
   const ready = w.settlers.filter((s) => s.owner === owner && s.tasks.length === 0 && isReadyWorker(s));
@@ -119,12 +157,14 @@ function dispatchFor(w: World, owner: PlayerId): void {
       ];
       continue;
     }
-    if (!hasIdle(pieceOf(b))) continue;
+    // A carrier takes up the job only above the reserve (ready-made workers above are no carriers).
+    if (spare <= 0 || !hasIdle(pieceOf(b))) continue;
     const tool = PROFESSIONS[kind].tool;
     const from = tool ? supplyOf(tool, b) : undefined;
     if (tool && !from) continue; // waits for the toolsmith
     const s = take(from ? from.at : b.door, pieceOf(b));
     if (!s) continue;
+    spare--;
     b.workerRequested = true;
     s.tasks = [];
     if (from && tool) fetchFrom(w, s, from, tool);
@@ -137,12 +177,13 @@ function dispatchFor(w: World, owner: PlayerId): void {
   // carriers pick up the profession's tool and take it up.
   for (const kind of ORDERABLE) {
     const tool = PROFESSIONS[kind].tool;
-    for (let k = workerOrder(w, owner, kind) - workersOf(w, owner, kind); k > 0; k--) {
+    for (let k = workerOrder(w, owner, kind) - workersOf(w, owner, kind); k > 0 && spare > 0; k--) {
       const from = tool ? supplyOf(tool, null) : undefined;
       if (tool && !from) break;
       // Without a tool to fetch, any free carrier will do: the first one's piece of land.
       const s = from ? take(from.at, from.piece) : idle.length > 0 ? take(idle[0], pieceOfCarrier[0]) : undefined;
       if (!s) break;
+      spare--;
       s.tasks = [];
       if (from && tool) fetchFrom(w, s, from, tool);
       s.tasks.push({ t: 'retool', kind });
@@ -150,17 +191,25 @@ function dispatchFor(w: World, owner: PlayerId): void {
     }
   }
 
-  // Demands are served one unit per round, least-stocked consumer first, so a scarce resource is
-  // shared fairly instead of the oldest building taking it all; for a good the player distributes
-  // (`economy.ts`), the consumer type furthest behind its weight goes first, and weight 0 gets none.
+  // Demands are served good by good in the player's transport priority (Settlers 4's list), one
+  // unit per round, least-stocked consumer first, so a scarce resource is shared fairly instead of the
+  // oldest building taking it all; for a good the player distributes (`economy.ts`), the consumer type
+  // furthest behind its weight goes first, and weight 0 gets none. A prioritised site is served first
+  // and, while it still needs the good, nobody else on its piece of land gets any (`SITE`).
   const eco = economyOf(w, owner);
+  const order = transportOrder(w, owner);
   /** Pieces of land with work but no carrier: one walks over from another piece (`relocate`). */
   const needy = new Set<number>();
-  for (const res of RESOURCES) {
+  for (const res of order) {
     if (idle.length === 0) break;
     const distributed = eco.distribution[res] !== undefined;
     const key = (b: Building) => (distributed ? distributionKey(eco, res, b) : 0);
-    let wanting = own.filter((b) => demand(w, b, res) > 0 && key(b) < Infinity);
+    let urgent: Set<number> | null = null;
+    for (const b of own) {
+      if (b.priority && siteNeeds(b, res) > 0 && isReachable(w, b)) (urgent ??= new Set()).add(pieceOf(b));
+    }
+    const allowed = (b: Building) => !urgent?.has(pieceOf(b)) || (b.priority && !b.done);
+    let wanting = own.filter((b) => demand(w, b, res) > 0 && key(b) < Infinity && allowed(b));
     while (wanting.length > 0) {
       wanting.sort(
         (a, b) =>
@@ -207,10 +256,11 @@ function dispatchFor(w: World, owner: PlayerId): void {
     if (!store) noStore.add(key);
     return store;
   };
-  for (const b of own) {
-    if (!b.done || BUILDINGS[b.type].storage || !isReachable(w, b)) continue;
-    for (const res of RESOURCES) {
-      const limit = RESOURCE_INFO[res].storeLimit ?? Infinity;
+  // Surplus goes to the warehouses in the same transport priority, good by good.
+  const producers = own.filter((b) => b.done && !BUILDINGS[b.type].storage && isReachable(w, b));
+  for (const res of order) {
+    const limit = RESOURCE_INFO[res].storeLimit ?? Infinity;
+    for (const b of producers) {
       while (b.output[res] - b.outReserved[res] > 0 && storedOf(res) < limit) {
         if (!hasIdle(pieceOf(b))) {
           if (pieceOf(b) !== 0) needy.add(pieceOf(b));
@@ -227,8 +277,9 @@ function dispatchFor(w: World, owner: PlayerId): void {
   // Goods on the ground go to a warehouse that takes them (and has room); with none they stay where
   // they lie, a supply for sites and workshops like any pile.
   const taken = acceptedGoods(w, owner);
-  for (const [res, stacks] of ground) {
-    if (!taken.has(res)) continue;
+  for (const res of order) {
+    const stacks = ground.get(res);
+    if (!stacks || !taken.has(res)) continue;
     const limit = RESOURCE_INFO[res].storeLimit ?? Infinity;
     for (const from of stacks) {
       while (idle.length > 0 && freeGoods(w, from.tile!) > 0 && storedOf(res) < limit) {

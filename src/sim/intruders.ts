@@ -11,7 +11,7 @@
 import { combatOf, duelTick } from './combat';
 import { INTRUDERS, PROFESSIONS } from './config';
 import { outdoorFighters } from './field';
-import { isArcher, isFighter, isMilitary, keepOf, leaveGarrison } from './military';
+import { isArcher, isFighter, isMilitary, keepOf, sendOut } from './military';
 import { SPECIALIST_KINDS } from './specialists';
 import type { Building, PlayerId, Point, Settler, Task } from './types';
 import type { World } from './world';
@@ -95,7 +95,7 @@ export function updateIntruders(w: World): void {
     if (chasers(w, s) >= INTRUDERS.responders) continue;
     const r = responder(w, host, s);
     if (!r) continue;
-    leaveGarrison(w, r.b, r.f);
+    sendOut(w, r.b, r.f);
     r.f.tasks = [{ t: 'chase', s: s.id, n: 0 }];
   }
 }

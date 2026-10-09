@@ -7,6 +7,7 @@ import {
   FISH_RESTOCK,
   TERRAIN,
   TREE_MATURE,
+  TREE_SPREAD,
   type GatherDef,
   type PlantDef,
 } from './config';
@@ -237,7 +238,7 @@ function scaled(w: World, perReferenceArea: number, attempt: () => void): void {
   }
 }
 
-/** Trees grow and seed, fields ripen, fish restock. */
+/** Trees grow (and seed, `TREE_SPREAD`), fields ripen, fish restock (`FISH_RESTOCK`; both 0 as in Settlers 4). */
 export function updateNature(w: World): void {
   const m = w.map;
   const n = m.w * m.h;
@@ -250,7 +251,7 @@ export function updateNature(w: World): void {
     }
   });
 
-  scaled(w, 0.1, () => {
+  scaled(w, TREE_SPREAD, () => {
     const i = randInt(w.rng, n);
     if (m.tree[i] !== TREE_MATURE) return;
     const x = (i % m.w) + randInt(w.rng, 5) - 2;

@@ -3,7 +3,8 @@
  * without one stand free (Settlers 4).
  *
  * A field unit is an ordinary fighter with a `Settler.post`: when idle (`soldierIdle`) it walks to its
- * post and stays there — military buildings never call it in —, engaging enemy fighters that come within
+ * post and stays there — though a military building wishing more than it holds may call it in, as
+ * Settlers 4 does (`isCallable`) —, engaging enemy fighters that come within
  * `FIELD.engageRadius` (swordsmen close in and duel with the `engage` task; archers shoot from where
  * they stand). Orders are public player commands (`World.orderMove`, `orderAttack`, `orderGarrison`,
  * `orderHold`, `releaseFighters`), usable by the AI as well. A squad leader (`combat.leads`) lifts the

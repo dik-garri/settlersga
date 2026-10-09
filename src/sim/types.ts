@@ -320,8 +320,10 @@ export interface Settler {
    * his owner's or with his player defeated; he dies after `FLEE.legs`. Absent on everyone else.
    */
   fled?: number;
-  /** Donkey: units of `carrying` in its packs (a carrier always holds one; absent means one). */
+  /** Donkey: units of `carrying` in its first pack (a carrier always holds one; absent means one). */
   load?: number;
+  /** Donkey: its second pack (`TRADE.packs`), when it carries one. */
+  pack2?: { res: Resource; n: number };
   /**
    * Field unit (`field.ts`, direct army control as in Settlers 4): a fighter ordered out into the open
    * stays at this post instead of looking for a garrison, and engages enemies that come near. With

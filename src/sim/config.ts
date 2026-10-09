@@ -108,10 +108,37 @@ export const SHOT_TICKS = 5;
  */
 export const OUTPUT_SHARES: Partial<Record<Resource, number>> = { sword: 60, bow: 40, armor: 8 };
 /**
- * Free carriers a barracks leaves alone when calling a recruit, until the player's own carrier reserve
- * (`EconomyState.minCarriers`, Settlers 4's settlers menu) exists — then that is used.
+ * Free-carrier reserve, as Settlers 4's settlers menu (`CEcoSector::ChangeMinMaxValues`, type 1;
+ * `OrderWorker`, `CarrierForJobOrderAvailable`): a carrier becomes a worker, builder, digger,
+ * specialist or recruit only while the player has more carriers than the reserve (carriers already
+ * on their way to take up a job do not count). The player sets it between `min` and `max`
+ * (`World.setCarrierReserve`, saved in `Player.economy.minCarriers`); S4's default and minimum is 5.
  */
-export const BARRACKS_MIN_IDLE = 2;
+export const CARRIER_RESERVE = { default: 5, min: 5, max: 999 };
+
+/**
+ * Default transport priority, Settlers 4's for the Romans (`CEcoSector::InitTransport`,
+ * `CGoodTransportPriority`, `ROMAN_TP_*`; manual §5.2.3): the dispatcher serves goods in this order —
+ * demands first, then surplus to warehouses —, which matters when carriers are short. The player
+ * moves goods up and down (`World.moveTransport`, `Player.economy.transport`). Unlike S4 there is no
+ * limit of one transport per good per pass (the «coalbug»): we keep the community's Transport+.
+ * Our goods only (no ammunition, wine or sulfur); every resource must be listed.
+ */
+export const TRANSPORT_PRIORITY: readonly Resource[] = [
+  'plank', 'stone', 'log', 'iron', 'ironore', 'coal', 'bread', 'fish', 'meat', 'flour', 'grain', 'pig', 'water',
+  'sword', 'bow', 'armor', 'shovel', 'hammer', 'axe', 'pickaxe', 'saw', 'rod', 'scythe', 'gold', 'goldore',
+];
+/**
+ * Construction sites as in Settlers 4 (`CBuildingSiteRole::OrderMaterial`, `LogicUpdate`,
+ * `CheckActivateUrgent*`; Settlers United wiki «Buildsite priority»): a site asks for each material
+ * only while what lies at it plus what is on the way stays under `pile` (S4: 8 — why big buildings
+ * take long), and asks nothing before a digger is on his way or it is levelled. Priority is for sites
+ * only and hard: while a prioritised site on a piece of land still needs a material, no other site or
+ * workshop there gets any of it; at most `maxPriority` prioritised sites per piece (S4: per economy
+ * sector), and the flag goes when the site is finished. (Workshops may be prioritised too — our
+ * extension: they are only served first.)
+ */
+export const SITE = { pile: 8, maxPriority: 10 };
 /**
  * Garrisons as in Settlers 4 (`CMilitaryBuildingRole`): every `every` ticks (S4: 15 of its ticks) a
  * military building orders a free fighter while it holds fewer than it wishes (`Building.wish`; an
@@ -621,9 +648,20 @@ export const ORE_AMOUNT: [number, number] = [12, 28];
 /** Food a miner eats per unit of ore. */
 export const MINER_FOOD: readonly Resource[] = ['bread', 'fish', 'meat'];
 
-/** Fish per water tile and how fast the water restocks (expected restock attempts per tick per 64×64 of map). */
-export const FISH_MAX = 3;
-export const FISH_RESTOCK = 2;
+/**
+ * Fish per open-water tile at generation. As in Settlers 4 fish runs out: nothing restocks it (only a
+ * spell does, and magic is out of scope), so `FISH_RESTOCK` (restock attempts per tick per 64×64 of
+ * map) is 0. An S4 tile holds 1–15 fish (`CSearchRoutines::SearchFish`) and one of ours covers about
+ * nine of them, but not every S4 water tile has fish: 8 is our own estimate.
+ */
+export const FISH_MAX = 8;
+export const FISH_RESTOCK = 0;
+/**
+ * Natural tree spread: seeding attempts per tick per 64×64 of map (a mature tree sows a sapling within
+ * two tiles). Settlers 4's trees only grow (`CTree::LogicUpdate`); new ones come from foresters
+ * alone, so 0 (the old 0.1 regrew forests for free).
+ */
+export const TREE_SPREAD = 0;
 
 // ------------------------------------------------------------- professions
 
@@ -663,6 +701,11 @@ export interface GatherDef {
   radius: number;
   workTicks: number;
   restTicks: number;
+  /**
+   * Chance that a finished attempt yields nothing (world RNG): the gatherer walks home empty-handed
+   * and the tile keeps its unit (Settlers 4's fisher: 33 %, `CSearchRoutines::SearchFish`).
+   */
+  missChance?: number;
 }
 
 /** A hunter: stalks game (`AnimalDef.game`) within `radius` of the lodge, shoots it from `range`. */
@@ -780,7 +823,12 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
     plant: { what: 'tree', radius: 4, workTicks: 60, restTicks: 40 },
   },
   waterman: { name: 'Водонос', behavior: 'gather', gather: { res: 'water', radius: 7, workTicks: 30, restTicks: 30 } },
-  fisher: { name: 'Рыбак', behavior: 'gather', tool: 'rod', gather: { res: 'fish', radius: 7, workTicks: 90, restTicks: 70 } },
+  fisher: {
+    name: 'Рыбак',
+    behavior: 'gather',
+    tool: 'rod',
+    gather: { res: 'fish', radius: 7, workTicks: 90, restTicks: 70, missChance: 0.33 },
+  },
   farmer: {
     name: 'Фермер',
     behavior: 'farm',
@@ -920,6 +968,12 @@ export interface Recipe {
   /** With `outputChoice`: the player can queue outputs (`World.orderTool`); orders go first. */
   orderable?: boolean;
   ticks: number;
+  /**
+   * Chance (world RNG) that a finished cycle, which always uses up its inputs, yields its outputs (or
+   * bred settler) — Settlers 4's animal ranches: a feeding adds a pig with 77 %, a donkey with 25 %
+   * (`CAnimalRanchRole::LogicUpdate`). Default 1.
+   */
+  outputChance?: number;
 }
 
 /** Build-menu tab. */
@@ -1016,19 +1070,22 @@ export interface GarrisonDef {
 }
 
 /**
- * Mining as in Settlers 4: a food unit buys digging attempts — `favourite` of the mine `attempts.favourite`,
- * any other `attempts.other`. Each attempt picks an ore tile in range; it yields one unit for sure
- * while the tile holds at least `sureAmount`, else with `chancePerUnit` × units left.
+ * Mining as in Settlers 4 (`CMineRole::TakeNextFood`, `SearchResource`): a food unit buys digging
+ * attempts — `favourite` of the mine `attempts.favourite`, any other `attempts.other`. Each attempt
+ * picks a random tile within the mine's radius, ore or not: a tile without its ore (or worked out) is
+ * a miss, the attempt spent; an ore tile yields one unit for sure while it holds at least
+ * `sureAmount`, else with `chancePerUnit` × units left. A worked-out mine keeps eating.
  */
 export const MINING = { attempts: { favourite: 10, other: 2 }, sureAmount: 4, chancePerUnit: 0.25 };
 
 /**
- * Trade over land, after Settlers 4: a donkey carries up to `donkeyLoad` units of one good per trip
- * from a marketplace to the market its route names; a donkey ranch breeds donkeys while the player
- * has fewer than `donkeysPerMarket` per finished marketplace. An endless order keeps `stock` units of
- * the good waiting at the market.
+ * Trade over land, as in Settlers 4 (`CDonkeyRole`, `CTradingBuildingRole`): a donkey carries `packs`
+ * packs of up to `donkeyLoad` units of one good each (two goods, or 16 of one) per trip from a
+ * marketplace to the market its route names; a donkey ranch breeds donkeys while the player has fewer
+ * than `donkeysPerMarket` per finished marketplace (our convenience: S4 has no limit). An order keeps
+ * up to `stock` units of the good waiting at the market (S4: three piles of 8).
  */
-export const TRADE = { donkeyLoad: 4, donkeysPerMarket: 3, stock: 8 };
+export const TRADE = { donkeyLoad: 8, packs: 2, donkeysPerMarket: 3, stock: 24 };
 
 /** Settlers 4's tower door: `MaxTowerDoorHealth` 50, one hit point back every 15 of its ticks. */
 const TOWER_DOOR = { hp: 50, regenEvery: s4Ticks(15) };
@@ -1191,7 +1248,8 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: 'pigfarmer',
     playerBuildable: true,
     category: 'food',
-    recipe: { inputs: { grain: 1, water: 1 }, outputs: { pig: 1 }, ticks: 399 },
+    // Settlers 4: a feeding every 421 of its ticks, a pig with 77 % — a pig every 39 s on average.
+    recipe: { inputs: { grain: 1, water: 1 }, outputs: { pig: 1 }, ticks: 299, outputChance: 0.77 },
   },
   // Settlers 4 town buildings: carriers stay on their own land, donkeys carry goods between markets.
   market: {
@@ -1212,7 +1270,8 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: 'donkeyrancher',
     playerBuildable: true,
     category: 'trade',
-    recipe: { inputs: { grain: 1, water: 1 }, outputs: {}, ticks: 192 },
+    // Settlers 4: a feeding adds a donkey with 25 % — about four feedings per donkey.
+    recipe: { inputs: { grain: 1, water: 1 }, outputs: {}, ticks: 192, outputChance: 0.25 },
     breeds: 'donkey',
   },
   slaughterhouse: {
@@ -1223,7 +1282,8 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: 'butcher',
     playerBuildable: true,
     category: 'food',
-    recipe: { inputs: { pig: 1 }, outputs: { meat: 2 }, ticks: 252 },
+    // Settlers 4: one animal, one meat, 178 of its ticks.
+    recipe: { inputs: { pig: 1 }, outputs: { meat: 1 }, ticks: 126 },
   },
 
   // Favourite foods as in Settlers 4: coal and stone bread, iron (and sulfur) meat, gold fish.
@@ -1481,6 +1541,8 @@ export const AI_PLAN: readonly { type: BuildingType; count: number; after?: Buil
   { type: 'stonecutter', count: 2, after: 'toolsmith' },
   { type: 'house_large', count: 1 },
   { type: 'ironmine', count: 2, after: 'toolsmith' },
+  // A pig is one meat now (Settlers 4): a second pig farm for the slaughterhouse (it keeps up with three).
+  { type: 'pigfarm', count: 2, after: 'slaughterhouse' },
   { type: 'weaponsmith', count: 2, after: 'ironsmelter' },
   { type: 'bigtower', count: 1, after: 'weaponsmith' },
   { type: 'tower', count: 8 },
@@ -1564,8 +1626,8 @@ export const AI = {
   scoutCenter: 1,
   /** Defenders it assumes in an enemy building out of its buildings' sight, as a share of the capacity. */
   unseenGarrison: 0.5,
-  /** Gathered resources that do not grow back: their gatherers are moved once nothing is left in range. */
-  exhaustible: ['stone'] as readonly Resource[],
+  /** Gathered resources that do not grow back (stone; fish as in Settlers 4): their gatherers are moved once nothing is left in range. */
+  exhaustible: ['stone', 'fish'] as readonly Resource[],
   /**
    * Score taken off a military building's or lookout's spot that a digger must level first (up to
    * `BUILD_DIG_SLOPE`; all else keeps to level ground): level ground first, but a slope facing the

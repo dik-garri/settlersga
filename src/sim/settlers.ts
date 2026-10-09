@@ -131,6 +131,11 @@ export function updateSettler(w: World, s: Settler): void {
     case 'store': {
       const b = w.buildings.get(task.b);
       if (!b) return abort(w, s);
+      // Back empty-handed from a missed attempt (`GatherDef.missChance`): nothing to put down.
+      if (s.carrying !== task.res) {
+        s.tasks.shift();
+        return;
+      }
       b.output[task.res]++;
       w.stats.produced[task.res]++;
       s.carrying = null;
@@ -142,10 +147,13 @@ export function updateSettler(w: World, s: Settler): void {
       if (!isGatherTarget(w, task.res, i, s.owner)) return abort(w, s);
       s.working = true;
       if (--task.n > 0) return;
-      harvest(w, task.res, i);
       w.reservedTargets.delete(i);
-      s.carrying = task.res;
       s.tasks.shift();
+      // A missed attempt (Settlers 4's fisher: a third of them) leaves the tile as it was.
+      const miss = PROFESSIONS[s.kind].gather?.missChance ?? 0;
+      if (miss > 0 && w.rng() < miss) return;
+      harvest(w, task.res, i);
+      s.carrying = task.res;
       return;
     }
     case 'plant': {
@@ -233,6 +241,8 @@ export function updateSettler(w: World, s: Settler): void {
         // The others at the site find it done on their next tick and leave.
         b.done = true;
         b.builderIds = [];
+        // Settlers 4: a site's priority goes once it needs nothing more.
+        b.priority = false;
         // A finished warehouse now serves its piece of land (`land.ts` caches by this version).
         if (BUILDINGS[b.type].storage) w.buildingsVersion++;
         s.tasks.shift();

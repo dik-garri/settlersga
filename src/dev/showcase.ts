@@ -305,7 +305,8 @@ export function buildShowcase(): World {
   // warehouse of the other player's (both start close to their goal, so they are busy as it opens).
   w.orderSpecialist('pioneer', 1);
   w.orderSpecialist('thief', 1);
-  run(w, 120);
+  // Recruits first fetch their tool (a shovel for the pioneer) from wherever it lies.
+  for (let i = 0; i < 30 && !(['pioneer', 'thief'] as const).every((k) => w.settlers.some((s) => s.kind === k)); i++) run(w, 40);
   const pioneer = w.settlers.find((s) => s.kind === 'pioneer');
   const edge = borderTile(w, cx, cy);
   if (pioneer && edge) {
