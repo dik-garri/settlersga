@@ -3,7 +3,7 @@
  * only how it looks and sounds. A new profession needs one `SETTLER_STYLES` entry (or uses the
  * default); a new kind of work one `ACTIONS` entry.
  */
-import type { BuildingType, PlantKind, Resource, SettlerKind } from '../sim/types';
+import type { BuildingType, PlantKind, Resource, SettlerKind, Task } from '../sim/types';
 
 /** Tools a settler can hold; each has a walking pose and the work actions that use it. */
 export const TOOLS = ['none', 'axe', 'hammer', 'pick', 'shovel', 'scythe', 'rod', 'bucket', 'sword', 'bow', 'carry', 'spear'] as const;
@@ -42,6 +42,11 @@ export interface ActionDef {
   arm: readonly [number, number, number, number];
   /** Bow string pull per frame (0..1), only for the bow. */
   pull?: readonly [number, number, number, number];
+  /**
+   * 3D figure only (`BEND` in art/blender/figures.py): the torso bent forward per frame, in degrees;
+   * the arm angles are then the torso's. The classic painter does not bend the body.
+   */
+  bend?: readonly [number, number, number, number];
   loopMs: number;
   /** Sound played when the loop reaches `soundFrame` on screen. */
   sound?: SoundId;
@@ -60,6 +65,8 @@ export const ACTIONS = {
   draw: { tool: 'bucket', arm: [0.06, 0.2, 0.38, 0.2], loopMs: 900, sound: 'splash', soundFrame: 2 },
   sword: { tool: 'sword', arm: [0.88, 0.45, 0.14, 0.5], loopMs: 600 },
   shoot: { tool: 'bow', arm: [0.5, 0.5, 0.5, 0.5], pull: [0, 0.5, 1, 0], loopMs: 800 },
+  // The geologist bends over the rock and knocks it with his hammer (Settlers 4), not at chest height.
+  knock: { tool: 'hammer', arm: [1.0, 0.43, 0.38, 0.41], bend: [30, 42, 50, 46], loopMs: 700, sound: 'pick', soundFrame: 2 },
 } satisfies Record<string, ActionDef>;
 export type ActionId = keyof typeof ACTIONS;
 export const ACTION_IDS = Object.keys(ACTIONS) as ActionId[];
@@ -125,6 +132,9 @@ const STYLES: Partial<Record<SettlerKind, Partial<SettlerStyle>>> = {
   // horn at the hip, a spear upright in his hand.
   watchman: { tunic: '#556677', hat: '#3b2b1a', hatStyle: 'bare', holds: 'spear', outfit: 'watch' },
 };
+
+/** Work done in a task of its own kind, whatever the profession (the geologist knocking the rock). */
+export const TASK_ACTION: Partial<Record<Task['t'], ActionId>> = { prospect: 'knock' };
 
 /** Work done on a planting or gathering task overrides the profession's default `work`. */
 export const PLANT_ACTION: Record<PlantKind, ActionId> = { tree: 'dig', grain: 'sow' };

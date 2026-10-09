@@ -113,6 +113,12 @@ export const WOUNDED_AT = 0.5;
 /** Visual only: ticks an arrow is drawn in flight. */
 export const SHOT_TICKS = 5;
 /**
+ * Visual only: a building that burns (`World.removeBuilding(b, 'burn')`: land lost to a conquest, a
+ * defeated player) leaves charred, smoking remains for `ticks` (Settlers 4 shows a smouldering ruin
+ * for a while; its length is our estimate). They block nothing and are not saved (`World.ruins`).
+ */
+export const RUIN = { ticks: 1200 };
+/**
  * Default weapon make-up per player (weights, see `World.setShare`): what the weaponsmith forges when
  * nothing ordered is waiting (Settlers 4's weaponsmith «by shares» mode). Who is recruited is the
  * player's barracks orders alone (`economy.ts` `recruitOrders`).

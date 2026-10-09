@@ -20,6 +20,7 @@ import {
   ACTIONS,
   GATHER_ACTION,
   PLANT_ACTION,
+  TASK_ACTION,
   styleOf,
   type ActionId,
   type ActionDef,
@@ -47,7 +48,7 @@ import { GuideLayer, type GuideMark } from './guide';
 import { WorkAreaLayer } from './workArea';
 import { pathLevel } from '../sim/paths';
 import { chatPartner } from '../sim/idle';
-import { BANNERS, EDGE_DIRS, siteSprite, GROUND_PRIORITY, groundVariants, PATH_VARIANTS, PLAYER_COLORS, type GroundKind } from './sprites';
+import { BANNERS, EDGE_DIRS, RUIN_SIZES, siteSprite, GROUND_PRIORITY, groundVariants, PATH_VARIANTS, PLAYER_COLORS, type GroundKind } from './sprites';
 
 const TERRAIN_KIND: Record<Terrain, GroundKind> = {
   [Terrain.Water]: 'water',
@@ -78,6 +79,8 @@ const SIGN_SWEEP_TICKS = 5;
 const SIGN_FADE_TICKS = 200;
 /** Signs are drawn a little smaller than rendered: about half a settler's height, as in Settlers 4. */
 const SIGN_SCALE = 0.82;
+/** Share of a burnt ruin's time (`RUIN`) over which it fades out at the end. */
+const RUIN_FADE = 0.15;
 
 /** Cheap deterministic per-tile hash for picking sprite variants. */
 function hash(i: number): number {
@@ -286,6 +289,8 @@ export class GameRenderer {
   private signSweptAt = -Infinity;
   /** Goods lying on the ground (`ground.ts`): one pile per tile, and its drawn kind × 16 + units (0 = none). */
   private readonly goodsSprites: (Container | null)[];
+  /** Burnt ruins on screen (`syncRuins`), by `x,y,tick` of the `World.ruins` entry. */
+  private readonly ruinViews = new Map<string, { body: Container; at: { x: number; y: number } }>();
   private readonly goodsState: Uint16Array;
   private readonly cropState: Uint8Array;
   /** Rendered deposit size per tile: 0 = none, otherwise size class + 1. */
@@ -761,6 +766,7 @@ export class GameRenderer {
     this.syncChangedTiles();
     this.sweepSigns();
     this.syncBuildings();
+    this.syncRuins();
     this.syncSettlers(alpha, timeMs);
     this.animals.sync(alpha, timeMs, view);
     this.swayTrees(timeMs);
@@ -1487,8 +1493,10 @@ export class GameRenderer {
   }
 
   /**
-   * Goods on the ground: the pre-rendered `pile:<res>:<n>` (3D art), else single wares stacked up,
-   * standing on the tile like any static object (culled with its chunk, hidden under unexplored fog).
+   * Goods on the ground: the pre-rendered `stack:<res>:<n>` (3D art: lying loose on a patch of
+   * trodden earth), else the door pile `pile:<res>:<n>`, else (classic art) single wares stacked up on
+   * a soft shadow, standing on the tile like any static object (culled with its chunk, hidden under
+   * unexplored fog).
    */
   private syncGoods(i: number): void {
     const { map } = this.sim;
@@ -1504,9 +1512,11 @@ export class GameRenderer {
     if (state === 0) return;
     const res = RESOURCES[map.goods[i] - 1];
     const pile = new Container();
-    const key = `pile:${res}:${Math.min(n, PILE_MAX)}`;
+    const shown = Math.min(n, PILE_MAX);
+    const key = this.atlas.has(`stack:${res}:${shown}`) ? `stack:${res}:${shown}` : `pile:${res}:${shown}`;
     if (this.atlas.has(key)) pile.addChild(new Sprite(this.atlas.get(key)));
     else {
+      pile.addChild(new Sprite(this.atlas.get('stack:shadow')));
       for (let k = 0; k < n; k++) {
         const s = new Sprite(this.atlas.get(`ware:${res}`));
         s.position.set(-4 + (k % 2) * 7, 6 - Math.floor(k / 2) * 4);
@@ -1547,6 +1557,49 @@ export class GameRenderer {
     }
     s.texture = this.atlas.get(`deposit:${state - 1}`);
     s.anchor.copyFrom(s.texture.defaultAnchor!);
+  }
+
+  /**
+   * Burnt buildings' remains (`World.ruins`, render-only): one `ruin:<side>` sprite each, placed and
+   * sorted like the building was (just under what stands on its footprint), smoking (`Effects`)
+   * while it smoulders and fading out over the last `RUIN_FADE` of its time. A building placed on the
+   * footprint before it is gone takes its place at once.
+   */
+  private syncRuins(): void {
+    const { map, ruins, tick } = this.sim;
+    const live = new Set<string>();
+    for (const r of ruins) {
+      const key = `${r.x},${r.y},${r.tick}`;
+      const cx = r.x + (r.w - 1) / 2;
+      const cy = r.y + (r.h - 1) / 2;
+      let built = false;
+      for (let dy = 0; dy < r.h && !built; dy++) for (let dx = 0; dx < r.w; dx++) if (map.building[map.idx(r.x + dx, r.y + dy)] !== 0) built = true;
+      if (built) continue;
+      live.add(key);
+      let v = this.ruinViews.get(key);
+      if (!v) {
+        const side = Math.max(1, Math.min(RUIN_SIZES, Math.max(r.w, r.h)));
+        const body = new Container();
+        body.addChild(new Sprite(this.atlas.get(`ruin:${side}`)));
+        const p = this.surface(cx, cy);
+        body.position.set(p.x, p.y);
+        body.zIndex = depthOf(cx, cy) - 0.3;
+        this.addStatic(body, cx, cy);
+        this.effects.attachRuin(key, body, side);
+        v = { body, at: { x: cx, y: cy } };
+        this.ruinViews.set(key, v);
+      }
+      // Smoke thins out as the embers die; the remains fade at the very end.
+      const left = (r.until - tick) / Math.max(1, r.until - r.tick);
+      this.effects.setRuinHeat(key, Math.min(1, left * 1.4));
+      v.body.alpha = Math.min(1, left / RUIN_FADE);
+    }
+    for (const [key, v] of this.ruinViews) {
+      if (live.has(key)) continue;
+      this.removeStatic(v.body, v.at.x, v.at.y);
+      this.effects.detachRuin(key);
+      this.ruinViews.delete(key);
+    }
   }
 
   private syncBuildings(): void {
@@ -1905,7 +1958,11 @@ export class GameRenderer {
         if (fr.tint) setFrame(v.tunic, fr.tint);
         const hat = s3d.hats[hatStyle][shown];
         v.hat.visible = hat !== null;
-        if (hat) setFrame(v.hat, hat);
+        if (hat) {
+          setFrame(v.hat, hat);
+          // A bent figure (the geologist knocking) carries its hat lower and further forward.
+          v.hat.position.set(fr.hatAt[0], fr.hatAt[1]);
+        }
         v.head.visible = false;
         // Arms and tool passing in front of the face are drawn again above the hat.
         v.arm.visible = fr.over !== null && hat !== null;
@@ -1956,6 +2013,8 @@ export class GameRenderer {
   /** What a working settler is doing: the task's own action (sowing, reaping…) or the profession's. */
   private actionOf(s: Settler, style: SettlerStyle): ActionId {
     const t = s.tasks[0];
+    const byTask = t ? TASK_ACTION[t.t] : undefined;
+    if (byTask) return byTask;
     if (t?.t === 'plant') return PLANT_ACTION[t.what];
     if (t?.t === 'gather') return GATHER_ACTION[t.res] ?? style.work;
     return style.work;

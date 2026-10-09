@@ -13,6 +13,8 @@ import { buildingFxAnchors, type FxAnchors } from './sprites';
 const MAX_PARTICLES = 700;
 const SMOKE_EVERY_MS = 170;
 const DUST_EVERY_MS = 220;
+/** A smouldering ruin puffs from one of its spots this often (at full heat; thinner as it cools). */
+const RUIN_SMOKE_EVERY_MS = 200;
 const FALL_MS = 750;
 const FADE_MS = 350;
 /** Death puff (`soul`): how long it stays in the air, how fast it rises (px/s), how late it fades. */
@@ -90,6 +92,8 @@ export class Effects {
   private next = 0;
 
   private readonly buildings = new Map<number, BuildingFxView>();
+  /** Smouldering ruins (`World.ruins`): their body, where smoke rises from it, and how hot they still are. */
+  private readonly ruins = new Map<string, { body: Container; spots: [number, number][]; heat: number; emitMs: number; next: number }>();
   private readonly falling: Falling[] = [];
   private readonly waterChunks: (Container | null)[];
   private readonly glintPhase: Float32Array[] = [];
@@ -377,6 +381,51 @@ export class Effects {
     }
   }
 
+  // ------------------------------------------------------------------ ruins
+
+  /** A burnt building's remains (n×n footprint) start to smoke from a few spots over the footprint. */
+  attachRuin(key: string, body: Container, n: number): void {
+    const spots: [number, number][] = [];
+    for (let k = 0; k < 1 + n; k++) {
+      // Inside the footprint diamond (half-width 32·n, half-height 16·n), away from its rim.
+      const u = (Math.random() - 0.5) * 0.9;
+      const v = (Math.random() - 0.5) * 0.9;
+      spots.push([(u - v) * 32 * n, (u + v) * 16 * n - 4]);
+    }
+    this.ruins.set(key, { body, spots, heat: 1, emitMs: 0, next: 0 });
+  }
+
+  /** How hot a ruin still is (1 just burnt … 0 cold): smoke and sparks thin out with it. */
+  setRuinHeat(key: string, heat: number): void {
+    const r = this.ruins.get(key);
+    if (r) r.heat = Math.max(0, heat);
+  }
+
+  detachRuin(key: string): void {
+    this.ruins.delete(key);
+  }
+
+  private updateRuins(dtMs: number): void {
+    for (const r of this.ruins.values()) {
+      const { body } = r;
+      if (body.parent === null || !body.visible || r.heat <= 0) continue;
+      r.emitMs += dtMs;
+      if (r.emitMs < RUIN_SMOKE_EVERY_MS / (0.35 + 0.65 * r.heat)) continue;
+      r.emitMs = 0;
+      const [sx, sy] = r.spots[r.next];
+      r.next = (r.next + 1) % r.spots.length;
+      const x = body.x + sx + (Math.random() - 0.5) * 4;
+      const y = body.y + sy;
+      // Thick dark smoke, slow and wide, then a lighter wisp.
+      this.emit(this.tex.puff, x, y, 3 + Math.random() * 5, -12 - Math.random() * 6, 3800 + Math.random() * 1200, 0.45, 1.9, 0.6 * r.heat + 0.2, 0x4e4945);
+      if (Math.random() < 0.6) this.emit(this.tex.puff, x + 3, y - 6, 5, -15, 3000, 0.3, 1.3, 0.4 * r.heat + 0.15, 0x8c8782);
+      // Sparks rise from the embers while it is still hot.
+      if (r.heat > 0.5 && Math.random() < 0.35) {
+        this.emit(this.tex.spark, x, y + 2, (Math.random() - 0.5) * 10, -24 - Math.random() * 16, 700, 0.7, 0.3, 0.9, 0xff8a2a);
+      }
+    }
+  }
+
   // ------------------------------------------------------------------ trees
 
   /**
@@ -475,6 +524,7 @@ export class Effects {
   update(dtMs: number, timeMs: number, chunkVisible: Uint8Array): void {
     const dt = Math.min(dtMs, 100);
     this.updateBuildings(dt, timeMs);
+    this.updateRuins(dt);
     this.updateFalling(timeMs);
     this.updateWater(timeMs, chunkVisible);
     this.stepParticles(dt);

@@ -11,6 +11,7 @@ import {
   DISPATCH_EVERY,
   GROUND,
   MAP_SIZE,
+  RUIN,
   ORDERABLE,
   OUTPUT_SHARES,
   PROFESSIONS,
@@ -80,6 +81,19 @@ import {
 import type { GameMessage } from './messages';
 
 /** A player's war record (`World.stats.war`). */
+/** A burnt building's remains (`World.ruins`, visual only): its footprint, type and owner, when it burnt. */
+export interface Ruin {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  type: BuildingType;
+  owner: PlayerId;
+  tick: number;
+  /** Tick it is gone (`RUIN.ticks` after it burnt). */
+  until: number;
+}
+
 export interface WarStats {
   killed: Partial<Record<SettlerKind, number>>;
   fallen: Partial<Record<SettlerKind, number>>;
@@ -225,6 +239,11 @@ export class World {
   readonly dying = new Set<number>();
   /** Arrows in flight, for drawing only: damage is applied when shot. Derived, not saved. */
   shots: { x0: number; y0: number; x1: number; y1: number; tick: number; owner: PlayerId }[] = [];
+  /**
+   * Burnt buildings' remains, for drawing only (`RUIN`): they block nothing, nothing in the simulation
+   * reads them, so they are not saved (a loaded game shows none). Dropped once `until` has passed.
+   */
+  ruins: Ruin[] = [];
   /**
    * Messages for players with a place on the map (`messages.ts`, Settlers 4's warnings), oldest first,
    * the last `MESSAGE_KEEP`. Nothing in the simulation reads them, so they are not saved.
@@ -789,6 +808,9 @@ export class World {
         markWalkable(m, b.x + dx, b.y + dy);
       }
     }
+    if (ruin === 'burn') {
+      this.ruins.push({ x: b.x, y: b.y, w: b.w, h: b.h, type: b.type, owner: b.owner, tick: this.tick, until: this.tick + RUIN.ticks });
+    }
     if (ruin !== 'none') {
       const c = centerOf(b);
       const at = { x: Math.round(c.x), y: Math.round(c.y) };
@@ -920,6 +942,7 @@ export class World {
     removeDead(this);
     this.checkDefeats();
     pruneShots(this);
+    if (this.ruins.some((r) => r.until <= this.tick)) this.ruins = this.ruins.filter((r) => r.until > this.tick);
     updateStrikes(this);
     if (this.tick % DISPATCH_EVERY === 0) dispatch(this);
     if (this.ai.length > 0) updateAi(this);

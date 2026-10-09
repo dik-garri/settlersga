@@ -5,6 +5,9 @@ Everything is data in `GOODS` (resource → item builder + pile layout), in the 
 Items are built lying or standing around the origin at "ware scale" (about 0.3 tile long); a layout
 places copies of them into a pile. Output (see build.py):
 - `piles-<res>.png`: a strip of PILE_MAX frames (PILE logical size each), frame k holds k + 1 items;
+- `stacks-<res>.png`: the same goods lying loose on bare ground (Settlers 4's piles: start goods,
+  ruins, dropped loads), a strip of PILE_MAX frames (STACK logical size) on a small patch of trodden
+  earth, the pile layout loosened (`loosen`) so they read as put down, not stacked at a door;
 - `wares.png` + `wares.json`: a strip of single wares (WARE logical size), in `GOODS` order.
 """
 
@@ -22,6 +25,7 @@ PILE_MAX = 8
 #: Piles are drawn a little larger than carried wares, so they read at the door as in Settlers 4.
 PILE_SCALE = 1.3
 PILE = (44, 34, 22, 24)  # logical w, h, anchor of a pile at a door
+STACK = (56, 40, 28, 26)  # logical w, h, anchor of a stack lying on the ground (a tile's centre)
 WARE = (24, 16, 12, 8)  # logical w, h, anchor of a carried ware / icon (same scale as a ware in a pile)
 
 
@@ -453,6 +457,44 @@ def render_piles(out, tmp, only=None):
             frames.append(render_frame(os.path.join(tmp, f'pile-{res}-{n}.png'), PILE, setup))
         save_strip(frames, os.path.join(out, f'piles-{res}.png'))
         print('rendered pile', res)
+
+
+def loosen(layout, rnd):
+    """A pile layout put down loosely: the ground layer first (a small heap lies on the ground, not
+    on top of nothing), every item shifted and turned a little, more on the ground layer than higher
+    up (where they rest on the ones below)."""
+    out = []
+    for x, y, z, yaw in sorted(layout, key=lambda p: p[2]):
+        k = 1.0 if z == 0 else 0.35
+        out.append((x + rnd.uniform(-0.018, 0.018) * k, y + rnd.uniform(-0.018, 0.018) * k, z,
+                    yaw + rnd.uniform(-0.3, 0.3) * k))
+    return out
+
+
+def ground_patch(seed):
+    """The grass flattened and scuffed bare where goods were put down: a small, soft-edged patch of
+    dark earth, mostly fringe, so it reads as the stack's contact shadow on the ground."""
+    mat = lib.mat_grain(f'patch{seed}', (0.2, 0.15, 0.08), (0.36, 0.27, 0.15), scale=22, stretch=(1, 1, 1), bump=0.6)
+    lib.pad((0, 0, 0), 0.24, 0.22, mat, verts=64, jitter=0.18, seed=seed, core=0.45, reach=1.35, grain=70.0)
+
+
+def render_stacks(out, tmp, only=None):
+    """`stacks-<res>.png` for every resource (or those in `only`)."""
+    for res, (build, layout) in GOODS.items():
+        if only and res not in only:
+            continue
+        frames = []
+        for n in range(1, PILE_MAX + 1):
+            def setup(scene, n=n):
+                m = Mats()
+                rnd = random.Random(n)
+                ground_patch(n)
+                k = PILE_SCALE
+                for x, y, z, yaw in loosen(layout, random.Random(7))[:n]:
+                    place(build, m, rnd, x * k, y * k, z * k, yaw, k)
+            frames.append(render_frame(os.path.join(tmp, f'stack-{res}-{n}.png'), STACK, setup))
+        save_strip(frames, os.path.join(out, f'stacks-{res}.png'))
+        print('rendered stack', res)
 
 
 def render_wares(out, tmp):

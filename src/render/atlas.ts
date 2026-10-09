@@ -22,6 +22,10 @@ import {
   EDGE_DIRS,
   GROUND_PRIORITY,
   paintMillSails,
+  paintRuin,
+  paintStackShadow,
+  RUIN_CANVAS,
+  RUIN_SIZES,
   paintTree,
   paintWare,
   PLAYER_COLORS,
@@ -41,6 +45,7 @@ import {
   PATH_FRAME,
   PILE,
   PILE_MAX,
+  STACK,
   SIGN_LEVELS,
   SIGN_VARIANTS,
   signFrame,
@@ -286,6 +291,16 @@ export class SpriteAtlas {
     for (let level = 1; level < SOLDIER_LEVELS.length; level++) {
       a.add(`chevrons:${level}`, 12, 10, 6, 5, (ctx) => paintChevrons(ctx, level));
     }
+    // Burnt ruins per footprint size (`World.ruins`), on the canvas of a building that size.
+    for (let n = 1; n <= RUIN_SIZES; n++) {
+      const c = RUIN_CANVAS[n];
+      a.add(`ruin:${n}`, c.w, c.h, c.ax, c.ay, (ctx) => {
+        ctx.translate(c.ax, c.ay);
+        paintRuin(ctx, n);
+      });
+    }
+    // The soft shadow under goods lying on the ground (classic art).
+    a.add('stack:shadow', 30, 14, 15, 7, paintStackShadow);
     a.add('cutoff', 18, 18, 9, 18, paintCutOff);
     a.add('stopped', 18, 18, 9, 18, paintStopped);
     addAnimalSprites((...args) => a.add(...args), art3d);
@@ -598,6 +613,16 @@ function addArt3d(a: AtlasBuilder, art: Art3d): void {
       a.add(`pile:${res}:${n}`, PILE.w, PILE.h, PILE.ax, PILE.ay, (ctx) => drawFrame(ctx, strip, n - 1, PILE.w, PILE.h));
     }
   }
+  // Goods lying loose on the ground, on a patch of trodden earth (`stack:<res>:<n>`).
+  for (const res of RESOURCES) {
+    const strip = art.images.get(`stacks-${res}`);
+    if (!strip) continue;
+    for (let n = 1; n <= PILE_MAX; n++) {
+      a.add(`stack:${res}:${n}`, STACK.w, STACK.h, STACK.ax, STACK.ay, (ctx) => drawFrame(ctx, strip, n - 1, STACK.w, STACK.h));
+    }
+  }
+  // Burnt ruins per footprint size, over the classic ones.
+  for (let n = 1; n <= RUIN_SIZES; n++) one(`ruin:${n}`, `ruin${n}`);
   // Carried wares (and the pile fallback): one frame per resource.
   const wares = art.images.get('wares')!;
   const [ww, wh, wax, way] = art.wares.frame;

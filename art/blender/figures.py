@@ -58,7 +58,16 @@ ACTIONS = {
     'draw': ('bucket', [0.06, 0.2, 0.38, 0.2], None),
     'sword': ('sword', [0.88, 0.45, 0.14, 0.5], None),
     'shoot': ('bow', [0.5, 0.5, 0.5, 0.5], [0, 0.5, 1, 0]),
+    # The geologist bent over the rock, knocking it with his hammer.
+    'knock': ('hammer', [1.0, 0.43, 0.38, 0.41], None),
 }
+#: Actions done bent over (animConfig.ts `ActionDef.bend`): the torso's forward bend per frame in
+#: degrees; the arm angles above are then the torso's, the free hand rests forward, the feet apart.
+BEND = {
+    'knock': [30, 42, 50, 46],
+}
+#: Where the torso bends (the belt), in figure space.
+WAIST_Z = 0.44
 
 #: How a tool is held while walking: tool arm angle (turns) and the tool's tilt at the hand
 #: (degrees about the shoulder axis; 0 = pointing up along the body, −25 = leaning back over the
@@ -133,6 +142,9 @@ class Figure:
         self.pivot = pivot
 
         hip_z = 0.29
+        # Everything above the belt hangs from the waist, so a work pose can bend the torso (`BEND`).
+        self.waist = pivot('waist', (0, 0, WAIST_Z))
+        self.head_ref = pivot('head', (0.005, 0, 0.76 - WAIST_Z), self.waist)
         self.legs = []
         for side in (-1, 1):
             p = pivot(f'hip{side}', (0, side * 0.062, hip_z))
@@ -148,7 +160,16 @@ class Figure:
         ]
         for obj in tunic:
             obj['mask'] = 1
-            self.attach(obj, self.root)
+            self.attach(obj, self.waist)
+        # Bent over, the tunic is two parts: the skirt below the belt stays with the legs, the bodice
+        # above it bends with the torso (the whole tunic would swing its hem up behind). Hidden upright.
+        self.tunic_whole = tunic[0]
+        self.skirt = lib.cylinder((0, 0, 0.35), 0.155, 0.18, self.tunic, radius2=0.131, verts=18)
+        self.bodice = lib.cylinder((0, 0, 0.49), 0.134, 0.18, self.tunic, radius2=0.112, verts=18)
+        for obj, parent in ((self.skirt, self.root), (self.bodice, self.waist)):
+            obj['mask'] = 1
+            obj.hide_render = True
+            self.attach(obj, parent)
         for obj in (
             lib.cylinder((0, 0, 0.45), 0.118, 0.045, self.leather, verts=18),
             lib.box((0.0, 0.0, 0.55), (0.24, 0.035, 0.03), self.leather, rot=(0.9, 0, 0)),
@@ -162,12 +183,12 @@ class Figure:
             lib.sphere((0.108, 0.04, 0.775), 0.012, self.dark),
             lib.sphere((0.108, -0.04, 0.775), 0.012, self.dark),
         ):
-            self.attach(obj, self.root)
+            self.attach(obj, self.waist)
         self.arms = []
         self.hands = []
         self.grips = []
         for side in (-1, 1):
-            p = pivot(f'shoulder{side}', (0, side * 0.145, 0.62))
+            p = pivot(f'shoulder{side}', (0, side * 0.145, 0.62 - WAIST_Z), self.waist)
             sleeve = lib.cylinder((0, side * 0.145, 0.59), 0.055, 0.08, self.tunic, verts=10)
             sleeve['mask'] = 1
             self.attach(sleeve, p)
@@ -273,7 +294,7 @@ class Figure:
 
         def on_body(parts):
             for obj in parts:
-                self.attach(obj, self.root)
+                self.attach(obj, self.waist)
             return parts
 
         def masked(obj):
@@ -391,10 +412,13 @@ class Figure:
 
     # ------------------------------------------------------------------------------------- poses
 
-    def pose(self, yaw, leg=0.0, right=None, left=None, right_yaw=0.0, left_yaw=0.0, tilt=0.0, left_tilt=0.0):
+    def pose(self, yaw, leg=0.0, right=None, left=None, right_yaw=0.0, left_yaw=0.0, tilt=0.0, left_tilt=0.0, bend=0.0):
         """Arm angles in turns (0 down … 1 up), None for a hanging arm; yaws (degrees) swing a raised
-        arm inward; tilts (degrees) turn the tool at the hand."""
+        arm inward; tilts (degrees) turn the tool at the hand; `bend` (degrees) bows the torso forward."""
         self.root.rotation_euler = (0, 0, yaw)
+        self.waist.rotation_euler = (0, math.radians(bend), 0)
+        self.tunic_whole.hide_render = bend != 0
+        self.skirt.hide_render = self.bodice.hide_render = bend == 0
         for side, p in zip((-1, 1), self.legs):
             p.rotation_euler = (0, math.radians(side * leg), 0)
         for side, p, a, y in ((-1, self.arms[0], right, right_yaw), (1, self.arms[1], left, left_yaw)):
@@ -454,6 +478,8 @@ def work_frames(action):
             kw = dict(right=a, left=0.25, left_yaw=20)
         else:
             kw = dict(right=a, left=0.04, tilt=WORK_TILT)
+        if action in BEND:
+            kw.update(bend=BEND[action][f], leg=12, left=0.3, left_yaw=12)
         frames.append((shape, kw))
     return frames
 
@@ -536,7 +562,7 @@ def build_hat_proxy(fig):
         lib.box((-0.02, 0, z + 0.3), (0.38, 0.08, 0.3), None),
     ]
     for o in objs:
-        fig.attach(o, fig.root)
+        fig.attach(o, fig.waist)
         o.hide_render = True
     fig.root.scale = scale
     bpy.context.view_layer.update()
@@ -617,9 +643,12 @@ class Packer:
         self.row = max(self.row, h)
         return len(self.frames) - 1
 
-    def save(self, out, prefix):
+    def save(self, out, prefix, first=0):
+        """Writes pages `first`… (the earlier ones are kept as they are on disk); returns their names."""
         names = []
         for k, page in enumerate(self.pages):
+            if k < first:
+                continue
             # The last page is cut down to the rows it uses.
             used = self.y + self.row + 1 if k == len(self.pages) - 1 else PAGE
             name = f'{prefix}-{k}.png'
@@ -638,9 +667,11 @@ def save_rgba(px, path):
     bpy.data.images.remove(img)
 
 
-def build_settlers(out, tmp, only=None, hats=None):
+def build_settlers(out, tmp, only=None, hats=None, add=False):
     """Renders every pose group in every direction plus the hat layers; writes settlers-*.png and
-    settlers.json into `out`. `only`: a list of group keys to render (for quick looks)."""
+    settlers.json into `out`. `only`: a list of group keys to render (for quick looks). With `add`,
+    keeps the existing sheet as it is and renders only the groups it lacks (a new action or outfit),
+    packed after the frames on its last page (re-quantize that page afterwards)."""
     scene = lib.reset_scene(samples=14)
     # Small frames render fine on the CPU; it keeps the GPU (and the machine) cool, and Metal kernel
     # compilation has crashed long runs.
@@ -661,6 +692,17 @@ def build_settlers(out, tmp, only=None, hats=None):
         'walk': WALK_FRAMES, 'groups': {}, 'hats': {}, 'carryAt': [], 'carryBehind': [],
         'rankY': -round(1.02 * FIGURE_SCALE * lib.PX_PER_UNIT * math.cos(math.radians(30)) + 6),
     }
+    kept = 0  # pages of an existing sheet left untouched (`add`)
+    if add:
+        with open(os.path.join(out, 'settlers.json')) as f:
+            meta = json.load(f)
+        kept = len(meta['pages']) - 1
+        last = read_png(os.path.join(out, meta['pages'][-1]))
+        pack.pages = [None] * kept + [np.zeros((PAGE, PAGE, 4), dtype=np.float32)]
+        pack.pages[-1][:last.shape[0], :last.shape[1]] = last
+        pack.frames = meta['frames']
+        pack.x, pack.y, pack.row = 1, last.shape[0] + 1, 0
+    meta.setdefault('heads', {})
     path = os.path.join(tmp, 'fig.png')
     mpath = os.path.join(tmp, 'fig-mask.png')
     opath = os.path.join(tmp, 'fig-over.png')
@@ -669,8 +711,13 @@ def build_settlers(out, tmp, only=None, hats=None):
         gx, gy = lib.ground_dir(d * math.pi / 4)
         yaws.append(math.atan2(gy, gx))
     for key, frames, outfit in poses():
-        if only and key not in only:
+        if only and key not in only or add and key in meta['groups']:
             continue
+        # Where the head is when the pose bends the torso, against standing (the hat layer follows).
+        heads = None
+        if any(kw.get('bend') for _, kw in frames):
+            heads = [[list(head_offset(scene, fig, yaws[d], kw)) for _, kw in frames] for d in range(DIRS)]
+            meta['heads'][key] = heads
         # Each group is cached (uint8) once rendered, so an interrupted run resumes where it stopped.
         work = key.startswith('work:')
         per = 3 if work else 2  # work poses add the arm-over-hat pass
@@ -681,7 +728,7 @@ def build_settlers(out, tmp, only=None, hats=None):
         else:
             data = []
             for d in range(DIRS):
-                for shape, kw in frames:
+                for f, (shape, kw) in enumerate(frames):
                     fig.show(shape, outfit)
                     fig.pose(yaws[d], **kw)
                     full = render_full(scene, path)
@@ -690,7 +737,8 @@ def build_settlers(out, tmp, only=None, hats=None):
                     tint[..., 3] = full[..., 3] * np.clip(mask, 0, 1)
                     data += [full, tint]
                     if work:
-                        data.append(render_over(scene, opath, fig, proxy, neck_y))
+                        drop = heads[d][f][1] * lib.RESOLUTION if heads else 0
+                        data.append(render_over(scene, opath, fig, proxy, neck_y + drop))
             data = np.stack(data)
             np.savez_compressed(cached, frames=np.round(np.clip(data, 0, 1) * 255).astype(np.uint8))
         rows = []
@@ -703,6 +751,12 @@ def build_settlers(out, tmp, only=None, hats=None):
             rows.append(row)
         meta['groups'][key] = rows
         print('settlers: rendered', key, flush=True)
+    if add:
+        meta['pages'] = meta['pages'][:kept] + pack.save(out, 'settlers', first=kept)
+        meta['frames'] = pack.frames
+        with open(os.path.join(out, 'settlers.json'), 'w') as f:
+            json.dump(meta, f, separators=(',', ':'))
+        return
     # Goods in hand: where the hands are in the carry poses, and whether they are behind the body.
     for d in range(DIRS):
         fig.show('carry')
@@ -720,6 +774,15 @@ def build_settlers(out, tmp, only=None, hats=None):
     meta['frames'] = pack.frames
     with open(os.path.join(out, 'settlers.json'), 'w') as f:
         json.dump(meta, f, separators=(',', ':'))
+
+
+def head_offset(scene, fig, yaw, kw):
+    """Logical px from where the head is standing to where it is in pose `kw` (facing `yaw`)."""
+    fig.pose(yaw)
+    x0, y0 = lib.screen_point(scene, fig.head_ref.matrix_world.translation)
+    fig.pose(yaw, **kw)
+    x1, y1 = lib.screen_point(scene, fig.head_ref.matrix_world.translation)
+    return round(x1 - x0, 1), round(y1 - y0, 1)
 
 
 def build_hat(style, fig):
@@ -790,7 +853,7 @@ def build_hat(style, fig):
     }
     objs = parts[style]()
     for o in objs:
-        fig.attach(o, fig.root)
+        fig.attach(o, fig.waist)
     return objs
 
 
@@ -807,6 +870,7 @@ def render_hats(scene, fig, yaws, pack, path):
     for style in HAT_STYLES:
         fig.root.scale = (1, 1, 1)
         fig.root.rotation_euler = (0, 0, 0)
+        fig.waist.rotation_euler = (0, 0, 0)
         bpy.context.view_layer.update()
         objs = build_hat(style, fig)
         fig.root.scale = scale

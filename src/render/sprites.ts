@@ -552,6 +552,75 @@ const DECOR: BuildingCanvas = { w: 80, h: 120, ax: 40, ay: 92 };
 /** The 4×4 castle (our `fortress`), as tall as two houses. */
 const HUGE: BuildingCanvas = { w: 320, h: 290, ax: 160, ay: 200 };
 
+/** Footprint sides that have a burnt-ruin sprite (`ruin:<n>`), and its canvas: a building's of that size. */
+export const RUIN_SIZES = 4;
+export const RUIN_CANVAS: Record<number, BuildingCanvas> = { 1: DECOR, 2: SMALL, 3: LARGE, 4: HUGE };
+
+/**
+ * A burnt building's remains (classic art), around the footprint centre: a scorched patch, broken
+ * blackened wall stubs along the back edges, charred beams and a few embers.
+ */
+export function paintRuin(ctx: Ctx, n: number): void {
+  const hw = n * 32;
+  const hh = n * 16;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, hw * 0.92, hh * 0.92, 0, 0, Math.PI * 2);
+  const g = ctx.createRadialGradient(0, 0, 2, 0, 0, hw * 0.92);
+  g.addColorStop(0, 'rgba(28,22,18,0.92)');
+  g.addColorStop(0.7, 'rgba(45,36,28,0.8)');
+  g.addColorStop(1, 'rgba(45,36,28,0)');
+  ctx.fillStyle = g;
+  ctx.fill();
+  if (n > 1) {
+    // Wall stubs along the two back edges (left: −x/−y corner up to the top corner, right: down from it).
+    const stub = (x: number, y: number, h: number) => {
+      ctx.fillStyle = '#3a3532';
+      ctx.fillRect(x - 3, y - h, 6, h);
+      ctx.fillStyle = '#5b544e';
+      ctx.fillRect(x - 3, y - h, 6, 2);
+    };
+    for (let k = 1; k < n * 3; k++) {
+      const t = k / (n * 3);
+      const h = 4 + ((k * 7) % 5) * 2 * Math.min(n, 3) / 2;
+      if (k % 4 !== 3) stub(-hw * 0.8 + t * hw * 0.8, -t * hh * 0.8, h);
+      if (k % 3 !== 2) stub(t * hw * 0.8, -hh * 0.8 + t * hh * 0.8, h);
+    }
+    // Charred beams across the floor.
+    ctx.strokeStyle = '#1b1411';
+    ctx.lineWidth = 3;
+    for (let k = 0; k < n; k++) {
+      const a = 0.4 + k * 1.3;
+      const r = hw * 0.45;
+      ctx.beginPath();
+      ctx.moveTo(-Math.cos(a) * r, -Math.sin(a) * r * 0.5);
+      ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r * 0.5);
+      ctx.stroke();
+    }
+  } else {
+    stoneBlock(ctx, -6, 4, 12, 6, 0.45);
+  }
+  // Embers.
+  ctx.fillStyle = '#ff7a1a';
+  for (let k = 0; k < 2 + 2 * n; k++) {
+    const a = k * 2.4;
+    const r = (k % 3) * 0.18 * hw;
+    ctx.fillRect(Math.cos(a) * r - 1, Math.sin(a) * r * 0.5 - 1, 2, 2);
+  }
+}
+
+/** The soft shadow under goods lying on the ground (classic art), 30×14 centred at (15, 7). */
+export function paintStackShadow(ctx: Ctx): void {
+  ctx.translate(15, 7);
+  const g = ctx.createRadialGradient(0, 0, 1, 0, 0, 14);
+  g.addColorStop(0, 'rgba(40,28,16,0.55)');
+  g.addColorStop(1, 'rgba(40,28,16,0)');
+  ctx.scale(1, 0.5);
+  ctx.beginPath();
+  ctx.arc(0, 0, 14, 0, Math.PI * 2);
+  ctx.fillStyle = g;
+  ctx.fill();
+}
+
 /** Construction-site sprites by footprint side (`site<n>`; 1×1 eyecatchers use the 2×2 one). */
 export type SiteSprite = 'site2' | 'site3' | 'site4';
 export function siteSprite(side: number): SiteSprite {

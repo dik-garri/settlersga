@@ -9,7 +9,7 @@
  * are made once here, so the per-frame update only indexes arrays.
  */
 import { ImageSource, Rectangle, Texture, type Sprite } from 'pixi.js';
-import { ACTION_IDS, HAT_STYLES, TOOLS, type ActionId, type HatStyle, type Outfit, type ToolShape } from './animConfig';
+import { ACTION_IDS, ACTIONS, HAT_STYLES, TOOLS, type ActionId, type HatStyle, type Outfit, type ToolShape } from './animConfig';
 
 /** `settlers.json` written by `art/blender/figures.py`. */
 export interface SettlersMeta {
@@ -28,6 +28,11 @@ export interface SettlersMeta {
   groups: Record<string, number[][][]>;
   /** Hat style → [dir] frame id (−1: none). */
   hats: Record<string, number[]>;
+  /**
+   * Groups whose head is not where it is standing (a bent torso, `BEND` in figures.py): [dir][frame]
+   * → where the head is, relative to standing (logical px); the hat layer moves with it.
+   */
+  heads?: Record<string, [number, number][][]>;
   /** [dir][walk frame or standing]: goods in hand, relative to the anchor (logical px). */
   carryAt: [number, number][][];
   /** [dir]: goods in hand are behind the figure. */
@@ -44,7 +49,11 @@ export interface Frame3d {
   full: Texture;
   tint: Texture | null;
   over: Texture | null;
+  /** Where the hat goes, relative to a standing figure's (logical px; [0, 0] unless the body bends). */
+  hatAt: readonly [number, number];
 }
+
+const UPRIGHT: readonly [number, number] = [0, 0];
 
 /** The pose groups of one look: plain clothes, or an outfit (only the tools and actions it has). */
 export interface Look3d {
@@ -95,13 +104,19 @@ export function buildSettler3d(meta: SettlersMeta, pages: HTMLImageElement[]): S
   const group = (key: string): Frame3d[][] => {
     const g = meta.groups[key];
     if (!g) throw new Error(`settlers.json has no group ${key}`);
-    return g.map((row) => row.map(([full, tint, over]) => ({ full: tex(full)!, tint: tex(tint), over: tex(over ?? -1) })));
+    const heads = meta.heads?.[key];
+    return g.map((row, d) =>
+      row.map(([full, tint, over], f) => ({ full: tex(full)!, tint: tex(tint), over: tex(over ?? -1), hatAt: heads?.[d][f] ?? UPRIGHT })),
+    );
   };
   const hold = Object.fromEntries(TOOLS.map((t) => [t, group(`hold:${t}`)])) as Record<ToolShape, Frame3d[][]>;
-  const work = Object.fromEntries(ACTION_IDS.filter((a) => a !== 'idle').map((a) => [a, group(`work:${a}`)])) as Record<
-    ActionId,
-    Frame3d[][]
-  >;
+  // An action whose pose group is not rendered (yet) shows its tool held still.
+  const work = Object.fromEntries(
+    ACTION_IDS.filter((a) => a !== 'idle').map((a) => [
+      a,
+      meta.groups[`work:${a}`] ? group(`work:${a}`) : hold[ACTIONS[a].tool].map((row) => Array.from({ length: 4 }, () => row[meta.walk])),
+    ]),
+  ) as Record<ActionId, Frame3d[][]>;
   // Idling at work: standing empty-handed.
   work.idle = hold.none.map((row) => Array.from({ length: 4 }, () => row[meta.walk]));
   // Outfit groups: `hold:<tool>@<outfit>` / `work:<action>@<outfit>`; idling at work in an outfit is
