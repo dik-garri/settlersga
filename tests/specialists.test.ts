@@ -117,6 +117,72 @@ describe('pioneer', () => {
     expect(w.map.owner[i]).toBe(2);
   });
 
+  /** Gives player 2 the neutral tiles within `r` of `t` (land no tower of his covers), returns them. */
+  function foreignPatch(w: World, t: { x: number; y: number }, r: number, owner = 2): number[] {
+    const m = w.map;
+    const out: number[] = [];
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const x = t.x + dx;
+        const y = t.y + dy;
+        if (!m.inBounds(x, y) || Math.hypot(dx, dy) > r) continue;
+        const i = m.idx(x, y);
+        if (m.owner[i] !== 0) continue;
+        m.owner[i] = owner;
+        out.push(i);
+      }
+    }
+    w.territoryVersion++;
+    return out;
+  }
+
+  it("may claim a hostile border tile no tower protects, never one a tower covers (S4 CheckLand)", () => {
+    const w = new World(42, { players: 2 });
+    const m = w.map;
+    // All of player 2's land lies in his start tower's influence: protected.
+    for (let i = 0; i < m.owner.length; i++) {
+      if (m.owner[i] !== 2) continue;
+      expect(claimable(w, i % m.w, Math.floor(i / m.w), 1)).toBe(false);
+    }
+    // A patch of his land far from his towers, touching player 1's border.
+    const t = borderTile(w);
+    const patch = foreignPatch(w, t, 3);
+    const edge = patch.filter((i) => claimable(w, i % m.w, Math.floor(i / m.w), 1));
+    expect(edge.length).toBeGreaterThan(0);
+    // Only border stones: a tile whose neighbours are all his (or water) is not.
+    for (const i of edge) {
+      const x = i % m.w;
+      const y = Math.floor(i / m.w);
+      let border = false;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if ((dx || dy) && m.owner[m.idx(x + dx, y + dy)] !== 2) border = true;
+      expect(border).toBe(true);
+    }
+    expect(patch.some((i) => m.isWalkable(i % m.w, Math.floor(i / m.w)) && !edge.includes(i))).toBe(true);
+    // Player 2 himself (and so an ally) never claims his own land.
+    for (const i of edge) expect(claimable(w, i % m.w, Math.floor(i / m.w), 2)).toBe(false);
+  });
+
+  it("an ally's border stones stay untouched", () => {
+    const w = new World(42, { players: 2, teams: [1, 1] });
+    const m = w.map;
+    const patch = foreignPatch(w, borderTile(w), 3);
+    expect(patch.some((i) => claimable(w, i % m.w, Math.floor(i / m.w), 1))).toBe(false);
+  });
+
+  it('moves hostile border stones that no tower protects, tile by tile', () => {
+    const w = new World(42, { players: 2 });
+    recruit(w, 'pioneer');
+    const t = borderTile(w);
+    const patch = foreignPatch(w, t, 3);
+    expect(w.sendPioneer(t.x, t.y)).toBe(true);
+    run(w, 8000);
+    const taken = patch.filter((i) => w.map.owner[i] === 1).length;
+    expect(taken).toBeGreaterThan(3);
+    // His tiles stay his: no tower of anybody's covers them.
+    recomputeTerritory(w);
+    expect(patch.filter((i) => w.map.owner[i] === 1).length).toBe(taken);
+  });
+
   it('goes back to being a carrier when dismissed on his own land, his shovel put down by him', () => {
     const w = new World(42);
     const s = recruit(w, 'pioneer');

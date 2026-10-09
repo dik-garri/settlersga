@@ -22,7 +22,7 @@ import { engageTick } from './field';
 import { assaultTick, joinTick, recruitTick, releaseJoin, releaseRecruit, soldierIdle } from './military';
 import { healTick, releaseHeal } from './infirmary';
 import { canPlant, findGatherTarget, findPlotFor, harvest, isGatherTarget, plant, type Target } from './nature';
-import { findPath } from './pathfinding';
+import { route } from './walk';
 import { sameRegion } from './regions';
 import { pathSpeed, wearTile } from './paths';
 import { restIdle } from './idle';
@@ -85,7 +85,7 @@ export function updateSettler(w: World, s: Settler): void {
           s.tasks.shift();
           return;
         }
-        const p = findPath(w.map, Math.round(s.x), Math.round(s.y), task.x, task.y, task.adj);
+        const p = route(w, s, Math.round(s.x), Math.round(s.y), task.x, task.y, task.adj);
         if (!p) return routeFailed(w, s);
         if (p.length === 0) {
           s.tasks.shift();
@@ -312,7 +312,7 @@ export function move(w: World, s: Settler, task: GotoTarget, onBlocked?: () => v
     const next = s.path[0];
     if (next && !w.map.isWalkable(next.x, next.y)) {
       // Something grew or was built in the way — find a new route.
-      const p = findPath(w.map, s.x, s.y, task.x, task.y, task.adj);
+      const p = route(w, s, s.x, s.y, task.x, task.y, task.adj);
       if (!p) return onBlocked ? onBlocked() : routeFailed(w, s);
       s.path = p;
     }

@@ -18,6 +18,7 @@
 import { duelTick, startDuel } from './combat';
 import { FIELD, INTRUDERS, PROFESSIONS } from './config';
 import { chasers, nearestIntruder } from './intruders';
+import { sameRegion } from './regions';
 import { abort } from './settlers';
 import {
   canGarrison,
@@ -81,9 +82,11 @@ const hostile = (w: World, a: Settler, b: Settler) => a.owner !== b.owner && !w.
 
 /**
  * Up to `n` distinct walkable tiles around (x, y), nearest first in a spiral, `FIELD.formation` apart:
- * where a group ordered to a point spreads out. Deterministic (fixed ring order).
+ * where a group ordered to a point spreads out (Settlers 4's `CGroupDestinations`: the target, then
+ * spiral offsets × 2 of its tiles). With `region` (a tile index) only tiles one can walk to from it
+ * (S4: the first member's sector). Deterministic (fixed ring order).
  */
-export function formationSpots(w: World, x: number, y: number, n: number): Point[] {
+export function formationSpots(w: World, x: number, y: number, n: number, region?: number): Point[] {
   const m = w.map;
   const step = Math.max(1, FIELD.formation);
   const out: Point[] = [];
@@ -94,11 +97,38 @@ export function formationSpots(w: World, x: number, y: number, n: number): Point
         const tx = Math.round(x) + dx * step;
         const ty = Math.round(y) + dy * step;
         if (!m.inBounds(tx, ty) || !m.isWalkable(tx, ty) || m.door[m.idx(tx, ty)] !== 0) continue;
+        if (region !== undefined && !sameRegion(m, region, m.idx(tx, ty))) continue;
         out.push({ x: tx, y: ty });
       }
     }
   }
   return out;
+}
+
+/**
+ * Where a group sent to (x, y) gathers (S4 `CGroupDestinations`): the point itself if one can walk
+ * there from `region`, else the nearest such tile within `FIELD.regroupRadius` (S4: a spiral of 15 of
+ * its tiles), else none.
+ */
+function groupTarget(w: World, x: number, y: number, region: number): Point | null {
+  const m = w.map;
+  const cx = Math.round(x);
+  const cy = Math.round(y);
+  const r = FIELD.regroupRadius;
+  let best: Point | null = null;
+  let bestD = Infinity;
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      const d = Math.hypot(dx, dy);
+      if (d > r || d >= bestD) continue;
+      const tx = cx + dx;
+      const ty = cy + dy;
+      if (!m.inBounds(tx, ty) || !m.isWalkable(tx, ty) || !sameRegion(m, region, m.idx(tx, ty))) continue;
+      best = { x: tx, y: ty };
+      bestD = d;
+    }
+  }
+  return best;
 }
 
 // ---------------------------------------------------------------- orders
@@ -128,8 +158,9 @@ function clearOrders(w: World, s: Settler): void {
 }
 
 /**
- * Player command: move fighters to (x, y). They spread into a formation around the point and stay
- * there as field units. If a squad leader is among them, the others keep their place around him:
+ * Player command: move fighters to (x, y). As in Settlers 4 (`CGroupMgr::SendGroupCommand`) every
+ * one is given his own spot of a formation round the point and walks there on his own route — S4
+ * has no march in step (its `CGroupWalking` is empty); they stay there as field units. If a squad leader is among them, the others keep their place around him:
  * their posts follow him wherever he is sent later. Returns how many obeyed.
  */
 export function orderMove(w: World, ids: readonly number[], x: number, y: number, player: PlayerId): number {
@@ -142,10 +173,15 @@ export function orderMove(w: World, ids: readonly number[], x: number, y: number
     ...units.filter((s) => s !== leader && !isArcher(s)),
     ...units.filter((s) => s !== leader && isArcher(s)),
   ];
-  const spots = formationSpots(w, x, y, ordered.length);
+  // All gather in the first one's walkable region (S4: the first member's sector).
+  const region = w.map.idx(Math.round(ordered[0].x), Math.round(ordered[0].y));
+  const at = groupTarget(w, x, y, region);
+  if (!at) return 0;
+  const spots = formationSpots(w, at.x, at.y, ordered.length, region);
   if (spots.length === 0) return 0;
   ordered.forEach((s, k) => {
-    const spot = spots[Math.min(k, spots.length - 1)];
+    // More men than spots: the spots are dealt out again from the first (S4 `GetNextDestination`).
+    const spot = spots[k % spots.length];
     clearOrders(w, s);
     const post: FieldPost = { x: spot.x, y: spot.y };
     if (leader && s !== leader) {

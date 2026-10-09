@@ -1,6 +1,6 @@
 import { BUILDINGS, IDLE, IDLE_GO_HOME_TICKS, TERRAIN } from './config';
 import { landAt, landOf } from './land';
-import { findPath } from './pathfinding';
+import { route } from './walk';
 import { randInt } from './rng';
 import { move } from './settlers';
 import { Terrain, type Building, type Point, type Settler } from './types';
@@ -46,7 +46,7 @@ export function restIdle(w: World, s: Settler): void {
   s.strollIn = IDLE.strollEvery[0] + randInt(w.idleRng, IDLE.strollEvery[1] - IDLE.strollEvery[0] + 1);
   const target = strollTarget(w, s, anchor);
   if (!target) return;
-  const p = findPath(w.map, Math.round(s.x), Math.round(s.y), target.x, target.y);
+  const p = route(w, s, Math.round(s.x), Math.round(s.y), target.x, target.y);
   if (!p) return;
   s.stroll = target;
   s.path = p;
@@ -67,7 +67,7 @@ function walk(w: World, s: Settler): void {
       s.stroll = null;
       return;
     }
-    const p = findPath(w.map, Math.round(s.x), Math.round(s.y), t.x, t.y);
+    const p = route(w, s, Math.round(s.x), Math.round(s.y), t.x, t.y);
     if (!p) {
       s.stroll = null;
       return;

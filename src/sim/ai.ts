@@ -1573,14 +1573,20 @@ function useSpecialists(w: World, ai: AiState, own: Building[]): void {
 }
 
 /**
- * Neutral spots next to its land worth a pioneer, best first: around its military buildings' edges,
+ * Spots next to its land worth a pioneer, best first — neutral ones, and hostile border tiles no tower
+ * it knows of protects: around its military buildings' edges,
  * the most explored unclaimed resources nearby, leaning towards the starts it still scouts for
  * (bounded sample: 16 per military building; ties by tile index).
  */
 function pioneerSpots(w: World, me: PlayerId, own: Building[]): Point[] {
   const m = w.map;
   const home = w.homeOf(me);
-  const targets = knownEnemies(w, me).length === 0 ? unexploredStarts(w, me) : [];
+  const known = knownEnemies(w, me);
+  const targets = known.length === 0 ? unexploredStarts(w, me) : [];
+  // Towers it knows of, whatever their garrison (it may not see that): their land is protected.
+  const towers = known
+    .filter(({ b }) => BUILDINGS[b.type].territory)
+    .map(({ b }) => ({ c: centerOf(b), r: BUILDINGS[b.type].territory! }));
   const spots: { x: number; y: number; score: number }[] = [];
   for (const b of own) {
     if (!isMilitary(b) || !b.done) continue;
@@ -1589,7 +1595,15 @@ function pioneerSpots(w: World, me: PlayerId, own: Building[]): Point[] {
     for (let a = 0; a < 16; a++) {
       const x = Math.round(c.x + Math.cos((a / 16) * Math.PI * 2) * r);
       const y = Math.round(c.y + Math.sin((a / 16) * Math.PI * 2) * r);
-      if (!claimable(w, x, y, me)) continue;
+      if (!m.inBounds(x, y)) continue;
+      if (m.owner[m.idx(x, y)] === 0) {
+        if (!claimable(w, x, y, me)) continue;
+      } else {
+        // A hostile border stone (S4: a pioneer moves it where no tower protects it). Judged only by
+        // what it knows — explored, and no known tower's land; the order is refused if it is wrong.
+        if (!w.isExplored(x, y, me) || w.allied(m.owner[m.idx(x, y)], me)) continue;
+        if (towers.some((t) => Math.hypot(t.c.x - x, t.c.y - y) <= t.r)) continue;
+      }
       let value = 0;
       for (let dy = -3; dy <= 3; dy++) {
         for (let dx = -3; dx <= 3; dx++) {

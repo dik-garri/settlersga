@@ -15,7 +15,8 @@ import {
   type PlantDef,
 } from './config';
 import type { GameMap } from './map';
-import { findPath, staysConnected } from './pathfinding';
+import { staysConnected } from './pathfinding';
+import { route } from './walk';
 import { markWalkable } from './regions';
 import { workCentre } from './workArea';
 import { randInt } from './rng';
@@ -177,7 +178,7 @@ export function findGatherTarget(w: World, s: Settler, home: Building, def: Gath
   }
   candidates.sort((a, b) => dist(a, c) - dist(b, c));
   for (const c of candidates.slice(0, 6)) {
-    const path = findPath(m, Math.round(s.x), Math.round(s.y), c.x, c.y, true);
+    const path = route(w, s, Math.round(s.x), Math.round(s.y), c.x, c.y, true);
     if (path) return { ...c, path };
   }
   return null;
@@ -265,7 +266,7 @@ export function findPlotFor(w: World, s: Settler, home: Building, def: PlantDef)
   for (let attempt = 0; attempt < 12 && candidates.length > 0; attempt++) {
     const [c] = candidates.splice(randInt(w.rng, candidates.length), 1);
     if (!PLANT_RULES[def.what].isSafe(w, c.x, c.y)) continue;
-    const path = findPath(w.map, Math.round(s.x), Math.round(s.y), c.x, c.y, true);
+    const path = route(w, s, Math.round(s.x), Math.round(s.y), c.x, c.y, true);
     if (path) return { ...c, path };
   }
   return null;
