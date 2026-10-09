@@ -1,5 +1,5 @@
 import { settlerIcon, wareIcon } from '../render/atlas';
-import { MESSAGES, RESOURCE_INFO, TICKS_PER_SECOND } from '../sim/config';
+import { MESSAGES, TICKS_PER_SECOND } from '../sim/config';
 import { messagesOf } from '../sim/messages';
 import { isFighter } from '../sim/military';
 import { scoreOf } from '../sim/score';
@@ -9,9 +9,11 @@ import { ArmyView } from './armyPanel';
 import { BuildView } from './buildMenu';
 import { button, el, rowsTable, type View } from './dom';
 import { inStorage, GoodsView } from './goodsView';
+import { t, withLang, type Key } from './i18n';
 import { glyph, type GlyphName } from './icons';
 import { InfoView } from './infoPanel';
 import { MESSAGE_CYCLE_MS, messageText } from './messageText';
+import { resName } from './names';
 import { OptionsView, SPEEDS, type GameActions } from './optionsView';
 import { SettlerInfoView } from './settlerInfo';
 import { UnitsView } from './unitsView';
@@ -30,13 +32,13 @@ import { StatsView } from './statsView';
 
 type MenuId = 'build' | 'goods' | 'settlers' | 'stats' | 'army' | 'options';
 
-const MENUS: { id: MenuId; glyph: GlyphName; title: string }[] = [
-  { id: 'build', glyph: 'build', title: 'Строительство' },
-  { id: 'goods', glyph: 'goods', title: 'Товары' },
-  { id: 'settlers', glyph: 'settlers', title: 'Поселенцы' },
-  { id: 'stats', glyph: 'stats', title: 'Статистика' },
-  { id: 'army', glyph: 'army', title: 'Армия' },
-  { id: 'options', glyph: 'options', title: 'Настройки' },
+const MENUS: { id: MenuId; glyph: GlyphName; title: Key }[] = [
+  { id: 'build', glyph: 'build', title: 'hud.menu.build' },
+  { id: 'goods', glyph: 'goods', title: 'hud.menu.goods' },
+  { id: 'settlers', glyph: 'settlers', title: 'hud.menu.settlers' },
+  { id: 'stats', glyph: 'stats', title: 'hud.menu.stats' },
+  { id: 'army', glyph: 'army', title: 'hud.menu.army' },
+  { id: 'options', glyph: 'options', title: 'hud.menu.options' },
 ];
 
 /** Goods always shown in the readout; everything else is in the goods menu. */
@@ -45,6 +47,14 @@ const PINNED: readonly Resource[] = ['plank', 'stone', 'log', 'bread', 'fish', '
 /** How long a ticker message stays (ms). */
 const MESSAGE_MS = 6000;
 
+/** What a rebuilt HUD (another language) takes over from the one it replaces. */
+export interface HudMemo {
+  menu: MenuId;
+  ended: boolean;
+  stats: StatsView;
+  warned: WeakSet<object>;
+}
+
 export interface HudOptions {
   /** The minimap canvas, framed at the top of the panel (with its layer switches). */
   minimap: HTMLElement;
@@ -52,6 +62,8 @@ export interface HudOptions {
   sound: HTMLElement | null;
   /** Moves the camera to a tile (messages, «find» buttons). */
   jump: (x: number, y: number) => void;
+  /** The HUD this one replaces (see `memo`). */
+  memo?: HudMemo;
 }
 
 export class Hud {
@@ -77,9 +89,11 @@ export class Hud {
   /** The end screen was shown (and possibly dismissed to keep watching). */
   private ended = false;
   private lastUpdate = 0;
+  /** The HUD's top-level elements, for `dispose`. */
+  private parts: HTMLElement[] = [];
   private readonly jump: (x: number, y: number) => void;
   /** Messages of the simulation (`World.messages`) already shown on the ticker. */
-  private readonly warned = new WeakSet<object>();
+  private readonly warned: WeakSet<object>;
   /** Space: the message it jumped to last (index among the local player's, from the newest), and when. */
   private jumped = { k: -1, at: -Infinity };
 
@@ -92,8 +106,11 @@ export class Hud {
   ) {
     const select = (type: Placeable | null) => this.selectBuildType(type);
     this.jump = opts.jump;
+    this.warned = opts.memo?.warned ?? new WeakSet<object>();
+    this.ended = opts.memo?.ended ?? false;
     this.build = new BuildView(world, state, select, (b) => this.focusBuilding(b));
     this.stats = new StatsView(world);
+    if (opts.memo) this.stats.carry(opts.memo.stats);
     this.info = new InfoView(world, state, (text) => this.toast(text), (b) => this.focusBuilding(b));
     this.settlerInfo = new SettlerInfoView(world, state, {
       place: (p) => select(p),
@@ -116,7 +133,7 @@ export class Hud {
     const tabs = el('nav', 'main-tabs');
     for (const m of MENUS) {
       const b = el('button', 'gem');
-      b.title = m.title;
+      b.title = t(m.title);
       b.append(glyph(m.glyph));
       b.onclick = () => {
         this.state.selected = null;
@@ -135,7 +152,7 @@ export class Hud {
 
     const strip = el('div', 'strip');
     const pause = el('button', 'gem small');
-    pause.title = 'Пауза (P или Pause)';
+    pause.title = t('hud.pauseTip');
     pause.append(glyph('pause', 14));
     pause.onclick = () => {
       state.paused = !state.paused;
@@ -144,7 +161,7 @@ export class Hud {
     strip.append(pause);
     this.speedButtons.set('pause', pause);
     for (const s of SPEEDS) {
-      const b = button(`${s}×`, `Скорость ${s}×`, () => {
+      const b = button(`${s}×`, t('options.speedTip', { n: s }), () => {
         state.speed = s;
         state.paused = false;
       }, 'speed-btn');
@@ -153,8 +170,19 @@ export class Hud {
     }
 
     this.endEl.hidden = true;
-    root.append(side, strip, this.hintEl, this.ticker, this.endEl);
-    this.showMenu('build');
+    this.parts = [side, strip, this.hintEl, this.ticker, this.endEl];
+    root.append(...this.parts);
+    this.showMenu(opts.memo?.menu ?? 'build');
+  }
+
+  /** What a HUD built to replace this one (in another language) takes over. */
+  memo(): HudMemo {
+    return { menu: this.menu, ended: this.ended, stats: this.stats, warned: this.warned };
+  }
+
+  /** Takes the HUD off the page (the minimap and sound controls go with the next one). */
+  dispose(): void {
+    for (const p of this.parts) p.remove();
   }
 
   /** The always-visible stats block: key goods, settlers, soldiers and army strength (Settlers 4). */
@@ -163,7 +191,7 @@ export class Hud {
     const goods = el('div', 'readout-goods');
     for (const r of PINNED) {
       const s = el('span', 'stat');
-      s.title = RESOURCE_INFO[r].name;
+      s.title = resName(r);
       const value = el('b', '', '0');
       s.append(wareIcon(r, 20), value);
       goods.append(s);
@@ -177,9 +205,9 @@ export class Hud {
       return s;
     };
     army.append(
-      cell(settlerIcon('carrier', 26), this.people, 'Поселенцы'),
-      cell(settlerIcon('soldier', 26), this.soldiers, 'Бойцы'),
-      cell(el('span', 'strength-ico', '⚔'), this.strength, 'Сила армии на чужой земле: растёт с ценностью поселения'),
+      cell(settlerIcon('carrier', 26), this.people, t('hud.readout.settlers')),
+      cell(settlerIcon('soldier', 26), this.soldiers, t('hud.readout.fighters')),
+      cell(el('span', 'strength-ico', '⚔'), this.strength, t('hud.readout.strength')),
     );
     box.append(goods, army);
     return box;
@@ -188,7 +216,7 @@ export class Hud {
   private showMenu(id: MenuId): void {
     this.menu = id;
     for (const [m, b] of this.menuButtons) b.classList.toggle('active', m === id);
-    this.mount(this.views[id], MENUS.find((m) => m.id === id)!.title);
+    this.mount(this.views[id], t(MENUS.find((m) => m.id === id)!.title));
   }
 
   private mount(view: View, title: string): void {
@@ -282,7 +310,7 @@ export class Hud {
     const at = opts.at;
     if (at) {
       m.classList.add('jump');
-      m.title = 'Щелчок — показать на карте (пробел — последнее сообщение)';
+      m.title = t('hud.messageTip');
       m.onclick = () => this.jump(at.x, at.y);
     }
     this.ticker.append(m);
@@ -302,14 +330,14 @@ export class Hud {
 
     // The selected building's window replaces the open menu, as in Settlers 4.
     if (state.selected !== null && world.buildings.has(state.selected)) {
-      this.mount(this.info, 'Здание');
+      this.mount(this.info, t('hud.title.building'));
       for (const b of this.menuButtons.values()) b.classList.remove('active');
     } else if (state.selectedSettler !== null && world.getSettler(state.selectedSettler)) {
-      this.mount(this.settlerInfo, 'Поселенец');
+      this.mount(this.settlerInfo, t('hud.title.settler'));
       for (const b of this.menuButtons.values()) b.classList.remove('active');
     } else if (state.selectedUnits.length > 0 && this.unitsView.units().length > 0) {
       // Selected army units: the selection panel, as in Settlers 4.
-      this.mount(this.unitsView, 'Отряд');
+      this.mount(this.unitsView, t('hud.title.units'));
       for (const b of this.menuButtons.values()) b.classList.remove('active');
     } else {
       if (state.selected !== null) state.selected = null;
@@ -336,18 +364,20 @@ export class Hud {
     for (const [key, b] of this.speedButtons) {
       b.classList.toggle('active', key === 'pause' ? state.paused : !state.paused && state.speed === key);
     }
-    this.hintEl.textContent =
+    const hint = t(
       state.placing === 'geologist'
-        ? 'ЛКМ по горе (можно и за границей) — геолог разведает весь хребет и останется там · ПКМ / Esc — отмена'
+        ? 'hud.hint.geologist'
         : state.placing === 'pioneer'
-          ? 'ЛКМ по ничейной земле — первопроходец займёт всю вокруг и останется там · ПКМ / Esc — отмена'
+          ? 'hud.hint.pioneer'
           : state.placing === 'thief'
-            ? 'ЛКМ по разведанному чужому зданию с товарами — послать вора · ПКМ / Esc — отмена'
+            ? 'hud.hint.thief'
             : state.placing
-              ? 'ЛКМ — поставить (Shift — несколько) · ПКМ / Esc — отмена'
+              ? 'hud.hint.placing'
               : state.selectedUnits.length > 0
-                ? 'ПКМ: бойцы — идти, атаковать, в гарнизон · геолог — разведать гору · первопроходец — занять землю · вор — украсть · Alt+ПКМ — просто идти · Ctrl+ЛКМ — добавить · Shift/Alt+ЛКМ — этот вид рядом / в секторе · Backspace — оставить раненых · Esc — снять выбор'
-                : 'ЛКМ-рамка или клик по бойцу — выбрать отряд · ПКМ/СКМ-перетаскивание, WASD — камера · колесо — зум · клик по зданию — его окно';
+                ? 'hud.hint.units'
+                : 'hud.hint.idle',
+    );
+    if (this.hintEl.textContent !== hint) this.hintEl.textContent = hint;
   }
 
   /** Victory or defeat: time played, a few totals, and a way to start over or keep watching. */
@@ -362,31 +392,25 @@ export class Hud {
     const ownLand = world.map.owner.reduce((n, o) => n + (mine(o) ? 1 : 0), 0);
     const soldiersOf = (own: boolean) => world.settlers.filter((s) => isFighter(s) && mine(s.owner) === own).length;
     const rows: [string, string][] = [
-      ['Время игры', time],
-      ['Ваших зданий', String([...world.buildings.values()].filter((b) => mine(b.owner)).length)],
-      ['Ваших солдат', String(soldiersOf(true))],
-      ['Солдат у противников', String(soldiersOf(false))],
-      ['Ваша доля земли', `${land ? Math.round((100 * ownLand) / land) : 0}%`],
+      [t('end.time'), time],
+      [t('end.buildings'), String([...world.buildings.values()].filter((b) => mine(b.owner)).length)],
+      [t('end.soldiers'), String(soldiersOf(true))],
+      [t('end.enemySoldiers'), String(soldiersOf(false))],
+      [t('end.land'), `${land ? Math.round((100 * ownLand) / land) : 0}%`],
     ];
     this.endEl.innerHTML = '';
     this.endEl.append(
-      el('h2', outcome === 'won' ? 'won' : 'lost', outcome === 'won' ? 'Победа!' : 'Поражение'),
-      el(
-        'p',
-        '',
-        outcome === 'won'
-          ? 'У противников не осталось ни занятых башен, ни бойцов.'
-          : 'У вас не осталось ни занятых башен, ни бойцов.',
-      ),
+      el('h2', outcome === 'won' ? 'won' : 'lost', outcome === 'won' ? t('end.won') : t('end.lost')),
+      el('p', '', outcome === 'won' ? t('end.wonText') : t('end.lostText')),
       rowsTable(rows),
-      el('h4', '', 'Счёт (формула Settlers 4)'),
+      el('h4', '', t('end.score')),
       scoreTable(world),
     );
     const actions = el('div', 'info-actions');
-    const again = el('button', 'active', 'Новая игра');
+    const again = el('button', 'active', t('menu.new'));
     // The setup screen of the main menu, with the last game's settings.
-    again.onclick = () => (location.href = `${location.pathname}?menu=new`);
-    const watch = el('button', '', 'Смотреть дальше');
+    again.onclick = () => (location.href = withLang(`${location.pathname}?menu=new`));
+    const watch = el('button', '', t('end.watch'));
     watch.onclick = () => (this.endEl.hidden = true);
     actions.append(again, watch);
     this.endEl.append(actions);
@@ -400,14 +424,15 @@ export class Hud {
  */
 function scoreTable(world: World): HTMLTableElement {
   const table = el('table', 'score-table');
-  table.title = 'Счёт = (5 × убитые враги + 2 × (поселенцы + бойцы + золото) + руда + еда + здания) / 10';
+  table.title = t('end.scoreTip');
   const head = el('tr');
-  for (const h of ['Игрок', 'Убито', 'Посел.', 'Бойцы', 'Золото', 'Руда', 'Еда', 'Здания', 'Счёт']) head.append(el('th', '', h));
+  const cols: Key[] = ['end.col.player', 'stats.col.killed', 'stats.col.settlers', 'stats.col.fighters', 'end.col.gold', 'end.col.ore', 'end.col.food', 'end.col.buildings', 'stats.col.score'];
+  for (const h of cols) head.append(el('th', '', t(h)));
   table.append(head);
   const rows = world.players.map((p) => ({ p, sc: scoreOf(world, p.id) })).sort((a, b) => b.sc.total - a.sc.total || a.p.id - b.p.id);
   for (const { p, sc } of rows) {
     const tr = el('tr', p.id === LOCAL_PLAYER ? 'mine' : '');
-    const name = p.id === LOCAL_PLAYER ? 'Вы' : `Игрок ${p.id}${world.isDefeated(p.id) ? ' †' : ''}`;
+    const name = p.id === LOCAL_PLAYER ? t('common.you') : `${t('common.player', { id: p.id })}${world.isDefeated(p.id) ? ' †' : ''}`;
     for (const v of [name, sc.kills, sc.settlers, sc.fighters, sc.gold, sc.ore, sc.food, sc.buildings]) tr.append(el('td', '', String(v)));
     tr.append(el('td', '', String(sc.total)));
     table.append(tr);

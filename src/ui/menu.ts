@@ -1,5 +1,6 @@
 import type { AudioEngine } from '../audio/audio';
 import { el } from './dom';
+import { LANG_EVENT, t } from './i18n';
 import { browserSlots, type SlotMeta } from './saves';
 import { savesPanel } from './savesPanel';
 import { defaultSetup, parseSetup, type GameSetup } from './setup';
@@ -47,6 +48,8 @@ export class MainMenu {
   readonly el = el('div', 'menu');
   private readonly panel = el('div', 'menu-panel');
   private readonly notice = el('p', 'menu-notice');
+  private readonly mark = el('h1', 'wordmark');
+  private readonly foot = el('footer', 'menu-foot');
   private screen: MenuScreen = 'main';
   private readonly slots = browserSlots();
 
@@ -54,12 +57,21 @@ export class MainMenu {
     private readonly actions: MenuActions,
     private readonly audio: AudioEngine,
   ) {
-    const mark = el('h1', 'wordmark');
-    mark.append(el('span', 'wm-title', 'Поселенцы'), el('span', 'wm-sub', 'экономическая стратегия'));
-    const foot = el('footer', 'menu-foot', 'Прототип в духе The Settlers 3/4. Графика, музыка и тексты — свои.');
     this.notice.hidden = true;
-    this.el.append(mark, this.panel, this.notice, foot);
+    this.el.append(this.mark, this.panel, this.notice, this.foot);
+    this.label();
     this.el.addEventListener('keydown', (e) => this.onKey(e));
+    // A language chosen in the settings: everything is drawn again in it, the screen stays.
+    window.addEventListener(LANG_EVENT, () => {
+      this.label();
+      this.show(this.screen);
+    });
+  }
+
+  /** The wordmark and the footer in the current language. */
+  private label(): void {
+    this.mark.replaceChildren(el('span', 'wm-title', t('app.title')), el('span', 'wm-sub', t('app.subtitle')));
+    this.foot.textContent = t('menu.foot');
   }
 
   /** A one-line message under the panel (e.g. a save that could not be read). */
@@ -105,7 +117,7 @@ export class MainMenu {
   }
 
   private back(row: HTMLElement): void {
-    const b = el('button', 'menu-small', 'Назад');
+    const b = el('button', 'menu-small', t('common.back'));
     b.onclick = () => this.show('main');
     row.prepend(b);
   }
@@ -113,12 +125,12 @@ export class MainMenu {
   private main(): void {
     const list = el('div', 'menu-list');
     list.append(
-      this.choice('Новая игра', 'свободная игра против компьютера', () => this.show('new')),
-      this.choice('Загрузить', 'продолжить сохранённую игру', () => this.show('load')),
-      this.choice('Сетевая игра', 'скоро появится', () => this.show('network'), true),
-      this.choice('Настройки', 'звук, графика, заставка', () => this.show('settings')),
-      this.choice('Об игре', '', () => this.show('about')),
-      this.choice('Выход', 'к заставке', () => this.actions.intro()),
+      this.choice(t('menu.new'), t('menu.newNote'), () => this.show('new')),
+      this.choice(t('menu.load'), t('menu.loadNote'), () => this.show('load')),
+      this.choice(t('menu.network'), t('menu.networkNote'), () => this.show('network'), true),
+      this.choice(t('menu.settings'), t('menu.settingsNote'), () => this.show('settings')),
+      this.choice(t('menu.about'), '', () => this.show('about')),
+      this.choice(t('menu.exit'), t('menu.exitNote'), () => this.actions.intro()),
     );
     this.panel.append(list);
     this.focusFirst();
@@ -127,17 +139,17 @@ export class MainMenu {
   private setupScreen(network: boolean): void {
     const setup = lastSetup();
     setup.mode = network ? 'network' : 'single';
-    this.heading(network ? 'Сетевая игра' : 'Новая игра');
+    this.heading(network ? t('menu.network') : t('menu.new'));
     if (network) {
       this.panel.append(
         el(
           'p',
           'menu-soon',
-          'Сетевая игра скоро появится: здесь будет лобби — игроки по сети занимают места, и все видят одни и те же настройки партии.',
+          t('menu.networkSoon'),
         ),
       );
     }
-    const start = el('button', 'menu-small active', 'Начать');
+    const start = el('button', 'menu-small active', t('menu.start'));
     const problem = el('span', 'setup-problem');
     this.panel.append(
       setupForm(setup, (p) => {
@@ -157,7 +169,7 @@ export class MainMenu {
   }
 
   private loadScreen(): void {
-    this.heading('Загрузить игру');
+    this.heading(t('menu.loadGame'));
     this.panel.append(savesPanel({ mode: 'load', slots: this.slots, onLoad: (m) => this.actions.load(m) }));
     const row = el('div', 'menu-row');
     this.back(row);
@@ -166,7 +178,7 @@ export class MainMenu {
   }
 
   private settingsScreen(): void {
-    this.heading('Настройки');
+    this.heading(t('menu.settings'));
     this.panel.append(settingsPanel(this.audio, { onArt: () => this.actions.artChanged(), onShowIntro: () => this.actions.intro() }));
     const row = el('div', 'menu-row');
     this.back(row);
@@ -175,13 +187,9 @@ export class MainMenu {
   }
 
   private aboutScreen(): void {
-    this.heading('Об игре');
+    this.heading(t('menu.about'));
     const text = el('div', 'about');
-    for (const p of [
-      'Экономическая стратегия в духе The Settlers 3 и 4: поселенцы рубят лес, добывают камень и руду, пекут хлеб и куют оружие, носильщики сами разносят товары, а солдаты защищают и раздвигают границы.',
-      'Это любительский прототип. Вся графика (3D-модели из Blender), музыка, звуки и тексты сделаны для него заново; ролики, музыка, логотипы и картинки оригинальных игр не используются.',
-      'Управление: ЛКМ — выбрать и строить, ПКМ — отмена или приказ отряду, колесо — приближение, P — пауза, пробел — к последнему сообщению, Esc — меню игры.',
-    ]) {
+    for (const p of [t('menu.about1'), t('menu.about2'), t('menu.about3')]) {
       text.append(el('p', '', p));
     }
     this.panel.append(text);

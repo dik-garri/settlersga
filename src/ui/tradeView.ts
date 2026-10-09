@@ -1,4 +1,4 @@
-import { BUILDINGS, PROFESSIONS, RESOURCE_INFO, TRADE } from '../sim/config';
+import { BUILDINGS, PROFESSIONS, TRADE } from '../sim/config';
 import { ENDLESS } from '../sim/economy';
 import { isCutOff } from '../sim/land';
 import { routeTarget } from '../sim/trade';
@@ -6,6 +6,8 @@ import { RESOURCES, type Building, type Resource } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { button, el } from './dom';
 import { goodsLists } from './goodsLists';
+import { t } from './i18n';
+import { profName, resName } from './names';
 
 /**
  * Trade in the building window, as in Settlers 4: a marketplace's route (the destination market and
@@ -13,7 +15,7 @@ import { goodsLists } from './goodsLists';
  * has no warehouse (cut off: carriers cannot reach them, only donkeys).
  */
 
-const nameOf = (r: Resource) => RESOURCE_INFO[r].name;
+const nameOf = (r: Resource) => resName(r);
 
 /** The player's finished markets other than `b`. */
 function otherMarkets(world: World, b: Building): Building[] {
@@ -33,13 +35,13 @@ function donkeys(world: World, owner: number): { all: number; idle: number } {
 }
 
 /**
- * A market's name for the player: «Рынок №k», numbered by building id among the owner's markets
+ * A market's name for the player: «Рынок №k» (`trade.marketName`), numbered by building id among the owner's markets
  * (sites included), so a number never changes while that market stands.
  */
 export function marketName(world: World, m: Building): string {
   let k = 1;
   for (const o of world.buildings.values()) if (o.owner === m.owner && BUILDINGS[o.type].market && o.id < m.id) k++;
-  return `Рынок №${k}`;
+  return t('trade.marketName', { k });
 }
 
 /** Straight-line distance between two buildings' doors, in tiles. */
@@ -56,22 +58,22 @@ export function tradeRows(world: World, b: Building): [string, string][] {
   const def = BUILDINGS[b.type];
   const rows: [string, string][] = [];
   if (b.owner !== LOCAL_PLAYER) return rows;
-  if (isCutOff(world, b)) rows.push(['Снабжение', 'отрезано от складов — только ослами через рынок']);
+  if (isCutOff(world, b)) rows.push([t('trade.supply'), t('trade.cutOff')]);
   if (!b.done) return rows;
   if (def.market) {
     const to = routeTarget(world, b);
-    rows.push(['Название', marketName(world, b)]);
-    rows.push(['Маршрут', to ? `→ ${marketName(world, to)}, ${tilesBetween(b, to)} кл.` : 'не задан']);
+    rows.push([t('trade.name'), marketName(world, b)]);
+    rows.push([t('trade.route'), to ? t('trade.routeTo', { market: marketName(world, to), n: tilesBetween(b, to) }) : t('trade.noRoute')]);
     const d = donkeys(world, b.owner);
-    rows.push(['Ослы', `${d.all} (свободны ${d.idle})`]);
-    for (const r of RESOURCES) if (b.output[r] > 0) rows.push([`${nameOf(r)} (прибыло)`, String(b.output[r])]);
+    rows.push([t('trade.donkeys'), t('trade.donkeysIdle', { n: d.all, idle: d.idle })]);
+    for (const r of RESOURCES) if (b.output[r] > 0) rows.push([t('trade.arrived', { name: nameOf(r) }), String(b.output[r])]);
   }
   if (def.breeds) {
     const markets = [...world.buildings.values()].filter((m) => m.owner === b.owner && m.done && BUILDINGS[m.type].market).length;
     const d = donkeys(world, b.owner);
-    rows.push([PROFESSIONS[def.breeds].name, `${d.all} / ${markets * TRADE.donkeysPerMarket}`]);
-    if (markets === 0) rows.push(['Разведение', 'нет рынка — не нужны']);
-    else if (d.all >= markets * TRADE.donkeysPerMarket) rows.push(['Разведение', 'ослов хватает']);
+    rows.push([profName(def.breeds), `${d.all} / ${markets * TRADE.donkeysPerMarket}`]);
+    if (markets === 0) rows.push([t('trade.breeding'), t('trade.noMarket')]);
+    else if (d.all >= markets * TRADE.donkeysPerMarket) rows.push([t('trade.breeding'), t('trade.enough')]);
   }
   return rows;
 }
@@ -90,36 +92,36 @@ export function tradeKey(world: World, b: Building): string {
 export function tradeControls(world: World, b: Building): HTMLElement | null {
   if (!BUILDINGS[b.type].market || b.owner !== LOCAL_PLAYER || !b.done) return null;
   const box = el('div', 'eco-orders trade');
-  box.append(el('h4', '', 'Куда'));
+  box.append(el('h4', '', t('trade.where')));
   const markets = otherMarkets(world, b);
-  if (markets.length === 0) box.append(el('p', 'muted', 'Постройте второй рынок — ослы возят товары между рынками по любой земле.'));
+  if (markets.length === 0) box.append(el('p', 'muted', t('trade.buildSecond')));
   const to = b.trade?.to ?? null;
   const routes = el('div', 'info-actions');
   for (const m of markets) {
     routes.append(
       button(
-        `→ ${marketName(world, m)} · ${tilesBetween(b, m)} кл.`,
-        'Ослы повезут товары к этому рынку (маршрут виден на карте пунктиром)',
+        t('trade.toMarket', { market: marketName(world, m), n: tilesBetween(b, m) }),
+        t('trade.toMarketTip'),
         () => world.setTradeRoute(b.id, m.id),
         m.id === to ? 'active' : '',
       ),
     );
   }
-  if (to !== null) routes.append(button('✕', 'Снять маршрут', () => world.setTradeRoute(b.id, null)));
+  if (to !== null) routes.append(button('✕', t('trade.clearRoute'), () => world.setTradeRoute(b.id, null)));
   box.append(routes);
 
-  box.append(el('h4', '', 'Что возить'));
-  box.append(el('p', 'muted', `Носильщики приносят товар на рынок, осёл берёт ${TRADE.packs} вьюка по ${TRADE.donkeyLoad} штук.`));
+  box.append(el('h4', '', t('trade.what')));
+  box.append(el('p', 'muted', t('trade.packs', { n: TRADE.packs, load: TRADE.donkeyLoad })));
   box.append(
     goodsLists({
-      inTitle: 'Возим',
-      outTitle: 'Не возим',
+      inTitle: t('trade.carried'),
+      outTitle: t('trade.notCarried'),
       isIn: (r) => carried(b, r),
       set: (r, on) => world.orderTrade(b.id, r, on ? ENDLESS : 0),
-      tipIn: (name) => `${name}: возим — нажмите, чтобы перестать (что ждёт на рынке, вернётся на склад)`,
-      tipOut: (name) => `${name}: не возим — нажмите, чтобы возить без остановки`,
-      noneTip: 'Не возить ничего: что ждёт на рынке, вернётся на склад',
-      allTip: 'Возить всё без остановки',
+      tipIn: (name) => t('trade.tipIn', { name }),
+      tipOut: (name) => t('trade.tipOut', { name }),
+      noneTip: t('trade.noneTip'),
+      allTip: t('trade.allTip'),
       nameOf,
       // The rest of a finite order (the AI places those) in the corner; units waiting on the market.
       corner: (r) => {

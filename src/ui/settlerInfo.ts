@@ -1,12 +1,14 @@
 import { settlerIcon } from '../render/atlas';
-import { BUILDINGS, PROFESSIONS, RESOURCE_INFO, SOLDIER_LEVELS } from '../sim/config';
+import { SOLDIER_LEVELS } from '../sim/config';
 import { isReadyWorker } from '../sim/buildings';
 import { isFighter, maxHp } from '../sim/military';
 import { packsOf } from '../sim/trade';
 import type { Building, Settler, SettlerKind, Task } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { button, el, rowsTable, type View } from './dom';
+import { lower, t } from './i18n';
 import { glyph } from './icons';
+import { buildingName, profName, resLower, resName } from './names';
 import type { GameState, Placeable } from './state';
 
 /**
@@ -14,7 +16,7 @@ import type { GameState, Placeable } from './state';
  * what it is doing right now; fighters show rank and health, specialists their commands.
  */
 
-const res = (r: keyof typeof RESOURCE_INFO) => RESOURCE_INFO[r].name.toLowerCase();
+const res = resLower;
 
 /** Specialists the player sends with a click on the map (the side panel's settlers menu does the same). */
 const SENDABLE: Partial<Record<SettlerKind, Placeable>> = { pioneer: 'pioneer', thief: 'thief', geologist: 'geologist' };
@@ -54,9 +56,9 @@ export class SettlerInfoView implements View {
     pic.append(settlerIcon(s.kind, 64));
     const title = el('div', 'info-title');
     const mine = s.owner === LOCAL_PLAYER;
-    title.append(el('h3', '', PROFESSIONS[s.kind].name), el('span', 'muted', mine ? 'ваш поселенец' : 'чужой поселенец'));
+    title.append(el('h3', '', profName(s.kind)), el('span', 'muted', mine ? t('settler.yours') : t('settler.foreign')));
     const close = el('button', 'gem small', '');
-    close.title = 'Закрыть (Esc)';
+    close.title = t('common.close');
     close.append(glyph('close', 14));
     close.onclick = () => {
       this.state.selectedSettler = null;
@@ -69,32 +71,32 @@ export class SettlerInfoView implements View {
   private rows(s: Settler): [string, string][] {
     const rows: [string, string][] = [];
     const ally = s.owner !== LOCAL_PLAYER && this.world.allied(s.owner, LOCAL_PLAYER);
-    rows.push(['Владелец', s.owner === LOCAL_PLAYER ? 'вы' : `игрок ${s.owner}${ally ? ' (союзник)' : ''}`]);
-    rows.push(['Занят', this.doing(s)]);
+    rows.push([t('info.owner'), s.owner === LOCAL_PLAYER ? t('settler.ownerYou') : t(ally ? 'info.ownerAlly' : 'info.ownerPlayer', { id: s.owner })]);
+    rows.push([t('settler.doing'), this.doing(s)]);
     if (s.carrying) {
       // A pack donkey carries up to two packs; a carrier one unit.
-      const packs = packsOf(s).map((p) => (s.load === undefined && !s.pack2 ? RESOURCE_INFO[p.res].name : `${RESOURCE_INFO[p.res].name} × ${p.n}`));
-      rows.push(['Несёт', packs.join(', ')]);
+      const packs = packsOf(s).map((p) => (s.load === undefined && !s.pack2 ? resName(p.res) : `${resName(p.res)} × ${p.n}`));
+      rows.push([t('settler.carries'), packs.join(', ')]);
     }
     if (isFighter(s)) {
-      rows.push(['Уровень', `${s.level + 1} из ${SOLDIER_LEVELS.length}`]);
-      rows.push(['Здоровье', `${Math.max(0, Math.round(s.hp))} / ${Math.round(maxHp(s))}`]);
+      rows.push([t('settler.level'), t('common.nOfM', { n: s.level + 1, m: SOLDIER_LEVELS.length })]);
+      rows.push([t('units.health'), `${Math.max(0, Math.round(s.hp))} / ${Math.round(maxHp(s))}`]);
     }
     const home = s.home !== null ? this.world.buildings.get(s.home) : undefined;
-    if (home) rows.push(['Работает в', BUILDINGS[home.type].name]);
+    if (home) rows.push([t('settler.worksAt'), buildingName(home.type)]);
     // A pack donkey's trip between markets (it takes no orders, as in Settlers 4).
     const load = s.tasks.find((t) => t.t === 'load');
     const unload = s.tasks.find((t) => t.t === 'unload');
     if (load || unload) {
       const name = (id: number) => {
         const m = this.world.buildings.get(id);
-        return m ? `${BUILDINGS[m.type].name.toLowerCase()} (${m.door.x}, ${m.door.y})` : '—';
+        return m ? `${lower(buildingName(m.type))} (${m.door.x}, ${m.door.y})` : '—';
       };
-      const from = load && 'b' in load ? name(load.b) : 'в пути';
+      const from = load && 'b' in load ? name(load.b) : t('settler.onTheWay');
       const to = unload && 'b' in unload ? name(unload.b) : '—';
-      rows.push(['Маршрут', `${from} → ${to}`]);
+      rows.push([t('trade.route'), `${from} → ${to}`]);
       const loads = s.tasks.filter((t) => t.t === 'load');
-      if (loads.length > 0) rows.push(['Заберёт', loads.map((t) => (t.t === 'load' ? `${RESOURCE_INFO[t.res].name} × ${t.n}` : '')).join(', ')]);
+      if (loads.length > 0) rows.push([t('settler.willTake'), loads.map((x) => (x.t === 'load' ? `${resName(x.res)} × ${x.n}` : '')).join(', ')]);
     }
     return rows;
   }
@@ -104,13 +106,13 @@ export class SettlerInfoView implements View {
     if (s.owner !== LOCAL_PLAYER) return box;
     const place = SENDABLE[s.kind];
     if (place) {
-      box.append(button('Послать…', 'Указать цель щелчком по карте', () => this.actions.place(place)));
+      box.append(button(t('settler.send'), t('settler.sendTip'), () => this.actions.place(place)));
     }
     if (SENDABLE[s.kind]) {
       box.append(
-        button('↩ Отпустить', 'Снова сделать носильщиком (на своей земле, без дела)', () => {
+        button(t('units.dismiss'), t('settler.dismissTip'), () => {
           const ok = this.world.dismissSpecialist(s.kind);
-          this.actions.toast(ok ? 'Специалист снова носильщик' : 'Свободного специалиста на своей земле нет');
+          this.actions.toast(ok ? t('settler.dismissed') : t('settler.noFreeSpecialist'));
         }),
       );
     }
@@ -122,88 +124,90 @@ export class SettlerInfoView implements View {
     const b = (id: number): Building | undefined => this.world.buildings.get(id);
     const at = (id: number) => {
       const x = b(id);
-      return x ? BUILDINGS[x.type].name.toLowerCase() : 'здание';
+      return x ? lower(buildingName(x.type)) : t('settler.aBuilding');
     };
-    if (s.opponent !== null) return 'сражается';
-    const t: Task | undefined = s.tasks[0];
+    if (s.opponent !== null) return t('doing.fighting');
+    const task: Task | undefined = s.tasks[0];
     const next = s.tasks.find((x) => x.t !== 'goto');
-    if (!t) {
-      if (s.inside !== null) return `внутри: ${at(s.inside)}`;
-      if (s.fled !== undefined) return 'бродит без крова';
-      if (s.errand) return s.kind === 'pioneer' ? 'идёт к границе' : s.kind === 'geologist' ? 'идёт к горе' : 'идёт на дело';
+    if (!task) {
+      if (s.inside !== null) return t('doing.inside', { b: at(s.inside) });
+      if (s.fled !== undefined) return t('doing.homeless');
+      if (s.errand) return t(s.kind === 'pioneer' ? 'doing.toBorder' : s.kind === 'geologist' ? 'doing.toMountain' : 'doing.onErrand');
       // Settlers 4: a carrier without a bed strikes; a worker whose workplace went waits for a new one.
-      if (s.strike) return 'бастует: нет кровати — нужен новый дом';
-      if (isReadyWorker(s)) return 'без работы, ждёт новое здание своего дела';
-      if (isFighter(s) && !s.post && s.home === null) return 'свободен: стоит, пока не позовёт башня или вы';
-      if (isFighter(s) && s.post) return 'стоит на позиции';
-      const idle = s.stroll ? 'прогуливается' : s.chatWith !== null ? 'беседует' : 'без дела';
-      return SENDABLE[s.kind] ? `${idle}, ждёт приказа` : idle;
+      if (s.strike) return t('doing.strike');
+      if (isReadyWorker(s)) return t('doing.jobless');
+      if (isFighter(s) && !s.post && s.home === null) return t('doing.free');
+      if (isFighter(s) && s.post) return t('doing.atPost');
+      const idle = t(s.stroll ? 'doing.strolling' : s.chatWith !== null ? 'doing.chatting' : 'doing.idle');
+      return SENDABLE[s.kind] ? t('doing.awaitingOrders', { idle }) : idle;
     }
-    switch (t.t) {
+    switch (task.t) {
       case 'goto':
         if (next?.t === 'pickup' || next?.t === 'lift') {
-          return s.tasks.some((x) => x.t === 'retool') ? `идёт за инструментом: ${res(next.res)}` : `идёт за товаром: ${res(next.res)}`;
+          return t(s.tasks.some((x) => x.t === 'retool') ? 'doing.fetchTool' : 'doing.fetchGood', { res: res(next.res) });
         }
-        if (next?.t === 'drop') return `несёт груз (${res(next.res).toLowerCase()}) → ${at(next.b)}`;
-        if (next?.t === 'build') return `идёт на стройку: ${at(next.b)}`;
-        if (next?.t === 'dig') return `идёт расчищать: ${at(next.b)}`;
-        if (next?.t === 'join') return `идёт в гарнизон: ${at(next.b)}`;
-        if (next?.t === 'recruit') return `идёт в казарму: ${at(next.b)}`;
-        if (next?.t === 'assault') return `идёт в атаку: ${at(next.b)}`;
-        if (next?.t === 'heal') return `идёт к лекарю: ${at(next.b)}`;
-        if (next?.t === 'become') return `идёт работать: ${at(next.b)}`;
-        if (next?.t === 'gather') return `идёт за сырьём: ${res(next.res)}`;
-        if (next?.t === 'prospect') return 'идёт к горе';
-        if (s.fled !== undefined) return 'бродит без крова';
-        if (next?.t === 'steal') return 'крадётся к добыче';
-        if (next?.t === 'claim') return 'идёт к границе';
-        if (next?.t === 'load') return `идёт за грузом: ${at(next.b)}`;
-        if (next?.t === 'unload') return s.carrying ? `везёт ${res(s.carrying).toLowerCase()} → ${at(next.b)}` : `идёт к: ${at(next.b)}`;
-        return 'в пути';
+        if (next?.t === 'drop') return t('doing.carrying', { res: res(next.res), b: at(next.b) });
+        if (next?.t === 'build') return t('doing.toSite', { b: at(next.b) });
+        if (next?.t === 'dig') return t('doing.toDig', { b: at(next.b) });
+        if (next?.t === 'join') return t('doing.toGarrison', { b: at(next.b) });
+        if (next?.t === 'recruit') return t('doing.toBarracks', { b: at(next.b) });
+        if (next?.t === 'assault') return t('doing.toAttack', { b: at(next.b) });
+        if (next?.t === 'heal') return t('doing.toHealer', { b: at(next.b) });
+        if (next?.t === 'become') return t('doing.toWork', { b: at(next.b) });
+        if (next?.t === 'gather') return t('doing.toGather', { res: res(next.res) });
+        if (next?.t === 'prospect') return t('doing.toMountain');
+        if (s.fled !== undefined) return t('doing.homeless');
+        if (next?.t === 'steal') return t('doing.sneaking');
+        if (next?.t === 'claim') return t('doing.toBorder');
+        if (next?.t === 'load') return t('doing.toLoad', { b: at(next.b) });
+        if (next?.t === 'unload') {
+          return s.carrying ? t('doing.hauling', { res: res(s.carrying), b: at(next.b) }) : t('doing.goingTo', { b: at(next.b) });
+        }
+        return t('doing.walking');
       case 'pickup':
       case 'lift':
-        return `берёт ${res(t.res)}`;
+        return t('doing.pickup', { res: res(task.res) });
       case 'drop':
-        return `кладёт ${res(t.res)}: ${at(t.b)}`;
+        return t('doing.drop', { res: res(task.res), b: at(task.b) });
       case 'store':
-        return `складывает ${res(t.res)}`;
+        return t('doing.store', { res: res(task.res) });
       case 'gather':
-        return `добывает: ${res(t.res)}`;
+        return t('doing.gather', { res: res(task.res) });
       case 'plant':
-        return t.what === 'tree' ? 'сажает дерево' : 'сеет';
+        return t(task.what === 'tree' ? 'doing.plantTree' : 'doing.sow');
       case 'build':
-        return `строит: ${at(t.b)}`;
+        return t('doing.build', { b: at(task.b) });
       case 'dig':
-        return `расчищает площадку: ${at(t.b)}`;
+        return t('doing.dig', { b: at(task.b) });
       case 'prospect':
-        return 'ищет руду';
+        return t('doing.prospect');
       case 'become':
-        return `приступает к работе: ${at(t.b)}`;
+        return t('doing.become', { b: at(task.b) });
       case 'retool':
-        return 'берёт инструмент';
+        return t('doing.retool');
       case 'join':
-        return `входит в гарнизон: ${at(t.b)}`;
+        return t('doing.join', { b: at(task.b) });
       case 'recruit':
-        return 'получает оружие';
+        return t('doing.recruit');
       case 'assault':
-        return `штурмует: ${at(t.b)}`;
+        return t('doing.assault', { b: at(task.b) });
       case 'hunt':
-        return 'охотится';
+        return t('doing.hunt');
       case 'heal':
-        return `лекарь лечит: ${at(t.b)}`;
+        return t('doing.heal', { b: at(task.b) });
       case 'claim':
-        return 'переносит пограничный камень';
+        return t('doing.claim');
       case 'steal':
-        return 'крадёт';
+        return t('doing.steal');
       case 'enter':
-        return `входит: ${at(t.b)}`;
+        return t('doing.enter', { b: at(task.b) });
       case 'wait':
-        return s.fled !== undefined ? 'бродит без крова' : 'ждёт';
+        return t(s.fled !== undefined ? 'doing.homeless' : 'doing.wait');
       case 'load':
-        return `навьючивает: ${res(t.res).toLowerCase()}`;
+        return t('doing.load', { res: res(task.res) });
       case 'unload':
-        return `разгружается: ${at(t.b)}`;
+        return t('doing.unload', { b: at(task.b) });
     }
-    return 'занят';
+    return t('doing.busy');
   }
 }

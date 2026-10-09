@@ -8,7 +8,6 @@ import {
   OUTPUT_CAP,
   OUTPUT_SHARES,
   PROFESSIONS,
-  RESOURCE_INFO,
 } from '../sim/config';
 import { available, chooseOutput, oreLeft, residents } from '../sim/buildings';
 import { diggersWanted } from '../sim/digging';
@@ -22,7 +21,9 @@ import { el, rowsTable, type View } from './dom';
 import { economyKey, economyRows, refreshStockCounts, stockText, toolOrderControls, warehouseControls } from './economyPanel';
 import { movableWorkArea, workRadius } from '../sim/workArea';
 import { canStop } from '../sim/stop';
+import { lower, t, type Key } from './i18n';
 import { glyph } from './icons';
+import { buildingName, profName, resLower, resName } from './names';
 import { refreshTradeCounts, tradeControls, tradeKey, tradeRows } from './tradeView';
 import type { GameState } from './state';
 
@@ -32,14 +33,14 @@ import type { GameState } from './state';
  * attack, garrison, recruit orders, weapon shares, toolsmith orders, accepted goods).
  */
 
-const nameOf = (r: Resource) => RESOURCE_INFO[r].name;
+const nameOf = (r: Resource) => resName(r);
 
-const GATHER_PLACE: Partial<Record<BuildingType, string>> = {
-  woodcutter: 'в лесу',
-  stonecutter: 'в каменоломне',
-  waterworks: 'у воды',
-  fisher: 'на берегу',
-  farm: 'в поле',
+const GATHER_PLACE: Partial<Record<BuildingType, Key>> = {
+  woodcutter: 'status.inForest',
+  stonecutter: 'status.inQuarry',
+  waterworks: 'status.atWater',
+  fisher: 'status.onShore',
+  farm: 'status.inField',
 };
 
 export /** "мечник ×2 (★1 ×1), лучник ×1": fighters by profession, with how many hold each rank above 0. */
@@ -51,7 +52,7 @@ function composition(fighters: Settler[]): string {
       const ranks = new Map<number, number>();
       for (const s of list) if (s.level > 0) ranks.set(s.level, (ranks.get(s.level) ?? 0) + 1);
       const r = [...ranks].sort((a, b) => b[0] - a[0]).map(([l, n]) => `★${l} ×${n}`);
-      return `${PROFESSIONS[kind].name.toLowerCase()} ×${list.length}${r.length ? ` (${r.join(', ')})` : ''}`;
+      return `${lower(profName(kind))} ×${list.length}${r.length ? ` (${r.join(', ')})` : ''}`;
     })
     .join(', ');
 }
@@ -94,39 +95,43 @@ export class InfoView implements View {
     // Out of sight (fog of war) other players' buildings show only what is known from afar.
     const sighted = !this.state.fog || this.world.isVisible(b.door.x, b.door.y);
     if (enemy) {
-      rows.push(['Владелец', `игрок ${b.owner}${this.world.allied(b.owner, LOCAL_PLAYER) ? ' (союзник)' : ''}`]);
-      if (!sighted) rows.push(['Обзор', 'нет — подойдите ближе']);
+      rows.push([t('info.owner'), t(this.world.allied(b.owner, LOCAL_PLAYER) ? 'info.ownerAlly' : 'info.ownerPlayer', { id: b.owner })]);
+      if (!sighted) rows.push([t('army.sight'), t('info.noSight')]);
       if (def.garrison && b.done) {
-        rows.push(['Защитников', sighted ? String(b.garrison.length) : '?']);
-        rows.push(['Можно послать', String(canSend)]);
+        rows.push([t('info.defenders'), sighted ? String(b.garrison.length) : '?']);
+        rows.push([t('info.canSend'), String(canSend)]);
         this.attackCount = Math.max(1, Math.min(this.attackCount, canSend));
-        rows.push(['Отправить', String(this.attackCount)]);
-        if (canSend > 0) rows.push(['Пойдут', composition(this.world.attackerComposition(b.id, this.attackCount))]);
+        rows.push([t('info.send'), String(this.attackCount)]);
+        if (canSend > 0) rows.push([t('info.willGo'), composition(this.world.attackerComposition(b.id, this.attackCount))]);
       }
     } else if (!b.done) {
-      rows.push(['Стройка', `${Math.floor(this.world.buildProgress(b) * 100)}%`]);
+      rows.push([t('info.site'), `${Math.floor(this.world.buildProgress(b) * 100)}%`]);
       const cost = costOf(b.type);
       for (const r of RESOURCES) {
-        if (cost[r] > 0) rows.push([nameOf(r), `${b.delivered[r]} / ${cost[r]} (в пути ${b.inbound[r]})`]);
+        if (cost[r] > 0) rows.push([nameOf(r), t('info.delivered', { n: b.delivered[r], m: cost[r], inbound: b.inbound[r] })]);
       }
-      if (!b.levelled) rows.push(['Землекопы', b.diggerIds.length > 0 ? `${b.diggerIds.length} из ${diggersWanted(this.world.map, b)}` : 'ждёт землекопа']);
-      rows.push(['Строители', b.builderIds.length > 0 ? `${b.builderIds.length} из ${buildersOf(b.type)}` : `ожидаются (до ${buildersOf(b.type)})`]);
+      if (!b.levelled) {
+        const wanted = diggersWanted(this.world.map, b);
+        rows.push([t('info.diggers'), b.diggerIds.length > 0 ? t('common.nOfM', { n: b.diggerIds.length, m: wanted }) : t('info.awaitingDigger')]);
+      }
+      const builders = buildersOf(b.type);
+      rows.push([t('info.builders'), b.builderIds.length > 0 ? t('common.nOfM', { n: b.builderIds.length, m: builders }) : t('info.buildersExpected', { n: builders })]);
     } else if (def.residence) {
-      rows.push(['Жители', `${b.spawned} / ${residents(this.world, b)}`]);
-      rows.push(['Статус', b.spawned < residents(this.world, b) ? 'заселяется' : 'заселён']);
+      rows.push([t('info.residents'), `${b.spawned} / ${residents(this.world, b)}`]);
+      rows.push([t('info.status'), b.spawned < residents(this.world, b) ? t('info.movingIn') : t('info.full')]);
     } else if (def.barracks) {
-      rows.push(['Статус', this.barracksStatus(b)]);
+      rows.push([t('info.status'), this.barracksStatus(b)]);
       rows.push(...barracksRows(this.world, b));
     } else if (def.garrison || def.storage) {
       if (def.garrison) {
-        rows.push(['Гарнизон', `${b.garrison.length} / ${def.garrison.capacity}`]);
+        rows.push([t('army.garrison'), `${b.garrison.length} / ${def.garrison.capacity}`]);
         const members = b.garrison.map((id) => this.world.getSettler(id)).filter((s): s is Settler => !!s);
-        if (members.length > 0) rows.push(['Состав', composition(members)]);
-        if (members.length === 0 && b.garrisonInbound === 0) rows.push(['Статус', 'пусто: нет свободных бойцов рядом']);
+        if (members.length > 0) rows.push([t('info.members'), composition(members)]);
+        if (members.length === 0 && b.garrisonInbound === 0) rows.push([t('info.status'), t('info.emptyGarrison')]);
         rows.push(...garrisonRows(this.world, b));
-        rows.push(['В атаку не уходят', String(keepOf(b))]);
+        rows.push([t('info.keep'), String(keepOf(b))]);
       }
-      if (def.territory) rows.push(['Радиус земли', `${def.territory} клеток`]);
+      if (def.territory) rows.push([t('info.landRadius'), t('common.tiles', { n: def.territory })]);
       for (const r of RESOURCES) if (def.storage && b.output[r] > 0) rows.push([nameOf(r), stockText(b, r)]);
     } else if (!def.worker) {
       rows.push(...(supportRows(this.world, b) ?? []));
@@ -134,32 +139,32 @@ export class InfoView implements View {
       const worker = this.world.getSettler(b.workerId);
       const tool = PROFESSIONS[def.worker!].tool;
       const workerName = worker
-        ? PROFESSIONS[worker.kind].name
+        ? profName(worker.kind)
         : b.workerRequested
-          ? 'идёт'
+          ? t('info.workerComing')
           : tool && available(this.world, b.owner, tool) === 0
-            ? `нет инструмента: ${nameOf(tool).toLowerCase()}`
-            : 'нет свободных носильщиков';
-      rows.push(['Работник', workerName]);
-      rows.push(['Статус', this.status(b)]);
+            ? t('info.noTool', { res: resLower(tool) })
+            : t('info.noCarriers');
+      rows.push([t('info.worker'), workerName]);
+      rows.push([t('info.status'), this.status(b)]);
       // Army support buildings with a worker (the infirmary's healer, the lookout's watchman): their own rows.
       rows.push(...(supportRows(this.world, b) ?? []));
       const gather = gatheredBy(b.type);
       const shared = this.sharedChoices(b);
       if (shared) {
         const total = shared.reduce((n, r) => n + this.world.shareOf(r), 0) || 1;
-        rows.push(['Состав армии', shared.map((r) => `${nameOf(r).toLowerCase()} ${Math.round((100 * this.world.shareOf(r)) / total)}%`).join(' · ')]);
+        rows.push([t('info.armyMix'), shared.map((r) => `${resLower(r)} ${Math.round((100 * this.world.shareOf(r)) / total)}%`).join(' · ')]);
       }
       if (def.recipe) {
         for (const r of RESOURCES) {
-          if (def.recipe.inputs[r]) rows.push([`${nameOf(r)} (вход)`, `${b.input[r]} / ${INPUT_CAP}`]);
+          if (def.recipe.inputs[r]) rows.push([t('info.input', { name: nameOf(r) }), `${b.input[r]} / ${INPUT_CAP}`]);
         }
         const anyOf = def.recipe.inputsAnyOf;
         if (anyOf) {
-          const held = anyOf.map((r) => `${nameOf(r).toLowerCase()} ${b.input[r]}`).join(', ');
-          rows.push(['Еда (вход)', `${held} / ${INPUT_CAP}`]);
+          const held = anyOf.map((r) => `${resLower(r)} ${b.input[r]}`).join(', ');
+          rows.push([t('info.foodInput'), `${held} / ${INPUT_CAP}`]);
         }
-        if (def.mine) rows.push(['Руды в радиусе', String(oreLeft(this.world, b))]);
+        if (def.mine) rows.push([t('info.oreLeft'), String(oreLeft(this.world, b))]);
         for (const r of RESOURCES) {
           if (def.recipe.outputs[r]) rows.push([nameOf(r), `${b.output[r]} / ${OUTPUT_CAP}`]);
         }
@@ -169,20 +174,20 @@ export class InfoView implements View {
       } else if (gather) {
         rows.push([nameOf(gather.res), `${b.output[gather.res]} / ${OUTPUT_CAP}`]);
       } else if (b.type === 'forester') {
-        rows.push(['Посажено всего', String(this.world.stats.treesPlanted)]);
+        rows.push([t('info.planted'), String(this.world.stats.treesPlanted)]);
       }
-      if (def.territory) rows.push(['Радиус земли', `${def.territory} клеток`]);
+      if (def.territory) rows.push([t('info.landRadius'), t('common.tiles', { n: def.territory })]);
     }
     if (!enemy && b.done) rows.push(...economyRows(b));
     const radius = workRadius(b.type);
     // The infirmary shows its work area as «Зона поиска» (`supportRows`).
     if (!enemy && radius !== null && !def.infirmary) {
-      rows.push(['Зона работы', `${radius} клеток${b.workAt ? ', перенесена' : ''}`]);
+      rows.push([t('info.workArea'), `${t('common.tiles', { n: radius })}${b.workAt ? t('info.moved') : ''}`]);
     }
     rows.push(...tradeRows(this.world, b));
-    if (b.priority) rows.push(['Приоритет', 'да']);
+    if (b.priority) rows.push([t('info.priority'), t('info.yes')]);
     if (!enemy && b.stopped) {
-      rows.push(['Остановлено', b.done ? 'не работает, отдаёт свои товары' : 'стройка стоит, материалы отдаёт']);
+      rows.push([t('info.stopped'), b.done ? t('info.stoppedDone') : t('info.stoppedSite')]);
     }
     const key = JSON.stringify([
       b.id,
@@ -207,17 +212,17 @@ export class InfoView implements View {
     if (movableWorkArea(b.type)) {
       // Settlers 4: the work area can be moved — choose a new centre with a click on the map.
       const area = el('div', 'info-actions');
-      const move = el('button', this.state.movingWorkArea === b.id ? 'active' : '', '🎯 Перенести зону работы');
-      move.title = 'Затем щёлкните по карте — там будет центр зоны (Esc — отмена)';
+      const move = el('button', this.state.movingWorkArea === b.id ? 'active' : '', t('info.moveArea'));
+      move.title = t('info.moveAreaTip');
       move.onclick = () => {
         this.state.movingWorkArea = b.id;
-        this.toast('Щёлкните по карте — новый центр зоны работы (Esc — отмена)');
+        this.toast(t('info.moveAreaToast'));
         move.blur();
       };
       area.append(move);
       if (b.workAt) {
-        const back = el('button', '', '↺ К дому');
-        back.title = 'Вернуть зону работы к дому';
+        const back = el('button', '', t('info.areaBack'));
+        back.title = t('info.areaBackTip');
         back.onclick = () => {
           this.world.setWorkArea(b.id, null);
           back.blur();
@@ -237,19 +242,15 @@ export class InfoView implements View {
     if (shared && shared.length >= 2) this.el.append(shareControls(this.world, shared, () => (this.infoKey = '')));
     const actions = el('div', 'info-actions');
     if (!b.done || def.recipe || def.residence) {
-      const prio = el('button', b.priority ? 'active' : '', b.priority ? '⬆ Приоритет: да' : '⬆ Приоритет');
-      prio.title = 'Обслуживать в первую очередь: материалы, сырьё, строители';
+      const prio = el('button', b.priority ? 'active' : '', b.priority ? t('info.priorityOn') : t('info.priorityBtn'));
+      prio.title = t('info.priorityTip');
       prio.onclick = () => this.world.setPriority(b.id, !b.priority);
       actions.append(prio);
     }
     if (canStop(b)) {
       // Settlers 4's stop switch: no new work, nothing delivered, the goods at it go to others.
-      const stop = el('button', b.stopped ? 'active' : '', b.stopped ? '▶ Запустить' : '⏸ Остановить');
-      stop.title = b.stopped
-        ? 'Снова работать (строить) и заказывать товары'
-        : b.done
-          ? 'Не начинать новую работу и ничего не заказывать; товары у здания отдать другим'
-          : 'Отпустить строителей и землекопов, ничего не заказывать; материалы отдать другим стройкам';
+      const stop = el('button', b.stopped ? 'active' : '', b.stopped ? t('info.start') : t('info.stop'));
+      stop.title = b.stopped ? t('info.startTip') : b.done ? t('info.stopTip') : t('info.stopSiteTip');
       stop.onclick = () => {
         this.world.setStopped(b.id, !b.stopped);
         stop.blur();
@@ -265,11 +266,9 @@ export class InfoView implements View {
     const demolish = el(
       'button',
       confirming ? 'danger' : '',
-      confirming ? (last ? 'Последняя занятая башня. Снести?' : 'Точно снести?') : '🔨 Снести',
+      confirming ? (last ? t('info.demolishLast') : t('info.demolishSure')) : t('info.demolish'),
     );
-    demolish.title = last
-      ? 'Бойцы выйдут и останутся без башни; земля останется вашей. Не останется ни башен, ни бойцов — поражение'
-      : 'Половина материалов и всё, что лежит у здания, останутся на земле; земля останется вашей';
+    demolish.title = last ? t('info.demolishLastTip') : t('info.demolishTip');
     demolish.onclick = () => {
       if (!confirming) {
         this.confirmDemolish = b.id;
@@ -280,12 +279,12 @@ export class InfoView implements View {
     };
     actions.append(demolish);
     // Settlers 4: the next building (or site) of this type, the camera follows.
-    const next = el('button', '', '⏭ Следующее');
-    next.title = 'Следующее ваше здание или стройка этого типа';
+    const next = el('button', '', t('info.next'));
+    next.title = t('info.nextTip');
     next.onclick = () => {
       const n = nextBuildingOfType(this.world, b.type, b.id);
       if (n && n.id !== b.id) this.focus(n);
-      else this.toast('Другого здания этого типа нет');
+      else this.toast(t('info.noOther'));
       next.blur();
     };
     actions.append(next);
@@ -298,9 +297,9 @@ export class InfoView implements View {
     const pic = el('div', 'info-pic');
     pic.append(buildingIcon(b.type, 64));
     const title = el('div', 'info-title');
-    title.append(el('h3', '', BUILDINGS[b.type].name), el('span', 'muted', b.owner === LOCAL_PLAYER ? (b.done ? 'ваше здание' : 'стройка') : 'чужое здание'));
+    title.append(el('h3', '', buildingName(b.type)), el('span', 'muted', b.owner === LOCAL_PLAYER ? (b.done ? t('info.yours') : t('info.yourSite')) : t('info.foreign')));
     const close = el('button', 'gem small', '');
-    close.title = 'Закрыть (Esc)';
+    close.title = t('common.close');
     close.append(glyph('close', 14));
     close.onclick = () => {
       this.state.selected = null;
@@ -329,10 +328,10 @@ export class InfoView implements View {
         if ((Object.entries(need) as [Resource, number][]).every(([r, n]) => b.input[r] >= n)) payable = true;
       });
     }
-    if (!ordered) return 'нет заказов';
-    if (w.settlers.some((s) => s.tasks.some((t) => t.t === 'recruit' && t.b === b.id))) return 'набирает';
-    if (!payable) return 'ждёт оружия или золота';
-    return 'ждёт свободного носильщика';
+    if (!ordered) return t('status.noOrders');
+    if (w.settlers.some((s) => s.tasks.some((x) => x.t === 'recruit' && x.b === b.id))) return t('status.recruiting');
+    if (!payable) return t('status.awaitingWeapons');
+    return t('status.awaitingCarrier');
   }
 
   private attackControls(b: Building, available: number): HTMLElement {
@@ -341,12 +340,12 @@ export class InfoView implements View {
     less.onclick = () => (this.attackCount = Math.max(1, this.attackCount - 1));
     const more = el('button', '', '+');
     more.onclick = () => (this.attackCount = Math.min(available, this.attackCount + 1));
-    const go = el('button', available > 0 ? 'danger' : '', `⚔ Атаковать (${Math.min(this.attackCount, available)})`);
+    const go = el('button', available > 0 ? 'danger' : '', t('info.attack', { n: Math.min(this.attackCount, available) }));
     go.disabled = available === 0;
-    go.title = available > 0 ? 'Свободные бойцы поблизости и лишние бойцы ваших военных зданий рядом' : 'Рядом нет свободных солдат';
+    go.title = available > 0 ? t('info.attackTip') : t('info.noAttackers');
     go.onclick = () => {
       const sent = this.world.attack(b.id, this.attackCount);
-      this.toast(sent > 0 ? `В атаку: ${sent}` : 'Некого отправить');
+      this.toast(sent > 0 ? t('input.order.attack', { n: sent }) : t('info.nobodyToSend'));
     };
     actions.append(less, more, go);
     return actions;
@@ -354,8 +353,8 @@ export class InfoView implements View {
 
   private status(b: Building): string {
     const def = BUILDINGS[b.type];
-    if (b.stopped) return b.timer > 0 ? 'останавливается' : 'остановлено';
-    if (b.workerId === null) return 'ждёт работника';
+    if (b.stopped) return b.timer > 0 ? t('status.stopping') : t('status.stopped');
+    if (b.workerId === null) return t('status.awaitingWorker');
     const behavior = PROFESSIONS[def.worker!].behavior;
     const w = this.world.getSettler(b.workerId);
     const outside = w !== undefined && w.inside === null;
@@ -364,39 +363,40 @@ export class InfoView implements View {
         const recipe = def.recipe;
         // Workplaces without a recipe: the infirmary's healer, the lookout's watchman.
         if (!recipe) {
-          if (outside) return 'идёт на место';
-          if (def.infirmary) return b.patient !== undefined ? 'лечит бойца' : 'ждёт раненых';
-          if (def.alarm) return b.alarm ? 'тревога: враг рядом!' : 'на посту';
-          return 'работает';
+          if (outside) return t('status.goingIn');
+          if (def.infirmary) return b.patient !== undefined ? t('status.healing') : t('status.awaitingWounded');
+          if (def.alarm) return b.alarm ? t('army.alarm') : t('army.onWatch');
+          return t('status.working');
         }
-        if (def.mine && oreLeft(this.world, b) === 0) return 'выработана';
-        if (recipe.outputChoice && !chooseOutput(this.world, b, recipe)) return 'запас полон, заказов нет';
-        if (RESOURCES.some((r) => b.output[r] + (recipe.outputs[r] ?? 0) > OUTPUT_CAP)) return 'склад полон';
-        const missing = RESOURCES.filter((r) => b.input[r] < (recipe.inputs[r] ?? 0)).map((r) =>
-          nameOf(r).toLowerCase(),
-        );
-        if (recipe.inputsAnyOf && !recipe.inputsAnyOf.some((r) => b.input[r] > 0)) missing.push('еды');
-        if (missing.length > 0) return `нет: ${missing.join(', ')}`;
-        return 'работает';
+        if (def.mine && oreLeft(this.world, b) === 0) return t('status.workedOut');
+        if (recipe.outputChoice && !chooseOutput(this.world, b, recipe)) return t('status.stockFull');
+        if (RESOURCES.some((r) => b.output[r] + (recipe.outputs[r] ?? 0) > OUTPUT_CAP)) return t('status.pileFull');
+        const missing = RESOURCES.filter((r) => b.input[r] < (recipe.inputs[r] ?? 0)).map((r) => resLower(r));
+        if (recipe.inputsAnyOf && !recipe.inputsAnyOf.some((r) => b.input[r] > 0)) missing.push(t('status.food'));
+        if (missing.length > 0) return t('status.missing', { list: missing.join(', ') });
+        return t('status.working');
       }
       case 'plant':
-        return outside ? 'сажает деревья' : 'отдыхает';
+        return outside ? t('status.planting') : t('status.resting');
       case 'garrison':
-        return 'охраняет границу';
+        return t('status.guarding');
       case 'hunt':
-        return outside ? 'на охоте' : b.output.meat >= OUTPUT_CAP ? 'склад полон' : 'отдыхает';
+        return outside ? t('status.hunting') : b.output.meat >= OUTPUT_CAP ? t('status.pileFull') : t('status.resting');
       case 'gather':
       case 'farm': {
         const gather = gatheredBy(b.type)!;
-        if (b.output[gather.res] >= OUTPUT_CAP) return 'склад полон';
-        if (outside) return GATHER_PLACE[b.type] ?? 'работает';
-        if (behavior === 'gather' && !hasGatherTargetNear(this.world, b, gather)) {
-          return `нет поблизости: ${nameOf(gather.res).toLowerCase()}`;
+        if (b.output[gather.res] >= OUTPUT_CAP) return t('status.pileFull');
+        if (outside) {
+          const place = GATHER_PLACE[b.type];
+          return place ? t(place) : t('status.working');
         }
-        return 'отдыхает';
+        if (behavior === 'gather' && !hasGatherTargetNear(this.world, b, gather)) {
+          return t('status.noneNear', { res: resLower(gather.res) });
+        }
+        return t('status.resting');
       }
       default:
-        return 'работает';
+        return t('status.working');
     }
   }
 }

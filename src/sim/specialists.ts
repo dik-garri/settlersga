@@ -624,8 +624,7 @@ export const SPECIALIST_KINDS: readonly SettlerKind[] = ['geologist', 'pioneer',
 export const isSpecialist = (s: Settler): boolean => SPECIALIST_KINDS.includes(s.kind);
 
 export interface SpecialistOrder {
-  /** What a right click does where `can` holds (the hover hint). */
-  label: string;
+  // The hover hint («what a right click does») is the UI's: `order.<kind>` in `src/i18n`.
   /** Whether the action applies at tile (x, y) / to building `b` under the cursor. */
   can(w: World, x: number, y: number, b: Building | undefined, player: PlayerId): boolean;
   /** Starts the action for one specialist (his previous errand already dropped). */
@@ -635,7 +634,6 @@ export interface SpecialistOrder {
 /** Per specialist kind: the action a right click starts where it is possible. */
 export const SPECIALIST_ORDERS: Partial<Record<SettlerKind, SpecialistOrder>> = {
   geologist: {
-    label: 'Разведать руду',
     can: (w, x, y, _b, player) => w.map.terrain[w.map.idx(x, y)] === Terrain.Mountain && canProspect(w, x, y, player),
     apply: (_w, s, x, y) => {
       s.errand = { x, y };
@@ -643,7 +641,6 @@ export const SPECIALIST_ORDERS: Partial<Record<SettlerKind, SpecialistOrder>> = 
     },
   },
   pioneer: {
-    label: 'Занять землю',
     can: (w, x, y, _b, player) => pioneerSpot(w, x, y, player),
     apply: (_w, s, x, y) => {
       s.errand = { x, y };
@@ -651,7 +648,6 @@ export const SPECIALIST_ORDERS: Partial<Record<SettlerKind, SpecialistOrder>> = 
     },
   },
   thief: {
-    label: 'Украсть',
     // At a building: its door; elsewhere the spot itself (goods lying there, on his own land too).
     can: (w, x, y, b, player) => (b ? robbable(w, b, player) : lootAt(w, x, y, player) !== null),
     apply: (w, s, x, y, b) => {

@@ -1,3 +1,4 @@
+import { t } from './i18n';
 import type { SaveData } from '../sim/save';
 
 /**
@@ -91,7 +92,7 @@ export class SaveSlots {
     const legacy = this.get(LEGACY);
     if (legacy) {
       try {
-        out.push({ id: 'v1', name: 'Сохранение прежней версии', savedAt: 0, ...describe(JSON.parse(legacy) as SaveData) });
+        out.push({ id: 'v1', name: t('saves.legacy'), savedAt: 0, ...describe(JSON.parse(legacy) as SaveData) });
       } catch {
         // Unreadable: not listed.
       }

@@ -5,12 +5,14 @@
  * Plain DOM helpers used by `Hud`.
  */
 import { settlerIcon } from '../render/atlas';
-import { BUILDINGS, LEVEL_RES, OUTPUT_SHARES, PROFESSIONS, RESOURCE_INFO } from '../sim/config';
+import { BUILDINGS, LEVEL_RES, OUTPUT_SHARES, PROFESSIONS } from '../sim/config';
 import { ENDLESS } from '../sim/economy';
 import { FIGHTERS, doorHp, garrisonCounts, isFighter, isFreeFighter, maxHp, recruitNeeds, slotsOf } from '../sim/military';
 import { RESOURCES, type Building, type Resource, type SettlerKind } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { button, el, type View } from './dom';
+import { t } from './i18n';
+import { profName, resLower, resName } from './names';
 
 /** Weapons whose shares the player sets (share-controlled outputs). */
 const OUTPUT_WEAPONS = RESOURCES.filter((r) => OUTPUT_SHARES[r] !== undefined);
@@ -28,12 +30,12 @@ export function shareControls(w: World, choices: readonly Resource[], onChange: 
   for (const r of choices) {
     const row = el('div', 'share-row');
     const pct = Math.round((100 * w.shareOf(r)) / total);
-    row.append(el('span', 'share-name', `${RESOURCE_INFO[r].name} ${pct}%`));
+    row.append(el('span', 'share-name', `${resName(r)} ${pct}%`));
     const step = (d: number) => () => {
       w.setShare(r, Math.max(0, Math.min(100, w.shareOf(r) + d)));
       onChange();
     };
-    row.append(button('−', `Меньше: ${RESOURCE_INFO[r].name.toLowerCase()}`, step(-10)), button('+', `Больше: ${RESOURCE_INFO[r].name.toLowerCase()}`, step(10)));
+    row.append(button('−', t('army.shareLess', { name: resLower(r) }), step(-10)), button('+', t('army.shareMore', { name: resLower(r) }), step(10)));
     box.append(row);
   }
   return box;
@@ -41,7 +43,7 @@ export function shareControls(w: World, choices: readonly Resource[], onChange: 
 
 /** «1 / 3 (идёт 1)»: fighters of a kind inside a military building out of its wish, and those on the way. */
 function kindText(inside: number, wish: number, coming: number): string {
-  return `${inside} / ${wish}${coming > 0 ? ` (идёт ${coming})` : ''}`;
+  return `${inside} / ${wish}${coming > 0 ? ` ${t('army.coming', { n: coming })}` : ''}`;
 }
 
 /** Rows of a military building's garrison: by kind, inside / wished; the door while damaged. */
@@ -50,9 +52,9 @@ export function garrisonRows(w: World, b: Building): Rows {
   if (!g || !b.done) return [];
   const c = garrisonCounts(w, b);
   const wish = b.wish ?? { melee: 0, ranged: 0 };
-  const rows: Rows = [['Мечники', kindText(c.melee, wish.melee, c.inMelee) + ` · мест ${slotsOf(b, false)}`]];
-  if (slotsOf(b, true) > 0) rows.push(['Лучники', kindText(c.ranged, wish.ranged, c.inRanged) + ` · мест ${slotsOf(b, true)}`]);
-  if (g.door && b.doorHp !== undefined) rows.push(['Ворота', b.doorHp > 0 ? `${doorHp(b)} / ${g.door.hp}` : 'выбиты']);
+  const rows: Rows = [[t('army.swordsmen'), `${kindText(c.melee, wish.melee, c.inMelee)} · ${t('army.slots', { n: slotsOf(b, false) })}`]];
+  if (slotsOf(b, true) > 0) rows.push([t('army.bowmen'), `${kindText(c.ranged, wish.ranged, c.inRanged)} · ${t('army.slots', { n: slotsOf(b, true) })}`]);
+  if (g.door && b.doorHp !== undefined) rows.push([t('army.gate'), b.doorHp > 0 ? `${doorHp(b)} / ${g.door.hp}` : t('army.gateBroken')]);
   return rows;
 }
 
@@ -63,21 +65,21 @@ export function garrisonRows(w: World, b: Building): Rows {
  */
 export function garrisonControls(w: World, b: Building, onChange: () => void): HTMLElement {
   const box = el('div', 'eco-orders');
-  box.append(el('h4', '', 'Гарнизон'));
-  box.append(el('p', 'muted', 'Башня зовёт свободных бойцов поблизости, сколько задано; лишние выходят и стоят у неё.'));
+  box.append(el('h4', '', t('army.garrison')));
+  box.append(el('p', 'muted', t('army.garrisonNote')));
   const wish = b.wish ?? { melee: 0, ranged: 0 };
   const kinds: [SettlerKind, boolean, number][] = [['soldier', false, wish.melee]];
   if (slotsOf(b, true) > 0) kinds.push(['archer', true, wish.ranged]);
   for (const [kind, archer, n] of kinds) {
     const row = el('div', 'eco-row');
-    const name = archer ? 'Лучники' : 'Мечники';
+    const name = archer ? t('army.bowmen') : t('army.swordsmen');
     row.append(settlerIcon(kind, 18), el('span', 'eco-name', name), el('b', '', `${n} / ${slotsOf(b, archer)}`));
     row.append(
-      button('−', `${name}: на одного меньше (не меньше одного бойца в башне)`, () => {
+      button('−', t('army.wishLess', { name }), () => {
         w.changeGarrison(b.id, archer, -1);
         onChange();
       }),
-      button('+', `${name}: на одного больше`, () => {
+      button('+', t('army.wishMore', { name }), () => {
         w.changeGarrison(b.id, archer, 1);
         onChange();
       }),
@@ -86,11 +88,11 @@ export function garrisonControls(w: World, b: Building, onChange: () => void): H
   }
   const actions = el('div', 'info-actions');
   actions.append(
-    button('⬆ Заполнить', 'Позвать бойцов на все места', () => {
+    button(t('army.fill'), t('army.fillTip'), () => {
       w.fillGarrison(b.id);
       onChange();
     }),
-    button('⬇ Вывести', 'Оставить одного бойца, остальные выйдут и встанут у башни', () => {
+    button(t('army.withdraw'), t('army.withdrawTip'), () => {
       w.withdrawGarrison(b.id);
       onChange();
     }),
@@ -102,7 +104,7 @@ export function garrisonControls(w: World, b: Building, onChange: () => void): H
 /** «меч, 2 золота»: what one recruit of `kind` at `level` takes from the barracks pile. */
 function needText(kind: SettlerKind, level: number): string {
   return (Object.entries(recruitNeeds(kind, level)) as [Resource, number][])
-    .map(([r, n]) => (n > 1 ? `${n} ${RESOURCE_INFO[r].name.toLowerCase()}` : RESOURCE_INFO[r].name.toLowerCase()))
+    .map(([r, n]) => (n > 1 ? `${n} ${resLower(r)}` : resLower(r)))
     .join(', ');
 }
 
@@ -115,10 +117,10 @@ export function orderText(n: number): string {
 export function barracksRows(w: World, b: Building): Rows {
   const rows: Rows = [];
   for (const r of [...new Set(FIGHTERS.map((k) => PROFESSIONS[k].tool!)), LEVEL_RES]) {
-    rows.push([`${RESOURCE_INFO[r].name} (запас)`, String(b.input[r])]);
+    rows.push([t('army.stock', { name: resName(r) }), String(b.input[r])]);
   }
   const coming = w.settlers.filter((s) => s.tasks.some((t) => t.t === 'recruit' && t.b === b.id)).length;
-  rows.push(['Идут в казарму', String(coming)]);
+  rows.push([t('army.toBarracks'), String(coming)]);
   return rows;
 }
 
@@ -129,29 +131,29 @@ export function barracksRows(w: World, b: Building): Rows {
  */
 export function recruitOrderControls(w: World, onChange: () => void): HTMLElement {
   const box = el('div', 'eco-orders');
-  box.append(el('h4', '', 'Заказ бойцов'));
-  box.append(el('p', 'muted', 'Казарма набирает только заказанных: старший уровень первым, если хватает оружия и золота.'));
+  box.append(el('h4', '', t('army.recruits')));
+  box.append(el('p', 'muted', t('army.recruitsNote')));
   for (const kind of FIGHTERS) {
     const levels = PROFESSIONS[kind].combat!.levels.length;
     for (let level = 0; level < levels; level++) {
       const n = w.recruitOrder(kind, level);
-      const name = levels > 1 ? `${PROFESSIONS[kind].name}, ур. ${level + 1}` : PROFESSIONS[kind].name;
+      const name = levels > 1 ? t('units.kindLevel', { name: profName(kind), level: level + 1 }) : profName(kind);
       const row = el('div', 'eco-row');
-      row.title = `Нужно: ${needText(kind, level)}`;
+      row.title = t('army.needs', { list: needText(kind, level) });
       row.append(settlerIcon(kind, 18), el('span', 'eco-name', name), el('b', '', orderText(n)));
       const order = (count: number) => () => {
         w.orderRecruits(kind, level, count);
         onChange();
       };
       row.append(
-        button('−', 'На одного меньше', () => {
+        button('−', t('eco.less1'), () => {
           w.reduceRecruits(kind, level, 1);
           onChange();
         }),
-        button('+1', 'Ещё один', order(1)),
-        button('+5', 'Ещё пять', order(5)),
-        button('∞', 'Набирать без остановки', order(ENDLESS)),
-        button('✕', 'Отменить заказ', order(0)),
+        button('+1', t('army.one'), order(1)),
+        button('+5', t('army.five'), order(5)),
+        button('∞', t('army.endless'), order(ENDLESS)),
+        button('✕', t('eco.cancelOrder'), order(0)),
       );
       box.append(row);
     }
@@ -174,21 +176,21 @@ export function supportRows(w: World, b: Building): Rows | null {
   const inside = !!keeper && keeper.inside === b.id;
   if (def.vision) {
     return [
-      ['Обзор', `${def.vision} клеток`],
-      ['Дозорный', inside ? (b.alarm ? 'тревога: враг рядом!' : 'на посту') : 'нет — тревоги не будет'],
+      [t('army.sight'), t('common.tiles', { n: def.vision })],
+      [profName('watchman'), inside ? (b.alarm ? t('army.alarm') : t('army.onWatch')) : t('army.noWatchman')],
     ];
   }
   if (def.infirmary) {
     const p = b.patient !== undefined ? w.getSettler(b.patient) : undefined;
-    const t = p?.tasks.find((k) => k.t === 'heal' && k.b === b.id);
-    const atDoor = !!p && p.tasks[0] === t;
+    const heal = p?.tasks.find((k) => k.t === 'heal' && k.b === b.id);
+    const atDoor = !!p && p.tasks[0] === heal;
     return [
-      ['Лекарь', inside ? 'на месте' : 'нет — никого не лечат'],
+      [profName('healer'), inside ? t('army.healerIn') : t('army.noHealer')],
       [
-        'Пациент',
-        p ? `${PROFESSIONS[p.kind].name}: ${Math.round(p.hp)} / ${maxHp(p)}${atDoor ? '' : ' (идёт)'}` : 'нет',
+        t('army.patient'),
+        p ? `${profName(p.kind)}: ${Math.round(p.hp)} / ${maxHp(p)}${atDoor ? '' : ` ${t('army.patientComing')}`}` : t('army.none'),
       ],
-      ['Зона поиска', `${def.infirmary.radius} клеток${b.workAt ? ', перенесена' : ''}`],
+      [t('army.searchArea'), `${t('common.tiles', { n: def.infirmary.radius })}${b.workAt ? t('info.moved') : ''}`],
     ];
   }
   return null;
@@ -215,7 +217,7 @@ export class ArmyView implements View {
     const byKey = new Map<string, number>();
     for (const s of fighters) {
       const levels = PROFESSIONS[s.kind].combat!.levels.length;
-      const k = levels > 1 ? `${PROFESSIONS[s.kind].name}, ур. ${s.level + 1}` : PROFESSIONS[s.kind].name;
+      const k = levels > 1 ? t('units.kindLevel', { name: profName(s.kind), level: s.level + 1 }) : profName(s.kind);
       byKey.set(k, (byKey.get(k) ?? 0) + 1);
     }
     const shares = OUTPUT_WEAPONS.map((r) => w.shareOf(r));
@@ -223,15 +225,15 @@ export class ArmyView implements View {
     if (key === this.key) return;
     this.key = key;
     this.el.innerHTML = '';
-    this.el.append(el('h4', '', 'Сила армии'));
+    this.el.append(el('h4', '', t('army.strength')));
     const meter = el('div', 'strength');
     const pct = Math.round(w.strengthOf());
     const bar = el('span', 'strength-bar');
     bar.style.setProperty('--p', `${Math.min(100, (pct / 150) * 100)}%`);
     meter.append(bar, el('b', '', `${pct}%`));
-    meter.title = 'Сила атаки на чужой земле растёт с ценностью поселения (материалы в постройках, украшения — втройне). На своей земле бойцы сражаются в полную силу.';
+    meter.title = t('army.strengthTip');
     this.el.append(meter);
-    this.el.append(el('h4', '', 'Бойцы'));
+    this.el.append(el('h4', '', t('army.fighters')));
     const grid = el('div', 'stats-grid');
     const line = (label: string, value: string, title = '') => {
       const row = el('span', 'stock-row');
@@ -239,16 +241,16 @@ export class ArmyView implements View {
       row.append(el('span', 'stock-name', label), el('b', '', value));
       grid.append(row);
     };
-    line('Всего', String(fighters.length));
-    line('В гарнизонах', String(garrisoned));
-    line('Свободны', String(free), 'Стоят без дела; башни с местом зовут их сами');
-    line('В поле', String(field), 'Стоят на позиции по вашему приказу');
-    if (coming > 0) line('Идут в казарму', String(coming));
+    line(t('army.total'), String(fighters.length));
+    line(t('army.inGarrisons'), String(garrisoned));
+    line(t('army.free'), String(free), t('army.freeTip'));
+    line(t('units.inField'), String(field), t('army.inFieldTip'));
+    if (coming > 0) line(t('army.toBarracks'), String(coming));
     for (const [k, n] of [...byKey].sort()) line(k, String(n));
     this.el.append(grid);
     this.el.append(recruitOrderControls(w, () => (this.key = '')));
-    this.el.append(el('h4', '', 'Оружие'));
-    const smith = el('p', 'muted', 'Оружейник куёт заказанное казармой первым, остальное — по долям.');
+    this.el.append(el('h4', '', t('army.weapons')));
+    const smith = el('p', 'muted', t('army.weaponsNote'));
     this.el.append(smith, shareControls(w, OUTPUT_WEAPONS, () => (this.key = '')));
   }
 }

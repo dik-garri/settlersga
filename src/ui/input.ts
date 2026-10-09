@@ -6,6 +6,8 @@ import { canProspect, isSpecialist, pioneerSpot, SPECIALIST_ORDERS, toolPileNear
 import { toScreen } from '../render/iso';
 import { Terrain, type BuildingType } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
+import { t } from './i18n';
+import { orderLabel } from './names';
 import { isCommand, type GameState, type Placeable } from './state';
 import { sameTypeAround, SELECT_RADIUS, SELECTION_MAX, toggleInSelection, withoutHealthy } from './selection';
 
@@ -91,12 +93,12 @@ export class InputController {
   /** Why `sendGeologist` refused (x, y): the first of its conditions that fails, in words. */
   private geologistBlocker(x: number, y: number): string {
     const w = this.world;
-    if (!w.map.inBounds(x, y) || w.map.terrain[w.map.idx(x, y)] !== Terrain.Mountain) return 'Геолог разведывает только горы: щёлкните по склону горы';
-    if (!canProspect(w, x, y, LOCAL_PLAYER)) return 'Здесь всё уже разведано';
+    if (!w.map.inBounds(x, y) || w.map.terrain[w.map.idx(x, y)] !== Terrain.Mountain) return t('input.geologist.mountain');
+    if (!canProspect(w, x, y, LOCAL_PLAYER)) return t('input.geologist.done');
     if (!toolPileNear(w, LOCAL_PLAYER, x, y)) {
-      return 'Нет свободного геолога и молотка для нового: закажите геолога в меню «Поселенцы» (молотки делает инструментальщик, их берут и строители)';
+      return t('input.geologist.noHammer');
     }
-    return 'Нет свободного геолога и носильщика, который стал бы им';
+    return t('input.geologist.noCarrier');
   }
 
   private anchorFor(type: BuildingType, fx: number, fy: number): { x: number; y: number } {
@@ -107,8 +109,8 @@ export class InputController {
   ghost(): Ghost | null {
     const { placing } = this.state;
     if (!placing || isCommand(placing) || !this.pointer) return null;
-    const t = this.tileAt(this.pointer.x, this.pointer.y);
-    const a = this.anchorFor(placing, t.x, t.y);
+    const tile = this.tileAt(this.pointer.x, this.pointer.y);
+    const a = this.anchorFor(placing, tile.x, tile.y);
     return { type: placing, ...a, valid: this.world.canPlace(placing, a.x, a.y) };
   }
 
@@ -116,9 +118,9 @@ export class InputController {
   area(): Area | null {
     const { placing } = this.state;
     if ((placing !== 'geologist' && placing !== 'pioneer') || !this.pointer) return null;
-    const t = this.tileAt(this.pointer.x, this.pointer.y);
-    const x = Math.round(t.x);
-    const y = Math.round(t.y);
+    const tile = this.tileAt(this.pointer.x, this.pointer.y);
+    const x = Math.round(tile.x);
+    const y = Math.round(tile.y);
     const m = this.world.map;
     // Where he starts: he searches outwards from here (`reach`) and then on from where he stands.
     if (placing === 'pioneer') return { x, y, r: PIONEER.reach, valid: pioneerSpot(this.world, x, y, LOCAL_PLAYER) };
@@ -147,8 +149,8 @@ export class InputController {
     if (dx || dy) this.camera.panScreen(dx * speed * dt, dy * speed * dt);
 
     if (this.pointer) {
-      const t = this.tileAt(this.pointer.x, this.pointer.y);
-      this.state.hover = { x: Math.round(t.x), y: Math.round(t.y) };
+      const tile = this.tileAt(this.pointer.x, this.pointer.y);
+      this.state.hover = { x: Math.round(tile.x), y: Math.round(tile.y) };
     } else {
       this.state.hover = null;
     }
@@ -208,13 +210,13 @@ export class InputController {
       const labels = new Set<string>();
       if (fighters.length > 0) {
         const o = alt ? 'move' : this.fighterOrderAt(hover.x, hover.y);
-        labels.add(o === 'attack' ? 'Атаковать' : o === 'garrison' ? 'В гарнизон' : 'Идти сюда');
+        labels.add(o === 'attack' ? t('input.hint.attack') : o === 'garrison' ? t('input.hint.garrison') : t('input.hint.move'));
       }
       const b = this.knownBuildingAt(hover.x, hover.y);
       for (const id of specialists) {
         const s = this.world.getSettler(id)!;
         const order = SPECIALIST_ORDERS[s.kind];
-        labels.add(!alt && order && order.can(this.world, hover.x, hover.y, b, LOCAL_PLAYER) ? order.label : 'Идти сюда');
+        labels.add(!alt && order && order.can(this.world, hover.x, hover.y, b, LOCAL_PLAYER) ? orderLabel(s.kind) : t('input.hint.move'));
       }
       this.hint.textContent = [...labels].join(' · ');
     }
@@ -316,45 +318,45 @@ export class InputController {
     }
     if (d.button !== 0) return;
     const p = this.local(e);
-    const t = this.tileAt(p.x, p.y);
+    const tile = this.tileAt(p.x, p.y);
     const { placing } = this.state;
     if (this.state.movingWorkArea !== null) {
-      const ok = this.world.setWorkArea(this.state.movingWorkArea, { x: Math.round(t.x), y: Math.round(t.y) });
-      this.cb.onMessage(ok ? 'Зона работы перенесена' : 'Слишком далеко от здания');
+      const ok = this.world.setWorkArea(this.state.movingWorkArea, { x: Math.round(tile.x), y: Math.round(tile.y) });
+      this.cb.onMessage(ok ? t('input.workArea.moved') : t('input.workArea.tooFar'));
       if (ok) this.state.movingWorkArea = null;
       return;
     }
     if (placing === 'pioneer') {
-      const ok = this.world.sendPioneer(Math.round(t.x), Math.round(t.y));
-      this.cb.onMessage(ok ? 'Первопроходец отправлен' : 'Нужна ничейная земля, до которой можно дойти, и свободный первопроходец (заказ — в ⚙)');
+      const ok = this.world.sendPioneer(Math.round(tile.x), Math.round(tile.y));
+      this.cb.onMessage(ok ? t('input.pioneer.sent') : t('input.pioneer.failed'));
       if (ok && !e.shiftKey) this.cb.onSelectBuildType(null);
       return;
     }
     if (placing === 'thief') {
-      const target = this.world.buildingAt(Math.round(t.x), Math.round(t.y));
+      const target = this.world.buildingAt(Math.round(tile.x), Math.round(tile.y));
       const ok = target ? this.world.sendThief(target.id) : false;
-      this.cb.onMessage(ok ? 'Вор отправлен' : 'Нужно разведанное чужое здание с товарами и свободный вор (заказ — в ⚙)');
+      this.cb.onMessage(ok ? t('input.thief.sent') : t('input.thief.failed'));
       if (ok && !e.shiftKey) this.cb.onSelectBuildType(null);
       return;
     }
     if (placing === 'geologist') {
-      const gx = Math.round(t.x);
-      const gy = Math.round(t.y);
+      const gx = Math.round(tile.x);
+      const gy = Math.round(tile.y);
       const ok = this.world.sendGeologist(gx, gy);
-      this.cb.onMessage(ok ? 'Геолог отправлен' : this.geologistBlocker(gx, gy));
+      this.cb.onMessage(ok ? t('input.geologist.sent') : this.geologistBlocker(gx, gy));
       if (ok && !e.shiftKey) this.cb.onSelectBuildType(null);
       return;
     }
     if (placing) {
-      const a = this.anchorFor(placing, t.x, t.y);
+      const a = this.anchorFor(placing, tile.x, tile.y);
       if (!this.world.canPlace(placing, a.x, a.y)) {
         const outside = !this.world.owns(a.x, a.y);
-        this.cb.onMessage(outside ? 'Строить можно только на своей земле' : 'Здесь строить нельзя');
+        this.cb.onMessage(outside ? t('input.place.outside') : t('input.place.cannot'));
         return;
       }
       const b = this.world.placeBuilding(placing, a.x, a.y);
       if (!b) {
-        this.cb.onMessage('Поселенцы не смогут дойти до этого места');
+        this.cb.onMessage(t('input.place.unreachable'));
         return;
       }
       if (!e.shiftKey) this.cb.onSelectBuildType(null);
@@ -396,8 +398,8 @@ export class InputController {
     }
     this.state.selectedSettler = null;
     this.state.selectedUnits = [];
-    const tx = Math.round(t.x);
-    const ty = Math.round(t.y);
+    const tx = Math.round(tile.x);
+    const ty = Math.round(tile.y);
     const b = this.world.buildingAt(tx, ty);
     // Under the fog nothing can be picked: the player does not know what stands there.
     const known = !this.state.fog || (b !== undefined && b.owner === LOCAL_PLAYER) || this.world.isExplored(tx, ty);
@@ -413,21 +415,21 @@ export class InputController {
    */
   private order(p: { x: number; y: number }, walkOnly = false): void {
     const { fighters, specialists } = this.selection();
-    const t = this.tileAt(p.x, p.y);
-    const tx = Math.round(t.x);
-    const ty = Math.round(t.y);
+    const tile = this.tileAt(p.x, p.y);
+    const tx = Math.round(tile.x);
+    const ty = Math.round(tile.y);
     const b = this.knownBuildingAt(tx, ty);
     const said: string[] = [];
     if (fighters.length > 0) {
       const o = walkOnly ? 'move' : this.fighterOrderAt(tx, ty);
       if (o === 'attack') {
         const n = this.world.orderAttack(fighters, b!.id);
-        said.push(n > 0 ? `В атаку: ${n}` : 'Эти бойцы сейчас не могут атаковать');
+        said.push(n > 0 ? t('input.order.attack', { n }) : t('input.order.cannotAttack'));
       } else if (o === 'garrison') {
         const n = this.world.orderGarrison(fighters, b!.id);
-        said.push(n > 0 ? `В гарнизон: ${n}` : 'В этом здании нет мест для них');
+        said.push(n > 0 ? t('input.order.garrison', { n }) : t('input.order.noRoom'));
       } else if (this.world.orderMove(fighters, tx, ty) === 0) {
-        said.push('Туда не пройти');
+        said.push(t('input.order.noWay'));
       }
     }
     if (specialists.length > 0) {
@@ -438,11 +440,11 @@ export class InputController {
             return SPECIALIST_ORDERS[s.kind]?.can(this.world, tx, ty, b, LOCAL_PLAYER) ?? false;
           }).length;
       const n = this.world.orderSpecialists(specialists, tx, ty, b ? b.id : null, LOCAL_PLAYER, walkOnly);
-      if (n === 0) said.push('Туда не пройти');
-      else if (acting > 0) said.push(`За работу: ${acting}`);
+      if (n === 0) said.push(t('input.order.noWay'));
+      else if (acting > 0) said.push(t('input.order.toWork', { n: acting }));
     }
     if (fighters.length === 0 && specialists.length === 0 && this.state.selectedUnits.length > 0) {
-      said.push('Ослы ходят только по маршрутам рынков');
+      said.push(t('input.order.donkeys'));
     }
     if (said.length > 0) this.cb.onMessage(said.join(' · '));
   }
@@ -483,7 +485,7 @@ export class InputController {
       case 'Space':
         // Settlers 4: Space jumps to the last message (pressed again, the one before).
         e.preventDefault();
-        if (!this.cb.onLastMessage()) this.cb.onMessage('Сообщений нет');
+        if (!this.cb.onLastMessage()) this.cb.onMessage(t('input.noMessages'));
         break;
       case 'KeyP':
       case 'Pause':
@@ -506,7 +508,7 @@ export class InputController {
           const before = this.state.selectedUnits.length;
           this.state.selectedUnits = withoutHealthy(this.world, this.state.selectedUnits);
           const left = this.state.selectedUnits.length;
-          this.cb.onMessage(left > 0 ? `Раненых в выделении: ${left} (здоровых убрано: ${before - left})` : 'Раненых в выделении нет');
+          this.cb.onMessage(left > 0 ? t('input.wounded', { n: left, removed: before - left }) : t('input.noWounded'));
         }
         break;
       default: {
@@ -529,7 +531,7 @@ export class InputController {
   private storeGroup(n: number): void {
     const ids = this.state.selectedUnits.filter((id) => this.ownLiving(id));
     this.state.groups[n] = ids;
-    this.cb.onMessage(ids.length > 0 ? `Группа ${n}: ${ids.length}` : `Группа ${n} очищена`);
+    this.cb.onMessage(ids.length > 0 ? t('input.group', { g: n, n: ids.length }) : t('input.groupCleared', { g: n }));
   }
 
   /**

@@ -1,10 +1,12 @@
 import { wareIcon } from '../render/atlas';
-import { BUILDINGS, PROFESSIONS, RESOURCE_INFO, TICKS_PER_SECOND } from '../sim/config';
+import { TICKS_PER_SECOND } from '../sim/config';
 import { isFighter } from '../sim/military';
 import { scoreOf } from '../sim/score';
 import { RESOURCES, type BuildingType, type PlayerId, type SettlerKind, type Stock } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { el, type View } from './dom';
+import { t } from './i18n';
+import { buildingName, profName, resName } from './names';
 
 /** What each player looks like at a sample (Settlers 4's land and fighters statistics). */
 interface PlayerSample {
@@ -53,15 +55,23 @@ export class StatsView implements View {
     this.slider.type = 'range';
     this.slider.min = '1';
     this.slider.value = String(this.minutes);
-    this.slider.title = 'За сколько последних минут считать';
+    this.slider.title = t('stats.windowTip');
     this.slider.oninput = () => {
       this.minutes = Number(this.slider.value);
       this.lastRender = -Infinity;
       this.update(performance.now());
     };
     const bar = el('div', 'stats-bar');
-    bar.append(el('span', '', 'Окно:'), this.slider, this.sliderLabel);
+    bar.append(el('span', '', t('stats.window')), this.slider, this.sliderLabel);
     this.el.append(bar, this.body);
+  }
+
+  /** Takes over another view's samples (the HUD is rebuilt when the language changes). */
+  carry(from: StatsView): void {
+    this.history.push(...from.history);
+    this.lastSampleTick = from.lastSampleTick;
+    this.minutes = from.minutes;
+    this.slider.value = String(this.minutes);
   }
 
   /** Keeps the minute samples going even while the view is hidden. */
@@ -116,7 +126,7 @@ export class StatsView implements View {
     this.slider.value = String(this.minutes);
     const old = this.history[this.history.length - this.minutes] ?? this.history[0] ?? now;
     const minutes = Math.max(1, Math.round((now.tick - old.tick) / (TICKS_PER_SECOND * 60)));
-    this.sliderLabel.textContent = `${minutes} мин`;
+    this.sliderLabel.textContent = t('common.minutes', { n: minutes });
     const body = this.body;
     body.innerHTML = '';
     const row = (name: string, value: string, icon?: HTMLElement) => {
@@ -126,44 +136,46 @@ export class StatsView implements View {
       return r;
     };
 
-    body.append(el('h4', '', `Производство (за ${minutes} мин / всего)`));
+    body.append(el('h4', '', t('stats.production', { n: minutes })));
     const grid = el('div', 'stats-grid');
     for (const r of RESOURCES) {
       if (now.produced[r] === 0) continue;
-      grid.append(row(RESOURCE_INFO[r].name, `${now.produced[r] - old.produced[r]} / ${now.produced[r]}`, wareIcon(r, 16)));
+      grid.append(row(resName(r), `${now.produced[r] - old.produced[r]} / ${now.produced[r]}`, wareIcon(r, 16)));
     }
     body.append(grid);
 
     // Settlers 4's fighters statistics: enemies killed and own losses by kind.
     const kinds = new Set([...Object.keys(now.killed), ...Object.keys(now.fallen)] as SettlerKind[]);
-    body.append(el('h4', '', `Бои: убито врагов / свои потери (за ${minutes} мин / всего)`));
-    if (kinds.size === 0) body.append(el('p', 'muted', 'Боёв ещё не было.'));
+    body.append(el('h4', '', t('stats.fights', { n: minutes })));
+    if (kinds.size === 0) body.append(el('p', 'muted', t('stats.noFights')));
     else {
       const war = el('table', 'stats-table');
       const head = el('tr');
-      for (const h of ['', 'Убито', 'Потеряно']) head.append(el('th', '', h));
+      for (const h of ['', t('stats.killed'), t('stats.lost')]) head.append(el('th', '', h));
       war.append(head);
       const cell = (a: number | undefined, b: number | undefined) => `${(a ?? 0) - (b ?? 0)} / ${a ?? 0}`;
       for (const k of [...kinds].sort()) {
         const tr = el('tr');
-        tr.append(el('td', '', PROFESSIONS[k].name), el('td', '', cell(now.killed[k], old.killed[k])), el('td', '', cell(now.fallen[k], old.fallen[k])));
+        tr.append(el('td', '', profName(k)), el('td', '', cell(now.killed[k], old.killed[k])), el('td', '', cell(now.fallen[k], old.fallen[k])));
         war.append(tr);
       }
       body.append(war);
     }
 
     // Every player (Settlers 4 shows them all): land and people now (change over the window), war in the window / all.
-    body.append(el('h4', '', 'Игроки'));
+    body.append(el('h4', '', t('stats.players')));
     const table = el('table', 'stats-table');
     const head = el('tr');
-    for (const h of ['', 'Земля', 'Посел.', 'Бойцы', 'Убито', 'Потери', 'Взято', 'Отдано', 'Счёт']) head.append(el('th', '', h));
+    for (const h of ['', t('stats.col.land'), t('stats.col.settlers'), t('stats.col.fighters'), t('stats.col.killed'), t('stats.col.losses'), t('stats.col.taken'), t('stats.col.given'), t('stats.col.score')]) {
+      head.append(el('th', '', h));
+    }
     table.append(head);
     const delta = (a: number, b: number) => (a - b > 0 ? `+${a - b}` : a - b < 0 ? String(a - b) : '±0');
     for (const p of world.players) {
       const n = now.players[p.id];
       const o = old.players[p.id] ?? n;
       const tr = el('tr', p.id === LOCAL_PLAYER ? 'mine' : '');
-      const name = p.id === LOCAL_PLAYER ? 'Вы' : `Игрок ${p.id}${world.isDefeated(p.id) ? ' †' : ''}`;
+      const name = p.id === LOCAL_PLAYER ? t('common.you') : `${t('common.player', { id: p.id })}${world.isDefeated(p.id) ? ' †' : ''}`;
       tr.append(
         el('td', '', name),
         el('td', '', `${n.land} (${delta(n.land, o.land)})`),
@@ -177,21 +189,21 @@ export class StatsView implements View {
       );
       table.append(tr);
     }
-    table.title = 'Земля — клеток; «Взято»/«Отдано» — военные здания; счёт — формула Settlers 4';
+    table.title = t('stats.playersTip');
     body.append(table);
 
     const people = new Map<SettlerKind, number>();
     for (const s of world.settlers) if (s.owner === LOCAL_PLAYER) people.set(s.kind, (people.get(s.kind) ?? 0) + 1);
-    body.append(el('h4', '', 'Население'));
+    body.append(el('h4', '', t('stats.population')));
     const pop = el('div', 'stats-grid');
-    for (const [kind, n] of [...people].sort((a, b) => b[1] - a[1])) pop.append(row(PROFESSIONS[kind].name, String(n)));
+    for (const [kind, n] of [...people].sort((a, b) => b[1] - a[1])) pop.append(row(profName(kind), String(n)));
     body.append(pop);
 
     const types = new Map<BuildingType, number>();
     for (const b of world.buildings.values()) if (b.owner === LOCAL_PLAYER) types.set(b.type, (types.get(b.type) ?? 0) + 1);
-    body.append(el('h4', '', 'Здания'));
+    body.append(el('h4', '', t('stats.buildings')));
     const houses = el('div', 'stats-grid');
-    for (const [type, n] of [...types].sort((a, b) => b[1] - a[1])) houses.append(row(BUILDINGS[type].name, String(n)));
+    for (const [type, n] of [...types].sort((a, b) => b[1] - a[1])) houses.append(row(buildingName(type), String(n)));
     body.append(houses);
   }
 }

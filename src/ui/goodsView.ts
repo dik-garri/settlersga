@@ -1,10 +1,12 @@
 import { wareIcon } from '../render/atlas';
-import { BUILDINGS, RESOURCE_GROUPS, RESOURCE_INFO, type ResourceGroup } from '../sim/config';
+import { BUILDINGS, RESOURCE_GROUPS, RESOURCE_INFO } from '../sim/config';
 import { groundStock } from '../sim/ground';
 import { RESOURCES, type Resource } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { button, el, type View } from './dom';
 import { DistributionView, TransportView } from './economyPanel';
+import { t } from './i18n';
+import { groupName, resName } from './names';
 
 type Page = 'stock' | 'distribution' | 'transport';
 
@@ -37,15 +39,15 @@ export class GoodsView implements View {
   constructor(private readonly world: World) {
     this.distribution = new DistributionView(world);
     this.transport = new TransportView(world);
-    for (const [group, title] of Object.entries(RESOURCE_GROUPS) as [ResourceGroup, string][]) {
-      this.stock.append(el('h4', '', title));
+    for (const group of RESOURCE_GROUPS) {
+      this.stock.append(el('h4', '', groupName(group)));
       const grid = el('div', 'stock-grid');
       for (const r of RESOURCES) {
         if (RESOURCE_INFO[r].group !== group) continue;
         const value = el('b', '', '0');
         const row = el('span', 'stock-row');
-        row.title = RESOURCE_INFO[r].name;
-        row.append(wareIcon(r, 18), el('span', 'stock-name', RESOURCE_INFO[r].name), value);
+        row.title = resName(r);
+        row.append(wareIcon(r, 18), el('span', 'stock-name', resName(r)), value);
         grid.append(row);
         this.values.push([r, value]);
       }
@@ -53,9 +55,9 @@ export class GoodsView implements View {
     }
     const pages = el('div', 'page-tabs');
     this.pageButtons = {
-      stock: button('Склад', 'Все товары на складах и на земле', () => this.show('stock')),
-      distribution: button('Распределение', 'Кому сколько товара', () => this.show('distribution')),
-      transport: button('Перевозка', 'Какие товары носильщики везут первыми', () => this.show('transport')),
+      stock: button(t('goods.stock'), t('goods.stockTip'), () => this.show('stock')),
+      distribution: button(t('goods.distribution'), t('goods.distributionTip'), () => this.show('distribution')),
+      transport: button(t('goods.transport'), t('goods.transportTip'), () => this.show('transport')),
     };
     pages.append(this.pageButtons.stock, this.pageButtons.distribution, this.pageButtons.transport);
     this.el.append(pages, this.stock, this.distribution.el, this.transport.el);

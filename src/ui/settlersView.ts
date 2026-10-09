@@ -1,18 +1,19 @@
 import { settlerIcon } from '../render/atlas';
 import { isReadyWorker } from '../sim/buildings';
-import { PROFESSIONS } from '../sim/config';
 import type { Settler, SettlerKind } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { nextSettlerOfKind } from './find';
 import { el, type View } from './dom';
 import { WorkersView } from './economyPanel';
+import { lower, t, type Key } from './i18n';
+import { profName } from './names';
 import type { GameState, Placeable } from './state';
 
 /** Errands sent from the settlers menu at a tile or a building, as in Settlers 4's specialists page. */
-export const COMMANDS: { type: 'geologist' | 'pioneer' | 'thief'; name: string; hint: string }[] = [
-  { type: 'geologist', name: 'Геолог', hint: 'Разведать хребет: ЛКМ по горе' },
-  { type: 'pioneer', name: 'Первопроходец', hint: 'Занять землю: ЛКМ по ничейной земле' },
-  { type: 'thief', name: 'Вор', hint: 'Украсть товар: ЛКМ по чужому зданию' },
+export const COMMANDS: { type: 'geologist' | 'pioneer' | 'thief'; what: Key; how: Key }[] = [
+  { type: 'geologist', what: 'settlers.cmd.geologist', how: 'settlers.cmd.geologistHow' },
+  { type: 'pioneer', what: 'settlers.cmd.pioneer', how: 'settlers.cmd.pioneerHow' },
+  { type: 'thief', what: 'settlers.cmd.thief', how: 'settlers.cmd.thiefHow' },
 ];
 
 /**
@@ -37,14 +38,14 @@ export class SettlersView implements View {
     private readonly focus: (s: Settler) => void = () => {},
   ) {
     this.workers = new WorkersView(world);
-    this.el.append(el('h4', '', 'Поселение'), this.summary, el('h4', '', 'Специалисты'));
+    this.el.append(el('h4', '', t('settlers.settlement')), this.summary, el('h4', '', t('settlers.specialists')));
     const grid = el('div', 'build-grid commands');
     for (const c of COMMANDS) {
       const b = el('button', 'build-btn');
-      b.title = c.hint;
+      b.title = `${t(c.what)}: ${t(c.how)}`;
       const pic = el('span', 'build-pic');
       pic.append(settlerIcon(c.type, 52));
-      b.append(pic, el('span', 'name', c.name), el('span', 'cost', c.hint.split(':')[0]));
+      b.append(pic, el('span', 'name', profName(c.type)), el('span', 'cost', t(c.what)));
       b.onclick = () => {
         select(this.state.placing === c.type ? null : c.type);
         b.blur();
@@ -82,27 +83,27 @@ export class SettlersView implements View {
         return row;
       };
       const grid = el('div', 'stats-grid');
-      grid.append(line('Всего поселенцев', String(people)), line('Носильщики заняты', `${busy} / ${carriers}`));
+      grid.append(line(t('settlers.total'), String(people)), line(t('settlers.carriersBusy'), `${busy} / ${carriers}`));
       // Only carriers need a bed (Settlers 4): the start's beds plus every finished house's.
-      const bedRow = line('Кровати (носильщики)', `${carriers} / ${beds}`);
-      bedRow.title = 'Кровати дают дома и начальный запас; носильщики сверх кроватей бастуют';
+      const bedRow = line(t('settlers.beds'), `${carriers} / ${beds}`);
+      bedRow.title = t('settlers.bedsTip');
       grid.append(bedRow);
       if (striking > 0) {
-        const strike = line('Бастуют', String(striking));
+        const strike = line(t('settlers.striking'), String(striking));
         strike.classList.add('warn');
-        strike.title = 'Носильщикам не хватает кроватей: они не работают, пока не будет нового дома';
+        strike.title = t('settlers.strikingTip');
         grid.append(strike);
       }
       if (jobless.size > 0) {
-        const list = [...jobless].map(([k, n]) => `${PROFESSIONS[k as keyof typeof PROFESSIONS].name.toLowerCase()} ${n}`).join(', ');
-        const row = line('Без работы', String([...jobless.values()].reduce((a, b) => a + b, 0)));
-        row.title = `Ждут новое здание своего дела: ${list}`;
+        const list = [...jobless].map(([k, n]) => `${lower(profName(k as SettlerKind))} ${n}`).join(', ');
+        const row = line(t('settlers.jobless'), String([...jobless.values()].reduce((a, b) => a + b, 0)));
+        row.title = t('settlers.joblessTip', { list });
         grid.append(row);
       }
       // Settlers 4's «find settler»: a click on a profession shows the next one of it on the map.
       const findable = (row: HTMLElement, kind: SettlerKind) => {
         row.classList.add('find');
-        row.title = 'Щелчок — показать следующего на карте';
+        row.title = t('settlers.findTip');
         row.onclick = () => {
           const next = nextSettlerOfKind(this.world, kind, this.lastFound);
           if (!next) return;
@@ -113,10 +114,10 @@ export class SettlersView implements View {
       };
       findable(grid.children[1] as HTMLElement, 'carrier');
       for (const [kind, n] of [...kinds].sort((a, b) => b[1] - a[1])) {
-        grid.append(findable(line(PROFESSIONS[kind as SettlerKind].name, String(n)), kind as SettlerKind));
+        grid.append(findable(line(profName(kind as SettlerKind), String(n)), kind as SettlerKind));
       }
       this.summary.append(grid);
-      if (striking > 0) this.summary.append(el('p', 'warn-note', 'Забастовка: носильщикам не хватает кроватей — постройте дом.'));
+      if (striking > 0) this.summary.append(el('p', 'warn-note', t('settlers.strikeNote')));
     }
     this.workers.update();
   }

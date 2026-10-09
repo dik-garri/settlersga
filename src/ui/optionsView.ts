@@ -1,7 +1,26 @@
 import { button, el, type View } from './dom';
+import { t, type Key } from './i18n';
 import type { GameState } from './state';
 
 export const SPEEDS = [1, 2, 4];
+/** The controls help: keys and what they do. */
+const HELP: [Key, Key][] = [
+  ['help.camera', 'help.cameraDo'],
+  ['help.zoom', 'help.zoomDo'],
+  ['help.building', 'help.buildingDo'],
+  ['help.settler', 'help.settlerDo'],
+  ['help.digits', 'help.digitsDo'],
+  ['help.shift', 'help.shiftDo'],
+  ['help.alt', 'help.altDo'],
+  ['help.ctrl', 'help.ctrlDo'],
+  ['help.backspace', 'help.backspaceDo'],
+  ['help.altRight', 'help.altRightDo'],
+  ['help.cancel', 'help.cancelDo'],
+  ['help.esc', 'help.escDo'],
+  ['help.pause', 'help.pauseDo'],
+  ['help.space', 'help.spaceDo'],
+  ['help.mute', 'help.muteDo'],
+];
 
 /** What the game's menus can do (opened by `PauseMenu`). */
 export interface GameActions {
@@ -23,49 +42,31 @@ export class OptionsView implements View {
     actions: GameActions,
     sound: HTMLElement | null,
   ) {
-    this.el.append(el('h4', '', 'Скорость'));
+    this.el.append(el('h4', '', t('options.speed')));
     const speed = el('div', 'info-actions');
-    const pause = button('Пауза', 'Пауза (P)', () => (state.paused = !state.paused));
+    const pause = button(t('options.pause'), t('options.pauseTip'), () => (state.paused = !state.paused));
     this.speedButtons.set('pause', pause);
     speed.append(pause);
     for (const s of SPEEDS) {
-      const b = button(`${s}×`, `Скорость ${s}×`, () => {
+      const b = button(`${s}×`, t('options.speedTip', { n: s }), () => {
         state.speed = s;
         state.paused = false;
       });
       this.speedButtons.set(s, b);
       speed.append(b);
     }
-    this.el.append(speed, el('h4', '', 'Игра'));
+    this.el.append(speed, el('h4', '', t('options.game')));
     const game = el('div', 'info-actions');
     game.append(
-      button('Сохранить', 'Сохранить игру', actions.onSave),
-      button('Загрузить', 'Загрузить сохранение', actions.onLoad),
-      button('Меню', 'Меню игры: настройки, выход в главное меню (Esc)', actions.onMenu),
+      button(t('saves.save'), t('pause.saveGame'), actions.onSave),
+      button(t('saves.load'), t('options.loadTip'), actions.onLoad),
+      button(t('options.menu'), t('options.menuTip'), actions.onMenu),
     );
     this.el.append(game);
-    if (sound) this.el.append(el('h4', '', 'Звук'), sound);
-    this.el.append(el('h4', '', 'Управление'));
+    if (sound) this.el.append(el('h4', '', t('settings.sound')), sound);
+    this.el.append(el('h4', '', t('options.controls')));
     const help = el('dl', 'help');
-    for (const [k, v] of [
-      ['Перетаскивание, WASD', 'камера'],
-      ['Колесо', 'приближение'],
-      ['ЛКМ по зданию', 'окно здания'],
-      ['ЛКМ по поселенцу', 'окно поселенца (что делает, уровень и здоровье бойца)'],
-      ['1–9, Tab', 'здание, категория'],
-      ['Shift + ЛКМ', 'поставить несколько; по бойцу — все его вида рядом'],
-      ['Alt + ЛКМ по бойцу', 'все его вида в секторе'],
-      ['Ctrl + ЛКМ по бойцу', 'добавить к выбору / убрать'],
-      ['Backspace', 'убрать из выбора здоровых (остаются раненые)'],
-      ['Alt + ПКМ', 'просто идти туда, без работы и атаки'],
-      ['ПКМ / Esc', 'отмена'],
-      ['Esc (ничего не выбрано)', 'меню игры'],
-      ['P', 'пауза'],
-      ['Пробел', 'к последнему сообщению (ещё раз — к предыдущему)'],
-      ['M', 'звук'],
-    ]) {
-      help.append(el('dt', '', k), el('dd', '', v));
-    }
+    for (const [k, v] of HELP) help.append(el('dt', '', t(k)), el('dd', '', t(v)));
     this.el.append(help);
   }
 
