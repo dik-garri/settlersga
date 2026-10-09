@@ -9,6 +9,7 @@ import {
   paintDeposit,
   paintChevrons,
   paintCutOff,
+  paintStopped,
   paintField,
   paintPath,
   PATH_VARIANTS,
@@ -285,6 +286,7 @@ export class SpriteAtlas {
       a.add(`chevrons:${level}`, 12, 10, 6, 5, (ctx) => paintChevrons(ctx, level));
     }
     a.add('cutoff', 18, 18, 9, 18, paintCutOff);
+    a.add('stopped', 18, 18, 9, 18, paintStopped);
     addAnimalSprites((...args) => a.add(...args), art3d);
     if (art3d) addArt3d(a, art3d);
     this.textures = a.build();

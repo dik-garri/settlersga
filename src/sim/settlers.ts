@@ -28,6 +28,8 @@ import { restIdle } from './idle';
 import { donkeyAbort, donkeyIdle, loadTick, marketOrdered, releaseLoad, unloadTick } from './trade';
 import { claimTick, geologistIdle, pioneerIdle, prospectTick, skipErrandTile, specialistPostIdle, stealTick, thiefIdle } from './specialists';
 import { chaseTick } from './intruders';
+import { houseBuilt } from './beds';
+import { takeOffered } from './stop';
 import { fleeing } from './flee';
 import { findGame, huntTick, releaseHunt } from './hunting';
 import { RESOURCES, Terrain, type Building, type Point, type Resource, type Settler, type Task } from './types';
@@ -100,9 +102,9 @@ export function updateSettler(w: World, s: Settler): void {
       if (--task.n <= 0) s.tasks.shift();
       return;
     case 'pickup': {
+      // The output pile, or what a stopped building offers (`stop.ts`).
       const b = w.buildings.get(task.b);
-      if (!b || b.output[task.res] <= 0) return abort(w, s);
-      b.output[task.res]--;
+      if (!b || !takeOffered(b, task.res)) return abort(w, s);
       b.outReserved[task.res]--;
       s.carrying = task.res;
       s.tasks.shift();
@@ -168,6 +170,7 @@ export function updateSettler(w: World, s: Settler): void {
       return;
     }
     case 'retool':
+      delete s.strike;
       s.kind = task.kind;
       s.hp = hpOf(task.kind);
       s.home = null;
@@ -245,6 +248,8 @@ export function updateSettler(w: World, s: Settler): void {
         b.priority = false;
         // A finished warehouse now serves its piece of land (`land.ts` caches by this version).
         if (BUILDINGS[b.type].storage) w.buildingsVersion++;
+        // A new house gives beds and first takes in striking carriers (`beds.ts`).
+        if (BUILDINGS[b.type].residence) houseBuilt(w, b);
         s.tasks.shift();
         // A worker-less territory building (castle-like) claims land as soon as it stands.
         if (BUILDINGS[b.type].territory && !BUILDINGS[b.type].worker) claimChanged(w, b);
@@ -254,6 +259,7 @@ export function updateSettler(w: World, s: Settler): void {
     case 'become': {
       const b = w.buildings.get(task.b);
       if (!b) return abort(w, s);
+      delete s.strike;
       s.kind = task.kind;
       s.home = b.id;
       s.inside = b.id;
@@ -340,7 +346,9 @@ function hasBuildWork(b: Building): boolean {
 
 function otherSiteWithWork(w: World, s: Settler, current: Building): boolean {
   for (const b of w.buildings.values()) {
-    if (b !== current && b.owner === s.owner && !b.done && b.builderIds.length < buildersOf(b.type) && hasBuildWork(b)) return true;
+    if (b !== current && b.owner === s.owner && !b.done && !b.stopped && b.builderIds.length < buildersOf(b.type) && hasBuildWork(b)) {
+      return true;
+    }
   }
   return false;
 }
@@ -502,7 +510,8 @@ function idle(w: World, s: Settler): void {
       let best: Building | undefined;
       let bestScore = Infinity;
       for (const b of w.buildings.values()) {
-        if (b.owner !== s.owner || b.done || !b.levelled || b.builderIds.length >= buildersOf(b.type) || !isReachable(w, b)) continue;
+        if (b.owner !== s.owner || b.done || !b.levelled || b.stopped || b.builderIds.length >= buildersOf(b.type)) continue;
+        if (!isReachable(w, b)) continue;
         // As in Settlers 4 several builders share a site (`buildersOf`); a site nobody builds yet
         // goes first among equals, so builders spread over the sites that have material.
         const score = dist(s, b.door) + (hasBuildWork(b) ? 0 : 1000) - (b.priority ? 2000 : 0) + b.builderIds.length * 4;
@@ -529,7 +538,7 @@ function idle(w: World, s: Settler): void {
       let best: Building | undefined;
       let bestScore = Infinity;
       for (const b of w.buildings.values()) {
-        if (b.owner !== s.owner || b.done || b.levelled || !isReachable(w, b)) continue;
+        if (b.owner !== s.owner || b.done || b.levelled || b.stopped || !isReachable(w, b)) continue;
         // Several diggers share a site while it has work for them (`diggersWanted`, Settlers 4).
         if (b.diggerIds.length >= diggersWanted(w.map, b)) continue;
         const score = dist(s, b.door) - (b.priority ? 2000 : 0) + b.diggerIds.length * 4;
@@ -557,6 +566,11 @@ function idle(w: World, s: Settler): void {
       // A ready-made worker (`START_CONDITIONS.workers`) waits with the others for a workplace.
       if (!home) return restIdle(w, s);
       if (s.inside !== home.id) return goHome(s, home);
+      // Stopped by the owner (`stop.ts`): he stays in.
+      if (home.stopped) {
+        s.tasks = [{ t: 'wait', n: 20 }];
+        return;
+      }
       // Farmers harvest first and only sow when nothing is ripe.
       if (prof.gather && startGathering(w, s, home)) return;
       if (prof.plant && startPlanting(w, s, home)) return;
@@ -578,6 +592,10 @@ function idle(w: World, s: Settler): void {
     case 'hunt': {
       if (!home) return restIdle(w, s);
       if (s.inside !== home.id) return goHome(s, home);
+      if (home.stopped) {
+        s.tasks = [{ t: 'wait', n: 40 }];
+        return;
+      }
       const def = prof.hunt!;
       const prey = findGame(w, s, home, def.radius);
       if (!prey) {

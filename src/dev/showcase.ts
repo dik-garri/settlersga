@@ -160,6 +160,9 @@ export function buildShowcase(): World {
   for (let i = 0; i < 36; i++) spawnSettler(w, 'soldier', c).inside = null;
   for (let i = 0; i < 24; i++) spawnSettler(w, 'archer', c).inside = null;
   for (let i = 0; i < 64; i++) spawnSettler(w, 'carrier', c);
+  // Beds for the extra carriers (`beds.ts`), so none of them goes on strike.
+  const me = w.players[LOCAL_PLAYER - 1];
+  me.startBeds = (me.startBeds ?? 0) + 80;
   for (let i = 0; i < 4; i++) spawnSettler(w, 'digger', c);
   // Builders and diggers come only as ordered (as in Settlers 4): order plenty.
   w.orderWorkers('builder', 16);
@@ -222,6 +225,15 @@ export function buildShowcase(): World {
     row++;
     if (row >= 3) break;
   }
+
+  // Stopped by the player (Settlers 4's switch, `stop.ts`): a workshop and a half-built site, each
+  // with its pause badge; and a woodcutter whose hut went, waiting jobless for the next one.
+  const stopMill = [...w.buildings.values()].find((b) => b.type === 'sawmill' && b.done && b.owner === LOCAL_PLAYER);
+  if (stopMill) w.setStopped(stopMill.id, true);
+  const stopSite = [...w.buildings.values()].find((b) => !b.done && b.owner === LOCAL_PLAYER && b.levelled && b.progress > 0);
+  if (stopSite) w.setStopped(stopSite.id, true);
+  const jobless = spawnSettler(w, 'woodcutter', c);
+  jobless.inside = null;
 
   // A full storage yard (Settlers 4: 8 piles of 8; the 3D yard shows its piles on the platform),
   // coal on two of them; frozen so the stock is not hauled away.

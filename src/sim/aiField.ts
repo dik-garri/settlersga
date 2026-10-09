@@ -374,7 +374,7 @@ export function muster(w: World, ai: AiState, own: Building[], fill: readonly Bu
     return w.orderGarrison([s.id], b.id, me) > 0;
   };
   for (const b of own) {
-    if (!b.done || !isMilitary(b) || pool.length === 0) continue;
+    if (!b.done || !isMilitary(b)) continue;
     const wish = b.wish ?? { melee: 0, ranged: 0 };
     let melee = 0;
     let ranged = 0;
@@ -390,8 +390,14 @@ export function muster(w: World, ai: AiState, own: Building[], fill: readonly Bu
       if (!take(b, false)) take(b, true);
       continue;
     }
-    for (let k = melee + inMelee; k < wish.melee && take(b, false); k++);
-    for (let k = ranged + inRanged; k < wish.ranged && take(b, true); k++);
+    let haveMelee = melee + inMelee;
+    let haveRanged = ranged + inRanged;
+    while (haveMelee < wish.melee && take(b, false)) haveMelee++;
+    while (haveRanged < wish.ranged && take(b, true)) haveRanged++;
+    // What it cannot fill now it wishes no more (`changeGarrison`): an open wish would call its own
+    // fighters off their orders — an attack passing by, a squad (Settlers 4 calls any of them).
+    for (let k = wish.melee; k > haveMelee && w.changeGarrison(b.id, false, -1, me); k--);
+    for (let k = wish.ranged; k > haveRanged && w.changeGarrison(b.id, true, -1, me); k--);
   }
   // The rest (and squad leaders, who never go in) gather at the rally point.
   const rest = idleFighters(w, ai).filter((s) => !s.tasks.some((t) => t.t === 'join'));

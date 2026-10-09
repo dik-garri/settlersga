@@ -518,7 +518,8 @@ function recruitStep(w: World, b: Building): void {
   // (`economy.minCarriers`, `spareCarriers`); then the nearest idle one on its land.
   let carrier: Settler | undefined;
   for (const s of w.settlers) {
-    if (s.owner !== b.owner || s.kind !== 'carrier' || s.tasks.length > 0 || w.dying.has(s.id)) continue;
+    // A carrier on strike (no bed, `beds.ts`) takes no job, this one neither.
+    if (s.owner !== b.owner || s.kind !== 'carrier' || s.tasks.length > 0 || s.strike || w.dying.has(s.id)) continue;
     if (landAt(w, s, b.owner) !== piece) continue;
     const d = Math.hypot(s.x - b.door.x, s.y - b.door.y);
     if (!carrier || d < Math.hypot(carrier.x - b.door.x, carrier.y - b.door.y)) carrier = s;
@@ -537,9 +538,12 @@ function recruitStep(w: World, b: Building): void {
   ];
 }
 
-/** Per tick for a finished barracks: its recruit orders, on their cadence. */
+/**
+ * Per tick for a finished barracks: its recruit orders, on their cadence — not while the player has it
+ * stopped (`stop.ts`; Settlers 4 checks orders only while the building runs).
+ */
 export function updateBarracks(w: World, b: Building): void {
-  if ((w.tick + b.id) % BARRACKS_EVERY === 0) recruitStep(w, b);
+  if (!b.stopped && (w.tick + b.id) % BARRACKS_EVERY === 0) recruitStep(w, b);
 }
 
 /**

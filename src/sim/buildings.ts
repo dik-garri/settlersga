@@ -27,6 +27,7 @@ import {
 } from './types';
 import { groundStock } from './ground';
 import { landOf } from './land';
+import { offered } from './stop';
 import { storageRoom } from './storage';
 import { wantsDonkeys } from './trade';
 import type { World } from './world';
@@ -156,6 +157,8 @@ export function nearestStorage(
   let bestD = Infinity;
   for (const b of w.buildings.values()) {
     if (b.owner !== owner || !b.done || !BUILDINGS[b.type].storage || !isReachable(w, b)) continue;
+    // A stopped warehouse takes nothing in (Settlers 4 unregisters it as storage).
+    if (b.stopped) continue;
     if (res && !rules.refused && !accepts(b, res)) continue;
     const d = Math.hypot(b.door.x - near.x, b.door.y - near.y);
     if (d >= bestD) continue;
@@ -178,11 +181,11 @@ function canRunRecipe(b: Building, recipe: Recipe): boolean {
 
 /**
  * Units of `res` the player has lying in piles, warehouses and on the ground of its land (`ground.ts`),
- * not yet promised to anyone.
+ * not yet promised to anyone — stopped buildings' offered piles included (`stop.ts`).
  */
 export function available(w: World, owner: PlayerId, res: Resource): number {
   let n = groundStock(w, owner, res);
-  for (const b of w.buildings.values()) if (b.owner === owner) n += b.output[res] - b.outReserved[res];
+  for (const b of w.buildings.values()) if (b.owner === owner) n += offered(b, res);
   return n;
 }
 
@@ -321,6 +324,8 @@ export function updateBuilding(w: World, b: Building): void {
   if (!recipe || !b.done) return;
   const worker = w.getSettler(b.workerId);
   if (!worker || worker.inside !== b.id) return;
+  // Stopped by its owner (`stop.ts`): the cycle under way is finished, no new one starts.
+  if (b.stopped && b.timer === 0) return;
   if (def.mine) return runMine(w, b, def, recipe);
   if (!canRunRecipe(b, recipe)) return;
   // A ranch breeds only while the player's markets want more donkeys (checked as a cycle starts).
@@ -386,11 +391,13 @@ const WORKPLACE_KINDS: ReadonlySet<SettlerKind> = new Set(
 );
 
 /**
- * A ready-made worker waiting for a workplace: a workplace profession with no home (Settlers 4's start
- * smiths, miners and hunter, `START_CONDITIONS.workers`).
+ * A ready-made worker waiting for a workplace: a workplace profession with no home — Settlers 4's
+ * start smiths, miners and hunter (`START_CONDITIONS.workers`), and a worker whose workplace was
+ * demolished or burnt, who keeps his profession (and tool) as in S4 (`ISettlerRole::SetFree` offers
+ * him as what he is; `CEcoSector::OrderWorker` takes the nearest such one before any carrier).
  */
 export function isReadyWorker(s: Settler): boolean {
-  return s.home === null && WORKPLACE_KINDS.has(s.kind);
+  return s.home === null && WORKPLACE_KINDS.has(s.kind) && !PROFESSIONS[s.kind].transient;
 }
 
 /** Whether a ready-made worker of `kind` may take up a workplace of `job`: the same profession or trade. */

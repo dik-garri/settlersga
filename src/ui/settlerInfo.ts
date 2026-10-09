@@ -1,5 +1,6 @@
 import { settlerIcon } from '../render/atlas';
 import { BUILDINGS, PROFESSIONS, RESOURCE_INFO, SOLDIER_LEVELS } from '../sim/config';
+import { isReadyWorker } from '../sim/buildings';
 import { isFighter, maxHp } from '../sim/military';
 import { packsOf } from '../sim/trade';
 import type { Building, Settler, SettlerKind, Task } from '../sim/types';
@@ -130,6 +131,9 @@ export class SettlerInfoView implements View {
       if (s.inside !== null) return `внутри: ${at(s.inside)}`;
       if (s.fled !== undefined) return 'бродит без крова';
       if (s.errand) return s.kind === 'pioneer' ? 'идёт к границе' : s.kind === 'geologist' ? 'идёт к горе' : 'идёт на дело';
+      // Settlers 4: a carrier without a bed strikes; a worker whose workplace went waits for a new one.
+      if (s.strike) return 'бастует: нет кровати — нужен новый дом';
+      if (isReadyWorker(s)) return 'без работы, ждёт новое здание своего дела';
       if (isFighter(s) && !s.post && s.home === null) return 'свободен: стоит, пока не позовёт башня или вы';
       if (isFighter(s) && s.post) return 'стоит на позиции';
       const idle = s.stroll ? 'прогуливается' : s.chatWith !== null ? 'беседует' : 'без дела';

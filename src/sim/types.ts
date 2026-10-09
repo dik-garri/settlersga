@@ -199,6 +199,12 @@ export interface Building {
   workAt?: Point | null;
   /** Marketplace: where its donkeys take goods, and what (see `trade.ts`). */
   trade?: TradeRoute;
+  /**
+   * Stopped by its owner (Settlers 4's `Switch`, `World.setStopped`; see `stop.ts`): a workplace
+   * starts no new cycle and asks for nothing, the goods at it are offered to others; a site sends its
+   * builders and diggers away. Absent = running.
+   */
+  stopped?: boolean;
 }
 
 /**
@@ -330,6 +336,11 @@ export interface Settler {
    * `leader`, the post follows that squad leader at offset (`dx`, `dy`). Absent or null otherwise.
    */
   post?: FieldPost | null;
+  /**
+   * A free carrier without a bed (Settlers 4's strike, `beds.ts`): he takes no job until a new house
+   * (or fewer carriers) makes room. Absent on everyone else.
+   */
+  strike?: boolean;
 }
 
 export interface FieldPost {

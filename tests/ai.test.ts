@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { knownEnemies } from '../src/sim/ai';
-import { AI, AI_PLAN, BUILDINGS, oreOf } from '../src/sim/config';
-import { centerOf, spawnSettler } from '../src/sim/buildings';
+import { AI, AI_PLAN, BUILDINGS, FOG, oreOf } from '../src/sim/config';
+import { addBuilding, centerOf, spawnSettler } from '../src/sim/buildings';
+import { recomputeTerritory } from '../src/sim/territory';
 import { enterGarrison, isFighter, killSettler } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
-import { RESOURCES } from '../src/sim/types';
+import { RESOURCES, type Building } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { placeNear } from '../tools/scenario';
 import { groundUnits, startTower } from './helpers';
@@ -134,6 +135,55 @@ describe('fog of war', () => {
     run(w, 20 * MINUTE);
     expect(explored()).toBeGreaterThan(start * 1.5);
     expect(ownBuildings(w, 1).length).toBe(1);
+  });
+
+  it('puts a lookout tower at the border when it sees foreign land but no enemy building', { timeout: LONG }, () => {
+    /** Player 2's world, with (or without) a manned tower of player 1 whose land, not its door, it sees. */
+    function setup(foreign: boolean) {
+      const w = new World(42, { players: 2, ai: [2] });
+      const t2 = startTower(w, 2);
+      t2.output.plank += 30;
+      t2.output.stone += 30;
+      if (!foreign) return { w, enemy: null };
+      const c = centerOf(t2);
+      const toward = centerOf(startTower(w, 1));
+      const len = Math.hypot(toward.x - c.x, toward.y - c.y);
+      const sight = BUILDINGS.tower.territory! + FOG.territoryMargin;
+      let enemy: Building | null = null;
+      // Beyond its start tower's sight, but near enough for its land to reach into it.
+      for (let d = sight + 3; d <= sight + 8 && !enemy; d++) {
+        for (let k = -6; k <= 6 && !enemy; k++) {
+          const x = Math.round(c.x + ((toward.x - c.x) / len) * d - ((toward.y - c.y) / len) * k);
+          const y = Math.round(c.y + ((toward.y - c.y) / len) * d + ((toward.x - c.x) / len) * k);
+          let ok = w.map.inBounds(x, y) && w.map.inBounds(x + 2, y + 3);
+          for (let dy = 0; dy <= 2 && ok; dy++) {
+            for (let dx = 0; dx < 2 && ok; dx++) ok = w.map.isBuildable(x + dx, y + dy) && w.map.owner[w.map.idx(x + dx, y + dy)] === 0;
+          }
+          if (!ok) continue;
+          enemy = addBuilding(w, 'tower', x, y, 1, true);
+          enterGarrison(w, enemy, spawnSettler(w, 'soldier', enemy));
+          recomputeTerritory(w);
+        }
+      }
+      expect(enemy).not.toBeNull();
+      return { w, enemy };
+    }
+    const lookouts = (w: World) => ownBuildings(w, 2).filter((b) => BUILDINGS[b.type].vision);
+    // Foreign land in sight of its start tower, the enemy's door not: it scouts with a lookout there.
+    const { w, enemy } = setup(true);
+    w.step();
+    expect(w.isExplored(enemy!.door.x, enemy!.door.y, 2)).toBe(false);
+    expect(knownEnemies(w, 2)).toEqual([]);
+    run(w, AI.thinkEvery * 4);
+    const placed = lookouts(w);
+    expect(placed.length).toBeGreaterThan(0);
+    // At that border: nearer the enemy tower than its start tower is.
+    const d = (b: Building) => Math.hypot(centerOf(b).x - centerOf(enemy!).x, centerOf(b).y - centerOf(enemy!).y);
+    expect(Math.min(...placed.map(d))).toBeLessThan(d(startTower(w, 2)));
+    // Without foreign land in sight it puts up none in that time.
+    const plain = setup(false).w;
+    run(plain, AI.thinkEvery * 4);
+    expect(lookouts(plain)).toEqual([]);
   });
 
   it('finds the enemy start tower (towers, lookouts, pioneers, scouts)', { timeout: LONG }, () => {

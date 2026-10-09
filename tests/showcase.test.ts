@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildShowcase } from '../src/dev/showcase';
+import { isReadyWorker } from '../src/sim/buildings';
 import { BUILDINGS, ORE_RESOURCES } from '../src/sim/config';
 import { hasSign, signLevel } from '../src/sim/specialists';
 import { isCutOff } from '../src/sim/land';
@@ -57,6 +58,10 @@ describe('dev showcase (?demo)', () => {
     expect(
       w.settlers.some((s) => (s.kind === 'soldier' || s.kind === 'archer') && s.home === null && !s.post && Math.hypot(s.x - barracks.door.x, s.y - barracks.door.y) < 5),
     ).toBe(true);
+    // Stopped by the player: a finished workshop and a site; a worker without a workplace.
+    expect(all.some((b) => b.stopped && b.done)).toBe(true);
+    expect(all.some((b) => b.stopped && !b.done)).toBe(true);
+    expect(w.settlers.some((s) => isReadyWorker(s) && s.kind === 'woodcutter')).toBe(true);
     // A field squad stands round its leader (direct army control).
     const leader = w.settlers.find((s) => s.kind === 'leader' && s.post);
     expect(leader).toBeDefined();

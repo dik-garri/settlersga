@@ -74,6 +74,8 @@ export class Hud {
   private lastUpdate = 0;
   /** Warnings of the simulation (`World.warnings`) already shown on the ticker. */
   private readonly warned = new WeakSet<object>();
+  /** Carriers on strike at the last update (a new strike is announced once). */
+  private striking = 0;
 
   constructor(
     root: HTMLElement,
@@ -282,6 +284,10 @@ export class Hud {
       if (isFighter(s)) fighters++;
     }
     this.people.textContent = String(people);
+    // Settlers 4's strike: a warning when carriers start striking for want of beds.
+    const striking = world.bedsOf().striking;
+    if (striking > 0 && this.striking === 0) this.toast(`Забастовка: ${striking} носильщ. без кроватей — постройте дом`);
+    this.striking = striking;
     this.soldiers.textContent = String(fighters);
     this.strength.textContent = `${Math.round(world.strengthOf())}%`;
 

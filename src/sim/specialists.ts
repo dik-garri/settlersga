@@ -503,7 +503,7 @@ export function sendGeologist(w: World, x: number, y: number, player: PlayerId):
   const near = from ? from.at : { x, y };
   let best: Settler | undefined;
   for (const s of w.settlers) {
-    if (s.owner !== player || s.kind !== 'carrier' || s.tasks.length > 0 || w.dying.has(s.id)) continue;
+    if (s.owner !== player || s.kind !== 'carrier' || s.tasks.length > 0 || s.strike || w.dying.has(s.id)) continue;
     if (!best || Math.hypot(s.x - near.x, s.y - near.y) < Math.hypot(best.x - near.x, best.y - near.y)) best = s;
   }
   if (!best) return false;

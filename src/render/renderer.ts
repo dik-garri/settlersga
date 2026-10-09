@@ -113,6 +113,8 @@ interface BuildingView {
   pileKey: string;
   /** Marker over a local building cut off from every warehouse (`land.ts`), made when first needed. */
   cutoff: Sprite | null;
+  /** Marker over a local building or site its owner stopped (`stop.ts`), made when first needed. */
+  stopped: Sprite | null;
 }
 
 /**
@@ -1570,6 +1572,16 @@ export class GameRenderer {
         v.body.addChild(v.cutoff);
       }
       if (v.cutoff) v.cutoff.visible = cut;
+      // Stopped by the player (Settlers 4's switch): a pause badge left of the cut-off one.
+      const stopped = b.owner === LOCAL_PLAYER && !!b.stopped;
+      if (stopped && !v.stopped) {
+        const top = this.atlas.topOf(`building:${b.type}`);
+        v.stopped = new Sprite(this.atlas.get('stopped'));
+        v.stopped.anchor.copyFrom(v.stopped.texture.defaultAnchor!);
+        v.stopped.position.set(top.x - 10, top.y - 2);
+        v.body.addChild(v.stopped);
+      }
+      if (v.stopped) v.stopped.visible = stopped;
       const progress = this.sim.buildProgress(b);
       const staged = this.atlas.has(`stage:${b.type}:0`);
       v.site.visible = !b.done && !staged;
@@ -1652,6 +1664,7 @@ export class GameRenderer {
       front,
       pileKey: '',
       cutoff: null,
+      stopped: null,
     };
     this.buildingViews.set(b.id, v);
     return v;

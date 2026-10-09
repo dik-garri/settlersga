@@ -2043,6 +2043,24 @@ export function paintCutOff(ctx: Ctx): void {
   ctx.stroke();
 }
 
+/**
+ * Marker over a building or site its owner stopped (`Building.stopped`, Settlers 4's stop switch): a
+ * round badge with two upright bars (pause), 18×18, anchored at its bottom (9, 18).
+ */
+export function paintStopped(ctx: Ctx): void {
+  ctx.translate(9, 9);
+  ctx.fillStyle = '#f3e6c4';
+  ctx.strokeStyle = '#7a4a12';
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.arc(0, 0, 7.6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#b4442f';
+  ctx.fillRect(-3.6, -3.8, 2.4, 7.6);
+  ctx.fillRect(1.2, -3.8, 2.4, 7.6);
+}
+
 /** Flag on a pole marking a door, 14×28 with the pole base at (2, 26), in the owner's colour. */
 /**
  * The owner's banner on military buildings, as in Settlers 4: a cloth in the player's colour with a
