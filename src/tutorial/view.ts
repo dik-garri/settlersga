@@ -233,6 +233,8 @@ export class TutorialView {
       this.unglow();
       this.glowing = target;
       (target as HTMLElement | null)?.classList.add('tut-glow');
+      // A row deep in a long list (the distribution's goods, the tool orders) is scrolled into view.
+      (target as HTMLElement | null)?.scrollIntoView?.({ block: 'nearest' });
     }
     this.placePointer();
   }

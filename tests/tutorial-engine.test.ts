@@ -13,6 +13,7 @@ import type { Anchor, Condition, MissionDef, Probe, UiProbe } from '../src/tutor
 import { buildingOpen, commandOpen, menuOpen, tabOpen } from '../src/ui/locks';
 import { SaveSlots, type KeyValue } from '../src/ui/saves';
 import { launchOf } from '../src/ui/setup';
+import { placeFinished } from '../src/sim/scenario';
 import { depot } from './helpers';
 
 const ui = (): UiProbe => ({ menu: 'build', selected: null, selectedUnits: 0, groups: [], camera: { x: 32, y: 32 }, zoom: 1, placing: null, speed: 1, paused: false, jumps: 0 });
@@ -53,6 +54,12 @@ describe('conditions', () => {
     w.step(); // sight is worked out in the first tick
     const store = depot(w);
     w.setAccepts(store.id, 'stone', false);
+    // A fed mine (10 attempts: its favourite food) and a geologist's finds on the guaranteed coal.
+    const coal = anchorResolver(w, 1, {})({ a: 'guarantee', mountain: 0, lobe: 0 })!;
+    const mine = placeFinished(w, 'coalmine', 1, Math.round(coal.x), Math.round(coal.y))!;
+    mine.attempts = 10;
+    const ci = w.map.idx(Math.round(coal.x), Math.round(coal.y));
+    w.map.prospected[ci] |= 1;
     const yes = probe(w, { acked: true, ui: { ...ui(), camera: { x: 45, y: 32 }, zoom: 1.5, menu: 'goods', selected: store.id, selectedUnits: 3, groups: [0, 2], placing: 'sawmill', speed: 2, jumps: 1 } });
     const no = probe(w);
     const home = w.homeOf(1);
@@ -65,10 +72,14 @@ describe('conditions', () => {
       produced: [[{ k: 'produced', res: 'plank', min: 0 }, yes]],
       units: [[{ k: 'units', kind: 'fighter', min: 1 }, yes]],
       garrison: [[{ k: 'garrison', type: 'tower', min: 1 }, yes]],
+      attempts: [[{ k: 'attempts', type: 'coalmine', min: 1 }, yes]],
       setting: [[{ k: 'setting', is: { s: 'accepts', res: ['plank'] } }, yes]],
       ui: [[{ k: 'ui', is: { u: 'zoomChanged' } }, yes]],
       explored: [[{ k: 'explored', at: { a: 'home' } }, yes]],
-      prospected: [[{ k: 'prospected', at: { a: 'home' }, r: 2, min: 0 }, yes]],
+      prospected: [
+        [{ k: 'prospected', at: { a: 'home' }, r: 2, min: 0 }, yes],
+        [{ k: 'prospected', at: { a: 'guarantee', mountain: 0, lobe: 0 }, r: 1, min: 1, ore: 'coal' }, yes],
+      ],
       claimed: [[{ k: 'claimed', min: 0 }, yes]],
       captured: [[{ k: 'captured', min: 0 }, yes]],
       outcome: [[{ k: 'outcome', is: 'playing' as 'won' }, yes]],
@@ -84,6 +95,7 @@ describe('conditions', () => {
       produced: { k: 'produced', res: 'plank', min: 1 },
       units: { k: 'units', kind: 'fighter', max: 0 },
       garrison: { k: 'garrison', type: 'tower', min: 9 },
+      attempts: { k: 'attempts', type: 'coalmine', min: 11 },
       setting: { k: 'setting', is: { s: 'accepts', res: ['plank', 'stone'] } },
       ui: { k: 'ui', is: { u: 'zoomChanged' } },
       explored: { k: 'explored', at: { a: 'offset', from: { a: 'home' }, dx: -40, dy: -40 } },
@@ -99,6 +111,8 @@ describe('conditions', () => {
       for (const [c, p] of examples[kind]) expect(check(c, p), `${kind} yes`).toBe(true);
       expect(check(counter[kind], no), `${kind} no`).toBe(false);
     }
+    // Only tiles found holding that ore count.
+    expect(check({ k: 'prospected', at: { a: 'guarantee', mountain: 0, lobe: 0 }, r: 1, min: 1, ore: 'goldore' }, yes)).toBe(false);
     expect(home).toBeTruthy();
   });
 
@@ -168,6 +182,7 @@ describe('anchors', () => {
     { a: 'spot', type: 'woodcutter', near: { a: 'guarantee', grove: true }, prefer: 'forest' },
     { a: 'spot', type: 'sawmill', near: { a: 'home' } },
     { a: 'spot', type: 'house_small', near: { a: 'home' }, prefer: 'meadow' },
+    { a: 'spot', type: 'coalmine', near: { a: 'guarantee', mountain: 0, lobe: 0 }, prefer: 'ore', within: 4 },
     { a: 'between', from: { a: 'home' }, to: { a: 'guarantee', pond: true }, t: 0.5 },
     { a: 'offset', from: { a: 'home' }, dx: 3, dy: -2 },
   ];

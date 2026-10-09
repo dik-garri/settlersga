@@ -1,127 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { BUILDINGS, TICKS_PER_SECOND } from '../src/sim/config';
+import { TICKS_PER_SECOND } from '../src/sim/config';
 import { saveWorld } from '../src/sim/save';
 import { DICTS, LANGS } from '../src/ui/i18n';
-import type { BuildingType, Point } from '../src/sim/types';
+import type { BuildingType } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { anchorResolver } from '../src/tutorial/anchors';
 import { MISSIONS } from '../src/tutorial/missions';
-import { anchorsOf, missionWorld, TutorialRunner, type TutorialModel } from '../src/tutorial/runner';
-import type { MissionDef, MissionId, UiProbe } from '../src/tutorial/types';
-
-/** A fake interface for the conditions (the browser fills the same fields from `GameState`). */
-function fakeUi(): UiProbe {
-  return { menu: 'build', selected: null, selectedUnits: 0, groups: [], camera: { x: 32, y: 32 }, zoom: 1, placing: null, speed: 1, paused: false, jumps: 0 };
-}
-
-/** Places a site of `type` for the mark at a footprint centre (or the nearest spot that takes it). */
-function placeAt(w: World, type: BuildingType, at: Point): boolean {
-  const def = BUILDINGS[type];
-  const x0 = Math.round(at.x - (def.w - 1) / 2);
-  const y0 = Math.round(at.y - (def.h - 1) / 2);
-  for (let r = 0; r <= 6; r++) {
-    for (let dy = -r; dy <= r; dy++) {
-      for (let dx = -r; dx <= r; dx++) {
-        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
-        if (w.placeBuilding(type, x0 + dx, y0 + dy)) return true;
-      }
-    }
-  }
-  return false;
-}
-
-const has = (w: World, type: BuildingType) => [...w.buildings.values()].some((b) => b.owner === 1 && b.type === type);
-const own = (w: World, type: BuildingType) => [...w.buildings.values()].find((b) => b.owner === 1 && b.type === type);
-
-type Solution = (w: World, ui: UiProbe, m: TutorialModel, r: TutorialRunner) => void;
-
-/** Builds the marked building once (the player's click on the arrow). */
-const build = (type: BuildingType): Solution => (w, _ui, m) => {
-  if (!has(w, type) && m.marks[0]) placeAt(w, type, m.marks[0]);
-};
-const ack: Solution = (_w, _ui, _m, r) => void r.ack();
-const wait: Solution = () => {};
-
-/** What a player does at each step: public commands and the interface only. */
-const SOLUTIONS: Partial<Record<MissionId, Record<string, Solution>>> = {
-  forest: {
-    welcome: ack,
-    look: (_w, ui) => (ui.camera = { x: ui.camera.x + 10, y: ui.camera.y }),
-    zoom: (_w, ui) => (ui.zoom = 1.4),
-    piles: ack,
-    woodcutter: build('woodcutter'),
-    digging: wait,
-    sawmill: build('sawmill'),
-    stonecutter: build('stonecutter'),
-    forester: build('forester'),
-    planks: wait,
-  },
-  logistics: {
-    warehouse: build('warehouse'),
-    wait,
-    select: (w, ui) => (ui.selected = own(w, 'warehouse')?.id ?? null),
-    accept: (w) => {
-      const b = own(w, 'warehouse')!;
-      w.setAccepts(b.id, 'plank', true);
-      w.setAccepts(b.id, 'stone', true);
-    },
-    carry: wait,
-    strike: ack,
-    house: build('house_small'),
-    priority: (w) => {
-      let site = [...w.buildings.values()].find((b) => b.owner === 1 && !b.done);
-      if (!site) {
-        const home = w.homeOf(1);
-        placeAt(w, 'forester', { x: home.x + 7, y: home.y - 6 });
-        site = [...w.buildings.values()].find((b) => b.owner === 1 && !b.done);
-      }
-      if (site) w.setPriority(site.id, true);
-    },
-    stop: (w) => void w.setStopped(own(w, 'sawmill')!.id, true),
-    restart: (w) => void w.setStopped(own(w, 'sawmill')!.id, false),
-    transport: (w) => void w.moveTransport('stone', 'top'),
-    reserve: ack,
-    planks: wait,
-  },
-};
-
-interface Run {
-  world: World;
-  runner: TutorialRunner;
-  ui: UiProbe;
-  /** Tick at which each step was entered. */
-  entered: number[];
-}
-
-function begin(def: MissionDef): Run {
-  const world = missionWorld(def);
-  const ui = fakeUi();
-  const runner = TutorialRunner.start(def, world, ui);
-  return { world, runner, ui, entered: [world.tick] };
-}
-
-/** Plays until the mission ends or `ticks` pass, applying the solutions; true if won. */
-function play(run: Run, ticks: number, stopAt?: number): boolean {
-  const { world, runner, ui } = run;
-  const sol = SOLUTIONS[runner.def.id]!;
-  const end = world.tick + ticks;
-  while (world.tick < end && !runner.finished) {
-    world.step();
-    if (world.tick % 5 !== 0) continue;
-    runner.update(world, ui);
-    while (run.entered.length <= runner.stepIndex) run.entered.push(world.tick);
-    if (stopAt !== undefined && runner.stepIndex >= stopAt) return false;
-    const m = runner.model(world);
-    if (m.step) sol[m.step.id]?.(world, ui, m, runner);
-  }
-  return runner.finished === 'won';
-}
+import { anchorsOf, missionWorld, onHand, TutorialRunner } from '../src/tutorial/runner';
+import { begin, own, play, type Run } from './tutorialPlay';
 
 const READY = MISSIONS.filter((m) => !m.soon);
 
 describe('tutorial missions', () => {
-  it('pass 1 has the first two missions ready, the rest listed as coming', () => {
-    expect(READY.map((m) => m.id)).toEqual(['forest', 'logistics']);
+  it('pass 2 has the first four missions ready, the rest listed as coming', () => {
+    expect(READY.map((m) => m.id)).toEqual(['forest', 'logistics', 'bread', 'metal']);
     expect(MISSIONS.length).toBe(6);
   });
 
@@ -222,5 +114,36 @@ describe('tutorial missions', () => {
     // The ready-made workers took their workplaces.
     for (let i = 0; i < 1000; i++) w.step();
     for (const b of w.buildings.values()) if (b.owner === 1 && b.type !== 'tower') expect(b.workerId, b.type).not.toBeNull();
+  });
+
+  it('mission 3 starts with a hungry coal mine on the guaranteed coal and a second tower for room', () => {
+    const def = MISSIONS.find((m) => m.id === 'bread')!;
+    const w = missionWorld(def);
+    const mine = w.buildings.get(w.tags.get('coalmine')!)!;
+    expect(mine.type).toBe('coalmine');
+    // Most of its digging disc lies on coal (`map.ore` code 1).
+    const c = { x: mine.x + 0.5, y: mine.y + 0.5 };
+    let coal = 0;
+    for (let y = mine.y - 2; y <= mine.y + 3; y++) {
+      for (let x = mine.x - 2; x <= mine.x + 3; x++) if (Math.hypot(x - c.x, y - c.y) <= 2 && w.map.ore[w.map.idx(x, y)] === 1) coal++;
+    }
+    expect(coal).toBeGreaterThanOrEqual(6);
+    const store = w.buildings.get(w.tags.get('warehouse')!)!;
+    expect(store.accept).toContain('coal');
+    for (let i = 0; i < 600; i++) w.step();
+    // No food at the start: the mine has eaten nothing yet; both towers are manned.
+    expect(mine.attempts ?? 0).toBe(0);
+    expect([...w.buildings.values()].filter((b) => b.owner === 1 && b.type === 'tower' && b.garrison.length > 0).length).toBe(2);
+  });
+
+  it('mission 4 tops up bread and fish, counting what carriers hold', () => {
+    const def = MISSIONS.find((m) => m.id === 'metal')!;
+    const run = begin(def);
+    for (let i = 0; i < 3000; i++) {
+      run.world.step();
+      if (i % 5 === 0) run.runner.update(run.world, run.ui);
+      expect(onHand(run.world, 1, 'bread')).toBeLessThanOrEqual(40);
+    }
+    expect(onHand(run.world, 1, 'bread')).toBeGreaterThanOrEqual(6);
   });
 });

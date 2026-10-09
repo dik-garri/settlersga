@@ -85,8 +85,11 @@ export type Condition =
   | { k: 'garrison'; type: BuildingType; min: number }
   | { k: 'setting'; is: SettingCheck }
   | { k: 'ui'; is: UiCheck }
+  /** Some own finished building of the type holds at least `min` mining attempts (food eaten, `Building.attempts`). */
+  | { k: 'attempts'; type: BuildingType; min: number }
   | { k: 'explored'; at: Anchor }
-  | { k: 'prospected'; at: Anchor; r: number; min: number }
+  /** Tiles within `r` of the point the player's geologists examined (with `ore`: only those found holding it). */
+  | { k: 'prospected'; at: Anchor; r: number; min: number; ore?: Resource }
   /** Tiles of land gained since the mission began. */
   | { k: 'claimed'; min: number }
   | { k: 'captured'; min: number }
@@ -153,7 +156,7 @@ export type Anchor =
   | { a: 'offset'; from: Anchor; dx: number; dy: number };
 
 export type AnchorKind = Anchor['a'];
-export type Prefer = 'forest' | 'stone' | 'water' | 'meadow' | 'border';
+export type Prefer = 'forest' | 'stone' | 'water' | 'meadow' | 'border' | 'ore';
 
 /** What the interface tells the conditions (the browser fills it from `GameState`, the tests by hand). */
 export interface UiProbe {

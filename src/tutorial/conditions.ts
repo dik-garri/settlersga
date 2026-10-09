@@ -1,5 +1,5 @@
 import { available } from '../sim/buildings';
-import { BUILDINGS, CARRIER_RESERVE } from '../sim/config';
+import { BUILDINGS, CARRIER_RESERVE, ORE_RESOURCES } from '../sim/config';
 import { carrierReserve, economyOf, ENDLESS, transportOrder } from '../sim/economy';
 import { isFighter } from '../sim/military';
 import { RESOURCES, type Building, type PlayerId, type Settler } from '../sim/types';
@@ -115,6 +115,7 @@ export const CONDITIONS: Table<Condition, 'k'> = {
     return n >= (c.min ?? 0) && (c.max === undefined || n <= c.max);
   },
   garrison: (c, { world, player }) => own(world, player).some((b) => b.type === c.type && b.done && b.garrison.length >= c.min),
+  attempts: (c, { world, player }) => own(world, player).some((b) => b.type === c.type && b.done && (b.attempts ?? 0) >= c.min),
   setting: (c, p) => (SETTINGS[c.is.s] as (s: SettingCheck, p: Probe) => boolean)(c.is, p),
   ui: (c, p) => (UI_CHECKS[c.is.u] as (u: UiCheck, p: Probe) => boolean)(c.is, p),
   explored: (c, p) => {
@@ -124,10 +125,14 @@ export const CONDITIONS: Table<Condition, 'k'> = {
   prospected: (c, p) => {
     const q = p.anchor(c.at);
     if (!q) return false;
+    const m = p.world.map;
+    const code = c.ore ? ORE_RESOURCES.indexOf(c.ore) + 1 : 0;
     let n = 0;
     for (let y = Math.floor(q.y - c.r); y <= q.y + c.r; y++) {
       for (let x = Math.floor(q.x - c.r); x <= q.x + c.r; x++) {
-        if (Math.hypot(x - q.x, y - q.y) <= c.r && p.world.isProspected(x, y, p.player)) n++;
+        if (Math.hypot(x - q.x, y - q.y) > c.r || !p.world.isProspected(x, y, p.player)) continue;
+        if (code && (m.ore[m.idx(x, y)] !== code || m.oreAmount[m.idx(x, y)] <= 0)) continue;
+        n++;
       }
     }
     return n >= c.min;

@@ -18,7 +18,7 @@ import { LOCAL_PLAYER, type World } from '../sim/world';
 import { barracksRows, garrisonControls, garrisonRows, recruitKey, recruitOrderControls, shareControls, supportRows } from './armyPanel';
 import { nextBuildingOfType } from './find';
 import { el, rowsTable, type View } from './dom';
-import { economyKey, economyRows, refreshStockCounts, stockText, toolOrderControls, warehouseControls } from './economyPanel';
+import { economyKey, economyRows, mineRows, refreshStockCounts, stockText, toolOrderControls, warehouseControls } from './economyPanel';
 import { movableWorkArea, workRadius } from '../sim/workArea';
 import { canStop } from '../sim/stop';
 import { lower, t, type Key } from './i18n';
@@ -161,7 +161,8 @@ export class InfoView implements View {
           if (def.recipe.inputs[r]) rows.push([t('info.input', { name: nameOf(r) }), `${b.input[r]} / ${INPUT_CAP}`]);
         }
         const anyOf = def.recipe.inputsAnyOf;
-        if (anyOf) {
+        // A mine's food has a table of its own (`mineRows`, below).
+        if (anyOf && !def.mine) {
           const held = anyOf.map((r) => `${resLower(r)} ${b.input[r]}`).join(', ');
           rows.push([t('info.foodInput'), `${held} / ${INPUT_CAP}`]);
         }
@@ -190,9 +191,11 @@ export class InfoView implements View {
     if (!enemy && b.stopped) {
       rows.push([t('info.stopped'), b.done ? t('info.stoppedDone') : t('info.stoppedSite')]);
     }
+    const food = enemy ? [] : mineRows(b);
     const key = JSON.stringify([
       b.id,
       rows,
+      food,
       this.confirmDemolish === b.id,
       this.state.movingWorkArea === b.id,
       economyKey(this.world, b),
@@ -204,6 +207,7 @@ export class InfoView implements View {
     this.infoKey = key;
     this.el.innerHTML = '';
     this.el.append(this.header(b), rowsTable(rows));
+    if (food.length > 0) this.el.append(tag(rowsTable(food), 'info.mineFood'));
     if (enemy) {
       if (def.garrison && b.done) this.el.append(this.attackControls(b, canSend));
       return;

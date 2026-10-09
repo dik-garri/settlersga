@@ -1,10 +1,10 @@
 import { centerOf, doorOf } from '../sim/buildings';
-import { BUILDINGS, TERRAIN, TREE_MATURE } from '../sim/config';
+import { BUILDINGS, ORE_RESOURCES, TERRAIN, TREE_MATURE } from '../sim/config';
 import { needsLevelling } from '../sim/digging';
 import { START_GUARANTEES } from '../sim/map';
-import { RESOURCES, Terrain, type Building, type PlayerId, type Point } from '../sim/types';
+import { RESOURCES, Terrain, type Building, type BuildingType, type PlayerId, type Point } from '../sim/types';
 import { startPositions, type World } from '../sim/world';
-import { workRadius } from '../sim/workArea';
+import { defaultWorkCentre, workRadius } from '../sim/workArea';
 import type { Anchor, AnchorKind, Prefer } from './types';
 
 /**
@@ -49,19 +49,28 @@ export function nearestTile(w: World, at: Point, r: number, test: (x: number, y:
   return best;
 }
 
-/** How much of what a building wants lies within `r` of its door (`spot` anchors). */
-const PREFER: Record<Prefer, (w: World, door: Point, r: number, player: PlayerId) => number> = {
+/**
+ * How much of what a building wants lies within `r` of its work centre (`spot` anchors: the door of a
+ * hut, the middle of a mine).
+ */
+const PREFER: Record<Prefer, (w: World, door: Point, r: number, player: PlayerId, type: BuildingType) => number> = {
   forest: (w, door, r) => count(w, door, r, (i) => w.map.tree[i] >= TREE_MATURE),
   stone: (w, door, r) => 1.5 * count(w, door, r, (i) => w.map.stone[i] > 0),
   water: (w, door, r) => Math.min(10, 0.5 * count(w, door, r, (i) => TERRAIN[w.map.terrain[i] as Terrain].water)),
   meadow: (w, door, r) => 0.2 * count(w, door, r, (i) => TERRAIN[w.map.terrain[i] as Terrain].plantable && w.map.tree[i] === 0),
   border: (w, door, r, player) => 0.3 * count(w, door, r, (i) => w.map.owner[i] !== player),
+  // A mine's own ore (`def.mine.res`) under its digging disc.
+  ore: (w, at, r, _player, type) => {
+    const res = BUILDINGS[type].mine?.res;
+    const code = res ? ORE_RESOURCES.indexOf(res) + 1 : 0;
+    return code ? 2 * count(w, at, r, (i) => w.map.ore[i] === code && w.map.oreAmount[i] > 0) : 0;
+  },
 };
 
 function count(w: World, at: Point, r: number, test: (i: number) => boolean): number {
   let n = 0;
-  for (let y = at.y - r; y <= at.y + r; y++) {
-    for (let x = at.x - r; x <= at.x + r; x++) {
+  for (let y = Math.ceil(at.y - r); y <= at.y + r; y++) {
+    for (let x = Math.ceil(at.x - r); x <= at.x + r; x++) {
       if (w.map.inBounds(x, y) && Math.hypot(x - at.x, y - at.y) <= r && test(w.map.idx(x, y))) n++;
     }
   }
@@ -125,7 +134,7 @@ export const ANCHORS: Resolvers = {
         // Behind what stands at the anchor (seen from the camera) the arrow would point at its roof.
         if (c.x + c.y < near.x + near.y - 1) score -= 3;
         if (def.terrain !== 'mountain' && needsLevelling(world.map, a.type, x, y)) score -= 4;
-        if (a.prefer) score += PREFER[a.prefer](world, door, work, player);
+        if (a.prefer) score += PREFER[a.prefer](world, defaultWorkCentre(a.type, door, c), work, player, a.type);
         if (score > bestScore) {
           bestScore = score;
           best = c;

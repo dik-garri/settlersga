@@ -1,5 +1,6 @@
 import { available } from '../sim/buildings';
-import type { Point } from '../sim/types';
+import { packsOf } from '../sim/trade';
+import type { Point, Resource } from '../sim/types';
 import { World, type WorldOptions } from '../sim/world';
 import type { Key } from '../ui/i18n';
 import type { Locks } from '../ui/locks';
@@ -66,6 +67,19 @@ export function missionWorld(def: MissionDef): World {
     scenario: def.scenario,
   };
   return new World(def.world.seed, opts);
+}
+
+/**
+ * Units of a good the player has to hand for top-ups: available (`available`: ground, piles, stock)
+ * plus what his carriers and donkeys hold, so goods on their way are not granted twice.
+ */
+export function onHand(w: World, player: number, res: Resource): number {
+  let n = available(w, player, res);
+  for (const s of w.settlers) {
+    if (s.owner !== player || w.dying.has(s.id)) continue;
+    for (const p of packsOf(s)) if (p.res === res) n += p.n;
+  }
+  return n;
 }
 
 /** Whether the condition waits for «Next» (Space). */
@@ -179,7 +193,7 @@ export class TutorialRunner {
   update(world: World, ui: UiProbe): void {
     if (this.p.finished) return;
     for (const r of this.def.refill ?? []) {
-      const have = available(world, this.p.player, r.res);
+      const have = onHand(world, this.p.player, r.res);
       if (have < r.below) world.grant(r.res, r.to - have, this.p.player);
     }
     // Steps already done on entering are passed at once; an «ack» step always waits.

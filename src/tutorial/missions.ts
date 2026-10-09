@@ -1,3 +1,4 @@
+import type { ScenarioBuilding } from '../sim/scenario';
 import type { Anchor, MissionDef } from './types';
 
 /**
@@ -11,6 +12,12 @@ import type { Anchor, MissionDef } from './types';
 const home: Anchor = { a: 'home' };
 const grove: Anchor = { a: 'guarantee', grove: true };
 const quarry: Anchor = { a: 'guarantee', quarry: 0 };
+const pond: Anchor = { a: 'guarantee', pond: true };
+const mountain: Anchor = { a: 'guarantee', mountain: 0 };
+const coalLobe: Anchor = { a: 'guarantee', mountain: 0, lobe: 0 };
+const ironLobe: Anchor = { a: 'guarantee', mountain: 0, lobe: 1 };
+/** A level meadow for the farm, on the land of mission 3's second tower (south-west of the start). */
+const farmSpot: Anchor = { a: 'spot', type: 'farm', near: { a: 'offset', from: home, dx: -8, dy: 8 }, prefer: 'meadow', within: 8 };
 
 /** Mission 1: camera, goods on the ground, the build menu, digger and builders, wood and stone. */
 const forest: MissionDef = {
@@ -267,6 +274,297 @@ const logistics: MissionDef = {
   ],
 };
 
+/**
+ * The economy missions 1–2 built (missions 3 and 4 start with it): wood, stone and a warehouse. It
+ * takes in food and the mines' goods only: 8 piles hold little, and planks, stone and tools would fill it.
+ */
+const woodAndStone: ScenarioBuilding[] = [
+  { type: 'woodcutter', near: { dx: 6, dy: -6 }, worker: true },
+  { type: 'woodcutter', near: { dx: 10, dy: 1 }, worker: true },
+  { type: 'sawmill', near: { dx: 4, dy: 3 }, worker: true },
+  { type: 'stonecutter', near: { dx: -5, dy: 1 }, worker: true },
+  { type: 'forester', near: { dx: 9, dy: -2 }, worker: true },
+  { type: 'warehouse', near: { dx: 3, dy: -3 }, tag: 'warehouse', accepts: ['bread', 'fish', 'meat', 'coal', 'ironore', 'iron'] },
+];
+
+const coalmine: Anchor = { a: 'building', type: 'coalmine', owner: 'scenario', tag: 'coalmine' };
+
+/** Mission 3: water, grain, flour and bread, the fisher, the farm's work area, bread distribution, a mine's food. */
+const bread: MissionDef = {
+  id: 'bread',
+  title: 'tut.bread.title',
+  summary: 'tut.bread.summary',
+  debrief: 'tut.bread.debrief',
+  world: { seed: 42, size: 64, players: 1, start: 'low', fog: true },
+  scenario: [
+    {
+      player: 1,
+      buildings: [
+        ...woodAndStone,
+        { type: 'tower', near: { dx: -3, dy: 10 }, garrison: 1 },
+        // A coal mine on the guaranteed coal, still without food (the start's ready-made miners take it up).
+        { type: 'coalmine', near: { dx: -4, dy: -8 }, tag: 'coalmine' },
+      ],
+      piles: [['plank', 8], ['plank', 8], ['stone', 8], ['stone', 6], ['rod', 1], ['scythe', 1], ['bow', 1]],
+      people: { carrier: 4, builder: 2, digger: 2 },
+    },
+  ],
+  unlock: { buildings: ['waterworks', 'farm', 'mill', 'bakery', 'fisher', 'hunter', 'pigfarm', 'slaughterhouse'] },
+  minutes: 14,
+  objectives: [
+    { text: 'tut.bread.goal.1', done: { k: 'produced', res: 'bread', min: 1 }, params: { building: { building: 'bakery' } } },
+    { text: 'tut.bread.goal.2', done: { k: 'attempts', type: 'coalmine', min: 1 }, params: { building: { building: 'coalmine' } } },
+    { text: 'tut.bread.goal.3', done: { k: 'stockAt', type: 'warehouse', res: 'coal', min: 8 }, params: { n: { n: 8 } } },
+  ],
+  steps: [
+    {
+      id: 'mine',
+      text: 'tut.bread.mine',
+      more: 'tut.bread.mine.more',
+      params: { building: { building: 'coalmine' } },
+      ui: ['info.mineFood'],
+      camera: coalmine,
+      marker: [coalmine],
+      done: { k: 'ack' },
+    },
+    {
+      id: 'fisher',
+      text: 'tut.bread.fisher',
+      more: 'tut.bread.fisher.more',
+      params: { building: { building: 'fisher' }, hunter: { building: 'hunter' }, tab: { label: 'category.food' } },
+      hint: { text: 'tut.bread.fisher.hint', after: 60 },
+      ui: ['menu.build', 'build.tab.food', 'build.item.fisher'],
+      camera: pond,
+      marker: [{ a: 'spot', type: 'fisher', near: pond, prefer: 'water' }],
+      done: { k: 'building', type: 'fisher', state: 'any' },
+    },
+    {
+      id: 'waterworks',
+      text: 'tut.bread.waterworks',
+      more: 'tut.bread.waterworks.more',
+      params: { building: { building: 'waterworks' } },
+      ui: ['menu.build', 'build.tab.food', 'build.item.waterworks'],
+      camera: pond,
+      marker: [{ a: 'spot', type: 'waterworks', near: pond, prefer: 'water' }],
+      done: { k: 'building', type: 'waterworks', state: 'any' },
+    },
+    {
+      id: 'farm',
+      text: 'tut.bread.farm',
+      more: 'tut.bread.farm.more',
+      params: { building: { building: 'farm' } },
+      hint: { text: 'tut.bread.farm.hint', after: 60 },
+      ui: ['menu.build', 'build.tab.food', 'build.item.farm'],
+      camera: farmSpot,
+      marker: [farmSpot],
+      done: { k: 'building', type: 'farm', state: 'any' },
+    },
+    {
+      id: 'area',
+      text: 'tut.bread.area',
+      more: 'tut.bread.area.more',
+      params: { building: { building: 'farm' }, button: { label: 'info.moveArea' } },
+      hint: { text: 'tut.bread.area.hint', after: 60 },
+      ui: ['info.workArea'],
+      marker: [{ a: 'building', type: 'farm', owner: 'me' }],
+      done: { k: 'setting', is: { s: 'workAt', type: 'farm' } },
+    },
+    {
+      id: 'mill',
+      text: 'tut.bread.mill',
+      more: 'tut.bread.mill.more',
+      params: { building: { building: 'mill' } },
+      ui: ['menu.build', 'build.tab.food', 'build.item.mill'],
+      marker: [{ a: 'spot', type: 'mill', near: farmSpot }],
+      done: { k: 'building', type: 'mill', state: 'any' },
+    },
+    {
+      id: 'bakery',
+      text: 'tut.bread.bakery',
+      more: 'tut.bread.bakery.more',
+      params: { building: { building: 'bakery' }, mill: { building: 'mill' }, waterworks: { building: 'waterworks' } },
+      ui: ['menu.build', 'build.tab.food', 'build.item.bakery'],
+      marker: [{ a: 'spot', type: 'bakery', near: home }],
+      done: { k: 'building', type: 'bakery', state: 'any' },
+    },
+    {
+      id: 'grain',
+      text: 'tut.bread.grain',
+      more: 'tut.bread.grain.more',
+      hint: { text: 'tut.bread.grain.hint', after: 120 },
+      ui: ['speed.4'],
+      marker: [{ a: 'building', type: 'farm', owner: 'me' }],
+      done: { k: 'produced', res: 'flour', min: 1 },
+    },
+    {
+      id: 'share',
+      text: 'tut.bread.share',
+      more: 'tut.bread.share.more',
+      params: { menu: { label: 'hud.menu.goods' }, tab: { label: 'goods.distribution' }, building: { building: 'coalmine' } },
+      hint: { text: 'tut.bread.share.hint', after: 60 },
+      ui: ['menu.goods', 'goods.distribution', 'distribution.bread'],
+      done: { k: 'setting', is: { s: 'distribution', res: 'bread' } },
+    },
+    {
+      id: 'coal',
+      text: 'tut.bread.coal',
+      more: 'tut.bread.coal.more',
+      params: { n: { n: 8 } },
+      hint: { text: 'tut.bread.coal.hint', after: 120 },
+      ui: ['speed.4'],
+      camera: coalmine,
+      marker: [coalmine],
+      done: { k: 'all', of: [
+        { k: 'produced', res: 'bread', min: 1 },
+        { k: 'stockAt', type: 'warehouse', res: 'coal', min: 8 },
+      ] },
+    },
+  ],
+};
+
+const toolsmith: Anchor = { a: 'building', type: 'toolsmith', owner: 'me' };
+
+/** Mission 4: the geologist and his signs, messages and Space, mines on ore, the iron smelter, the toolsmith's orders. */
+const metal: MissionDef = {
+  id: 'metal',
+  title: 'tut.metal.title',
+  summary: 'tut.metal.summary',
+  debrief: 'tut.metal.debrief',
+  world: { seed: 42, size: 64, players: 1, start: 'medium', fog: true },
+  scenario: [
+    {
+      player: 1,
+      buildings: [
+        ...woodAndStone,
+        { type: 'tower', near: { dx: -3, dy: 10 }, garrison: 1 },
+        // Mission 3's food chain, standing and staffed.
+        { type: 'fisher', near: { dx: -3, dy: 5 }, worker: true },
+        { type: 'waterworks', near: { dx: 2, dy: 6 }, worker: true },
+        { type: 'farm', near: { dx: -9, dy: 9 }, worker: true },
+        { type: 'mill', near: { dx: -7, dy: 4 }, worker: true },
+        { type: 'bakery', near: { dx: -10, dy: 4 }, worker: true },
+      ],
+    },
+  ],
+  unlock: { buildings: ['coalmine', 'ironmine', 'ironsmelter', 'toolsmith'], commands: ['geologist'] },
+  // As in Settlers 4's tutorials the mission keeps food at hand, however the food chain fares.
+  refill: [
+    { res: 'bread', below: 6, to: 8 },
+    { res: 'fish', below: 6, to: 8 },
+  ],
+  minutes: 12,
+  objectives: [
+    { text: 'tut.metal.goal.1', done: { k: 'prospected', at: mountain, r: 5, min: 1, ore: 'coal' }, params: { res: { res: 'coal' } } },
+    { text: 'tut.metal.goal.2', done: { k: 'prospected', at: mountain, r: 5, min: 1, ore: 'ironore' }, params: { res: { res: 'ironore' } } },
+    { text: 'tut.metal.goal.3', done: { k: 'produced', res: 'coal', min: 1 }, params: { building: { building: 'coalmine' } } },
+    { text: 'tut.metal.goal.4', done: { k: 'produced', res: 'ironore', min: 1 }, params: { building: { building: 'ironmine' } } },
+    { text: 'tut.metal.goal.5', done: { k: 'produced', res: 'shovel', min: 2 }, params: { n: { n: 2 } } },
+  ],
+  steps: [
+    {
+      id: 'geologist',
+      text: 'tut.metal.geologist',
+      more: 'tut.metal.geologist.more',
+      params: { menu: { label: 'hud.menu.settlers' }, prof: { prof: 'geologist' } },
+      ui: ['menu.settlers', 'settlers.cmd.geologist'],
+      camera: mountain,
+      done: { k: 'any', of: [
+        { k: 'ui', is: { u: 'placing', what: 'geologist' } },
+        { k: 'prospected', at: mountain, r: 5, min: 1 },
+      ] },
+    },
+    {
+      id: 'prospect',
+      text: 'tut.metal.prospect',
+      more: 'tut.metal.prospect.more',
+      params: { prof: { prof: 'geologist' } },
+      hint: { text: 'tut.metal.prospect.hint', after: 60 },
+      marker: [mountain],
+      ring: { at: mountain, r: 3 },
+      done: { k: 'prospected', at: mountain, r: 5, min: 6 },
+    },
+    {
+      id: 'message',
+      text: 'tut.metal.message',
+      more: 'tut.metal.message.more',
+      ui: ['hud.ticker'],
+      done: { k: 'any', of: [{ k: 'ui', is: { u: 'jumpedToMessage' } }, { k: 'after', s: 25 }] },
+    },
+    {
+      id: 'signs',
+      text: 'tut.metal.signs',
+      more: 'tut.metal.signs.more',
+      params: { coal: { res: 'coal' }, iron: { res: 'ironore' } },
+      camera: mountain,
+      done: { k: 'ack' },
+    },
+    {
+      id: 'coalmine',
+      text: 'tut.metal.coalmine',
+      more: 'tut.metal.coalmine.more',
+      params: { building: { building: 'coalmine' }, tab: { label: 'category.mining' } },
+      hint: { text: 'tut.metal.coalmine.hint', after: 60 },
+      ui: ['menu.build', 'build.tab.mining', 'build.item.coalmine'],
+      camera: coalLobe,
+      marker: [{ a: 'spot', type: 'coalmine', near: coalLobe, prefer: 'ore', within: 4 }],
+      done: { k: 'building', type: 'coalmine', state: 'any', near: coalLobe, r: 4 },
+    },
+    {
+      id: 'ironmine',
+      text: 'tut.metal.ironmine',
+      more: 'tut.metal.ironmine.more',
+      params: { building: { building: 'ironmine' }, food: { res: 'meat' } },
+      ui: ['menu.build', 'build.tab.mining', 'build.item.ironmine'],
+      camera: ironLobe,
+      marker: [{ a: 'spot', type: 'ironmine', near: ironLobe, prefer: 'ore', within: 4 }],
+      done: { k: 'building', type: 'ironmine', state: 'any', near: ironLobe, r: 4 },
+    },
+    {
+      id: 'smelter',
+      text: 'tut.metal.smelter',
+      more: 'tut.metal.smelter.more',
+      params: { building: { building: 'ironsmelter' }, tab: { label: 'category.metal' } },
+      ui: ['menu.build', 'build.tab.metal', 'build.item.ironsmelter'],
+      marker: [{ a: 'spot', type: 'ironsmelter', near: home }],
+      done: { k: 'building', type: 'ironsmelter', state: 'any' },
+    },
+    {
+      id: 'toolsmith',
+      text: 'tut.metal.toolsmith',
+      more: 'tut.metal.toolsmith.more',
+      params: { building: { building: 'toolsmith' } },
+      hint: { text: 'tut.metal.toolsmith.hint', after: 90 },
+      ui: ['menu.build', 'build.tab.metal', 'build.item.toolsmith'],
+      marker: [{ a: 'spot', type: 'toolsmith', near: home }],
+      done: { k: 'building', type: 'toolsmith' },
+    },
+    {
+      id: 'order',
+      text: 'tut.metal.order',
+      more: 'tut.metal.order.more',
+      params: { building: { building: 'toolsmith' }, n: { n: 2 }, res: { res: 'shovel' } },
+      hint: { text: 'tut.metal.order.hint', after: 60 },
+      ui: ['info.toolOrder.shovel'],
+      marker: [toolsmith],
+      done: { k: 'setting', is: { s: 'toolOrder', res: 'shovel', min: 2 } },
+    },
+    {
+      id: 'shovels',
+      text: 'tut.metal.shovels',
+      more: 'tut.metal.shovels.more',
+      params: { n: { n: 2 } },
+      hint: { text: 'tut.metal.shovels.hint', after: 120 },
+      ui: ['speed.4'],
+      marker: [toolsmith],
+      done: { k: 'all', of: [
+        { k: 'building', type: 'coalmine' },
+        { k: 'building', type: 'ironmine' },
+        { k: 'produced', res: 'shovel', min: 2 },
+      ] },
+    },
+  ],
+};
+
 /** A mission of a later pass: listed in the menu as coming, what it opens already set (docs/TUTORIAL.md §2.5–2.8). */
 function later(id: MissionDef['id'], unlock: MissionDef['unlock'], minutes: number): MissionDef {
   return {
@@ -286,8 +584,8 @@ function later(id: MissionDef['id'], unlock: MissionDef['unlock'], minutes: numb
 export const MISSIONS: readonly MissionDef[] = [
   forest,
   logistics,
-  later('bread', { buildings: ['waterworks', 'farm', 'mill', 'bakery', 'fisher', 'hunter', 'pigfarm', 'slaughterhouse'] }, 14),
-  later('metal', { buildings: ['coalmine', 'ironmine', 'ironsmelter', 'toolsmith'], commands: ['geologist'] }, 14),
+  bread,
+  metal,
   later('trade', { buildings: ['market', 'donkeyranch'], commands: ['pioneer', 'thief'] }, 15),
   later('battle', { buildings: ['tower', 'bigtower', 'barracks', 'lookout', 'infirmary'], menus: ['army'] }, 15),
 ];

@@ -23,10 +23,12 @@ export type UiTarget =
   | 'info.accept'
   | `accept.${Resource}`
   | `info.toolOrder.${Resource}`
+  | 'info.mineFood'
   | 'goods.stock'
   | 'goods.transport'
   | 'goods.distribution'
   | `transport.${Resource}.top`
+  | `distribution.${Resource}`
   | 'settlers.beds'
   | 'settlers.reserve'
   | `settlers.cmd.${CommandId}`
