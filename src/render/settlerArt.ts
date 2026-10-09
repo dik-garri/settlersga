@@ -295,6 +295,21 @@ export function paintHat(ctx: Ctx, pd: number, style: HatStyle): void {
       ctx.fillStyle = '#c8c8c8';
       ctx.fillRect(cx - 3.2, -22.8, 6.4, 1.2);
       return;
+    case 'coif':
+      // A close linen cap with a flap over the nape.
+      ctx.fillStyle = '#d8d8d8';
+      ctx.beginPath();
+      ctx.arc(cx - fr.f[0] * 0.5, -21.8, 3.8, Math.PI, 0);
+      ctx.fill();
+      ctx.fillStyle = '#c0c0c0';
+      ctx.beginPath();
+      ctx.moveTo(cx - fr.f[0] * 3 - 1.8, -21.8);
+      ctx.lineTo(cx - fr.f[0] * 3.6 - 1.6, -18.4);
+      ctx.lineTo(cx - fr.f[0] * 2.2 + 1.8, -18.4);
+      ctx.lineTo(cx - fr.f[0] * 1.6 + 1.8, -21.8);
+      ctx.closePath();
+      ctx.fill();
+      return;
     case 'bare':
       ctx.fillStyle = '#6b4423';
       ctx.beginPath();
@@ -416,6 +431,13 @@ export function paintArm(ctx: Ctx, pd: number, armTurns: number, tool: ToolShape
         ctx.lineTo(bottom[0], bottom[1]);
         ctx.stroke();
         if (pull > 0) stroke(ctx, nock, at(5.5, 0), '#d9c39a', 0.8);
+        return;
+      }
+      case 'spear': {
+        // Held upright whatever the arm's swing: the butt by the feet, a leaf-shaped head above.
+        stroke(ctx, [h[0], h[1] + 7], [h[0], h[1] - 15], WOOD, 1.1);
+        ctx.fillStyle = STEEL;
+        poly(ctx, [[h[0], h[1] - 19.5], [h[0] + 1.1, h[1] - 16], [h[0], h[1] - 14.6], [h[0] - 1.1, h[1] - 16]]);
         return;
       }
       case 'carry':
