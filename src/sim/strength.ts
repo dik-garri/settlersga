@@ -1,4 +1,4 @@
-import { BUILDINGS, STRENGTH } from './config';
+import { AI_LEVELS, BUILDINGS, STRENGTH } from './config';
 import type { PlayerId, Settler } from './types';
 import type { World } from './world';
 
@@ -13,13 +13,20 @@ import type { World } from './world';
  * Values are derived from the buildings, never saved; they are computed once per tick per world.
  */
 
-/** Settlement value of a player: material points in their finished buildings (`STRENGTH`). */
+/**
+ * Settlement value of a player: material points in their finished buildings (`STRENGTH`). A computer
+ * player of a level with `strengthDouble` (Settlers 4's AI from «normal» on,
+ * `SPlayerStatistic::CalculateFightingStrength`) counts every building's materials twice instead of
+ * its eyecatchers' extra.
+ */
 export function settlementValue(w: World, player: PlayerId): number {
+  const level = w.aiLevel(player);
+  const double = !!level && AI_LEVELS[level].strengthDouble;
   let value = 0;
   for (const b of w.buildings.values()) {
     if (b.owner !== player || !b.done) continue;
     const def = BUILDINGS[b.type];
-    const k = def.eyecatcher ? STRENGTH.eyecatcher : 1;
+    const k = double ? 2 : def.eyecatcher ? STRENGTH.eyecatcher : 1;
     const c = def.cost;
     value += k * (((c.plank ?? 0) + (c.log ?? 0) + (c.stone ?? 0)) * STRENGTH.points + (c.gold ?? 0) * STRENGTH.goldPoints);
   }

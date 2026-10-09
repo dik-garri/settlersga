@@ -21,7 +21,8 @@
  */
 import { fighterLevel, hpOf, PROFESSIONS, type CombatDef } from './config';
 import { moraleOf } from './field';
-import { killSettler } from './military';
+import { donkeyHit } from './intruders';
+import { killSettler, warStats } from './military';
 import { fieldFactor } from './strength';
 import type { Settler, SettlerKind } from './types';
 import type { World } from './world';
@@ -51,10 +52,17 @@ export function hitDamage(w: World, hitter: Settler, victim: Settler | null, bon
   return Math.max(1, damage - (victim ? (combatOf(victim)?.armor ?? 0) : 0));
 }
 
-/** One attack: the victim loses the damage and dies at 0. True if he died. */
+/** One attack: the victim loses the damage and dies at 0 (a donkey drops its load instead). True if he died. */
 export function strike(w: World, hitter: Settler, victim: Settler, bonus = 0): boolean {
+  // A loaded donkey is not hurt: it drops its load and goes home (`intruders.ts`).
+  if (PROFESSIONS[victim.kind].dropsLoad) {
+    donkeyHit(w, victim);
+    return false;
+  }
   victim.hp -= hitDamage(w, hitter, victim, bonus);
   if (victim.hp > 0) return false;
+  const killed = warStats(w, hitter.owner).killed;
+  killed[victim.kind] = (killed[victim.kind] ?? 0) + 1;
   killSettler(w, victim);
   return true;
 }

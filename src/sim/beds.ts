@@ -12,6 +12,7 @@
  * carriers, never from houses themselves: a house brings as many beds as people.
  */
 import { BEDS, BUILDINGS, bedsOf, residentsOf } from './config';
+import { postMessage } from './messages';
 import type { Building, PlayerId } from './types';
 import type { World } from './world';
 
@@ -54,12 +55,16 @@ function settleStrike(w: World, player: PlayerId): void {
   let excess = carriers - bedsFor(w, player) - striking;
   if (excess === 0) return;
   if (excess > 0) {
+    let struck = false;
     for (const s of w.settlers) {
-      if (excess === 0) return;
+      if (excess === 0) break;
       if (s.owner !== player || s.kind !== 'carrier' || s.strike || s.tasks.length > 0 || w.dying.has(s.id)) continue;
       s.strike = true;
+      struck = true;
       excess--;
     }
+    // Its player hears of it (`messages.ts`), at most every `MESSAGES.strike.every`.
+    if (struck) postMessage(w, 'strike', player, w.homeOf(player));
     return;
   }
   for (let i = w.settlers.length - 1; i >= 0 && excess < 0; i--) {

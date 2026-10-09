@@ -1,5 +1,6 @@
 import { canTakeUp, isReachable, isReadyWorker, nearestStorage } from './buildings';
 import { freeGoods, goodsOn, reserveGoods, stackTiles } from './ground';
+import { postMessage } from './messages';
 import { landAt, landOf } from './land';
 import { offered } from './stop';
 import { dispatchTrade, marketWants } from './trade';
@@ -161,10 +162,17 @@ function dispatchFor(w: World, owner: PlayerId): void {
       continue;
     }
     // A carrier takes up the job only above the reserve (ready-made workers above are no carriers).
-    if (spare <= 0 || !hasIdle(pieceOf(b))) continue;
+    if (spare <= 0 || !hasIdle(pieceOf(b))) {
+      postMessage(w, 'noCarrier', owner, b.door, { b: b.id });
+      continue;
+    }
     const tool = PROFESSIONS[kind].tool;
     const from = tool ? supplyOf(tool, b) : undefined;
-    if (tool && !from) continue; // waits for the toolsmith
+    if (tool && !from) {
+      // Waits for the toolsmith; its owner hears of it (Settlers 4 `MissingToolWarning`).
+      postMessage(w, 'noTool', owner, b.door, { res: tool });
+      continue;
+    }
     const s = take(from ? from.at : b.door, pieceOf(b));
     if (!s) continue;
     spare--;
@@ -182,7 +190,10 @@ function dispatchFor(w: World, owner: PlayerId): void {
     const tool = PROFESSIONS[kind].tool;
     for (let k = workerOrder(w, owner, kind) - workersOf(w, owner, kind); k > 0 && spare > 0; k--) {
       const from = tool ? supplyOf(tool, null) : undefined;
-      if (tool && !from) break;
+      if (tool && !from) {
+        postMessage(w, 'noTool', owner, w.homeOf(owner), { res: tool });
+        break;
+      }
       // Without a tool to fetch, any free carrier will do: the first one's piece of land.
       const s = from ? take(from.at, from.piece) : idle.length > 0 ? take(idle[0], pieceOfCarrier[0]) : undefined;
       if (!s) break;

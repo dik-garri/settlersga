@@ -214,7 +214,14 @@ function game(
     world,
     state,
     { onSave: () => pause.open('save'), onLoad: () => pause.open('load'), onMenu: () => pause.open('main') },
-    { minimap: minimap.el, sound: audioControls(audio) },
+    {
+      minimap: minimap.box,
+      sound: audioControls(audio),
+      jump: (x, y) => {
+        const p = toScreen(x, y);
+        camera.centerOn(p.x, p.y - world.map.heightAt(x, y));
+      },
+    },
   );
   hudEl.append(pause.el);
   hudEl.addEventListener('click', (e) => {
@@ -226,6 +233,7 @@ function game(
     onNextTab: () => hud.nextTab(),
     onMessage: (text) => hud.toast(text),
     onMenu: () => pause.open('main'),
+    onLastMessage: () => hud.jumpToMessage(),
   });
 
   // Autosave: every few game minutes into its own slot (compressed in the background).

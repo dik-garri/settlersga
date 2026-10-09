@@ -281,9 +281,11 @@ export function hunt(w: World, ai: AiState, own: Building[]): void {
   const friendly = [...w.buildings.values()].filter((b) => w.allied(b.owner, me)).map((b) => b.door);
   const starts = startPositions(m.w, w.players.length).filter((st) => !friendly.some((f) => dist(f, st) < 8));
   const homeSeen = (s: Settler) => {
+    // Every start lies by its own or an ally's buildings: theirs has been taken, so seen.
+    if (starts.length === 0) return true;
     let best = starts[0];
     for (const st of starts) if (dist(st, s) < dist(best, s)) best = st;
-    return !!best && w.isExplored(best.x, best.y, me);
+    return w.isExplored(best.x, best.y, me);
   };
   const prey: Settler[] = [];
   for (const s of w.settlers) {

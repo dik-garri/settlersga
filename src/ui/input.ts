@@ -27,6 +27,8 @@ export interface InputCallbacks {
   onMessage(text: string): void;
   /** Esc with nothing to cancel: the game menu (pause). */
   onMenu(): void;
+  /** Space: the camera to the last message, again for the one before (Settlers 4). */
+  onLastMessage(): boolean;
 }
 
 /** Mouse and keyboard: camera control, placement and selection. */
@@ -470,6 +472,12 @@ export class InputController {
         if (!this.cancel()) this.cb.onMenu();
         break;
       case 'Space':
+        // Settlers 4: Space jumps to the last message (pressed again, the one before).
+        e.preventDefault();
+        if (!this.cb.onLastMessage()) this.cb.onMessage('Сообщений нет');
+        break;
+      case 'KeyP':
+      case 'Pause':
         e.preventDefault();
         this.state.paused = !this.state.paused;
         break;

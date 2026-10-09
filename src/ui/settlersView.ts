@@ -1,7 +1,9 @@
 import { settlerIcon } from '../render/atlas';
 import { isReadyWorker } from '../sim/buildings';
 import { PROFESSIONS } from '../sim/config';
+import type { Settler, SettlerKind } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
+import { nextSettlerOfKind } from './find';
 import { el, type View } from './dom';
 import { WorkersView } from './economyPanel';
 import type { GameState, Placeable } from './state';
@@ -16,7 +18,8 @@ export const COMMANDS: { type: 'geologist' | 'pioneer' | 'thief'; name: string; 
 /**
  * The settlers menu: who lives in the settlement — beds and strikers (Settlers 4: carriers beyond the
  * beds strike), workers waiting for a workplace —, the specialists' errands (geologist, pioneer,
- * thief — aimed at the map like a building) and the worker orders.
+ * thief — aimed at the map like a building) and the worker orders. A click on a profession finds
+ * the next settler of it on the map (Settlers 4).
  */
 export class SettlersView implements View {
   readonly el = el('div', 'view settlers-view');
@@ -24,11 +27,14 @@ export class SettlersView implements View {
   private readonly commandButtons = new Map<string, HTMLButtonElement>();
   private readonly workers: WorkersView;
   private summaryKey = '';
+  /** The settler the last «find» click showed (the next one comes after him). */
+  private lastFound: number | null = null;
 
   constructor(
     private readonly world: World,
     private readonly state: GameState,
     select: (type: Placeable | null) => void,
+    private readonly focus: (s: Settler) => void = () => {},
   ) {
     this.workers = new WorkersView(world);
     this.el.append(el('h4', '', 'Поселение'), this.summary, el('h4', '', 'Специалисты'));
@@ -93,8 +99,21 @@ export class SettlersView implements View {
         row.title = `Ждут новое здание своего дела: ${list}`;
         grid.append(row);
       }
+      // Settlers 4's «find settler»: a click on a profession shows the next one of it on the map.
+      const findable = (row: HTMLElement, kind: SettlerKind) => {
+        row.classList.add('find');
+        row.title = 'Щелчок — показать следующего на карте';
+        row.onclick = () => {
+          const next = nextSettlerOfKind(this.world, kind, this.lastFound);
+          if (!next) return;
+          this.lastFound = next.id;
+          this.focus(next);
+        };
+        return row;
+      };
+      findable(grid.children[1] as HTMLElement, 'carrier');
       for (const [kind, n] of [...kinds].sort((a, b) => b[1] - a[1])) {
-        grid.append(line(PROFESSIONS[kind as keyof typeof PROFESSIONS].name, String(n)));
+        grid.append(findable(line(PROFESSIONS[kind as SettlerKind].name, String(n)), kind as SettlerKind));
       }
       this.summary.append(grid);
       if (striking > 0) this.summary.append(el('p', 'warn-note', 'Забастовка: носильщикам не хватает кроватей — постройте дом.'));

@@ -120,7 +120,9 @@ export type SettlerKind =
   | 'pioneer'
   | 'thief'
   | 'donkeyrancher'
-  | 'donkey';
+  | 'donkey'
+  | 'healer'
+  | 'watchman';
 
 /** Player ids start at 1; 0 means "nobody" in per-tile ownership. */
 export type PlayerId = number;
@@ -199,6 +201,12 @@ export interface Building {
   workAt?: Point | null;
   /** Marketplace: where its donkeys take goods, and what (see `trade.ts`). */
   trade?: TradeRoute;
+  /** Infirmary: the fighter it called and is healing (`infirmary.ts`), one at a time. */
+  patient?: number;
+  /** Lookout tower: its alarm is up (an enemy fighter in range, `lookout.ts`) until none is left. */
+  alarm?: boolean;
+  /** Mine: fruitless attempts in a row (`MINING.emptyAfter`: then its owner is told). */
+  misses?: number;
   /**
    * Stopped by its owner (Settlers 4's `Switch`, `World.setStopped`; see `stop.ts`): a workplace
    * starts no new cycle and asks for nothing, the goods at it are offered to others; a site sends its
@@ -261,12 +269,15 @@ export type Task =
   | { t: 'hunt'; a: number; n: number; chase: number; res: Resource }
   /** A fighter going for an intruding specialist `s` on his owner's land (`intruders.ts`); `n` counts to the next blow. */
   | { t: 'chase'; s: number; n: number }
-  /** Wounded fighter lies in an infirmary until healed (`n` counts ticks to the next hit point). */
+  /**
+   * A wounded fighter called by an infirmary (`infirmary.ts`) stands at its door while its healer heals
+   * him (`n` counts ticks to the next hit points); he is its `Building.patient`.
+   */
   | { t: 'heal'; b: number; n: number }
   /** Pioneer moves the border stone onto a neutral tile: after `n` ticks it is the owner's land. */
   | { t: 'claim'; x: number; y: number; n: number }
-  /** Thief at a foreign building's door: after `n` ticks he takes one good and carries it home. */
-  | { t: 'steal'; b: number; n: number }
+  /** Thief at the spot he was sent to: after `n` ticks he takes one unit of the stack there (`THIEF`) and carries it home. */
+  | { t: 'steal'; x: number; y: number; n: number }
   /** Donkey at a marketplace loads `n` units of `res` from its input (reserved in `trade.loading`). */
   | { t: 'load'; b: number; res: Resource; n: number }
   /** Donkey unloads what it carries onto the output pile of marketplace `b`. */
@@ -294,8 +305,16 @@ export interface Settler {
   working: boolean;
   /** Hit points: fighters and specialists have them (0 for everyone else). */
   hp: number;
-  /** A disguised specialist (thief) on hostile land is exposed — a valid target — until this tick (`intruders.ts`). */
-  exposedUntil?: number;
+  /**
+   * A disguised specialist (the thief) unmasked by a hostile fighter close by: a valid target on hostile
+   * land until he is disguised again (`intruders.ts`). Absent = disguised.
+   */
+  exposed?: boolean;
+  /**
+   * The thief's home point (Settlers 4): where he puts his loot on the ground — where he was made,
+   * then wherever he was last ordered to a spot on his owner's or an ally's land (`specialists.ts`).
+   */
+  homeAt?: Point | null;
   /** Settler this soldier is fighting right now, or null. */
   opponent: number | null;
   /** Military rank, 0-based index into `SOLDIER_LEVELS`; raised with gold. */

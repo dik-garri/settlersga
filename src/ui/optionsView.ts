@@ -25,7 +25,7 @@ export class OptionsView implements View {
   ) {
     this.el.append(el('h4', '', 'Скорость'));
     const speed = el('div', 'info-actions');
-    const pause = button('Пауза', 'Пауза (пробел)', () => (state.paused = !state.paused));
+    const pause = button('Пауза', 'Пауза (P)', () => (state.paused = !state.paused));
     this.speedButtons.set('pause', pause);
     speed.append(pause);
     for (const s of SPEEDS) {
@@ -56,7 +56,8 @@ export class OptionsView implements View {
       ['Shift + ЛКМ', 'поставить несколько'],
       ['ПКМ / Esc', 'отмена'],
       ['Esc (ничего не выбрано)', 'меню игры'],
-      ['Пробел', 'пауза'],
+      ['P', 'пауза'],
+      ['Пробел', 'к последнему сообщению (ещё раз — к предыдущему)'],
       ['M', 'звук'],
     ]) {
       help.append(el('dt', '', k), el('dd', '', v));

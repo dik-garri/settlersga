@@ -22,7 +22,7 @@
  *   left, a swordsman or archer (`combat.captures`) takes the building over alone: ownership and land
  *   change (`territory.ts`), and the rest stay outside. The squad leader neither takes nor holds one.
  * - A fighter's level is bought with gold at the barracks and never changes; wounded fighters heal
- *   only in an infirmary. Allied players (`World.allied`) never attack each other.
+ *   only at an infirmary's door (`infirmary.ts`). Allied players (`World.allied`) never attack each other.
  *
  * Removing a settler must go through `killSettler`, which clears every reference to it; the settler
  * itself leaves `World.settlers` at the end of the tick (`removeDead`).
@@ -44,8 +44,6 @@ import {
   PROFESSIONS,
   SHOT_TICKS,
   SOLDIER_LEVELS,
-  WOUNDED_AT,
-  WOUNDED_CHECK_EVERY,
   type GarrisonDef,
 } from './config';
 import { duelTick, hitDamage, maxHp, rearm, startDuel, strike } from './combat';
@@ -53,10 +51,11 @@ import { economyOf, ENDLESS, recruitCalled } from './economy';
 import { fieldIdle, formationSpots, freeIdle, outdoorFighters } from './field';
 import { dropGoods } from './ground';
 import { landAt, landOf } from './land';
+import { postMessage } from './messages';
 import { sameRegion } from './regions';
 import { abort } from './settlers';
 import type { Building, PlayerId, Point, Resource, Settler, SettlerKind, Stock, Task } from './types';
-import type { World } from './world';
+import type { WarStats, World } from './world';
 
 /** Professions that fight. */
 export const FIGHTERS: readonly SettlerKind[] = (Object.keys(PROFESSIONS) as SettlerKind[]).filter(
@@ -189,25 +188,9 @@ function spareSoldiers(w: World, b: Building, archer?: boolean): Settler[] {
   return order.slice(0, Math.max(0, Math.min(order.length, b.garrison.length - keepOf(b))));
 }
 
-// ---------------------------------------------------------------- warnings
-
-/** A message for a player (Settlers 4's warnings, `CTextMsgHandler::AddWarningMsg`): derived, not saved. */
-export interface Warning {
-  tick: number;
-  player: PlayerId;
-  /** `noFighter`: an empty military building finds no free fighter (S4 2461); `noCarrier`: a barracks no carrier (S4 2459). */
-  kind: 'noFighter' | 'noCarrier';
-  b: number;
-  x: number;
-  y: number;
-}
-
-/** Warns the building's owner, at most once per `GARRISON_ORDERS.warnEvery` per building and kind. */
-function warn(w: World, kind: Warning['kind'], b: Building): void {
-  const list = w.warnings;
-  while (list.length > 0 && w.tick - list[0].tick >= GARRISON_ORDERS.warnEvery) list.shift();
-  if (list.some((m) => m.kind === kind && m.b === b.id)) return;
-  list.push({ tick: w.tick, player: b.owner, kind, b: b.id, x: b.door.x, y: b.door.y });
+/** Tells the building's owner (`messages.ts`): an empty building finds no free fighter, a barracks no carrier. */
+function warn(w: World, kind: 'noFighter' | 'noCarrier', b: Building): void {
+  postMessage(w, kind, b.owner, b.door, { b: b.id });
 }
 
 // ---------------------------------------------------------------- garrisons
@@ -230,6 +213,7 @@ export function isFreeFighter(w: World, s: Settler): boolean {
  */
 export function isCallable(w: World, s: Settler): boolean {
   if (s.inside !== null || s.home !== null || s.opponent !== null || w.dying.has(s.id) || !canGarrison(s)) return false;
+  // A patient on his way to or at an infirmary's door (`infirmary.ts`) is left to heal [оценка].
   return !s.tasks.some((t) => t.t === 'join' || t.t === 'heal');
 }
 
@@ -772,6 +756,8 @@ export function assaultTick(w: World, s: Settler, task: Extract<Task, { t: 'assa
     return;
   }
   const defenders = members(w, b);
+  // Its owner hears of it (Settlers 4 `CAttackMsgList`), at most every `MESSAGES.attacked.every`.
+  postMessage(w, 'attacked', b.owner, b.door, { b: b.id });
   if (defenders.length > 0 && doorHp(b) > 0) {
     // The door first: every attacker strikes it at his own pace, archers too.
     s.working = true;
@@ -858,8 +844,8 @@ function towerTargets(w: World, b: Building, range: number): Settler[] {
  * Per tick for a finished military building: archers inside shoot enemy fighters in their tower
  * range (looked for every tick while the building is assaulted, else every `FIELD.scanEvery` ticks);
  * a damaged door mends; every `GARRISON_ORDERS.every` ticks it calls free fighters in and puts one
- * beyond its wish out (`orderWarriors`, `throwOut`); every `WOUNDED_CHECK_EVERY` ticks, while it is not
- * under attack, its wounded go to an infirmary.
+ * beyond its wish out (`orderWarriors`, `throwOut`). Wounded fighters inside stay there: an infirmary
+ * heals only free fighters in the open (`infirmary.ts`), as in Settlers 4.
  */
 export function updateGarrison(w: World, b: Building, assaults: Map<number, Settler[]>): void {
   const g = garrisonOf(b);
@@ -883,76 +869,6 @@ export function updateGarrison(w: World, b: Building, assaults: Map<number, Sett
     const target = targets.find((t) => !w.dying.has(t.id));
     if (target) shoot(w, s, target, b.door, b);
   }
-  if ((w.tick + b.id) % WOUNDED_CHECK_EVERY === 0 && !assaulted) sendWounded(w, b, inside);
-}
-
-// ---------------------------------------------------------------- infirmary
-
-/** Patients per infirmary (in bed or on the way), derived from tasks once per tick and world. */
-const patientCache = new WeakMap<World, { tick: number; count: Map<number, number> }>();
-
-function patients(w: World): Map<number, number> {
-  const cached = patientCache.get(w);
-  if (cached && cached.tick === w.tick) return cached.count;
-  const count = new Map<number, number>();
-  for (const s of w.settlers) {
-    if (w.dying.has(s.id)) continue;
-    for (const t of s.tasks) if (t.t === 'heal') count.set(t.b, (count.get(t.b) ?? 0) + 1);
-  }
-  patientCache.set(w, { tick: w.tick, count });
-  return count;
-}
-
-/**
- * Wounded fighters (below `WOUNDED_AT` of their hit points) leave the garrison for the nearest own
- * infirmary in range with a free bed; the building keeps at least one fighter (its land) and its
- * `keep`. Without an infirmary nobody heals, as in Settlers 4.
- */
-function sendWounded(w: World, b: Building, inside: Settler[]): void {
-  const wounded = inside.filter((s) => s.hp < maxHp(s) * WOUNDED_AT).sort((p, q) => p.hp - q.hp || p.id - q.id);
-  if (wounded.length === 0) return;
-  const c = centerOf(b);
-  const beds = patients(w);
-  for (const s of wounded) {
-    if (b.garrison.length <= Math.max(1, keepOf(b))) return;
-    let best: Building | undefined;
-    let bestD = Infinity;
-    for (const o of w.buildings.values()) {
-      const inf = BUILDINGS[o.type].infirmary;
-      if (!inf || o.owner !== b.owner || !o.done || (beds.get(o.id) ?? 0) >= inf.beds) continue;
-      const oc = centerOf(o);
-      const d = Math.hypot(oc.x - c.x, oc.y - c.y);
-      if (d <= inf.range && d < bestD) {
-        best = o;
-        bestD = d;
-      }
-    }
-    if (!best) return;
-    beds.set(best.id, (beds.get(best.id) ?? 0) + 1);
-    leaveGarrison(w, b, s);
-    s.tasks = [
-      { t: 'goto', x: best.door.x, y: best.door.y },
-      { t: 'heal', b: best.id, n: 0 },
-    ];
-  }
-}
-
-/** `heal` task: lie in the infirmary, one hit point every `healEvery` ticks, then stand free by it. */
-export function healTick(w: World, s: Settler, task: Extract<Task, { t: 'heal' }>): void {
-  const b = w.buildings.get(task.b);
-  const inf = b ? BUILDINGS[b.type].infirmary : undefined;
-  if (!b || !inf || !b.done || b.owner !== s.owner) {
-    if (s.inside === task.b) s.inside = null;
-    s.tasks.shift();
-    return;
-  }
-  s.inside = b.id;
-  if (++task.n < inf.healEvery) return;
-  task.n = 0;
-  s.hp = Math.min(maxHp(s), s.hp + 1);
-  if (s.hp < maxHp(s)) return;
-  s.inside = null;
-  s.tasks.shift();
 }
 
 /** End of tick: forget arrows that have landed (they are only drawn, never simulated). */
@@ -967,8 +883,17 @@ export function pruneShots(w: World): void {
  * no more; his buildings on land that changed hands burn, and their people, homeless on foreign land,
  * flee (`flee.ts`).
  */
+/** The player's war record, created on first use (`World.stats.war`, saved). */
+export function warStats(w: World, player: PlayerId): WarStats {
+  return (w.stats.war[player] ??= { killed: {}, fallen: {}, captured: 0, lostBuildings: 0 });
+}
+
 function conquer(w: World, b: Building, s: Settler): void {
   const previous = b.owner;
+  warStats(w, s.owner).captured++;
+  warStats(w, previous).lostBuildings++;
+  postMessage(w, 'lost', previous, b.door, { b: b.id });
+  postMessage(w, 'captured', s.owner, b.door, { b: b.id });
   for (const o of w.settlers) {
     if (o.owner !== previous) continue;
     if (o.tasks.some((t) => 'b' in t && t.b === b.id)) abort(w, o);
@@ -991,6 +916,8 @@ function conquer(w: World, b: Building, s: Settler): void {
 export function killSettler(w: World, s: Settler): void {
   if (w.dying.has(s.id)) return;
   w.dying.add(s.id);
+  const fallen = warStats(w, s.owner).fallen;
+  fallen[s.kind] = (fallen[s.kind] ?? 0) + 1;
   s.hp = 0;
   if (s.opponent !== null) {
     const o = w.getSettler(s.opponent);

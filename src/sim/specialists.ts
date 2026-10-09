@@ -1,9 +1,10 @@
-import { nearestStorage } from './buildings';
-import { FIELD, GEOLOGIST, GEOLOGIST_SIGN, ORDERABLE, PIONEER, PROFESSIONS, THIEF } from './config';
+import { FIELD, GEOLOGIST, GEOLOGIST_SIGN, ORDERABLE, oreOf, PIONEER, PROFESSIONS, THIEF } from './config';
+import { postMessage } from './messages';
 import { recountWorkers, spareCarriers, workerOrder, workersOf } from './economy';
 import { restIdle } from './idle';
 import { formationSpots } from './field';
-import { freeGoods, goodsOn, reserveGoods, stackTiles } from './ground';
+import { freeGoods, goodsOn, liftGoods, reserveGoods, stackTiles } from './ground';
+import { sitePile } from './logistics';
 import { sameRegion } from './regions';
 import { abort, carryBack } from './settlers';
 import { RESOURCES, Terrain, type Building, type PlayerId, type Point, type Resource, type Settler, type SettlerKind, type Task } from './types';
@@ -31,11 +32,12 @@ import type { World } from './world';
  * his owner's land, neutral or foreign, one per `prospect` task — the whole ridge. Signs come down
  * after `GEOLOGIST_SIGN`'s lifetime (`signEnds`), and the tile may then be examined again.
  *
- * Thief: `sendThief` points him at a foreign, explored building with goods at its door (or in stock);
- * he walks there unnoticed, takes one unit of its most plentiful good in `THIEF.stealTicks` and carries
- * it to his owner's nearest warehouse, then goes back for more until the building is bare or gone.
- * On hostile land every specialist may be cut down by that land's swordsmen, the thief once unmasked
- * (`intruders.ts`, `INTRUDERS`).
+ * Thief (`THIEF`, Settlers 4's `CThiefRole`): sent to a spot (`sendThief` — a foreign building's door —
+ * or any explored spot by mouse), he takes one unit off the first stack round it (`lootAt`: a pile at
+ * a building's door or goods on the ground; on his own or an ally's land only goods on the ground),
+ * carries it to his home point (`Settler.homeAt`) and puts it on the ground there, then goes back
+ * while there is loot. On hostile land every specialist may be cut down by that land's swordsmen, the
+ * thief once a hostile fighter has unmasked him (`intruders.ts`, `INTRUDERS`).
  *
  * All keep their errand in `Settler.errand` (saved); without one or a post they idle with the crowd.
  * `dismissSpecialist` turns a free one standing on his owner's land back into a carrier (bringing the
@@ -278,25 +280,89 @@ export function claimTick(w: World, s: Settler, task: Extract<Task, { t: 'claim'
 
 // ---------------------------------------------------------------- thief
 
-/** Whether a thief of `player` may be sent to rob `b`: foreign, not allied, explored, with goods. */
-export function robbable(w: World, b: Building, player: PlayerId): boolean {
-  if (b.owner === player || w.allied(b.owner, player) || !b.done) return false;
-  if (!w.isExplored(b.door.x, b.door.y, player)) return false;
-  return lootOf(b) !== null;
+/** Where a thief takes a unit from: a building's pile at its door, or a stack on the ground. */
+export interface Loot {
+  x: number;
+  y: number;
+  res: Resource;
+  /** The building whose pile it is (none: goods on the ground). */
+  b?: number;
+  from: 'output' | 'input' | 'site' | 'ground';
 }
 
-/** The good a thief takes from the building: its most plentiful one not promised to a carrier. */
-function lootOf(b: Building): Resource | null {
-  let best: Resource | null = null;
+/** Units of `res` a building's pile of kind `from` holds that nobody has claimed. */
+function pileOf(b: Building, from: Loot['from'], res: Resource): number {
+  if (from === 'output') return b.output[res] - b.outReserved[res];
+  if (from === 'input') return b.input[res] - (b.trade?.loading[res] ?? 0);
+  return sitePile(b, res);
+}
+
+/** The fullest pile at a building's door, output first, then input, then a site's materials. */
+function buildingLoot(b: Building): Pick<Loot, 'res' | 'from'> | null {
+  let best: Pick<Loot, 'res' | 'from'> | null = null;
   let most = 0;
-  for (const r of RESOURCES) {
-    const n = b.output[r] - b.outReserved[r];
-    if (n > most) {
-      most = n;
-      best = r;
+  for (const from of (b.done ? ['output', 'input'] : ['site']) as Loot['from'][]) {
+    for (const r of RESOURCES) {
+      const n = pileOf(b, from, r);
+      if (n > most) {
+        most = n;
+        best = { res: r, from };
+      }
     }
   }
   return best;
+}
+
+/**
+ * What a thief of `player` sent to (x, y) takes (Settlers 4 `CThiefRole::CheckGoodInSurrounding`): the
+ * first stack in a spiral of `THIEF.lootRadius` round the spot — a building's pile at its door (a
+ * producer's output, a workshop's input, a warehouse's stock, a site's materials) or goods on the
+ * ground. On his own or an ally's land only goods on the ground (he moves his player's goods). Only
+ * on tiles the player has explored.
+ */
+export function lootAt(w: World, x: number, y: number, player: PlayerId): Loot | null {
+  const m = w.map;
+  const offs = spiral(THIEF.lootRadius);
+  for (let k = 0; k < offs.length; k += 2) {
+    const tx = x + offs[k];
+    const ty = y + offs[k + 1];
+    if (!m.inBounds(tx, ty) || !w.isExplored(tx, ty, player)) continue;
+    const i = m.idx(tx, ty);
+    const land = m.owner[i];
+    const friendly = land !== 0 && w.allied(land, player);
+    const door = m.door[i];
+    if (door && !friendly) {
+      const b = w.buildings.get(door);
+      if (b && !w.allied(b.owner, player)) {
+        const l = buildingLoot(b);
+        if (l) return { x: tx, y: ty, b: b.id, ...l };
+      }
+    }
+    const res = goodsOn(w, i);
+    if (res && freeGoods(w, i) > 0) return { x: tx, y: ty, res, from: 'ground' };
+  }
+  return null;
+}
+
+/** Whether a thief of `player` may be sent to rob `b`: not allied, explored, with loot at its door. */
+export function robbable(w: World, b: Building, player: PlayerId): boolean {
+  if (w.allied(b.owner, player)) return false;
+  const l = lootAt(w, b.door.x, b.door.y, player);
+  return !!l && l.b === b.id;
+}
+
+/** The thief's home point (`Settler.homeAt`): where he stood when first asked, until an order moves it. */
+function thiefHome(s: Settler): Point {
+  return (s.homeAt ??= { x: Math.round(s.x), y: Math.round(s.y) });
+}
+
+/** An order to (x, y) on the thief's own or an ally's land moves his home point there (Settlers 4). */
+function orderedTo(w: World, s: Settler, x: number, y: number): void {
+  thiefHome(s);
+  const m = w.map;
+  if (!m.inBounds(x, y)) return;
+  const land = m.owner[m.idx(x, y)];
+  if (land !== 0 && w.allied(land, s.owner)) s.homeAt = { x, y };
 }
 
 /** Player command: send the nearest free thief to rob building `targetId`. */
@@ -306,88 +372,57 @@ export function sendThief(w: World, targetId: number, player: PlayerId): boolean
   const s = idleSpecialist(w, player, 'thief', b.door.x, b.door.y);
   if (!s) return false;
   clearSpecialist(w, s);
-  s.errand = { x: b.door.x, y: b.door.y, b: b.id };
+  orderedTo(w, s, b.door.x, b.door.y);
+  s.errand = { x: b.door.x, y: b.door.y };
   return true;
 }
 
-/** Idle thief: (back) to the building he was sent to rob, while there is loot; else hang about. */
+/**
+ * Idle thief: with loot in hand, to his home point, where he puts it on the ground (Settlers 4: not
+ * into a warehouse; his player's carriers take it from there); then back to the spot while there is
+ * loot round it; with none he stays where he stands.
+ */
 export function thiefIdle(w: World, s: Settler): void {
-  // Loot no warehouse at home takes in: put down on his own land, where his carriers can use it.
+  const home = thiefHome(s);
   if (s.carrying) {
-    const m = w.map;
-    const x = Math.round(s.x);
-    const y = Math.round(s.y);
-    if (m.inBounds(x, y) && m.owner[m.idx(x, y)] === s.owner) {
-      carryBack(w, s, s.carrying);
-    } else {
-      const to = homeLand(w, s);
-      if (to) {
-        s.tasks = [{ t: 'goto', x: to.x, y: to.y }];
-        return;
-      }
-      carryBack(w, s, s.carrying);
+    if (Math.round(s.x) !== home.x || Math.round(s.y) !== home.y) {
+      s.tasks = [{ t: 'goto', x: home.x, y: home.y }];
+      return;
     }
+    carryBack(w, s, s.carrying);
   }
   const e = s.errand;
-  const b = e?.b !== undefined ? w.buildings.get(e.b) : undefined;
-  if (b && robbable(w, b, s.owner)) {
-    s.tasks = [
-      { t: 'goto', x: b.door.x, y: b.door.y },
-      { t: 'steal', b: b.id, n: THIEF.stealTicks },
-    ];
-    return;
-  }
-  s.errand = null;
-  restIdle(w, s);
-}
-
-/** Where a thief takes loot no warehouse takes in: his player's home, else his nearest own building's door. */
-function homeLand(w: World, s: Settler): Point | null {
-  const m = w.map;
-  const home = w.homeOf(s.owner);
-  if (m.inBounds(home.x, home.y) && m.owner[m.idx(home.x, home.y)] === s.owner) return home;
-  let best: Point | null = null;
-  let bestD = Infinity;
-  for (const b of w.buildings.values()) {
-    if (b.owner !== s.owner || m.owner[m.idx(b.door.x, b.door.y)] !== s.owner) continue;
-    const d = Math.hypot(b.door.x - s.x, b.door.y - s.y);
-    if (d < bestD) {
-      best = b.door;
-      bestD = d;
-    }
-  }
-  return best;
+  if (!e) return restIdle(w, s);
+  const loot = lootAt(w, e.x, e.y, s.owner);
+  if (!loot) return finishErrand(s);
+  s.tasks = [
+    { t: 'goto', x: loot.x, y: loot.y },
+    { t: 'steal', x: loot.x, y: loot.y, n: THIEF.stealTicks },
+  ];
 }
 
 /**
- * `steal` task: after `n` ticks at the door, take one good and carry it to a warehouse at home that
- * takes it in; with none, he carries it onto his own land and puts it down there (`thiefIdle`), as
- * goods on the ground (`ground.ts`) his carriers then use like any pile.
+ * `steal` task: after `n` ticks at the stack, take one unit of it (if it is still there for him) and
+ * carry it home (`thiefIdle`).
  */
 export function stealTick(w: World, s: Settler, task: Extract<Task, { t: 'steal' }>): void {
-  const b = w.buildings.get(task.b);
-  if (!b || b.owner === s.owner || w.allied(b.owner, s.owner)) {
-    s.tasks.shift();
-    return;
-  }
   s.working = true;
   if (--task.n > 0) return;
   s.tasks.shift();
-  const res = lootOf(b);
-  if (!res) return;
-  const store = nearestStorage(w, s.owner, s, res);
-  b.output[res]--;
-  s.carrying = res;
-  if (!store) {
-    const to = homeLand(w, s);
-    s.tasks = to ? [{ t: 'goto', x: to.x, y: to.y }] : [];
-    return;
+  // The first stack still there for him at that very tile (a radius of 0).
+  const loot = lootAt(w, task.x, task.y, s.owner);
+  if (!loot || loot.x !== task.x || loot.y !== task.y) return;
+  if (loot.b !== undefined) {
+    const b = w.buildings.get(loot.b)!;
+    if (loot.from === 'output') b.output[loot.res]--;
+    else if (loot.from === 'input') b.input[loot.res]--;
+    else b.delivered[loot.res]--;
+  } else {
+    const i = w.map.idx(loot.x, loot.y);
+    reserveGoods(w, i);
+    if (!liftGoods(w, i, loot.res)) return;
   }
-  store.inbound[res]++;
-  s.tasks = [
-    { t: 'goto', x: store.door.x, y: store.door.y },
-    { t: 'drop', b: store.id, res },
-  ];
+  s.carrying = loot.res;
 }
 
 // ---------------------------------------------------------------- dismissal
@@ -569,6 +604,9 @@ export function prospectTick(w: World, s: Settler, task: Extract<Task, { t: 'pro
   w.map.signAt[i] = w.tick + 1;
   w.map.signBy[i] = s.owner;
   w.map.touch(i);
+  // Ore under his sign: his owner hears of it (Settlers 4 tells of a find), at most once a minute per ore.
+  const ore = oreOf(w.map.ore[i]);
+  if (ore && w.map.oreAmount[i] > 0) postMessage(w, 'oreFound', s.owner, task, { res: ore });
   if (s.errand) s.errand.n = (s.errand.n ?? 0) + 1;
   s.tasks.shift();
 }
@@ -614,11 +652,12 @@ export const SPECIALIST_ORDERS: Partial<Record<SettlerKind, SpecialistOrder>> = 
   },
   thief: {
     label: 'Украсть',
-    can: (w, _x, _y, b, player) => b !== undefined && robbable(w, b, player),
-    apply: (_w, s, _x, _y, b) => {
-      if (!b) return false;
-      s.errand = { x: b.door.x, y: b.door.y, b: b.id };
-      return true;
+    // At a building: its door; elsewhere the spot itself (goods lying there, on his own land too).
+    can: (w, x, y, b, player) => (b ? robbable(w, b, player) : lootAt(w, x, y, player) !== null),
+    apply: (w, s, x, y, b) => {
+      const at = b ? b.door : { x, y };
+      s.errand = { x: at.x, y: at.y };
+      return w.map.inBounds(at.x, at.y);
     },
   },
 };
@@ -669,6 +708,7 @@ export function orderSpecialists(
   let n = 0;
   for (const s of ownSpecialists(w, ids, player)) {
     clearSpecialist(w, s);
+    if (PROFESSIONS[s.kind].behavior === 'thief') orderedTo(w, s, b ? b.door.x : tx, b ? b.door.y : ty);
     const order = SPECIALIST_ORDERS[s.kind];
     if (order && order.can(w, tx, ty, b, player) && order.apply(w, s, tx, ty, b)) n++;
     else walkers.push(s);
@@ -688,6 +728,7 @@ export function holdSpecialists(w: World, ids: readonly number[], player: Player
   for (const s of units) {
     clearSpecialist(w, s);
     s.post = { x: Math.round(s.x), y: Math.round(s.y) };
+    if (PROFESSIONS[s.kind].behavior === 'thief') orderedTo(w, s, s.post.x, s.post.y);
   }
   return units.length;
 }

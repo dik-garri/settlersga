@@ -1,16 +1,18 @@
 import { centerOf } from './buildings';
 import { BUILDINGS, FOG, PROFESSIONS } from './config';
-import type { PlayerId } from './types';
+import type { Building, PlayerId } from './types';
 import type { World } from './world';
 
 /**
- * Fog of war, per player. `map.explored` (saved) remembers what a player has ever seen. What they
- * see right now is derived, never saved:
- * - `vision`: tiles within sight of the player's buildings (bit player − 1), rebuilt only when
- *   buildings or territory change;
+ * Fog of war, per player, as in Settlers 4 (`FOG`). `map.explored` (saved) remembers what a player has
+ * ever seen. What they see right now is derived, never saved:
+ * - `vision` (bit player − 1): all of the player's land plus a `FOG.landBand` band beyond its edge,
+ *   and the sight of his manned military buildings (`BuildingDef.sight`) and lookout towers (`vision`);
+ *   rebuilt only when buildings, territory or the manned sighted buildings change (`stale`);
  * - `seenUntil`: per player, the tick until which a tile stays in sight after a settler passed by;
  *   settlers stamp their surroundings every `FOG.settlerEvery` ticks.
- * Cost: O(settlers × disc) every few ticks plus O(map + buildings × disc) per building change.
+ * Cost: O(settlers × disc) every few ticks plus O(map + border × band + sighted buildings × disc) per
+ * change of buildings or land (no per-tick map work).
  * The AI reads only `explored` and building sight (`inBuildingSight`), both reproducible after a load.
  *
  * Allies share their sight: every query below tests the player's `sightMask` — its own bit and its
@@ -21,8 +23,7 @@ import type { World } from './world';
 export interface FogState {
   vision: Uint8Array;
   seenUntil: Uint32Array[];
-  /** `buildingsVersion` / `territoryVersion` the vision was built for. */
-  /** `buildingsVersion`, `territoryVersion` and `lookouts(w)` the vision was built for. */
+  /** `buildingsVersion`, `territoryVersion` and `sighted(w)` the vision was built for. */
   builtFor: [number, number, number];
 }
 
@@ -57,49 +58,85 @@ function stamp(w: World, cx: number, cy: number, r: number, visit: (i: number) =
   }
 }
 
-/** How far a building sees: its territory radius plus a margin, or a small default. */
+/** How far a building sees when it does: a lookout's `vision`, a military building's `sight` (else 0). */
 export function visionRadius(type: keyof typeof BUILDINGS): number {
   const def = BUILDINGS[type];
-  if (def.vision) return def.vision;
-  const t = def.territory;
-  return t ? t + FOG.territoryMargin : FOG.buildingRadius;
+  return def.vision ?? def.sight ?? 0;
+}
+
+/** Whether a finished building sees its `visionRadius` now: a lookout always, a military building while manned. */
+function seeing(b: Building): boolean {
+  const def = BUILDINGS[b.type];
+  if (!b.done) return false;
+  if (def.vision) return true;
+  return !!def.sight && (!def.garrison || b.garrison.length > 0);
 }
 
 function rebuildVision(w: World): void {
   const f = w.fog;
   const m = w.map;
-  if (f.vision.length !== m.w * m.h) f.vision = new Uint8Array(m.w * m.h);
-  else f.vision.fill(0);
+  const n = m.w * m.h;
+  if (f.vision.length !== n) f.vision = new Uint8Array(n);
+  const vision = f.vision;
+  const owner = m.owner;
+  const explored = m.explored;
+  // Own land, every tile of it (Settlers 4 `ClearDynamicFoggingAndCalcStatic`).
+  for (let i = 0; i < n; i++) {
+    const o = owner[i];
+    vision[i] = o === 0 ? 0 : 1 << (o - 1);
+  }
+  // The band beyond its edge: a disc round every border tile (a tile with a neighbour of another owner).
+  const band = disc(FOG.landBand);
+  for (let y = 0; y < m.h; y++) {
+    for (let x = 0; x < m.w; x++) {
+      const i = y * m.w + x;
+      const o = owner[i];
+      if (o === 0) continue;
+      const edge =
+        (x > 0 && owner[i - 1] !== o) ||
+        (x < m.w - 1 && owner[i + 1] !== o) ||
+        (y > 0 && owner[i - m.w] !== o) ||
+        (y < m.h - 1 && owner[i + m.w] !== o) ||
+        x === 0 || y === 0 || x === m.w - 1 || y === m.h - 1;
+      if (!edge) continue;
+      const bit = 1 << (o - 1);
+      for (let k = 0; k < band.length; k += 2) {
+        const tx = x + band[k];
+        const ty = y + band[k + 1];
+        if (tx >= 0 && ty >= 0 && tx < m.w && ty < m.h) vision[ty * m.w + tx] |= bit;
+      }
+    }
+  }
   for (const b of w.buildings.values()) {
+    if (!seeing(b)) continue;
     const bit = 1 << (b.owner - 1);
     const c = centerOf(b);
-    // Sites see only a little; a finished building its full range (territory changes trigger a rebuild).
-    stamp(w, c.x, c.y, b.done ? visionRadius(b.type) : FOG.buildingRadius, (i) => {
-      f.vision[i] |= bit;
-      m.explored[i] |= bit;
+    stamp(w, c.x, c.y, visionRadius(b.type), (i) => {
+      vision[i] |= bit;
     });
   }
-  f.builtFor = [w.buildingsVersion, w.territoryVersion, lookouts(w)];
+  for (let i = 0; i < n; i++) explored[i] |= vision[i];
+  f.builtFor = [w.buildingsVersion, w.territoryVersion, sighted(w)];
 }
 
-/** Building types with a sight of their own (`def.vision`, e.g. the lookout tower). */
-const SIGHTED = (Object.keys(BUILDINGS) as (keyof typeof BUILDINGS)[]).filter((t) => BUILDINGS[t].vision);
+/** Building types with a sight of their own (`vision` or `sight`). */
+const SIGHTED = (Object.keys(BUILDINGS) as (keyof typeof BUILDINGS)[]).filter((t) => visionRadius(t) > 0);
 
 /**
- * Finished buildings with a sight of their own: finishing one widens its sight without touching the
- * territory, so it must also make the vision stale. Cheap: a pass over the buildings only when such
- * types exist.
+ * A signature of the buildings seeing now (their ids, summed): manning or emptying a tower, or
+ * finishing a lookout, widens or narrows sight without touching the buildings or the land, so it
+ * must also make the vision stale. A pass over the buildings per tick, only when such types exist.
  */
-function lookouts(w: World): number {
+function sighted(w: World): number {
   if (SIGHTED.length === 0) return 0;
-  let n = 0;
-  for (const b of w.buildings.values()) if (b.done && BUILDINGS[b.type].vision) n++;
-  return n;
+  let sig = 0;
+  for (const b of w.buildings.values()) if (seeing(b)) sig += b.id * 2654435761 % 4294967291;
+  return sig;
 }
 
 function stale(w: World): boolean {
   const f = w.fog;
-  return f.builtFor[0] !== w.buildingsVersion || f.builtFor[1] !== w.territoryVersion || f.builtFor[2] !== lookouts(w);
+  return f.builtFor[0] !== w.buildingsVersion || f.builtFor[1] !== w.territoryVersion || f.builtFor[2] !== sighted(w);
 }
 
 /** Rebuilds the building vision if it is stale (e.g. right after a load); cheap otherwise. */

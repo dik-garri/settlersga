@@ -379,12 +379,19 @@ export function buildShowcase(): World {
   const open = openGround(w, c.door.x - 5, c.door.y + 5);
   const field = formationSpots(w, open.x, open.y, 1)[0];
   if (field) w.orderMove(squad, field.x, field.y);
-  // A few wounded in the start tower and the first towers: they walk to the infirmary and lie there
-  // while the demo opens.
-  const garrisons = [...w.buildings.values()].filter((b) => b.owner === LOCAL_PLAYER && b.garrison.length > 1);
-  for (const id of garrisons.slice(0, 3).map((b) => b.garrison[b.garrison.length - 1])) {
-    const s = w.getSettler(id);
-    if (s) s.hp = 8;
+  // A few wounded free fighters by the infirmary (Settlers 4's healer's hut): its healer calls them
+  // to its door one at a time and heals them there while the demo opens.
+  const infirmary = [...w.buildings.values()].find((b) => b.owner === LOCAL_PLAYER && b.type === 'infirmary' && b.done);
+  if (infirmary) {
+    (['soldier', 'archer', 'soldier'] as const).forEach((kind, k) => {
+      const s = spawnSettler(w, kind, c);
+      s.hp = 8 + 6 * k;
+      s.inside = null;
+      s.home = null;
+      const at = formationSpots(w, infirmary.door.x + 2, infirmary.door.y + 2, 3)[k] ?? infirmary.door;
+      s.x = s.px = at.x;
+      s.y = s.py = at.y;
+    });
   }
   // Long enough for the squad to reach its formation at Settlers 4's walking pace.
   run(w, 450);

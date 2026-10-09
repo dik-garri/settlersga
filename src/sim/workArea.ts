@@ -7,13 +7,15 @@ import type { World } from './world';
  * Work areas, as in Settlers 4: a gatherer, planter or hunter works within a radius of its hut's
  * door — or of a centre the player moved it to (`Building.workAt`, saved); a mine digs within a
  * radius of its centre (fixed: the ore lies under the mountain). The radius comes from the data
- * (`PROFESSIONS[worker].gather/plant/hunt.radius`, `BUILDINGS[type].mine.radius`).
+ * (`PROFESSIONS[worker].gather/plant/hunt.radius`, `BUILDINGS[type].mine.radius`, `.infirmary.radius`).
  */
 
 /** The work radius of a building type, or null if its worker does not work an area. */
 export function workRadius(type: BuildingType): number | null {
   const def = BUILDINGS[type];
   if (def.mine) return def.mine.radius;
+  // The infirmary looks for patients round its work centre (`infirmary.ts`).
+  if (def.infirmary) return def.infirmary.radius;
   const prof = def.worker ? PROFESSIONS[def.worker] : undefined;
   if (!prof) return null;
   const r = Math.max(prof.gather?.radius ?? 0, prof.plant?.radius ?? 0, prof.hunt?.radius ?? 0);

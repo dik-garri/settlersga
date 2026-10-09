@@ -92,6 +92,18 @@ export interface AiState {
    * the cut-off sites seen at the last check (demolished if still empty at the next).
    */
   trade?: { anchor: number; home: number; away: number; nextCheck: number; stuck: number[] };
+  /**
+   * Its military buildings at the last think (ids): one of them in an enemy's hands now was taken from
+   * it, and it strikes back (`counterAttack`).
+   */
+  held?: number[];
+  /** A building taken from it that it is striking back at, until the tick it gives up. */
+  counter?: { b: number; until: number };
+  /**
+   * Settlers 4's attack trigger (`AI.s4Attack`): the chance (per cent) of the next roll, and the tick
+   * of that roll; `ready` once a roll came up — it attacks at the next chance, then it starts over.
+   */
+  trigger?: { chance: number; next: number; ready: boolean };
   stats: {
     placed: number;
     attacks: number;
@@ -106,6 +118,8 @@ export interface AiState {
     hunts?: number;
     defended?: number;
     traded?: number;
+    /** Counterattacks on buildings taken from it. */
+    counters?: number;
   };
 }
 
@@ -208,7 +222,7 @@ function think(w: World, ai: AiState): void {
   }
   if (AI.fieldDefense) defend(w, ai, own);
   hunt(w, ai, own);
-  const attacked = attackIfStrong(w, ai);
+  const attacked = counterAttack(w, ai, own) || attackIfStrong(w, ai);
   scoutIfStuck(w, ai, own);
   muster(w, ai, own, frontline(w, me, own), rallyPoint(w, me, own));
   tradeCheck(w, ai, own);
@@ -220,6 +234,7 @@ function think(w: World, ai: AiState): void {
   const sites = own.filter((b) => !b.done);
   if (sites.length >= tuning(ai).maxOpenSites) return;
   const ctx = new Context(w, me, own, ai.wantOre);
+  ctx.rally = ai.rally ?? null;
   if (placeTrade(ctx, ai)) return;
   if (siege(ctx, ai)) return;
 
@@ -770,6 +785,74 @@ function knownCastles(w: World, me: PlayerId): Map<PlayerId, { b: Building; last
 }
 
 /**
+ * Settlers 4's counterattack (`CAITaskForce`: up to ten squads against whoever took a building): a
+ * military building of its own now in an enemy's hands (it knows where — it stood there) is attacked
+ * at once, with up to `AI.counterAttackers` fighters in range (`World.attack`), every
+ * `AI.counterEvery` ticks while the enemy holds it, for at most `AI.counterTicks` — peace time and the
+ * attack cooldown do not hold it back. True if it attacked now.
+ */
+function counterAttack(w: World, ai: AiState, own: Building[]): boolean {
+  const me = ai.player;
+  const held = own.filter((b) => b.done && isMilitary(b)).map((b) => b.id);
+  for (const id of ai.held ?? []) {
+    const b = w.buildings.get(id);
+    if (b && b.owner !== me && !w.allied(b.owner, me) && !held.includes(id)) {
+      ai.counter = { b: id, until: w.tick + AI.counterTicks };
+    }
+  }
+  ai.held = held;
+  const c = ai.counter;
+  if (!c) return false;
+  const target = w.buildings.get(c.b);
+  if (!target || w.allied(target.owner, me) || w.isDefeated(target.owner) || w.tick > c.until) {
+    delete ai.counter;
+    return false;
+  }
+  if (w.tick - ai.lastAttack < AI.counterEvery) return false;
+  const ready = w.attackerComposition(target.id, AI.counterAttackers, me);
+  if (!ready.some((s) => PROFESSIONS[s.kind].combat?.captures && !PROFESSIONS[s.kind].combat?.fieldOnly)) return false;
+  const sent = w.attack(target.id, ready.length, me);
+  if (sent === 0) return false;
+  ai.lastAttack = w.tick;
+  ai.lastTarget = target.id;
+  ai.stats.counters = (ai.stats.counters ?? 0) + 1;
+  ai.stats.soldiersSent += sent;
+  return true;
+}
+
+/**
+ * Settlers 4's attack trigger (`CAIAttack…`, docs/S4-AUDIT.md item 29), with `AI.s4Attack`: no attack
+ * with fewer than `minFighters` fighters of its own; every `every[0]`–`every[1]` ticks a roll comes up
+ * with `start` per cent, `step` more after each miss up to `max`. Our AI has no random numbers of its
+ * own: the roll is a hash of the tick, the player and its attacks so far (deterministic, saved state).
+ * Once a roll came up it may attack (the usual target choice and strength check), and the chance
+ * starts over after the attack.
+ */
+export function attackTriggered(w: World, ai: AiState): boolean {
+  const cfg = AI.s4Attack;
+  if (!cfg) return true;
+  const t = (ai.trigger ??= { chance: cfg.start, next: w.tick, ready: false });
+  if (t.ready) return true;
+  if (w.tick < t.next) return false;
+  let fighters = 0;
+  for (const s of w.settlers) if (s.owner === ai.player && isFighter(s) && !w.dying.has(s.id)) fighters++;
+  const h = hash3(w.tick, ai.player, ai.stats.attacks);
+  t.next = w.tick + cfg.every[0] + (h % (cfg.every[1] - cfg.every[0] + 1));
+  if (fighters < cfg.minFighters) return false;
+  if ((h >>> 8) % 100 < t.chance) t.ready = true;
+  else t.chance = Math.min(cfg.max, t.chance + cfg.step);
+  return t.ready;
+}
+
+/** A small integer hash (deterministic, no state): the AI's stand-in for S4's random roll. */
+function hash3(a: number, b: number, c: number): number {
+  let h = Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 0x632be5ab, 0xc2b2ae35) ^ Math.imul(c + 0x27d4eb2f, 0x165667b1);
+  h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
+  h = Math.imul(h ^ (h >>> 12), 0x297a2d39);
+  return (h ^ (h >>> 15)) >>> 0;
+}
+
+/**
  * Sends every spare soldier in range against the best known enemy military building: one it clearly
  * outnumbers (party strength against what it can see of the defence), preferring the castle, then
  * targets that bring it closer to an enemy castle (its siege buildings are staged there), then ones
@@ -785,6 +868,7 @@ function attackIfStrong(w: World, ai: AiState): boolean {
   if (w.tick - ai.lastAttack < (pressing ? AI.followUpCooldown : t.attackCooldown)) return true;
   // No rush: the early game is for building up.
   if (w.tick < t.peaceTicks) return false;
+  if (!attackTriggered(w, ai)) return false;
   const known = knownEnemies(w, me);
   const castles = knownCastles(w, me);
   // Where each enemy's castle is (or presumably is): attacks work towards it.
@@ -846,6 +930,7 @@ function attackIfStrong(w: World, ai: AiState): boolean {
   ai.lastTarget = target.id;
   ai.stats.attacks++;
   ai.stats.soldiersSent += sent;
+  if (ai.trigger) ai.trigger = { chance: AI.s4Attack?.start ?? 0, next: ai.trigger.next, ready: false };
   return true;
 }
 
@@ -1025,6 +1110,8 @@ class Context {
   private readonly pieces: Set<number>;
   /** Set while placing a market on a cut-off piece: only that piece then. */
   onPiece = 0;
+  /** Where its free fighters gather (`AiState.rally`): its infirmary goes near it. */
+  rally: Point | null = null;
 
   constructor(
     readonly w: World,
@@ -1320,6 +1407,11 @@ class Context {
       return fromCastle - enemy * 0.4 + this.unclaimedResources(cx, cy, reach) * 0.15;
     }
 
+    if (def.infirmary && this.rally) {
+      // An infirmary heals free fighters in the open (`infirmary.ts`): next to where they gather.
+      const d = Math.hypot(this.rally.x - cx, this.rally.y - cy);
+      return d <= def.infirmary.radius ? -d : -d - fromCastle;
+    }
     const worker = def.worker ? PROFESSIONS[def.worker] : undefined;
     const gather = gatheredBy(type);
     if (gather && worker?.behavior === 'gather') {

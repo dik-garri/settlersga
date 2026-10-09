@@ -1,69 +1,197 @@
 import { wareIcon } from '../render/atlas';
 import { BUILDINGS, PROFESSIONS, RESOURCE_INFO, TICKS_PER_SECOND } from '../sim/config';
-import { RESOURCES, type BuildingType, type SettlerKind, type Stock } from '../sim/types';
+import { isFighter } from '../sim/military';
+import { scoreOf } from '../sim/score';
+import { RESOURCES, type BuildingType, type PlayerId, type SettlerKind, type Stock } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { el, type View } from './dom';
 
+/** What each player looks like at a sample (Settlers 4's land and fighters statistics). */
+interface PlayerSample {
+  land: number;
+  settlers: number;
+  fighters: number;
+  killed: number;
+  fallen: number;
+  captured: number;
+  lost: number;
+}
+
+interface Sample {
+  tick: number;
+  produced: Stock;
+  /** The local player's kills and losses by kind. */
+  killed: Partial<Record<SettlerKind, number>>;
+  fallen: Partial<Record<SettlerKind, number>>;
+  players: Record<PlayerId, PlayerSample>;
+}
+
+/** Samples kept: one a game minute, ten hours. */
+const MAX_SAMPLES = 600;
+
+const sum = (r: Partial<Record<SettlerKind, number>> | undefined) => Object.values(r ?? {}).reduce((n, k) => n + (k ?? 0), 0);
+
 /**
- * The statistics menu: production over the last minutes and in total, population by profession and
- * buildings by type. `stats.produced` is sampled once per game minute (UI-only history).
+ * The statistics menu, after Settlers 4's: production, the fighters (own losses and enemies killed by
+ * kind) and every player's land, people, fighters, kills and losses, buildings taken and lost — each
+ * over the time chosen with the slider (minutes back, sampled once per game minute) and in all — plus
+ * population by profession, buildings by type and the score so far (`scoreOf`).
  */
 export class StatsView implements View {
   readonly el = el('div', 'view stats-view');
-  /** `stats.produced` sampled once per game minute, newest last (for "last 10 minutes"). */
-  private readonly history: Stock[] = [];
+  /** Samples once per game minute, newest last. */
+  private readonly history: Sample[] = [];
   private lastSampleTick = -Infinity;
   private lastRender = -Infinity;
+  /** Minutes back the window spans (the slider). */
+  private minutes = 10;
+  private readonly slider = el('input', 'stats-slider');
+  private readonly sliderLabel = el('span', 'stats-window');
+  private readonly body = el('div', 'stats-body');
 
-  constructor(private readonly world: World) {}
+  constructor(private readonly world: World) {
+    this.slider.type = 'range';
+    this.slider.min = '1';
+    this.slider.value = String(this.minutes);
+    this.slider.title = 'За сколько последних минут считать';
+    this.slider.oninput = () => {
+      this.minutes = Number(this.slider.value);
+      this.lastRender = -Infinity;
+      this.update(performance.now());
+    };
+    const bar = el('div', 'stats-bar');
+    bar.append(el('span', '', 'Окно:'), this.slider, this.sliderLabel);
+    this.el.append(bar, this.body);
+  }
 
   /** Keeps the minute samples going even while the view is hidden. */
   sample(): void {
     const { world } = this;
     if (world.tick - this.lastSampleTick < TICKS_PER_SECOND * 60) return;
     this.lastSampleTick = world.tick;
-    this.history.push({ ...world.stats.produced });
-    if (this.history.length > 11) this.history.shift();
+    this.history.push(this.snapshot());
+    if (this.history.length > MAX_SAMPLES) this.history.shift();
+  }
+
+  private snapshot(): Sample {
+    const { world } = this;
+    const players: Record<PlayerId, PlayerSample> = {};
+    for (const p of world.players) {
+      const war = world.stats.war[p.id];
+      players[p.id] = {
+        land: 0,
+        settlers: 0,
+        fighters: 0,
+        killed: sum(war?.killed),
+        fallen: sum(war?.fallen),
+        captured: war?.captured ?? 0,
+        lost: war?.lostBuildings ?? 0,
+      };
+    }
+    for (const o of world.map.owner) if (o !== 0 && players[o]) players[o].land++;
+    for (const s of world.settlers) {
+      const p = players[s.owner];
+      if (!p || world.dying.has(s.id)) continue;
+      if (isFighter(s)) p.fighters++;
+      else p.settlers++;
+    }
+    const mine = world.stats.war[LOCAL_PLAYER];
+    return {
+      tick: world.tick,
+      produced: { ...world.stats.produced },
+      killed: { ...mine?.killed },
+      fallen: { ...mine?.fallen },
+      players,
+    };
   }
 
   update(nowMs: number): void {
     if (nowMs - this.lastRender < 1000) return;
     this.lastRender = nowMs;
     const { world } = this;
-    const total = world.stats.produced;
-    const old = this.history[0] ?? total;
-    const minutes = Math.max(1, this.history.length - 1);
-    this.el.innerHTML = '';
-    this.el.append(el('h4', '', `Производство (за ${minutes} мин / всего)`));
+    const now = this.snapshot();
+    const span = Math.max(1, this.history.length);
+    this.slider.max = String(span);
+    this.minutes = Math.min(this.minutes, span);
+    this.slider.value = String(this.minutes);
+    const old = this.history[this.history.length - this.minutes] ?? this.history[0] ?? now;
+    const minutes = Math.max(1, Math.round((now.tick - old.tick) / (TICKS_PER_SECOND * 60)));
+    this.sliderLabel.textContent = `${minutes} мин`;
+    const body = this.body;
+    body.innerHTML = '';
+    const row = (name: string, value: string, icon?: HTMLElement) => {
+      const r = el('span', 'stock-row');
+      if (icon) r.append(icon);
+      r.append(el('span', 'stock-name', name), el('b', '', value));
+      return r;
+    };
+
+    body.append(el('h4', '', `Производство (за ${minutes} мин / всего)`));
     const grid = el('div', 'stats-grid');
     for (const r of RESOURCES) {
-      if (total[r] === 0) continue;
-      const row = el('span', 'stock-row');
-      row.append(wareIcon(r, 16), el('span', 'stock-name', RESOURCE_INFO[r].name), el('b', '', `${total[r] - old[r]} / ${total[r]}`));
-      grid.append(row);
+      if (now.produced[r] === 0) continue;
+      grid.append(row(RESOURCE_INFO[r].name, `${now.produced[r] - old.produced[r]} / ${now.produced[r]}`, wareIcon(r, 16)));
     }
-    this.el.append(grid);
+    body.append(grid);
 
-    const kinds = new Map<SettlerKind, number>();
-    for (const s of world.settlers) if (s.owner === LOCAL_PLAYER) kinds.set(s.kind, (kinds.get(s.kind) ?? 0) + 1);
-    this.el.append(el('h4', '', 'Население'));
-    const people = el('div', 'stats-grid');
-    for (const [kind, n] of [...kinds].sort((a, b) => b[1] - a[1])) {
-      const row = el('span', 'stock-row');
-      row.append(el('span', 'stock-name', PROFESSIONS[kind].name), el('b', '', String(n)));
-      people.append(row);
+    // Settlers 4's fighters statistics: enemies killed and own losses by kind.
+    const kinds = new Set([...Object.keys(now.killed), ...Object.keys(now.fallen)] as SettlerKind[]);
+    body.append(el('h4', '', `Бои: убито врагов / свои потери (за ${minutes} мин / всего)`));
+    if (kinds.size === 0) body.append(el('p', 'muted', 'Боёв ещё не было.'));
+    else {
+      const war = el('table', 'stats-table');
+      const head = el('tr');
+      for (const h of ['', 'Убито', 'Потеряно']) head.append(el('th', '', h));
+      war.append(head);
+      const cell = (a: number | undefined, b: number | undefined) => `${(a ?? 0) - (b ?? 0)} / ${a ?? 0}`;
+      for (const k of [...kinds].sort()) {
+        const tr = el('tr');
+        tr.append(el('td', '', PROFESSIONS[k].name), el('td', '', cell(now.killed[k], old.killed[k])), el('td', '', cell(now.fallen[k], old.fallen[k])));
+        war.append(tr);
+      }
+      body.append(war);
     }
-    this.el.append(people);
+
+    // Every player (Settlers 4 shows them all): land and people now (change over the window), war in the window / all.
+    body.append(el('h4', '', 'Игроки'));
+    const table = el('table', 'stats-table');
+    const head = el('tr');
+    for (const h of ['', 'Земля', 'Посел.', 'Бойцы', 'Убито', 'Потери', 'Взято', 'Отдано', 'Счёт']) head.append(el('th', '', h));
+    table.append(head);
+    const delta = (a: number, b: number) => (a - b > 0 ? `+${a - b}` : a - b < 0 ? String(a - b) : '±0');
+    for (const p of world.players) {
+      const n = now.players[p.id];
+      const o = old.players[p.id] ?? n;
+      const tr = el('tr', p.id === LOCAL_PLAYER ? 'mine' : '');
+      const name = p.id === LOCAL_PLAYER ? 'Вы' : `Игрок ${p.id}${world.isDefeated(p.id) ? ' †' : ''}`;
+      tr.append(
+        el('td', '', name),
+        el('td', '', `${n.land} (${delta(n.land, o.land)})`),
+        el('td', '', `${n.settlers} (${delta(n.settlers, o.settlers)})`),
+        el('td', '', `${n.fighters} (${delta(n.fighters, o.fighters)})`),
+        el('td', '', `${n.killed - o.killed} / ${n.killed}`),
+        el('td', '', `${n.fallen - o.fallen} / ${n.fallen}`),
+        el('td', '', `${n.captured - o.captured} / ${n.captured}`),
+        el('td', '', `${n.lost - o.lost} / ${n.lost}`),
+        el('td', '', String(scoreOf(world, p.id).total)),
+      );
+      table.append(tr);
+    }
+    table.title = 'Земля — клеток; «Взято»/«Отдано» — военные здания; счёт — формула Settlers 4';
+    body.append(table);
+
+    const people = new Map<SettlerKind, number>();
+    for (const s of world.settlers) if (s.owner === LOCAL_PLAYER) people.set(s.kind, (people.get(s.kind) ?? 0) + 1);
+    body.append(el('h4', '', 'Население'));
+    const pop = el('div', 'stats-grid');
+    for (const [kind, n] of [...people].sort((a, b) => b[1] - a[1])) pop.append(row(PROFESSIONS[kind].name, String(n)));
+    body.append(pop);
 
     const types = new Map<BuildingType, number>();
     for (const b of world.buildings.values()) if (b.owner === LOCAL_PLAYER) types.set(b.type, (types.get(b.type) ?? 0) + 1);
-    this.el.append(el('h4', '', 'Здания'));
+    body.append(el('h4', '', 'Здания'));
     const houses = el('div', 'stats-grid');
-    for (const [type, n] of [...types].sort((a, b) => b[1] - a[1])) {
-      const row = el('span', 'stock-row');
-      row.append(el('span', 'stock-name', BUILDINGS[type].name), el('b', '', String(n)));
-      houses.append(row);
-    }
-    this.el.append(houses);
+    for (const [type, n] of [...types].sort((a, b) => b[1] - a[1])) houses.append(row(BUILDINGS[type].name, String(n)));
+    body.append(houses);
   }
 }

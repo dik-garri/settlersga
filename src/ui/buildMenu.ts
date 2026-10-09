@@ -1,15 +1,17 @@
 import { buildingIcon, wareIcon } from '../render/atlas';
 import { BUILDINGS, CATEGORIES, costOf, type Category } from '../sim/config';
-import { RESOURCES, type BuildingType } from '../sim/types';
+import { RESOURCES, type Building, type BuildingType } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { el, type View } from './dom';
+import { nextBuildingOfType } from './find';
 import type { GameState, Placeable } from './state';
 
 /**
  * The build menu of the side panel, laid out like Settlers 4's: a row of category buttons (each shows
  * a building of its tab), then a two-column grid of building pictures with how many the player has
  * (finished, and sites in brackets), the name and the cost. Digits pick the n-th building of the open
- * category, Tab cycles categories.
+ * category, Tab cycles categories. A right click on a building jumps to the player's next building
+ * (or site) of that type, as in Settlers 4.
  */
 
 /** Player-buildable types per build-menu category. */
@@ -37,11 +39,14 @@ export class BuildView implements View {
   private readonly buttons = new Map<BuildingType, { b: HTMLButtonElement; count: HTMLElement }>();
   private readonly title = el('h4', 'view-sub');
   private tab = 0;
+  /** The building the last right click jumped to (the next one comes after it). */
+  private lastFound: number | null = null;
 
   constructor(
     private readonly world: World,
     private readonly state: GameState,
     private readonly select: (type: Placeable | null) => void,
+    private readonly focus: (b: Building) => void,
   ) {
     const tabs = el('div', 'cat-tabs');
     MENU.forEach(({ category, types }, t) => {
@@ -57,7 +62,7 @@ export class BuildView implements View {
       const grid = el('div', 'build-grid');
       types.forEach((type, i) => {
         const b = el('button', 'build-btn');
-        b.title = `${BUILDINGS[type].name} [${i + 1}]`;
+        b.title = `${BUILDINGS[type].name} [${i + 1}] · ПКМ — к вашему зданию этого типа`;
         const count = el('span', 'build-count', '0');
         const pic = el('span', 'build-pic');
         pic.append(buildingIcon(type, 58));
@@ -67,6 +72,14 @@ export class BuildView implements View {
         b.onclick = () => {
           this.select(this.state.placing === type ? null : type);
           b.blur();
+        };
+        b.oncontextmenu = (e) => {
+          e.preventDefault();
+          const next = nextBuildingOfType(this.world, type, this.lastFound);
+          if (!next) return;
+          this.lastFound = next.id;
+          this.select(null);
+          this.focus(next);
         };
         grid.append(b);
         this.buttons.set(type, { b, count });

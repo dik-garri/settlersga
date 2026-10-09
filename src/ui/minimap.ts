@@ -1,8 +1,19 @@
 import type { Camera } from '../render/camera';
 import { toScreen, toTile } from '../render/iso';
 import { TERRAIN } from '../sim/config';
+import { isFighter } from '../sim/military';
 import { Terrain } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
+import { PLAYER_COLORS } from '../render/sprites';
+
+/** What the minimap shows (Settlers 4's minimap switches); land is the territory tint of the overview. */
+export type MinimapLayer = 'buildings' | 'fighters' | 'settlers' | 'land';
+const LAYERS: { id: MinimapLayer; label: string; title: string }[] = [
+  { id: 'buildings', label: '⌂', title: 'Здания' },
+  { id: 'fighters', label: '⚔', title: 'Бойцы' },
+  { id: 'settlers', label: '☺', title: 'Поселенцы' },
+  { id: 'land', label: '▦', title: 'Земля (границы владений)' },
+];
 
 /** Terrain and trees are re-rasterised about this often (ms), a slice of rows per frame; buildings and the view frame every frame. */
 const BASE_EVERY = 2000;
@@ -14,6 +25,11 @@ const BASE_EVERY = 2000;
  */
 export class Minimap {
   readonly el: HTMLCanvasElement;
+  /** The layer switches under the map (Settlers 4: buildings, fighters, settlers, land). */
+  readonly controls: HTMLElement;
+  /** The map and its switches, as framed in the side panel. */
+  readonly box: HTMLElement;
+  readonly layers: Record<MinimapLayer, boolean> = { buildings: true, fighters: true, settlers: false, land: true };
   private readonly ctx: CanvasRenderingContext2D;
   private readonly base: HTMLCanvasElement;
   private readonly baseCtx: CanvasRenderingContext2D;
@@ -55,7 +71,30 @@ export class Minimap {
     this.baseCtx = this.base.getContext('2d')!;
     this.image = this.baseCtx.createImageData(w, h);
     this.el.addEventListener('pointerdown', (e) => this.jump(e));
+    this.controls = document.createElement('div');
+    this.controls.className = 'mm-layers';
+    for (const l of LAYERS) {
+      const b = document.createElement('button');
+      b.textContent = l.label;
+      b.title = `${l.title}: показать/скрыть`;
+      b.classList.toggle('active', this.layers[l.id]);
+      b.onclick = () => {
+        this.setLayer(l.id, !this.layers[l.id]);
+        b.classList.toggle('active', this.layers[l.id]);
+        b.blur();
+      };
+      this.controls.append(b);
+    }
+    this.box = document.createElement('div');
+    this.box.className = 'mm-box';
+    this.box.append(this.el, this.controls);
     this.rasterize(0, world.map.h);
+  }
+
+  /** Turns a layer on or off (the land tint at once: the overview is re-rasterised). */
+  setLayer(layer: MinimapLayer, on: boolean): void {
+    this.layers[layer] = on;
+    if (layer === 'land') this.rasterize(0, this.world.map.h);
   }
 
   private jump(e: PointerEvent): void {
@@ -76,12 +115,19 @@ export class Minimap {
       else if (map.crop[i]) [r, g, b] = [184, 160, 80];
       // Higher ground is brighter, so mountains read on the overview too.
       let light = 0.85 + Math.min(1, map.heightAt(i % map.w, Math.floor(i / map.w)) / 100) * 0.45;
-      if (map.owner[i] !== LOCAL_PLAYER) light *= 0.6;
+      const land = this.layers.land;
+      if (land && map.owner[i] !== LOCAL_PLAYER) light *= 0.6;
       r = Math.min(255, r * light);
       g = Math.min(255, g * light);
       b = Math.min(255, b * light);
-      // Another player's land gets a red cast.
-      if (map.owner[i] !== LOCAL_PLAYER && map.owner[i] !== 0) r = Math.min(255, r + 70);
+      // Another player's land gets a cast of his colour.
+      const o = map.owner[i];
+      if (land && o !== LOCAL_PLAYER && o !== 0) {
+        const c = parseInt(PLAYER_COLORS[(o - 1) % PLAYER_COLORS.length].slice(1), 16);
+        r = Math.min(255, r * 0.6 + ((c >> 16) & 255) * 0.45);
+        g = Math.min(255, g * 0.6 + ((c >> 8) & 255) * 0.45);
+        b = Math.min(255, b * 0.6 + (c & 255) * 0.45);
+      }
       if (this.fogOn) {
         const x = i % map.w;
         const y = (i - x) / map.w;
@@ -120,11 +166,26 @@ export class Minimap {
     ctx.drawImage(this.base, -0.5, -0.5);
     ctx.restore();
 
-    for (const b of this.world.buildings.values()) {
-      if (this.fogOn && b.owner !== LOCAL_PLAYER && !this.world.isExplored(b.door.x, b.door.y, LOCAL_PLAYER)) continue;
-      const [x, y] = this.point(b.x + (b.w - 1) / 2, b.y + (b.h - 1) / 2);
-      ctx.fillStyle = b.owner === LOCAL_PLAYER ? '#ffe08a' : '#e05a4a';
-      ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+    if (this.layers.buildings) {
+      for (const b of this.world.buildings.values()) {
+        if (this.fogOn && b.owner !== LOCAL_PLAYER && !this.world.isExplored(b.door.x, b.door.y, LOCAL_PLAYER)) continue;
+        const [x, y] = this.point(b.x + (b.w - 1) / 2, b.y + (b.h - 1) / 2);
+        ctx.fillStyle = b.owner === LOCAL_PLAYER ? '#ffe08a' : '#e05a4a';
+        ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+      }
+    }
+    if (this.layers.fighters || this.layers.settlers) {
+      // Outdoor settlers as dots, other players' only where the local player sees (fog).
+      for (const s of this.world.settlers) {
+        if (s.inside !== null) continue;
+        const fighter = isFighter(s);
+        if (fighter ? !this.layers.fighters : !this.layers.settlers) continue;
+        if (this.fogOn && s.owner !== LOCAL_PLAYER && !this.world.isVisible(Math.round(s.x), Math.round(s.y), LOCAL_PLAYER)) continue;
+        const [x, y] = this.point(s.x, s.y);
+        ctx.fillStyle = fighter ? PLAYER_COLORS[(s.owner - 1) % PLAYER_COLORS.length] : s.owner === LOCAL_PLAYER ? '#f4f0e0' : '#c8b8a8';
+        const r = fighter ? 1.2 : 0.8;
+        ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
+      }
     }
 
     const v = this.camera.viewRect(viewW, viewH);

@@ -7,7 +7,7 @@
 import { settlerIcon } from '../render/atlas';
 import { BUILDINGS, LEVEL_RES, OUTPUT_SHARES, PROFESSIONS, RESOURCE_INFO } from '../sim/config';
 import { ENDLESS } from '../sim/economy';
-import { FIGHTERS, doorHp, garrisonCounts, isFighter, isFreeFighter, recruitNeeds, slotsOf } from '../sim/military';
+import { FIGHTERS, doorHp, garrisonCounts, isFighter, isFreeFighter, maxHp, recruitNeeds, slotsOf } from '../sim/military';
 import { RESOURCES, type Building, type Resource, type SettlerKind } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { button, el, type View } from './dom';
@@ -164,17 +164,28 @@ export function recruitKey(w: World): string {
   return FIGHTERS.map((k) => PROFESSIONS[k].combat!.levels.map((_, l) => w.recruitOrder(k, l)).join(',')).join('|');
 }
 
-/** Worker-less army buildings without a garrison: the lookout tower and the infirmary. */
+/** Army buildings without a garrison: the lookout tower and the infirmary (Settlers 4's healer's hut). */
 export function supportRows(w: World, b: Building): Rows | null {
   const def = BUILDINGS[b.type];
-  if (def.vision) return [['Обзор', `${def.vision} клеток`]];
-  if (def.infirmary) {
-    const inBed = w.settlers.filter((s) => s.inside === b.id && s.tasks.some((t) => t.t === 'heal' && t.b === b.id));
-    const coming = w.settlers.filter((s) => s.inside !== b.id && s.tasks.some((t) => t.t === 'heal' && t.b === b.id));
+  const keeper = w.getSettler(b.workerId);
+  const inside = !!keeper && keeper.inside === b.id;
+  if (def.vision) {
     return [
-      ['Койки', `${inBed.length} / ${def.infirmary.beds}`],
-      ['Идут лечиться', String(coming.length)],
-      ['Радиус', `${def.infirmary.range} клеток`],
+      ['Обзор', `${def.vision} клеток`],
+      ['Дозорный', inside ? (b.alarm ? 'тревога: враг рядом!' : 'на посту') : 'нет — тревоги не будет'],
+    ];
+  }
+  if (def.infirmary) {
+    const p = b.patient !== undefined ? w.getSettler(b.patient) : undefined;
+    const t = p?.tasks.find((k) => k.t === 'heal' && k.b === b.id);
+    const atDoor = !!p && p.tasks[0] === t;
+    return [
+      ['Лекарь', inside ? 'на месте' : 'нет — никого не лечат'],
+      [
+        'Пациент',
+        p ? `${PROFESSIONS[p.kind].name}: ${Math.round(p.hp)} / ${maxHp(p)}${atDoor ? '' : ' (идёт)'}` : 'нет',
+      ],
+      ['Зона поиска', `${def.infirmary.radius} клеток`],
     ];
   }
   return null;

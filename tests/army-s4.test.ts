@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { knownEnemies } from '../src/sim/ai';
-import { centerOf, spawnSettler } from '../src/sim/buildings';
+import { addBuilding, centerOf, spawnSettler } from '../src/sim/buildings';
 import { BUILDINGS, FOG, PROFESSIONS, SOLDIER_LEVELS } from '../src/sim/config';
 import { enterGarrison, isArcher, isFighter, killSettler, maxHp, slotsFree } from '../src/sim/military';
 import { ENDLESS } from '../src/sim/economy';
@@ -202,39 +202,83 @@ describe('capture (Settlers 4)', () => {
   });
 });
 
-describe('infirmary', () => {
-  it('wounded fighters heal only in an infirmary, then their tower calls them back', () => {
+describe('infirmary (Settlers 4 healer\'s hut)', () => {
+  /** A finished infirmary near the start with its healer inside (test setup). */
+  function infirmary(w: World): Building {
+    const at = base(w);
+    for (let d = 3; d < 12; d++) {
+      for (let y = at.y - d; y <= at.y + d; y++) {
+        for (let x = at.x + 4 - d; x <= at.x + 4 + d; x++) {
+          if (!w.canPlace('infirmary', x, y)) continue;
+          const b = addBuilding(w, 'infirmary', x, y, 1, true);
+          const h = spawnSettler(w, 'healer', b);
+          h.home = b.id;
+          b.workerId = h.id;
+          return b;
+        }
+      }
+    }
+    throw new Error('no room');
+  }
+
+  /** A wounded free archer standing idle `d` tiles from the infirmary's door. */
+  function woundedOutside(w: World, b: Building, dx: number): Settler {
+    const s = spawnSettler(w, 'archer', startTower(w));
+    s.inside = null;
+    s.x = s.px = b.door.x + dx;
+    s.y = s.py = b.door.y + 1;
+    s.hp = 10;
+    return s;
+  }
+
+  it('calls wounded free fighters in its area to its door one at a time and heals them; never from a tower', () => {
     const w = rich(new World(42));
     const c = startTower(w);
     dismissStandby(w);
-    // Two archers in the start tower (it wishes them: they were let in).
-    const wounded = [station(w, c, 'archer'), station(w, c, 'archer')];
-    for (const s of wounded) s.hp = 10;
-    run(w, 600);
-    // No infirmary: nobody heals, nobody leaves.
-    for (const s of wounded) expect(s.hp).toBe(10);
-    const inf = placeNear(w, 'infirmary', base(w).x + 5, base(w).y + 3)!;
-    let wasInBed = false;
-    for (let i = 0; i < 8000 && (!inf.done || wounded.some((s) => s.hp < maxHp(s))); i++) {
+    const inf = infirmary(w);
+    const inTower = station(w, c, 'archer');
+    inTower.hp = 10;
+    const out = [woundedOutside(w, inf, 2), woundedOutside(w, inf, -2)];
+    // Too far: outside its work area.
+    const far = woundedOutside(w, inf, BUILDINGS.infirmary.infirmary!.radius + 4);
+    let together = 0;
+    for (let i = 0; i < 6000 && out.some((s) => s.hp < maxHp(s)); i++) {
       w.step();
-      if (wounded.some((s) => s.inside === inf.id)) wasInBed = true;
+      const patients = w.settlers.filter((s) => s.tasks.some((t) => t.t === 'heal'));
+      together = Math.max(together, patients.length);
+      if (inf.patient !== undefined) expect(patients.map((s) => s.id)).toEqual([inf.patient]);
     }
-    expect(inf.done).toBe(true);
-    expect(wasInBed).toBe(true);
-    for (const s of wounded) expect(s.hp).toBe(maxHp(s));
-    run(w, 900);
-    for (const s of wounded) expect(s.home).toBe(c.id);
+    for (const s of out) expect(s.hp).toBe(maxHp(s));
+    expect(together).toBe(1);
+    // Healed at the door, standing there (free fighters stay where they are).
+    expect(out.some((s) => Math.hypot(s.x - inf.door.x, s.y - inf.door.y) <= 1)).toBe(true);
+    // The tower's archer stays in his tower, wounded; the one far off is not called.
+    expect(inTower.hp).toBe(10);
+    expect(inTower.inside).toBe(c.id);
+    expect(far.hp).toBe(10);
   });
 
-  it('a stay in the infirmary continues identically after save and load', () => {
+  it('heals nobody without its healer inside', () => {
     const w = rich(new World(42));
-    const c = startTower(w);
-    const inf = placeNear(w, 'infirmary', base(w).x + 5, base(w).y + 3)!;
-    run(w, 2000);
-    expect(inf.done).toBe(true);
-    station(w, c, 'archer').hp = 5;
-    for (let i = 0; i < 2000 && !w.settlers.some((s) => s.inside === inf.id); i++) w.step();
-    expect(w.settlers.some((s) => s.inside === inf.id)).toBe(true);
+    dismissStandby(w);
+    const inf = infirmary(w);
+    const healer = w.getSettler(inf.workerId)!;
+    healer.inside = null;
+    healer.x = healer.px = inf.door.x + 6;
+    healer.tasks = [{ t: 'wait', n: 5000 }];
+    const s = woundedOutside(w, inf, 2);
+    run(w, 1500);
+    expect(s.hp).toBe(10);
+    expect(inf.patient).toBeUndefined();
+  });
+
+  it('a stay at the infirmary continues identically after save and load', () => {
+    const w = rich(new World(42));
+    dismissStandby(w);
+    const inf = infirmary(w);
+    woundedOutside(w, inf, 3).hp = 5;
+    for (let i = 0; i < 2000 && !w.settlers.some((s) => s.tasks[0]?.t === 'heal'); i++) w.step();
+    expect(w.settlers.some((s) => s.tasks[0]?.t === 'heal')).toBe(true);
     const l = World.load(JSON.parse(JSON.stringify(saveWorld(w))));
     run(w, 800);
     run(l, 800);
@@ -243,17 +287,19 @@ describe('infirmary', () => {
 });
 
 describe('lookout tower', () => {
-  it('sees far, claims no land and holds nobody', () => {
+  it('sees far once built, claims no land, holds nobody; its occupant is a watchman', () => {
     const w = rich(new World(42));
     const c = base(w);
     const look = placeNear(w, 'lookout', c.x + 7, c.y, 5)!;
-    run(w, 2000);
+    run(w, 2500);
     expect(look.done).toBe(true);
     expect(look.garrison).toHaveLength(0);
     expect(BUILDINGS.lookout.territory).toBeUndefined();
+    expect(BUILDINGS.lookout.worker).toBe('watchman');
+    expect(w.getSettler(look.workerId)?.kind).toBe('watchman');
     const cc = centerOf(look);
     const r = BUILDINGS.lookout.vision!;
-    expect(r).toBeGreaterThan(FOG.buildingRadius);
+    expect(r).toBeGreaterThan(BUILDINGS.tower.territory! + FOG.landBand);
     // A tile at its full sight range is seen (inside the map).
     const far = [
       [cc.x + r - 1, cc.y],

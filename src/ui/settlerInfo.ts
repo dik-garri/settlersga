@@ -150,12 +150,12 @@ export class SettlerInfoView implements View {
         if (next?.t === 'join') return `идёт в гарнизон: ${at(next.b)}`;
         if (next?.t === 'recruit') return `идёт в казарму: ${at(next.b)}`;
         if (next?.t === 'assault') return `идёт в атаку: ${at(next.b)}`;
-        if (next?.t === 'heal') return 'идёт в лазарет';
+        if (next?.t === 'heal') return `идёт к лекарю: ${at(next.b)}`;
         if (next?.t === 'become') return `идёт работать: ${at(next.b)}`;
         if (next?.t === 'gather') return `идёт за сырьём: ${res(next.res)}`;
         if (next?.t === 'prospect') return 'идёт к горе';
         if (s.fled !== undefined) return 'бродит без крова';
-        if (next?.t === 'steal') return `крадётся к: ${at(next.b)}`;
+        if (next?.t === 'steal') return 'крадётся к добыче';
         if (next?.t === 'claim') return 'идёт к границе';
         if (next?.t === 'load') return `идёт за грузом: ${at(next.b)}`;
         if (next?.t === 'unload') return s.carrying ? `везёт ${res(s.carrying).toLowerCase()} → ${at(next.b)}` : `идёт к: ${at(next.b)}`;
@@ -190,11 +190,11 @@ export class SettlerInfoView implements View {
       case 'hunt':
         return 'охотится';
       case 'heal':
-        return 'лечится';
+        return `лекарь лечит: ${at(t.b)}`;
       case 'claim':
         return 'переносит пограничный камень';
       case 'steal':
-        return `крадёт: ${at(t.b)}`;
+        return 'крадёт';
       case 'enter':
         return `входит: ${at(t.b)}`;
       case 'wait':

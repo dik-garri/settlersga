@@ -112,14 +112,25 @@ describe('AI difficulty', () => {
     expect(tuning({} as never)).toEqual(t('medium'));
   });
 
-  it('a hard AI starts with its bonus goods on the ground by its start tower; the level survives a save', () => {
-    const plain = new World(4, { players: 2, ai: [2] });
-    const hard = new World(4, { players: 2, ai: [2], difficulty: ['medium', 'hard'] });
-    for (const [res, n] of Object.entries(AI_LEVELS.hard.bonus) as [Resource, number][]) {
-      expect(groundUnits(hard, res, 2) - groundUnits(plain, res, 2)).toBe(n);
-      expect(groundUnits(hard, res, 1)).toBe(groundUnits(plain, res, 1));
+  it("a computer player starts with Settlers 4's help (goods and people by level); the level survives a save", () => {
+    const human = new World(4, { players: 2 });
+    for (const level of AI_LEVEL_IDS) {
+      const ai = new World(4, { players: 2, ai: [2], difficulty: ['medium', level] });
+      for (const [res, n] of Object.entries(AI_LEVELS[level].bonus) as [Resource, number][]) {
+        expect(groundUnits(ai, res, 2) - groundUnits(human, res, 2)).toBe(n);
+        expect(groundUnits(ai, res, 1)).toBe(groundUnits(human, res, 1));
+      }
+      const people = (w: World, kind: string) => w.settlers.filter((s) => s.owner === 2 && s.kind === kind).length;
+      for (const [kind, n] of Object.entries(AI_LEVELS[level].people)) {
+        expect(people(ai, kind) - people(human, kind)).toBe(n);
+      }
+      // Pioneers wait for orders: the order grows with them (none is dismissed).
+      expect(ai.players[1].economy!.orders.pioneer ?? 0).toBe(people(ai, 'pioneer'));
+      expect(World.load(JSON.parse(JSON.stringify(saveWorld(ai)))).ai[0].level).toBe(level);
     }
-    expect(World.load(JSON.parse(JSON.stringify(saveWorld(hard)))).ai[0].level).toBe('hard');
+    // S4's start script: every AI 8 planks, 16 stone, 5 pioneers; from «normal» on again, and 5 swordsmen.
+    expect(AI_LEVELS.easy.bonus).toEqual({ plank: 8, stone: 16 });
+    expect(AI_LEVELS.hard.people).toEqual({ pioneer: 10, soldier: 5 });
   });
 });
 

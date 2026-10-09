@@ -118,6 +118,9 @@ const STYLES: Partial<Record<SettlerKind, Partial<SettlerStyle>>> = {
   pioneer: { tunic: '#a8743a', hat: '#6b4a2a', hatStyle: 'straw', work: 'dig', holds: 'shovel' },
   thief: { tunic: '#2e2a30', hat: '#1e1b20', hatStyle: 'hood', work: 'sow' },
   donkeyrancher: { tunic: '#7a6a4a', hat: '#4a3a26', hatStyle: 'straw' },
+  // The infirmary's healer (a carrier's figure in white with a red cap) and the lookout's watchman.
+  healer: { tunic: '#ece6d8', hat: '#b8322a', hatStyle: 'cap' },
+  watchman: { tunic: '#556677', hat: '#3b2b1a', hatStyle: 'hood' },
 };
 
 /** Work done on a planting or gathering task overrides the profession's default `work`. */

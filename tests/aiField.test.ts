@@ -108,8 +108,9 @@ describe('computer player: field orders', () => {
       const s = spawnSettler(w, 'soldier', startTower(w, 1));
       s.inside = null;
       s.home = null;
-      s.x = s.px = c2.door.x + 4 + (k % 2);
-      s.y = s.py = c2.door.y + 3 + Math.floor(k / 2);
+      // Four abreast: all within its sight (its land and a band beyond it, `FOG`).
+      s.x = s.px = c2.door.x + 3 + (k % 4);
+      s.y = s.py = c2.door.y + 3 + Math.floor(k / 4);
       s.post = { x: Math.round(s.x), y: Math.round(s.y) };
       out.push(s);
     }
@@ -151,8 +152,9 @@ describe('computer player: field orders', () => {
 
   it('stays behind its walls when it cannot match them in the open', () => {
     const w = new World(42, { players: 2, ai: [2] });
-    // More of them than all its fighters outside its start tower.
-    for (const s of intruders(w, 16)) s.hp = 1e9;
+    // More of them than all its fighters outside its start tower (S4's start help included).
+    const own = w.settlers.filter((s) => s.owner === 2 && isFighter(s)).length;
+    for (const s of intruders(w, own + 2)) s.hp = 1e9;
     run(w, AI.thinkEvery * 2);
     const ai = w.ai[0];
     expect(ai.defense).toBeUndefined();

@@ -1,7 +1,9 @@
 import { settlerIcon, wareIcon } from '../render/atlas';
-import { BUILDINGS, RESOURCE_INFO, TICKS_PER_SECOND } from '../sim/config';
+import { MESSAGES, RESOURCE_INFO, TICKS_PER_SECOND } from '../sim/config';
+import { messagesOf } from '../sim/messages';
 import { isFighter } from '../sim/military';
-import type { Resource } from '../sim/types';
+import { scoreOf } from '../sim/score';
+import type { Building, Resource, Settler } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { ArmyView } from './armyPanel';
 import { BuildView } from './buildMenu';
@@ -9,6 +11,7 @@ import { button, el, rowsTable, type View } from './dom';
 import { inStorage, GoodsView } from './goodsView';
 import { glyph, type GlyphName } from './icons';
 import { InfoView } from './infoPanel';
+import { MESSAGE_CYCLE_MS, messageText } from './messageText';
 import { OptionsView, SPEEDS, type GameActions } from './optionsView';
 import { SettlerInfoView } from './settlerInfo';
 import { UnitsView } from './unitsView';
@@ -43,10 +46,12 @@ const PINNED: readonly Resource[] = ['plank', 'stone', 'log', 'bread', 'fish', '
 const MESSAGE_MS = 6000;
 
 export interface HudOptions {
-  /** The minimap canvas, framed at the top of the panel. */
+  /** The minimap canvas, framed at the top of the panel (with its layer switches). */
   minimap: HTMLElement;
   /** Sound controls for the options menu. */
   sound: HTMLElement | null;
+  /** Moves the camera to a tile (messages, «find» buttons). */
+  jump: (x: number, y: number) => void;
 }
 
 export class Hud {
@@ -72,10 +77,11 @@ export class Hud {
   /** The end screen was shown (and possibly dismissed to keep watching). */
   private ended = false;
   private lastUpdate = 0;
-  /** Warnings of the simulation (`World.warnings`) already shown on the ticker. */
+  private readonly jump: (x: number, y: number) => void;
+  /** Messages of the simulation (`World.messages`) already shown on the ticker. */
   private readonly warned = new WeakSet<object>();
-  /** Carriers on strike at the last update (a new strike is announced once). */
-  private striking = 0;
+  /** Space: the message it jumped to last (index among the local player's, from the newest), and when. */
+  private jumped = { k: -1, at: -Infinity };
 
   constructor(
     root: HTMLElement,
@@ -85,9 +91,10 @@ export class Hud {
     opts: HudOptions,
   ) {
     const select = (type: Placeable | null) => this.selectBuildType(type);
-    this.build = new BuildView(world, state, select);
+    this.jump = opts.jump;
+    this.build = new BuildView(world, state, select, (b) => this.focusBuilding(b));
     this.stats = new StatsView(world);
-    this.info = new InfoView(world, state, (text) => this.toast(text));
+    this.info = new InfoView(world, state, (text) => this.toast(text), (b) => this.focusBuilding(b));
     this.settlerInfo = new SettlerInfoView(world, state, {
       place: (p) => select(p),
       toast: (text) => this.toast(text),
@@ -96,7 +103,7 @@ export class Hud {
     this.views = {
       build: this.build,
       goods: new GoodsView(world),
-      settlers: new SettlersView(world, state, select),
+      settlers: new SettlersView(world, state, select, (s) => this.focusSettler(s)),
       stats: this.stats,
       army: new ArmyView(world),
       options: new OptionsView(state, actions, opts.sound),
@@ -128,7 +135,7 @@ export class Hud {
 
     const strip = el('div', 'strip');
     const pause = el('button', 'gem small');
-    pause.title = 'Пауза (пробел)';
+    pause.title = 'Пауза (P или Pause)';
     pause.append(glyph('pause', 14));
     pause.onclick = () => {
       state.paused = !state.paused;
@@ -223,22 +230,61 @@ export class Hud {
   }
 
   /**
-   * The local player's new warnings on the ticker (Settlers 4's messages): a military building that
-   * finds no free fighter, a barracks with no carrier for a recruit.
+   * The local player's new messages on the ticker (Settlers 4's messages, `messages.ts`): a click jumps
+   * the camera there, as Space does to the last one.
    */
-  private showWarnings(): void {
-    for (const m of this.world.warnings) {
+  private showMessages(): void {
+    for (const m of this.world.messages) {
       if (m.player !== LOCAL_PLAYER || this.warned.has(m)) continue;
       this.warned.add(m);
-      const b = this.world.buildings.get(m.b);
-      const name = b ? BUILDINGS[b.type].name : 'Здание';
-      this.toast(m.kind === 'noFighter' ? `${name} пустует: нет свободных бойцов поблизости` : `${name}: нет свободного носильщика для новобранца`);
+      this.toast(messageText(this.world, m), { at: m, alert: MESSAGES[m.kind].alert });
     }
   }
 
-  /** A message on the ticker at the bottom of the view; it fades after a few seconds. */
-  toast(text: string): void {
-    const m = el('div', 'msg', text);
+  /**
+   * Space (Settlers 4): the camera jumps to the last message; pressed again soon after, to the one
+   * before, and so on back through the list.
+   */
+  jumpToMessage(): boolean {
+    const mine = messagesOf(this.world, LOCAL_PLAYER);
+    if (mine.length === 0) return false;
+    const now = performance.now();
+    const k = now - this.jumped.at < MESSAGE_CYCLE_MS ? (this.jumped.k + 1) % mine.length : 0;
+    this.jumped = { k, at: now };
+    const m = mine[mine.length - 1 - k];
+    this.jump(m.x, m.y);
+    this.toast(`${messageText(this.world, m)} (${k + 1}/${mine.length})`, { at: m });
+    return true;
+  }
+
+  /** Selects a building and centres the camera on it («next building of this type»). */
+  focusBuilding(b: Building): void {
+    this.state.selected = b.id;
+    this.state.selectedSettler = null;
+    this.state.selectedUnits = [];
+    this.jump(b.door.x, b.door.y);
+  }
+
+  /** Selects a settler and centres the camera on him («find settler»). */
+  focusSettler(s: Settler): void {
+    this.state.selected = null;
+    this.state.selectedUnits = [];
+    this.state.selectedSettler = s.id;
+    this.jump(s.x, s.y);
+  }
+
+  /**
+   * A message on the ticker at the bottom of the view; it fades after a few seconds. With `at` a
+   * click on it moves the camera there.
+   */
+  toast(text: string, opts: { at?: { x: number; y: number }; alert?: boolean } = {}): void {
+    const m = el('div', opts.alert ? 'msg alert' : 'msg', text);
+    const at = opts.at;
+    if (at) {
+      m.classList.add('jump');
+      m.title = 'Щелчок — показать на карте (пробел — последнее сообщение)';
+      m.onclick = () => this.jump(at.x, at.y);
+    }
     this.ticker.append(m);
     while (this.ticker.children.length > 4) this.ticker.firstElementChild!.remove();
     window.setTimeout(() => m.classList.add('gone'), MESSAGE_MS);
@@ -252,7 +298,7 @@ export class Hud {
     const outcome = world.outcome(LOCAL_PLAYER);
     if (outcome !== 'playing' && !this.ended) this.showEnd(outcome);
     this.stats.sample();
-    this.showWarnings();
+    this.showMessages();
 
     // The selected building's window replaces the open menu, as in Settlers 4.
     if (state.selected !== null && world.buildings.has(state.selected)) {
@@ -284,10 +330,6 @@ export class Hud {
       if (isFighter(s)) fighters++;
     }
     this.people.textContent = String(people);
-    // Settlers 4's strike: a warning when carriers start striking for want of beds.
-    const striking = world.bedsOf().striking;
-    if (striking > 0 && this.striking === 0) this.toast(`Забастовка: ${striking} носильщ. без кроватей — постройте дом`);
-    this.striking = striking;
     this.soldiers.textContent = String(fighters);
     this.strength.textContent = `${Math.round(world.strengthOf())}%`;
 
@@ -337,6 +379,8 @@ export class Hud {
           : 'У вас не осталось ни занятых башен, ни бойцов.',
       ),
       rowsTable(rows),
+      el('h4', '', 'Счёт (формула Settlers 4)'),
+      scoreTable(world),
     );
     const actions = el('div', 'info-actions');
     const again = el('button', 'active', 'Новая игра');
@@ -348,4 +392,25 @@ export class Hud {
     this.endEl.append(actions);
     this.endEl.hidden = false;
   }
+}
+
+/**
+ * Every player's final score (`scoreOf`, Settlers 4's formula): the parts and the total, best first.
+ * Hovering the header shows the formula.
+ */
+function scoreTable(world: World): HTMLTableElement {
+  const table = el('table', 'score-table');
+  table.title = 'Счёт = (5 × убитые враги + 2 × (поселенцы + бойцы + золото) + руда + еда + здания) / 10';
+  const head = el('tr');
+  for (const h of ['Игрок', 'Убито', 'Посел.', 'Бойцы', 'Золото', 'Руда', 'Еда', 'Здания', 'Счёт']) head.append(el('th', '', h));
+  table.append(head);
+  const rows = world.players.map((p) => ({ p, sc: scoreOf(world, p.id) })).sort((a, b) => b.sc.total - a.sc.total || a.p.id - b.p.id);
+  for (const { p, sc } of rows) {
+    const tr = el('tr', p.id === LOCAL_PLAYER ? 'mine' : '');
+    const name = p.id === LOCAL_PLAYER ? 'Вы' : `Игрок ${p.id}${world.isDefeated(p.id) ? ' †' : ''}`;
+    for (const v of [name, sc.kills, sc.settlers, sc.fighters, sc.gold, sc.ore, sc.food, sc.buildings]) tr.append(el('td', '', String(v)));
+    tr.append(el('td', '', String(sc.total)));
+    table.append(tr);
+  }
+  return table;
 }

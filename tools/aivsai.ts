@@ -48,7 +48,7 @@ for (const seed of seeds) {
         let land = 0;
         for (const o of w.map.owner) if (o === p.id) land++;
         const st = w.ai.find((a) => a.player === p.id)?.stats;
-        const ai = st ? ` · placed ${st.placed} attacks ${st.attacks} (sent ${st.soldiersSent}) geo ${st.geologists} staged ${st.staged ?? 0} defended ${st.defended ?? 0} hunts ${st.hunts ?? 0} traded ${st.traded ?? 0}` : '';
+        const ai = st ? ` · placed ${st.placed} attacks ${st.attacks} (sent ${st.soldiersSent}) geo ${st.geologists} staged ${st.staged ?? 0} defended ${st.defended ?? 0} hunts ${st.hunts ?? 0} traded ${st.traded ?? 0} counters ${st.counters ?? 0}` : '';
         const out = w.isDefeated(p.id) ? ' DEFEATED' : '';
         return `  p${p.id}: buildings ${done}/${own.length} · settlers ${people.length} · soldiers ${soldiers} · land ${land}${ai}${out}`;
       });

@@ -95,10 +95,8 @@ export const s4Ticks = (n: number): number => (n * 60 * TICKS_PER_SECOND) / 845;
  */
 export const SOLDIER_LEVELS: readonly { cost: number }[] = [{ cost: 0 }, { cost: 1 }, { cost: 2 }];
 export const LEVEL_RES: Resource = 'gold';
-/** A fighter below this share of his hit points, idle in a garrison, goes to an infirmary if one has a bed. */
-export const WOUNDED_AT = 0.6;
-/** Garrisons look for wounded to send to an infirmary this often (ticks). */
-export const WOUNDED_CHECK_EVERY = 20;
+/** Below this share of his hit points a fighter counts as wounded (Settlers 4's «select wounded»: 50 %). */
+export const WOUNDED_AT = 0.5;
 /** Visual only: ticks an arrow is drawn in flight. */
 export const SHOT_TICKS = 5;
 /**
@@ -145,14 +143,12 @@ export const SITE = { pile: 8, maxPriority: 10 };
  * empty one with no wish asks for one — a swordsman if there is one, else an archer), the highest
  * level first, looking `rings` tiles round its door one ring after the other (S4: 20, 40 and 80 of its
  * tiles); and it puts one fighter beyond its wish out of the door, only while no enemy fighter is
- * within `enemyNear` tiles (S4: 10). `warnEvery`: the same warning («no free fighter», «no carrier
- * for a recruit») reaches the player at most this often per building (ticks; our choice).
+ * within `enemyNear` tiles (S4: 10). With nobody to call the player is warned (`MESSAGES.noFighter`).
  */
 export const GARRISON_ORDERS = {
   every: Math.round(s4Ticks(15)),
   rings: [20 / 3, 40 / 3, 80 / 3] as readonly number[],
   enemyNear: 10 / 3,
-  warnEvery: 60 * TICKS_PER_SECOND,
 };
 /**
  * The barracks looks at its owner's recruit orders this often (S4: every 13–15 of its ticks); a
@@ -355,8 +351,9 @@ export const ORDERABLE: readonly SettlerKind[] = ['builder', 'digger', 'geologis
  *   neutral or foreign (S4 `CheckPosition` has no owner test) — `ticks` each, until none is left in
  *   reach, so he follows the whole ridge. S4: a sign every 4 s (siedlercommunity), the step to the
  *   next tile included: ≈ 2 s of work plus our ≈ 2 s step;
- * - thief: robs a foreign building's door pile or stock (`stealTicks` of work, one unit of its most
- *   plentiful good) and carries it home. How intruders are met is `INTRUDERS`.
+ * - thief (`THIEF`): takes one unit off the first stack in a small spiral round the spot he was sent
+ *   to and carries it to his home point, where he puts it on the ground. How intruders are met is
+ *   `INTRUDERS`.
  */
 export const PIONEER = { reach: 5.3, window: 5, claimTicks: 400 };
 export const GEOLOGIST = { reach: 10.6, window: 9, ticks: 21 };
@@ -376,7 +373,16 @@ export const GEOLOGIST_SIGN = {
   spread: 5 * 60 * TICKS_PER_SECOND,
   levels: [20, 40] as const,
 };
-export const THIEF = { stealTicks: 30 };
+/**
+ * The thief, as in Settlers 4 (`CThiefRole::CheckGoodInSurrounding`, `ConvertEventIntoGoal`,
+ * `LogicUpdateJob`): sent to a spot, he looks for the first stack of goods in a spiral of 80 S4 tiles
+ * round it — `lootRadius` of ours (√(80/π) ≈ 5 S4 tiles ≈ 1.7) —: a producer's output, a workshop's
+ * input, a warehouse's stock, a site's materials or goods on the ground (on his own or an ally's land
+ * only goods on the ground: he moves his player's goods); takes one unit in `stealTicks` and carries
+ * it to his home point (`Settler.homeAt`: where he was made, moved by every order to a spot on his
+ * own or an ally's land) and puts it on the ground there, then goes back while there is loot.
+ */
+export const THIEF = { stealTicks: 30, lootRadius: 1.7 };
 
 /** Work areas (`workArea.ts`): a moved centre may lie at most `maxShift` × the work radius from the door. */
 export const WORK_AREA = { maxShift: 1.5 };
@@ -399,7 +405,15 @@ export const WORK_AREA = { maxShift: 1.5 };
  * are our approximations: the wiki gives no numbers (`exposedTicks` leaves a responder from
  * `respondRadius` time to arrive at the S4 walking pace).
  */
-export const INTRUDERS = { scanEvery: 10, decloakRadius: 3, exposedTicks: 900, respondRadius: 12, responders: 1, seizeRadius: 3 };
+export const INTRUDERS = {
+  scanEvery: 10,
+  decloakRadius: 2,
+  recloakEvery: Math.round(s4Ticks(45)),
+  recloakRadius: 5,
+  respondRadius: 12,
+  responders: 1,
+  seizeRadius: 3,
+};
 
 /**
  * Fighting strength, after Settlers 4 (settlers-united wiki, «fighting strength calculation»): a
@@ -607,24 +621,62 @@ export const BIOMES = {
 
 // ------------------------------------------------------------------- fog
 
-/** Fog of war: how far buildings and settlers see, and how often visibility is refreshed. */
+/**
+ * Fog of war, as in Settlers 4 (`CFogging::ClearDynamicFoggingAndCalcStatic`, `CalculateDynamicLayer`,
+ * `UpdateEntityFogging`): a player sees all of his own and his allies' land plus a band of `landBand`
+ * tiles beyond its edge (S4: 6 of its tiles, ÷ `S4_TILES_PER_TILE`); a manned military building sees
+ * its `BuildingDef.sight`, a lookout tower its `vision`; outdoor settlers see `settlerRadius` (S4: 15 of
+ * its tiles plus the 6-tile band, (15 + 6) / 3 = 7), a profession with its own `sight` that far (the
+ * thief: (25 + 6) / 3 ≈ 10). Other buildings have no sight of their own: they stand on own land.
+ */
 export const FOG = {
-  /** Buildings see their territory radius plus this, or `buildingRadius` without territory. */
-  territoryMargin: 3,
-  buildingRadius: 5,
-  /**
-   * Settlers see this far (tiles), unless their profession has its own `sight`: Settlers 4 gives
-   * fighters and specialists 15 of its tiles (≈ 5 of ours; the thief 25 ≈ 8).
-   */
-  settlerRadius: 5,
+  landBand: 2,
+  settlerRadius: 7,
   /**
    * Settlers stamp their surroundings every this many ticks; a tile stays visible that long after. At
    * the S4 walking pace a settler moves under a tile between two stamps.
    */
   settlerEvery: 15,
-  /** Building vision is rebuilt at most this often, and only when buildings or territory changed. */
-  buildingEvery: 10,
 };
+
+// -------------------------------------------------------------- messages
+
+/** What the simulation tells a player (Settlers 4's warnings with a map position, `CTextMsgHandler::AddWarningMsg`). */
+export type MessageKind =
+  | 'attacked'
+  | 'captured'
+  | 'lost'
+  | 'noFighter'
+  | 'noCarrier'
+  | 'noTool'
+  | 'mineEmpty'
+  | 'oreFound'
+  | 'strike'
+  | 'alarm';
+
+/**
+ * Messages (`messages.ts`), as in Settlers 4 (manual §5.1: a message with a place on the map, Space
+ * jumps there): `text` for the ticker (`{b}` stands for the building's name, `{res}` for the good's),
+ * `every` — the same message (kind, player and building or good — any building with `perPlayer`)
+ * comes at most this often (ticks; our choice), `alert` — shown as an alarm. Sources: the S4 text ids of `CTextMsgHandler::AddWarningMsg`
+ * calls — 2450 attack (also the lookout tower's alarm, `CLookoutTowerRole`), 2453–2460 a missing tool
+ * (`CEcoSector::MissingToolWarning`), 2459 no carrier, 2461/2462/2551 a tower lost or taken, 2526 a
+ * mine worked out (`CMineRole`: after more than 15 fruitless attempts in a row, `MINING.emptyAfter`).
+ * The buffer keeps the last `MESSAGE_KEEP`.
+ */
+export const MESSAGES: Record<MessageKind, { text: string; every: number; alert?: boolean; perPlayer?: boolean }> = {
+  attacked: { text: '{b}: нападение!', every: 30 * TICKS_PER_SECOND, alert: true },
+  captured: { text: '{b}: захвачено', every: 0 },
+  lost: { text: '{b}: потеряно', every: 0, alert: true },
+  noFighter: { text: '{b} пустует: нет свободных бойцов', every: 60 * TICKS_PER_SECOND },
+  noCarrier: { text: '{b}: нет свободного носильщика', every: 60 * TICKS_PER_SECOND, perPlayer: true },
+  noTool: { text: 'Нет инструмента: {res}', every: 60 * TICKS_PER_SECOND },
+  mineEmpty: { text: '{b}: руда кончилась', every: 0 },
+  oreFound: { text: 'Геолог нашёл руду: {res}', every: 60 * TICKS_PER_SECOND },
+  strike: { text: 'Забастовка: носильщикам не хватает кроватей — постройте дом', every: 60 * TICKS_PER_SECOND },
+  alarm: { text: '{b}: враг рядом!', every: 0, alert: true },
+};
+export const MESSAGE_KEEP = 50;
 /**
  * Stone units in a deposit tile at generation, inclusive range. Our own numbers (no S4 source), doubled
  * with the S4 building costs, which ask about twice the stone ours did (`docs/PROPORTIONS.md`).
@@ -785,8 +837,13 @@ export interface ProfessionDef {
   hp?: number;
   /** How far (tiles) a settler of this profession sees outdoors, instead of `FOG.settlerRadius`. */
   sight?: number;
-  /** Disguised on hostile land until a fighter of that land comes close (the thief, `INTRUDERS`). */
+  /** Disguised until a hostile fighter comes close (the thief, `INTRUDERS`). */
   cloaked?: boolean;
+  /**
+   * Loaded with goods on hostile land, it is that land's intruder (`intruders.ts`); a blow makes it
+   * drop its load there and go home instead of hurting it (Settlers 4's donkey, `CDonkeyRole`).
+   */
+  dropsLoad?: boolean;
   combat?: CombatDef;
   /** Walking speed relative to `SETTLER_SPEED` (Settlers 4: the squad leader rides, 9 ticks a tile against 7). */
   speed?: number;
@@ -871,9 +928,14 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
    * Disguised: no target on hostile land until a fighter of that land comes close (`INTRUDERS`).
    * Sees 25 S4 tiles (Settlers United changelog), ≈ 8 of ours.
    */
-  thief: { name: 'Вор', behavior: 'thief', hp: 20, cloaked: true, sight: 8 },
+  thief: { name: 'Вор', behavior: 'thief', hp: 20, cloaked: true, sight: 10 },
   donkeyrancher: { name: 'Погонщик', behavior: 'workshop' },
-  donkey: { name: 'Осёл', behavior: 'donkey', roads: true },
+  /** Settlers 4 `CDonkeyRole::TakeJob`: a loaded donkey of a player is vulnerable (`ENTITY_FLAG_VulnerableMask`). */
+  donkey: { name: 'Осёл', behavior: 'donkey', roads: true, dropsLoad: true },
+  /** The infirmary's healer (Settlers 4 `SETTLER_HEALER`, no tool): works while inside (`infirmary.ts`). */
+  healer: { name: 'Лекарь', behavior: 'workshop' },
+  /** The lookout tower's occupant (Settlers 4 orders one before it works, `CLookoutTowerRole`). */
+  watchman: { name: 'Дозорный', behavior: 'workshop' },
   recruit: { name: 'Новобранец', behavior: 'workshop', transient: true },
   /** Settlers 4: 100 / 150 / 210 hit points, 10 / 14 / 20 a blow, a blow every 13 of its ticks. */
   soldier: {
@@ -1039,13 +1101,27 @@ export interface BuildingDef {
    * fighters.
    */
   barracks?: { ticks: number };
-  /** Sees this far (tiles from the center) once built, instead of its territory (lookout tower). */
+  /** Lookout tower: sees this far (tiles from the center) once built — its job (`fog.ts`, `FOG`). */
   vision?: number;
   /**
-   * Infirmary: wounded fighters (below `WOUNDED_AT` of their hit points) walk here from garrisons
-   * within `range`, take one of `beds`, regain a hit point every `healEvery` ticks and go back.
+   * A military building's sight while manned (tiles from the center; Settlers 4 `explorerRadius` in
+   * `CFogging::CalculateDynamicLayer` plus its 6-tile band, ÷ 3; `fog.ts`).
    */
-  infirmary?: { beds: number; healEvery: number; range: number };
+  sight?: number;
+  /**
+   * Lookout tower (Settlers 4 `CLookoutTowerRole::LogicUpdate`): while its worker is inside, every
+   * `every` ticks it raises the alarm (`MESSAGES.alarm`) when a hostile fighter is within `radius` of
+   * it — once, until none is left in range (`lookout.ts`).
+   */
+  alarm?: { radius: number; every: number };
+  /**
+   * Healer's hut (Settlers 4 `BUILDING_HEALERHUT`, `CSimpleBuildingRole::LogicUpdate`; `infirmary.ts`):
+   * while its healer is inside, every `scanEvery` ticks it looks for a wounded free fighter of its
+   * owner or an ally standing idle in the open within `radius` of its work centre and calls him to
+   * its door — one patient at a time —, where he regains `heal` hit points every `every` ticks until
+   * whole. It never calls fighters out of buildings.
+   */
+  infirmary?: { radius: number; heal: number; every: number; scanEvery: number };
   /** Eyecatcher (decoration): no worker, no territory; its materials count extra in the owner's settlement value (`STRENGTH`). */
   eyecatcher?: boolean;
   /** Marketplace: starting point of donkey caravans to another marketplace (`trade.ts`). */
@@ -1080,9 +1156,11 @@ export interface GarrisonDef {
  * attempts — `favourite` of the mine `attempts.favourite`, any other `attempts.other`. Each attempt
  * picks a random tile within the mine's radius, ore or not: a tile without its ore (or worked out) is
  * a miss, the attempt spent; an ore tile yields one unit for sure while it holds at least
- * `sureAmount`, else with `chancePerUnit` × units left. A worked-out mine keeps eating.
+ * `sureAmount`, else with `chancePerUnit` × units left. A worked-out mine keeps eating; after more
+ * than `emptyAfter` fruitless attempts in a row its owner is told (`MESSAGES.mineEmpty`). Computer
+ * players get the difficulty's help (`AiLevelDef.mine`).
  */
-export const MINING = { attempts: { favourite: 10, other: 2 }, sureAmount: 4, chancePerUnit: 0.25 };
+export const MINING = { attempts: { favourite: 10, other: 2 }, sureAmount: 4, chancePerUnit: 0.25, emptyAfter: 15 };
 
 /**
  * Trade over land, as in Settlers 4 (`CDonkeyRole`, `CTradingBuildingRole`): a donkey carries `packs`
@@ -1352,6 +1430,8 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     territory: 10,
     // As in Settlers 4: 1 swordsman + 2 archers.
     garrison: { capacity: 3, keep: 1, archers: 2, door: TOWER_DOOR },
+    // Settlers 4: 35 of its tiles while manned, plus the 6-tile band: (35 + 6) / 3 ≈ 14.
+    sight: 14,
   },
   bigtower: {
     name: 'Большая башня',
@@ -1365,6 +1445,8 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     territory: 11,
     // 3 swordsmen + 3 archers.
     garrison: { capacity: 6, keep: 2, archers: 3, door: TOWER_DOOR },
+    // Settlers 4: 40 of its tiles while manned, plus the band: (40 + 6) / 3 ≈ 15.
+    sight: 15,
   },
   barracks: {
     name: 'Казарма',
@@ -1389,26 +1471,36 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     territory: 12,
     // The Settlers 4 castle: 4 swordsmen + 5 archers.
     garrison: { capacity: 9, keep: 3, archers: 5, door: TOWER_DOOR },
+    // Settlers 4: 45 of its tiles while manned, plus the band: (45 + 6) / 3 = 17.
+    sight: 17,
   },
   lookout: {
     name: 'Смотровая башня',
     w: 2,
     h: 2,
     cost: { plank: 2, stone: 2 },
-    worker: null,
+    // Settlers 4 orders an occupant first; it sees 45 of its tiles (with or without him), plus the
+    // band: (45 + 6) / 3 = 17; the alarm (with him inside) at an enemy fighter within 32 S4 tiles,
+    // checked every 31 of its ticks.
+    worker: 'watchman',
     playerBuildable: true,
     category: 'military',
-    vision: 16,
+    vision: 17,
+    alarm: { radius: 32 / 3, every: Math.round(s4Ticks(31)) },
   },
   infirmary: {
+    // Settlers 4's healer's hut («Lazarett»): 3 planks, 3 stone, a healer. It looks for patients
+    // every 31 of its ticks; its radius and how fast it heals are in the game data, not in the code
+    // [оценка]: 8 tiles (24 of S4's), a hit point every 4 ticks (a swordsman of level 1 in 40 s,
+    // «gemächlich», siedlercommunity).
     name: 'Лазарет',
     w: 2,
     h: 2,
     cost: { plank: 3, stone: 3 },
-    worker: null,
+    worker: 'healer',
     playerBuildable: true,
     category: 'military',
-    infirmary: { beds: 4, healEvery: 3, range: 30 },
+    infirmary: { radius: 8, heal: 1, every: 4, scanEvery: Math.round(s4Ticks(31)) },
   },
 
   // Eyecatchers, as in Settlers 4: built for show, they raise the settlement value and so the army's
@@ -1560,6 +1652,26 @@ export const AI_PLAN: readonly { type: BuildingType; count: number; after?: Buil
 
 /** Computer player tuning; `thinkEvery` and `attackRatio` are the difficulty knobs. */
 export const AI = {
+  /**
+   * Counterattack (Settlers 4: up to ten squads against whoever took one of its buildings): up to
+   * `counterAttackers` fighters in range, again every `counterEvery` ticks while the enemy holds it,
+   * for `counterTicks` at most.
+   */
+  counterAttackers: 30,
+  counterEvery: 300,
+  counterTicks: 3 * 60 * TICKS_PER_SECOND,
+  /**
+   * Settlers 4's attack trigger (null: attack whenever the estimate allows): at least `minFighters`
+   * fighters, a roll every `every` (S4: 512–768 of its ticks ≈ 36–55 s), `start` per cent, `step` more
+   * per miss, at most `max`.
+   */
+  s4Attack: {
+    minFighters: 15,
+    every: [Math.round(s4Ticks(512)), Math.round(s4Ticks(768))] as [number, number],
+    start: 2,
+    step: 2,
+    max: 16,
+  } as { minFighters: number; every: [number, number]; start: number; step: number; max: number } | null,
   /** Ticks between decisions (lower = faster, harder). */
   thinkEvery: 40,
   /** At most this many own construction sites at once. */
@@ -1768,14 +1880,36 @@ export const AI = {
 /**
  * Computer player difficulty, chosen per opponent in the game setup (`WorldOptions.difficulty`,
  * kept in the saved `AiState.level`). A level scales the `AI` tuning, so `medium` is exactly the `AI`
- * table (what `sim:ai` measures): `think` multiplies `AI.thinkEvery` (how often it decides), `attack`
- * the `AI.attackRatio` it wants over the defenders, `peace` `AI.peaceTicks` (no attacks before),
- * `cooldown` `AI.attackCooldown`; `sites` is added to `AI.maxOpenSites`; `bonus` goods lie by its
- * start tower on top of the start level's (S4's script adds goods for computer players too).
+ * table: `think` multiplies `AI.thinkEvery` (how often it decides), `attack` the `AI.attackRatio` it
+ * wants over the defenders, `peace` `AI.peaceTicks` (no attacks before), `cooldown`
+ * `AI.attackCooldown`; `sites` is added to `AI.maxOpenSites` (these knobs are ours: S4's AI is
+ * another program).
+ *
+ * The rest is Settlers 4's own help for the computer (`s4`: its difficulty 1 easy, 2 normal, 3 hard;
+ * `IAIDifficultyLevels`), sources in docs/S4-AUDIT.md item 29:
+ * - `bonus` goods and `people` added at its start on top of the start level's (`StartResources.txt`:
+ *   every computer player 8 planks, 16 stone and 5 pioneers; normal and hard the same again and 5
+ *   swordsmen of level 1);
+ * - `mine` (`CMineRole::TakeNextFood`, `SearchResource`): every computer player's ore never runs out
+ *   (a tile keeps at least 1); an attempt tries up to `tries` random tiles; a tile yields surely while
+ *   it holds `sureAmount` (else `MINING.chancePerUnit` × units left); a food buys `extra[0]` attempts
+ *   more while 4 or more ore lie at the mine, `extra[1]` more below that; with no food and fewer than
+ *   2 ore lying there, `free.chance` of `free.attempts` attempts for nothing;
+ * - `strengthDouble` (`SPlayerStatistic::CalculateFightingStrength`): its settlement value counts the
+ *   building materials twice (and eyecatchers no more than other buildings);
+ * - `recruitLevels`: easy recruits only level 1.
  */
 export type AiLevel = 'easy' | 'medium' | 'hard';
+export interface AiMineHelp {
+  tries: number;
+  sureAmount: number;
+  extra: [number, number];
+  free: { chance: number; attempts: number } | null;
+}
 export interface AiLevelDef {
   name: string;
+  /** Settlers 4's difficulty number (1 easy, 2 normal, 3 hard). */
+  s4: number;
   /** Recruit levels it orders (1–3, `AI.recruitKinds`). */
   recruitLevels: number;
   think: number;
@@ -1784,11 +1918,53 @@ export interface AiLevelDef {
   cooldown: number;
   sites: number;
   bonus: Partial<Stock>;
+  people: Partial<Record<SettlerKind, number>>;
+  mine: AiMineHelp;
+  strengthDouble: boolean;
 }
 export const AI_LEVELS: Record<AiLevel, AiLevelDef> = {
-  easy: { name: 'Лёгкий', recruitLevels: 1, think: 2, attack: 1.6, peace: 1.6, cooldown: 2, sites: -1, bonus: {} },
-  medium: { name: 'Средний', recruitLevels: 3, think: 1, attack: 1, peace: 1, cooldown: 1, sites: 0, bonus: {} },
-  hard: { name: 'Тяжёлый', recruitLevels: 3, think: 0.6, attack: 0.85, peace: 0.7, cooldown: 0.75, sites: 1, bonus: { plank: 12, stone: 8, fish: 6, bread: 6 } },
+  easy: {
+    name: 'Лёгкий',
+    s4: 1,
+    recruitLevels: 1,
+    think: 2,
+    attack: 1.6,
+    peace: 1.6,
+    cooldown: 2,
+    sites: -1,
+    bonus: { plank: 8, stone: 16 },
+    people: { pioneer: 5 },
+    mine: { tries: 1, sureAmount: 4, extra: [0, 0], free: null },
+    strengthDouble: false,
+  },
+  medium: {
+    name: 'Средний',
+    s4: 2,
+    recruitLevels: 3,
+    think: 1,
+    attack: 1,
+    peace: 1,
+    cooldown: 1,
+    sites: 0,
+    bonus: { plank: 16, stone: 32 },
+    people: { pioneer: 10, soldier: 5 },
+    mine: { tries: 2, sureAmount: 2, extra: [2, 5], free: { chance: 0.05, attempts: 5 } },
+    strengthDouble: true,
+  },
+  hard: {
+    name: 'Тяжёлый',
+    s4: 3,
+    recruitLevels: 3,
+    think: 0.6,
+    attack: 0.85,
+    peace: 0.7,
+    cooldown: 0.75,
+    sites: 1,
+    bonus: { plank: 16, stone: 32 },
+    people: { pioneer: 10, soldier: 5 },
+    mine: { tries: 3, sureAmount: 1, extra: [3, 6], free: { chance: 0.25, attempts: 10 } },
+    strengthDouble: true,
+  },
 };
 export const AI_LEVEL_IDS = Object.keys(AI_LEVELS) as AiLevel[];
 

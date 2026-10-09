@@ -19,7 +19,8 @@ import {
 } from './config';
 import { clearStrokes, diggersWanted, leaveSite, levelStep } from './digging';
 import { engageTick } from './field';
-import { assaultTick, healTick, joinTick, recruitTick, releaseJoin, releaseRecruit, soldierIdle } from './military';
+import { assaultTick, joinTick, recruitTick, releaseJoin, releaseRecruit, soldierIdle } from './military';
+import { healTick, releaseHeal } from './infirmary';
 import { canPlant, findGatherTarget, findPlotFor, harvest, isGatherTarget, plant, type Target } from './nature';
 import { findPath } from './pathfinding';
 import { sameRegion } from './regions';
@@ -176,6 +177,8 @@ export function updateSettler(w: World, s: Settler): void {
       s.home = null;
       s.carrying = null;
       s.errand = task.errand ? { ...task.errand } : null;
+      // A thief's home point is where he was made (Settlers 4; orders on own land move it).
+      if (PROFESSIONS[task.kind].behavior === 'thief') s.homeAt = { x: Math.round(s.x), y: Math.round(s.y) };
       s.tasks.shift();
       return;
     case 'join':
@@ -414,6 +417,9 @@ export function abort(w: World, s: Settler): void {
         break;
       case 'load':
         releaseLoad(w, task);
+        break;
+      case 'heal':
+        releaseHeal(w, s, task);
         break;
       case 'chase': {
         // Let the pinned intruder go.

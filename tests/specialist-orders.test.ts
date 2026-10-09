@@ -148,7 +148,8 @@ describe('specialists under direct control', () => {
     expect(thief.post).not.toBeNull();
     w.map.explored[w.map.idx(store!.door.x, store!.door.y)] |= 1;
     expect(w.orderSpecialists([thief.id], store!.door.x, store!.door.y, store!.id)).toBe(1);
-    expect(thief.errand?.b).toBe(store!.id);
+    // Settlers 4: his errand is the spot (the door); what he takes is the first stack round it.
+    expect(thief.errand).toMatchObject({ x: store!.door.x, y: store!.door.y });
     expect(thief.post).toBeNull();
   });
 

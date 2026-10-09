@@ -17,6 +17,7 @@ import { hasGatherTargetNear } from '../sim/nature';
 import { RESOURCES, type Building, type BuildingType, type Resource, type Settler, type SettlerKind } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { barracksRows, garrisonControls, garrisonRows, recruitKey, recruitOrderControls, shareControls, supportRows } from './armyPanel';
+import { nextBuildingOfType } from './find';
 import { el, rowsTable, type View } from './dom';
 import { economyKey, economyRows, refreshStockCounts, stockText, toolOrderControls, warehouseControls } from './economyPanel';
 import { movableWorkArea, workRadius } from '../sim/workArea';
@@ -68,6 +69,7 @@ export class InfoView implements View {
     private readonly world: World,
     private readonly state: GameState,
     private readonly toast: (text: string) => void,
+    private readonly focus: (b: Building) => void = () => {},
   ) {}
 
   update(): void {
@@ -274,6 +276,16 @@ export class InfoView implements View {
       if (this.world.demolish(b.id)) this.state.selected = null;
     };
     actions.append(demolish);
+    // Settlers 4: the next building (or site) of this type, the camera follows.
+    const next = el('button', '', '⏭ Следующее');
+    next.title = 'Следующее ваше здание или стройка этого типа';
+    next.onclick = () => {
+      const n = nextBuildingOfType(this.world, b.type, b.id);
+      if (n && n.id !== b.id) this.focus(n);
+      else this.toast('Другого здания этого типа нет');
+      next.blur();
+    };
+    actions.append(next);
     this.el.append(actions);
   }
 

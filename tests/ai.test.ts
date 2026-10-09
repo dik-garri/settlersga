@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { knownEnemies } from '../src/sim/ai';
-import { AI, AI_PLAN, BUILDINGS, FOG, oreOf } from '../src/sim/config';
+import { AI, AI_PLAN, BUILDINGS, oreOf } from '../src/sim/config';
 import { addBuilding, centerOf, spawnSettler } from '../src/sim/buildings';
 import { recomputeTerritory } from '../src/sim/territory';
 import { enterGarrison, isFighter, killSettler } from '../src/sim/military';
@@ -148,7 +148,7 @@ describe('fog of war', () => {
       const c = centerOf(t2);
       const toward = centerOf(startTower(w, 1));
       const len = Math.hypot(toward.x - c.x, toward.y - c.y);
-      const sight = BUILDINGS.tower.territory! + FOG.territoryMargin;
+      const sight = BUILDINGS.tower.sight!;
       let enemy: Building | null = null;
       // Beyond its start tower's sight, but near enough for its land to reach into it.
       for (let d = sight + 3; d <= sight + 8 && !enemy; d++) {

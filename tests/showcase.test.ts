@@ -32,7 +32,8 @@ describe('dev showcase (?demo)', () => {
     // Specialists at work: a pioneer has claimed land, a thief is on his errand.
     expect(w.settlers.some((s) => s.kind === 'pioneer' && (s.errand?.n ?? 0) > 0)).toBe(true);
     const thief = w.settlers.find((s) => s.kind === 'thief');
-    expect(thief?.errand?.b).toBeDefined();
+    expect(thief?.errand).toBeTruthy();
+    expect(thief?.homeAt).toBeTruthy();
     // Trade: a market with a route, donkeys under way with goods, and land cut off from every warehouse.
     expect(all.some((b) => b.type === 'market' && b.trade?.to != null)).toBe(true);
     expect(w.settlers.some((s) => s.kind === 'donkey' && s.tasks.length > 0)).toBe(true);

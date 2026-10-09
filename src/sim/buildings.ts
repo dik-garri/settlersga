@@ -1,4 +1,5 @@
 import {
+  AI_LEVELS,
   BUILD_TICKS_PER_UNIT,
   BUILDINGS,
   costOf,
@@ -26,6 +27,7 @@ import {
   type Settler,
 } from './types';
 import { groundStock } from './ground';
+import { postMessage } from './messages';
 import { landOf } from './land';
 import { offered } from './stop';
 import { storageRoom } from './storage';
@@ -86,11 +88,14 @@ export function addBuilding(w: World, type: BuildingType, x: number, y: number, 
   w.buildingsVersion++;
   // Anyone standing on the new footprint would be walled in: step them out onto the door tile,
   // which is always walkable. Their current route is recomputed from there.
+  const under = (tx: number, ty: number) => tx >= x && ty >= y && tx < x + def.w && ty < y + def.h;
   for (const s of w.settlers) {
     if (s.inside !== null) continue;
+    // One stepping onto it finds a new route from where he is (he would walk into the walls).
+    if (s.path.length > 0 && under(s.path[0].x, s.path[0].y)) s.path = [];
     const sx = Math.round(s.x);
     const sy = Math.round(s.y);
-    if (sx < x || sy < y || sx >= x + def.w || sy >= y + def.h) continue;
+    if (!under(sx, sy)) continue;
     s.x = s.px = b.door.x;
     s.y = s.py = b.door.y;
     s.path = [];
@@ -281,23 +286,50 @@ function mineTiles(w: World, b: Building, def: BuildingDef): number[] {
 function runMine(w: World, b: Building, def: BuildingDef, recipe: Recipe): void {
   const { res, favourite } = def.mine!;
   const foods = recipe.inputsAnyOf ?? [];
+  // A computer player's help (Settlers 4 `IAIDifficultyLevels`, `AI_LEVELS[…].mine`); none for people.
+  const level = w.aiLevel(b.owner);
+  const help = level ? AI_LEVELS[level].mine : null;
   if (b.output[res] >= OUTPUT_CAP) return;
-  if (!b.attempts && !foods.some((r) => b.input[r] > 0)) return;
+  if (!b.attempts && !foods.some((r) => b.input[r] > 0) && !help?.free) return;
   if (++b.timer < recipe.ticks) return;
   b.timer = 0;
   if (!b.attempts) {
-    // The favourite if there is any, else whichever food is most plentiful.
-    const pick = b.input[favourite] > 0 ? favourite : foods.reduce((a, r) => (b.input[r] > b.input[a] ? r : a));
-    b.input[pick]--;
-    b.attempts = pick === favourite ? MINING.attempts.favourite : MINING.attempts.other;
+    if (foods.some((r) => b.input[r] > 0)) {
+      // The favourite if there is any, else whichever food is most plentiful.
+      const pick = b.input[favourite] > 0 ? favourite : foods.reduce((a, r) => (b.input[r] > b.input[a] ? r : a));
+      b.input[pick]--;
+      b.attempts = pick === favourite ? MINING.attempts.favourite : MINING.attempts.other;
+      if (help) b.attempts += b.output[res] >= 4 ? help.extra[0] : help.extra[1];
+    } else if (help?.free && b.output[res] < 2 && w.rng() < help.free.chance) {
+      b.attempts = help.free.attempts;
+    }
+    if (!b.attempts) return;
   }
   b.attempts--;
   const tiles = mineTiles(w, b, def);
-  const i = tiles[Math.floor(w.rng() * tiles.length)];
-  const amount = oreOf(w.map.ore[i]) === res ? w.map.oreAmount[i] : 0;
-  if (amount === 0) return; // a miss: no ore of its kind there (any more)
-  if (amount < MINING.sureAmount && w.rng() >= MINING.chancePerUnit * amount) return; // nothing this time
-  if (--w.map.oreAmount[i] === 0) w.map.touch(i);
+  const sure = help?.sureAmount ?? MINING.sureAmount;
+  let hit = -1;
+  for (let k = 0; k < (help?.tries ?? 1) && hit < 0; k++) {
+    const i = tiles[Math.floor(w.rng() * tiles.length)];
+    const amount = oreOf(w.map.ore[i]) === res ? w.map.oreAmount[i] : 0;
+    if (amount === 0) continue; // a miss: no ore of its kind there (any more)
+    if (amount < sure && w.rng() >= MINING.chancePerUnit * amount) continue; // nothing this time
+    hit = i;
+  }
+  if (hit < 0) {
+    // More than `emptyAfter` fruitless attempts in a row: its owner hears the mine is worked out (S4 2526).
+    b.misses = (b.misses ?? 0) + 1;
+    if (b.misses > MINING.emptyAfter) {
+      b.misses = 0;
+      postMessage(w, 'mineEmpty', b.owner, b.door, { b: b.id });
+    }
+    return;
+  }
+  delete b.misses;
+  // A computer player's tile never runs out (S4: it keeps at least 1).
+  if (!help || w.map.oreAmount[hit] > 1) {
+    if (--w.map.oreAmount[hit] === 0) w.map.touch(hit);
+  }
   b.output[res]++;
   w.stats.produced[res]++;
 }

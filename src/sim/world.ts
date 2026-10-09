@@ -11,6 +11,7 @@ import {
   DISPATCH_EVERY,
   GROUND,
   MAP_SIZE,
+  ORDERABLE,
   OUTPUT_SHARES,
   PROFESSIONS,
   SITE,
@@ -34,6 +35,8 @@ import {
 } from './specialists';
 import { formationSpots, orderAttack, orderGarrison, orderHold, orderMove, releaseFighters } from './field';
 import { updateIntruders } from './intruders';
+import { updateInfirmary } from './infirmary';
+import { updateLookout } from './lookout';
 import { attackStrength } from './strength';
 import {
   createEconomy,
@@ -47,6 +50,7 @@ import {
   setAccepts,
   setCarrierReserve,
   setDistribution,
+  workerOrder,
   type EconomyState,
   type TransportMove,
 } from './economy';
@@ -71,8 +75,16 @@ import {
   updateBarracks,
   updateGarrison,
   withdrawGarrison,
-  type Warning,
 } from './military';
+import type { GameMessage } from './messages';
+
+/** A player's war record (`World.stats.war`). */
+export interface WarStats {
+  killed: Partial<Record<SettlerKind, number>>;
+  fallen: Partial<Record<SettlerKind, number>>;
+  captured: number;
+  lostBuildings: number;
+}
 import { generateMap, type GameMap } from './map';
 import { createFog, ensureVision, isExplored, isVisible, resetSightMasks, updateFog, type FogState } from './fog';
 import { updateNature } from './nature';
@@ -167,6 +179,8 @@ export class World {
     trained: number;
     /** Intruding specialists killed on hostile land (`intruders.ts`). */
     intrudersKilled: number;
+    /** Per player (Settlers 4's fighters statistics): enemies killed and own settlers fallen by kind, buildings taken and lost (`military.ts`). */
+    war: Record<number, WarStats>;
   } = {
     produced: emptyStock(),
     lost: emptyStock(),
@@ -174,6 +188,7 @@ export class World {
     prospected: 0,
     trained: 0,
     intrudersKilled: 0,
+    war: {},
   };
   tick = 0;
   /** Bumped whenever the territory changes, so views can redraw the border. */
@@ -205,11 +220,14 @@ export class World {
   /** Arrows in flight, for drawing only: damage is applied when shot. Derived, not saved. */
   shots: { x0: number; y0: number; x1: number; y1: number; tick: number; owner: PlayerId }[] = [];
   /**
-   * Recent warnings for players (an empty military building with no free fighter, a barracks with no
-   * carrier; `military.ts`), oldest first, kept `GARRISON_ORDERS.warnEvery` ticks. Messages only: the
-   * HUD shows the local player's, nothing in the simulation reads them, so they are not saved.
+   * Messages for players with a place on the map (`messages.ts`, Settlers 4's warnings), oldest first,
+   * the last `MESSAGE_KEEP`. Nothing in the simulation reads them, so they are not saved.
    */
-  readonly warnings: Warning[] = [];
+  readonly messages: GameMessage[] = [];
+  /** The messages under their old name (an empty military building, a barracks with no carrier…). */
+  get warnings(): readonly GameMessage[] {
+    return this.messages;
+  }
   /** Computer players' state (saved). */
   readonly ai: AiState[] = [];
   /** Players with no occupied military building left (`DEFEAT`), in order of defeat (saved). */
@@ -252,10 +270,44 @@ export class World {
       if (!this.players.some((pl) => pl.id === p)) continue;
       const level = opts.difficulty?.[p - 1] ?? 'medium';
       this.ai.push(createAi(p, level));
-      const home = this.homeOf(p);
-      for (const [res, n] of Object.entries(AI_LEVELS[level].bonus) as [Resource, number][]) dropGoods(this, home, res, n);
+      this.aiStart(p, level);
     }
     spawnAnimals(this, starts);
+  }
+
+  /**
+   * Settlers 4's start help for a computer player (`StartResources.txt`, `AI_LEVELS[level]`): its
+   * `bonus` goods on the ground by the start tower and its `people` — pioneers waiting for orders (the
+   * order grows with them), swordsmen of level 1 standing free in front of the tower.
+   */
+  private aiStart(p: PlayerId, level: AiLevel): void {
+    const def = AI_LEVELS[level];
+    const home = this.homeOf(p);
+    const tower = [...this.buildings.values()].find((b) => b.owner === p);
+    if (!tower) return;
+    const c = centerOf(tower);
+    for (const [res, n] of Object.entries(def.bonus) as [Resource, number][]) dropGoods(this, { x: Math.round(c.x), y: Math.round(c.y) }, res, n);
+    const free: Settler[] = [];
+    for (const [kind, n] of Object.entries(def.people) as [SettlerKind, number][]) {
+      for (let i = 0; i < n; i++) {
+        const s = spawnSettler(this, kind, tower);
+        if (isFighter(s)) free.push(s);
+      }
+      if (ORDERABLE.includes(kind)) orderWorkers(this, p, kind, workerOrder(this, p, kind) + n);
+    }
+    const spots = formationSpots(this, home.x, home.y + 3, free.length);
+    free.forEach((s, k) => {
+      const at = spots[Math.min(k, spots.length - 1)] ?? home;
+      s.inside = null;
+      s.x = s.px = at.x;
+      s.y = s.py = at.y;
+    });
+  }
+
+  /** The computer player's difficulty, or null for a human player. */
+  aiLevel(player: PlayerId): AiLevel | null {
+    const ai = this.ai.find((a) => a.player === player);
+    return ai ? (ai.level ?? 'medium') : null;
   }
 
   static load(save: SaveData): World {
@@ -833,6 +885,8 @@ export class World {
       if (b.done && isMilitary(b)) updateGarrison(this, b, assaults);
       // A stopped barracks trains no one (`stop.ts`).
       if (b.done && BUILDINGS[b.type].barracks && !b.stopped) updateBarracks(this, b);
+      if (b.done && BUILDINGS[b.type].infirmary) updateInfirmary(this, b);
+      if (b.done && BUILDINGS[b.type].alarm) updateLookout(this, b);
     }
     // Intruding specialists unmasked and met (`intruders.ts`) before the settlers move this tick.
     updateIntruders(this);
