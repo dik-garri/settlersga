@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { addBuilding, spawnSettler } from '../src/sim/buildings';
-import { hpOf, PROFESSIONS } from '../src/sim/config';
+import { FIELD, hpOf, PROFESSIONS } from '../src/sim/config';
+import { sameRegion } from '../src/sim/regions';
 import { fieldUnits, formationSpots, moraleOf } from '../src/sim/field';
 import { enterGarrison, keepOf, killSettler } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
@@ -185,6 +186,52 @@ describe('direct army control', () => {
     w.orderMove([lone.id], far.x, far.y);
     run(w, 600);
     expect(moraleOf(w, lone)).toBe(1);
+  });
+
+  it('a group sent somewhere gets a spot each round the point, in its own walkable region (S4 CGroupDestinations)', () => {
+    const w = new World(42);
+    const m = w.map;
+    const units = inTheField(w, 5);
+    const c = startTower(w);
+    const t = spotNear(w, c.door.x + 6, c.door.y + 3);
+    expect(w.orderMove(units.map((s) => s.id), t.x, t.y)).toBe(5);
+    const posts = units.map((s) => s.post!);
+    // Distinct spots, the first at the point itself, all walkable and close to it.
+    expect(new Set(posts.map((p) => m.idx(p.x, p.y))).size).toBe(5);
+    expect(posts[0]).toMatchObject({ x: t.x, y: t.y });
+    for (const p of posts) expect(dist(p, t)).toBeLessThanOrEqual(2);
+    // Each walks there on his own route; S4 has no march in step.
+    run(w, 400);
+    for (const s of units) expect(dist(s, s.post!)).toBeLessThanOrEqual(1.5);
+  });
+
+  it('sent onto a tile nobody can reach, the group gathers at the nearest one it can', () => {
+    const w = new World(42);
+    const m = w.map;
+    const units = inTheField(w, 3);
+    const from = m.idx(Math.round(units[0].x), Math.round(units[0].y));
+    // The nearest blocked tile (water, rock, a tree) with a reachable one beside it.
+    const c = startTower(w);
+    let target: { x: number; y: number } | null = null;
+    for (let r = 2; r < 20 && !target; r++) {
+      for (let dy = -r; dy <= r && !target; dy++) {
+        for (let dx = -r; dx <= r && !target; dx++) {
+          const x = c.door.x + dx;
+          const y = c.door.y + dy;
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r || !m.inBounds(x, y) || m.isWalkable(x, y)) continue;
+          if (m.building[m.idx(x, y)] !== 0) continue;
+          target = { x, y };
+        }
+      }
+    }
+    expect(target).not.toBeNull();
+    expect(w.orderMove(units.map((s) => s.id), target!.x, target!.y)).toBe(3);
+    for (const s of units) {
+      const p = s.post!;
+      expect(m.isWalkable(p.x, p.y)).toBe(true);
+      expect(sameRegion(m, from, m.idx(p.x, p.y))).toBe(true);
+      expect(dist(p, target!)).toBeLessThanOrEqual(FIELD.regroupRadius + 2);
+    }
   });
 
   it('a barracks makes an ordered squad leader from armour, a sword and gold', () => {

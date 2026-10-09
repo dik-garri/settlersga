@@ -49,7 +49,7 @@ for (const tool of Object.values(PROFESSIONS).map((p) => p.tool)) if (tool) stor
 const warmup = 600;
 for (let i = 0; i < warmup; i++) w.step();
 let worst = 0;
-Object.assign(pathStats, { calls: 0, failures: 0, expanded: 0, expandedInFailures: 0 });
+Object.assign(pathStats, { calls: 0, failures: 0, expanded: 0, expandedInFailures: 0, landFallbacks: 0 });
 const t0 = performance.now();
 for (let done = 0; done < ticks; done += 100) {
   const s = performance.now();
@@ -65,5 +65,6 @@ console.log(`avg ${avg.toFixed(3)} ms/tick · worst 100-tick window ${worst.toFi
 console.log(
   `A*: ${(pathStats.calls / ticks).toFixed(2)} searches/tick · ${((100 * pathStats.failures) / Math.max(1, pathStats.calls)).toFixed(1)}% failed` +
     ` · ${Math.round(pathStats.expanded / Math.max(1, pathStats.calls))} nodes/search` +
-    ` · ${((100 * pathStats.expandedInFailures) / Math.max(1, pathStats.expanded)).toFixed(0)}% of nodes in failed searches`,
+    ` · ${((100 * pathStats.expandedInFailures) / Math.max(1, pathStats.expanded)).toFixed(0)}% of nodes in failed searches` +
+    ` · ${pathStats.landFallbacks} off-land fallbacks`,
 );

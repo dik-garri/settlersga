@@ -74,7 +74,17 @@ class MinHeap {
 }
 
 /** Counters for benchmarks and profiling; never read by game logic. */
-export const pathStats = { calls: 0, failures: 0, expanded: 0, expandedInFailures: 0 };
+export const pathStats = { calls: 0, failures: 0, expanded: 0, expandedInFailures: 0, landFallbacks: 0 };
+
+/**
+ * Keeps a search on one player's land (Settlers 4's `CAStar64Worker::IsNotBlocked`: a worker's step
+ * is open only on his eco sector), giving up after `budget` expansions.
+ */
+export interface LandLimit {
+  owner: ArrayLike<number>;
+  player: number;
+  budget: number;
+}
 
 /**
  * Search buffers reused across calls on the same map, so a search costs what it explores
@@ -145,6 +155,8 @@ function octile(ax: number, ay: number, bx: number, by: number): number {
  * With `adjacent`, any walkable tile touching the target counts as the goal
  * (used for blocked targets such as trees). The start tile is always allowed.
  * `useRegions` lets hopeless searches fail in O(1) (see regions.ts); tests disable it to cross-check.
+ * With `land`, only tiles of that player are entered (the start tile is always allowed) and the
+ * search fails once it has expanded `land.budget` nodes.
  */
 export function findPath(
   map: GameMap,
@@ -154,6 +166,7 @@ export function findPath(
   ty: number,
   adjacent = false,
   useRegions = true,
+  land?: LandLimit,
 ): Point[] | null {
   const isGoal = adjacent
     ? (x: number, y: number) => Math.max(Math.abs(x - tx), Math.abs(y - ty)) === 1
@@ -184,6 +197,7 @@ export function findPath(
     if (closed[cur] === stamp) continue;
     closed[cur] = stamp;
     pathStats.expanded++;
+    if (land && pathStats.expanded - expandedBefore > land.budget) break;
     const cx = cur % map.w;
     const cy = (cur - cx) / map.w;
 
@@ -206,6 +220,7 @@ export function findPath(
       }
       const ni = map.idx(nx, ny);
       if (closed[ni] === stamp) continue;
+      if (land && land.owner[ni] !== land.player) continue;
       // Slow terrain costs more to enter, and so does a tile with goods lying on it (Settlers 4's
       // piles, `GROUND.pathCost`), so routes go around them when that is cheaper. Never below 1: the
       // octile heuristic stays admissible.

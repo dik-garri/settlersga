@@ -44,6 +44,14 @@ function claimersNear(w: World, cx: number, cy: number, r: number): Claimer[] {
   return out;
 }
 
+/**
+ * Whether any claiming building's influence reaches the tile (Settlers 4's tower bit, world flag
+ * 0x80, set by `SetOwner`/`SetTowerBits` wherever a tower's influence lies). O(buildings).
+ */
+export function influenced(w: World, x: number, y: number): boolean {
+  return claimersNear(w, x, y, 0).length > 0;
+}
+
 /** Scratch per-player influence sums, indexed by player id. */
 let sums = new Float64Array(9);
 

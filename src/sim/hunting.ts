@@ -1,6 +1,6 @@
 import type { Animal } from './animals';
 import { ANIMALS, OUTPUT_CAP, PROFESSIONS, type AnimalDef } from './config';
-import { findPath } from './pathfinding';
+import { route } from './walk';
 import type { Building, Point, Resource, Settler, Task } from './types';
 import type { World } from './world';
 import { abort } from './settlers';
@@ -39,7 +39,7 @@ export function findGame(w: World, s: Settler, home: Building, radius: number): 
   if (!best) return null;
   const x = Math.round(best.x);
   const y = Math.round(best.y);
-  const path = findPath(w.map, Math.round(s.x), Math.round(s.y), x, y, true);
+  const path = route(w, s, Math.round(s.x), Math.round(s.y), x, y, true);
   if (!path) return null;
   const def: AnimalDef = ANIMALS[best.kind];
   return { animal: best, res: def.game!, x, y, path };

@@ -1,4 +1,5 @@
-import { FIELD, GEOLOGIST, GEOLOGIST_SIGN, ORDERABLE, oreOf, PIONEER, PROFESSIONS, THIEF } from './config';
+import { FIELD, GEOLOGIST, GEOLOGIST_SIGN, ORDERABLE, oreOf, PIONEER, PROFESSIONS, TERRAIN, THIEF } from './config';
+import { influenced } from './territory';
 import { postMessage } from './messages';
 import { recountWorkers, spareCarriers, workerOrder, workersOf } from './economy';
 import { restIdle } from './idle';
@@ -23,9 +24,11 @@ import type { World } from './world';
  * `reach` of him. Then the errand is over and he stays standing where he is (`Settler.post`), waiting
  * for orders; nobody walks home. Tiles he finds no route to are skipped (`errand.skip`).
  *
- * Pioneer: claims neutral passable tiles (`claimable`), one per `claim` task: the tile's `map.owner`
- * is set at once and stays his owner's like any land (`territory.ts`). It carries no influence, so
- * another player's tower that covers it takes it, as in Settlers 4. Pioneers never claim owned land.
+ * Pioneer: claims passable tiles (`claimable`) — neutral ones, and a hostile player's border tiles
+ * no tower's influence reaches (S4 moves such border stones) —, one per `claim` task: the tile's
+ * `map.owner` is set at once and stays his owner's like any land (`territory.ts`). It carries no
+ * influence, so another player's tower that covers it takes it, as in Settlers 4. Pioneers never
+ * claim their own or an ally's land.
  *
  * Geologist: puts up a sign (`map.signAt`/`signBy`; what his owner learns goes to `map.prospected`,
  * per player, for good) on every walkable mountain tile without a sign of his owner's (`prospectable`),
@@ -44,10 +47,33 @@ import type { World } from './world';
  * tool back to a warehouse) and lowers the order.
  */
 
-/** Whether a pioneer of `player` may claim the tile: neutral and passable (S4 `CPioneerRole::CheckLand`). */
-export function claimable(w: World, x: number, y: number, _player: PlayerId): boolean {
+/**
+ * Whether a pioneer of `player` may claim the tile (S4 `CPioneerRole::CheckLand`): passable, no
+ * building on it, no tower's influence (world flag 0x80), and either nobody's, or a non-allied
+ * player's border tile — one carrying a border stone (S4 `CTiling::CalculateBorderstoneBit`: a
+ * neighbour of another owner that is not water). So he moves foreign border stones that no tower
+ * protects, tile by tile, and never touches his own or an ally's land.
+ */
+export function claimable(w: World, x: number, y: number, player: PlayerId): boolean {
   const m = w.map;
-  return m.inBounds(x, y) && m.owner[m.idx(x, y)] === 0 && m.isWalkable(x, y);
+  if (!m.inBounds(x, y) || !m.isWalkable(x, y)) return false;
+  const i = m.idx(x, y);
+  const o = m.owner[i];
+  if (o === 0) return true;
+  if (w.allied(o, player) || m.door[i] !== 0 || m.building[i] !== 0) return false;
+  return borderStone(m, x, y, o) && !influenced(w, x, y);
+}
+
+/** S4's border stone bit: the tile of `owner` touches a tile of another owner that is not water. */
+function borderStone(m: GameMap, x: number, y: number, owner: number): boolean {
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if ((dx === 0 && dy === 0) || !m.inBounds(x + dx, y + dy)) continue;
+      const j = m.idx(x + dx, y + dy);
+      if (m.owner[j] !== owner && !TERRAIN[m.terrain[j] as Terrain].water) return true;
+    }
+  }
+  return false;
 }
 
 /** Whether a geologist of `player` may examine the tile: walkable mountain without his sign, on any land. */

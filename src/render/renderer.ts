@@ -1,4 +1,16 @@
-import { CanvasSource, Container, Graphics, MeshSimple, Sprite, Text, Texture, type Application } from 'pixi.js';
+import {
+  BatchableGraphics,
+  BigPool,
+  CanvasSource,
+  Container,
+  Graphics,
+  GraphicsContextRenderData,
+  MeshSimple,
+  Sprite,
+  Text,
+  Texture,
+  type Application,
+} from 'pixi.js';
 import { BUILD_TICKS_PER_UNIT, BUILDINGS, CROP_KINDS, DEPOSIT_STONE, SHOT_TICKS, TERRAIN, TREE_MATURE } from '../sim/config';
 import { RESOURCES, Terrain, type Building, type BuildingType, type Resource, type Settler } from '../sim/types';
 import { CHUNK } from '../sim/map';
@@ -69,6 +81,14 @@ const KEEP_CHUNKS = 128;
 const UNLOAD_AFTER_MS = 10_000;
 const UNLOADS_PER_CALL = 256;
 const MAX_READY_CHUNKS = 600;
+/**
+ * Free Pixi graphics render data kept for reuse after an unload pass (`trimGraphicsPools`): beyond
+ * this many the pools are emptied.
+ */
+const POOL_KEEP = { renderData: 64, batches: 4096 };
+/** Most sprites (`spritePool`) and fog canvases (`fogPool`) kept for reuse. */
+const SPRITE_POOL_MAX = 30_000;
+const FOG_POOL_MAX = 256;
 
 /** First-time chunk builds allowed per frame (see `syncVisibleChunks`). */
 const CHUNK_BUILDS_PER_FRAME = 6;
@@ -210,6 +230,17 @@ export class GameRenderer {
    */
   private readonly chunkHiddenAt: Float64Array;
   private readonly boulders: Container[][] = [];
+  /**
+   * Plain sprites (trees, boulders) given back by unloaded chunks, reused by the next chunk built
+   * (`takeSprite`): a fly-over of a big map otherwise makes and drops a forest's worth every second.
+   */
+  private readonly spritePool: Sprite[] = [];
+  private readonly groundTextures: Partial<Record<GroundKind, Texture[]>> = {};
+  private readonly edgeTextures: Partial<Record<GroundKind, Texture[]>> = {};
+  /** Fog canvases and their textures given back by unloaded chunks, reused by the next one. */
+  private readonly fogPool: { canvas: HTMLCanvasElement; tex: Texture }[] = [];
+  /** One pixel buffer for every fog chunk redraw. */
+  private fogImage: ImageData | null = null;
   private lastUnload = 0;
   private lastHeightSync = 0;
   /** Where each static object stands (tile coordinates) and its offset from that surface point. */
@@ -486,7 +517,7 @@ export class GameRenderer {
         const i = map.idx(x, y);
         const kind = TERRAIN_KIND[map.terrain[i] as Terrain];
         if (kind !== 'rock' && !(kind === 'mountain' && hash(i + 3) % 4 === 0)) continue;
-        const rock = new Sprite(this.atlas.get(`boulder:${hash(i + 7) % 2}`));
+        const rock = this.takeSprite(this.atlas.get(`boulder:${hash(i + 7) % 2}`));
         const p = this.surface(x, y);
         rock.position.set(p.x + ((hash(i) >> 8) % 7) - 3, p.y + 2);
         rock.scale.set((kind === 'rock' ? 0.8 : 0.4) + ((hash(i) >> 4) % 4) * 0.08);
@@ -509,71 +540,59 @@ export class GameRenderer {
     const y0 = Math.floor(c / map.chunksX) * CHUNK;
     const x1 = Math.min(map.w, x0 + CHUNK);
     const y1 = Math.min(map.h, y0 + CHUNK);
-    const vertices: number[] = [];
-    const uvs: number[] = [];
-    const indices: number[] = [];
-    const shade = new Graphics();
-    const levels = new Map<number, number[][]>();
+    // Both meshes are collected in reusable buffers (`QuadBuffer`); only the final, exact-size
+    // arrays the meshes keep are new. Slope shading is one mesh over a palette of shade texels
+    // (`shadeSheet`), not a Graphics — a chunk's 256 polygons made a Graphics' worth of paths,
+    // batches and geometry every time it was built.
+    const ground = GROUND_QUADS.reset();
+    const shade = SHADE_QUADS.reset();
+    const sw = source.width;
+    const sh = source.height;
     const kindAt = (x: number, y: number) =>
       map.inBounds(x, y) ? TERRAIN_KIND[map.terrain[map.idx(x, y)] as Terrain] : undefined;
     const priority = (k: GroundKind | undefined) => (k ? GROUND_PRIORITY.indexOf(k) : -1);
-    const quadOf = (tex: Texture, quad: { x: number; y: number }[]) => {
+    const q = QUAD;
+    const quadOf = (tex: Texture) => {
       if (tex.source !== source) throw new Error('ground sprites must share one atlas page');
       // Sample slightly inside the painted diamond so antialiased edges never show as seams.
       const f = tex.frame;
-      const uv = [
-        [f.x + 33, f.y + 2],
-        [f.x + 63.5, f.y + 17],
-        [f.x + 33, f.y + 32],
-        [f.x + 2.5, f.y + 17],
-      ];
-      const k = vertices.length / 2;
-      for (let q = 0; q < 4; q++) {
-        vertices.push(quad[q].x, quad[q].y);
-        uvs.push(uv[q][0] / source.width, uv[q][1] / source.height);
-      }
-      indices.push(k, k + 1, k + 2, k, k + 2, k + 3);
+      ground.quad(q, (f.x + 33) / sw, (f.y + 2) / sh, (f.x + 63.5) / sw, (f.y + 17) / sh, (f.x + 33) / sw, (f.y + 32) / sh, (f.x + 2.5) / sw, (f.y + 17) / sh);
     };
     for (let d = x0 + y0; d <= x1 - 1 + y1 - 1; d++) {
       for (let x = Math.max(x0, d - (y1 - 1)); x <= Math.min(x1 - 1, d - y0); x++) {
         const y = d - x;
         const i = map.idx(x, y);
         const kind = kindAt(x, y)!;
-        const quad = [this.corner(x, y), this.corner(x + 1, y), this.corner(x + 1, y + 1), this.corner(x, y + 1)];
+        // The tile's corners: (x, y), (x + 1, y), (x + 1, y + 1), (x, y + 1) of the vertex grid.
+        for (let k = 0; k < 4; k++) {
+          const vx = x + (k === 1 || k === 2 ? 1 : 0);
+          const vy = y + (k >= 2 ? 1 : 0);
+          q[2 * k] = (vx - vy) * HALF_W;
+          q[2 * k + 1] = (vx + vy - 1) * HALF_H - map.vertexHeight(vx, vy);
+        }
         const period = this.atlas.groundPeriod[kind];
         const variant = period ? (x % period) + period * (y % period) : hash(i) % groundVariants(kind);
-        quadOf(this.atlas.get(`ground:${kind}:${variant}`), quad);
+        quadOf(this.groundTexture(kind, variant));
         const own = priority(kind);
-        EDGE_DIRS.forEach(([du, dv], dir) => {
+        for (let dir = 0; dir < EDGE_DIRS.length; dir++) {
+          const [du, dv] = EDGE_DIRS[dir];
           const n = kindAt(x + du, y + dv);
-          if (!n || priority(n) <= own) return;
+          if (!n || priority(n) <= own) continue;
           // A corner overlay is redundant where an edge neighbour of the same kind already covers it.
-          if (du !== 0 && dv !== 0 && (kindAt(x + du, y) === n || kindAt(x, y + dv) === n)) return;
-          quadOf(this.atlas.get(`edge:${n}:${dir}`), quad);
-        });
+          if (du !== 0 && dv !== 0 && (kindAt(x + du, y) === n || kindAt(x, y + dv) === n)) continue;
+          quadOf(this.edgeTexture(n, dir));
+        }
 
         const level = this.slopeLight(x, y);
         if (level !== 0) {
-          const list = levels.get(level) ?? [];
-          list.push(quad.flatMap((p) => [p.x, p.y]));
-          levels.set(level, list);
+          const u = (level - SHADE_MIN + 0.5) / SHADE_TEXELS;
+          shade.quad(q, u, 0.5, u, 0.5, u, 0.5, u, 0.5);
         }
       }
     }
-    for (const [level, polys] of levels) {
-      for (const pts of polys) shade.poly(pts);
-      shade.fill(level > 0 ? { color: 0xfff4d8, alpha: level * 0.05 } : { color: 0x0c0a14, alpha: -level * 0.07 });
-    }
     const layer = new Container();
-    layer.addChild(
-      new MeshSimple({
-        texture: this.groundSheet,
-        vertices: new Float32Array(vertices),
-        uvs: new Float32Array(uvs),
-        indices: new Uint32Array(indices),
-      }),
-      shade,
-    );
+    layer.addChild(ground.mesh(this.groundSheet));
+    if (shade.quads > 0) layer.addChild(shade.mesh(shadeSheet()));
     this.scatterProps(layer, x0, y0, x1, y1);
     this.streamBanks(layer, x0, y0, x1, y1);
     // The ground layer stays below the chunk's field decals.
@@ -733,6 +752,46 @@ export class GameRenderer {
   private removeStatic(obj: Container, x: number, y: number, chunk?: number): void {
     this.chunkObjects[chunk ?? this.sim.map.chunkOf(Math.round(x), Math.round(y))].delete(obj);
     obj.destroy();
+  }
+
+  /** `ground:<kind>:<variant>` without building the key for every tile of every chunk built. */
+  private groundTexture(kind: GroundKind, variant: number): Texture {
+    const list = (this.groundTextures[kind] ??= []);
+    return (list[variant] ??= this.atlas.get(`ground:${kind}:${variant}`));
+  }
+
+  /** `edge:<kind>:<dir>`, cached like `groundTexture`. */
+  private edgeTexture(kind: GroundKind, dir: number): Texture {
+    const list = (this.edgeTextures[kind] ??= []);
+    return (list[dir] ??= this.atlas.get(`edge:${kind}:${dir}`));
+  }
+
+  /** A plain sprite showing `texture`: from the pool when one is there, else new. */
+  private takeSprite(texture: Texture): Sprite {
+    const s = this.spritePool.pop();
+    if (!s) return new Sprite(texture);
+    s.texture = texture;
+    // A sprite takes its texture's anchor only when made (see the Pixi notes in CLAUDE.md).
+    s.anchor.copyFrom(texture.defaultAnchor ?? { x: 0, y: 0 });
+    return s;
+  }
+
+  /** `removeStatic` for a plain sprite made by `takeSprite`: back into the pool, reset. */
+  private recycleStatic(s: Sprite, chunk: number): void {
+    this.chunkObjects[chunk].delete(s);
+    if (this.spritePool.length >= SPRITE_POOL_MAX) {
+      s.destroy();
+      return;
+    }
+    s.removeFromParent();
+    s.scale.set(1, 1);
+    s.skew.set(0, 0);
+    s.rotation = 0;
+    s.alpha = 1;
+    s.tint = 0xffffff;
+    s.visible = true;
+    s.label = '';
+    this.spritePool.push(s);
   }
 
   /**
@@ -1022,13 +1081,19 @@ export class GameRenderer {
     const W = CHUNK + 2;
     let canvas = this.fogCanvas[c];
     if (!canvas) {
-      canvas = document.createElement('canvas');
-      canvas.width = W;
-      canvas.height = W;
+      const free = this.fogPool.pop();
+      if (free) {
+        canvas = free.canvas;
+        this.fogTex[c] = free.tex;
+      } else {
+        canvas = document.createElement('canvas');
+        canvas.width = W;
+        canvas.height = W;
+      }
       this.fogCanvas[c] = canvas;
     }
     const ctx = canvas.getContext('2d')!;
-    const img = ctx.createImageData(W, W);
+    const img = (this.fogImage ??= ctx.createImageData(W, W));
     const ALPHA = [255, 107, 0]; // unexplored, explored out of sight (0.42), in sight
     for (let k = 0; k < W * W; k++) {
       img.data[k * 4] = 5;
@@ -1119,7 +1184,9 @@ export class GameRenderer {
       if (crowded || timeMs - this.chunkHiddenAt[c] > UNLOAD_AFTER_MS) stale.push(c);
     }
     stale.sort((a, b) => this.chunkHiddenAt[a] - this.chunkHiddenAt[b] || a - b);
-    for (const c of stale.slice(0, Math.min(UNLOADS_PER_CALL, ready - KEEP_CHUNKS))) this.unloadChunk(c);
+    const gone = stale.slice(0, Math.min(UNLOADS_PER_CALL, ready - KEEP_CHUNKS));
+    for (const c of gone) this.unloadChunk(c);
+    if (gone.length > 0) trimGraphicsPools();
   }
 
   private unloadChunk(c: number): void {
@@ -1127,14 +1194,17 @@ export class GameRenderer {
     this.chunkReady[c] = 0;
     disposeLayer(this.groundLayers[c]);
     this.groundLayers[c] = null;
-    for (const rock of this.boulders[c]) this.removeStatic(rock, 0, 0, c);
+    for (const rock of this.boulders[c]) this.recycleStatic(rock as Sprite, c);
     this.boulders[c] = [];
     const x0 = (c % map.chunksX) * CHUNK;
     const y0 = Math.floor(c / map.chunksX) * CHUNK;
     for (let y = y0; y < Math.min(map.h, y0 + CHUNK); y++) {
       for (let x = x0; x < Math.min(map.w, x0 + CHUNK); x++) {
         const i = map.idx(x, y);
-        for (const list of [this.treeSprites, this.depositSprites, this.signSprites, this.goodsSprites]) {
+        const tree = this.treeSprites[i];
+        if (tree) this.recycleStatic(tree, c);
+        this.treeSprites[i] = null;
+        for (const list of [this.depositSprites, this.signSprites, this.goodsSprites]) {
           const sprite = list[i];
           if (sprite) this.removeStatic(sprite, x, y);
           list[i] = null;
@@ -1165,7 +1235,10 @@ export class GameRenderer {
     disposeMesh(this.fogMesh[c]);
     this.fogMesh[c] = null;
     this.effects.unloadChunk(c);
-    this.fogTex[c]?.destroy(true);
+    const fogCanvas = this.fogCanvas[c];
+    const fogTex = this.fogTex[c];
+    if (fogCanvas && fogTex && this.fogPool.length < FOG_POOL_MAX) this.fogPool.push({ canvas: fogCanvas, tex: fogTex });
+    else fogTex?.destroy(true);
     this.fogTex[c] = null;
     this.fogCanvas[c] = null;
     this.fogPrev[c] = null;
@@ -1241,7 +1314,7 @@ export class GameRenderer {
     }
     if (!s) {
       const h = hash(i);
-      s = new Sprite(this.atlas.get(`tree:${h % this.atlas.treeVariants}`));
+      s = this.takeSprite(this.atlas.get(`tree:${h % this.atlas.treeVariants}`));
       s.label = 'tree';
       const p = this.surface(x, y);
       s.position.set(p.x + ((h >> 6) % 9) - 4, p.y + ((h >> 10) % 5) - 2);
@@ -2183,6 +2256,101 @@ function shadeColor(color: number | string, k: number): number {
   const c = typeof color === 'string' ? parseInt(color.replace('#', ''), 16) : color;
   const ch = (v: number) => Math.min(255, Math.round(v * k));
   return (ch((c >> 16) & 255) << 16) | (ch((c >> 8) & 255) << 8) | ch(c & 255);
+}
+
+/**
+ * Quads of a mesh being built (four corners, their texture coordinates, two triangles each), in
+ * buffers that grow and are reused by every chunk built; `mesh` copies out exactly what was added.
+ */
+class QuadBuffer {
+  private v = new Float32Array(8 * 512);
+  private u = new Float32Array(8 * 512);
+  quads = 0;
+
+  reset(): this {
+    this.quads = 0;
+    return this;
+  }
+
+  /** A quad with corners `q` (x0, y0 … x3, y3) and texture coordinates (u0, v0) … (u3, v3). */
+  quad(q: Float32Array, u0: number, v0: number, u1: number, v1: number, u2: number, v2: number, u3: number, v3: number): void {
+    if ((this.quads + 1) * 8 > this.v.length) {
+      const v = new Float32Array(this.v.length * 2);
+      v.set(this.v);
+      this.v = v;
+      const u = new Float32Array(this.u.length * 2);
+      u.set(this.u);
+      this.u = u;
+    }
+    const k = this.quads * 8;
+    this.v.set(q, k);
+    const u = this.u;
+    u[k] = u0;
+    u[k + 1] = v0;
+    u[k + 2] = u1;
+    u[k + 3] = v1;
+    u[k + 4] = u2;
+    u[k + 5] = v2;
+    u[k + 6] = u3;
+    u[k + 7] = v3;
+    this.quads++;
+  }
+
+  mesh(texture: Texture): MeshSimple {
+    const n = this.quads;
+    const indices = new Uint32Array(n * 6);
+    for (let i = 0, k = 0, j = 0; i < n; i++, k += 4, j += 6) {
+      indices[j] = k;
+      indices[j + 1] = k + 1;
+      indices[j + 2] = k + 2;
+      indices[j + 3] = k;
+      indices[j + 4] = k + 2;
+      indices[j + 5] = k + 3;
+    }
+    return new MeshSimple({ texture, vertices: this.v.slice(0, n * 8), uvs: this.u.slice(0, n * 8), indices });
+  }
+}
+const GROUND_QUADS = new QuadBuffer();
+const SHADE_QUADS = new QuadBuffer();
+/** One tile's four corners while a chunk is built. */
+const QUAD = new Float32Array(8);
+
+/** Slope shading levels (`slopeLight`): −7 … 5, one texel each in `shadeSheet`. */
+const SHADE_MIN = -7;
+const SHADE_TEXELS = 13;
+let shadeTexture: Texture | null = null;
+
+/**
+ * The slope shading palette, made once: texel k is level k + `SHADE_MIN` — warm light at 5 % per
+ * level up, cool shade at 7 % per level down, clear at 0 — sampled at its centre (nearest).
+ */
+function shadeSheet(): Texture {
+  if (shadeTexture) return shadeTexture;
+  const canvas = document.createElement('canvas');
+  canvas.width = SHADE_TEXELS;
+  canvas.height = 1;
+  const ctx = canvas.getContext('2d')!;
+  for (let k = 0; k < SHADE_TEXELS; k++) {
+    const level = k + SHADE_MIN;
+    if (level === 0) continue;
+    ctx.fillStyle = level > 0 ? `rgba(255, 244, 216, ${level * 0.05})` : `rgba(12, 10, 20, ${-level * 0.07})`;
+    ctx.fillRect(k, 0, 1, 1);
+  }
+  shadeTexture = new Texture({ source: new CanvasSource({ resource: canvas, scaleMode: 'nearest' }) });
+  return shadeTexture;
+}
+
+/**
+ * Empties Pixi's pools of graphics render data once they hold more than `POOL_KEEP` free items. A
+ * destroyed `Graphics` hands its render data (a batcher whose vertex and index buffers grew to fit
+ * it) and its batches (each still holding its geometry arrays and that batcher) back to `BigPool`,
+ * which never shrinks: after a fly-over of a 1024×1024 map the free ones held ≈ 300 MB.
+ */
+function trimGraphicsPools(): void {
+  const renderData = BigPool.getPool(GraphicsContextRenderData);
+  if (renderData.totalFree > POOL_KEEP.renderData) renderData.clear();
+  const batches = BigPool.getPool(BatchableGraphics);
+  if (batches.totalFree > POOL_KEEP.batches) batches.clear();
 }
 
 /**

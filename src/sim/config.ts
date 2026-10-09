@@ -355,6 +355,20 @@ export const FLEE = {
 };
 
 /**
+ * Who walks on his own land only (Settlers 4: carriers, free settlers, builders, diggers, workers of
+ * houses and the hunter walk as `CWalkingWorker`, whose A* — `CAStar64Worker::IsNotBlocked` — enters
+ * only tiles of the walker's eco sector, a connected piece of his own land; donkeys, specialists and
+ * soldiers walk anywhere). Their routes between two tiles of one piece of their land (`walk.ts`) stay
+ * on it, searched for at most `budget` + `perTile` × distance nodes; where no such route exists
+ * (water, rock or forest cut the piece on our square grid) they take the plain route.
+ */
+export const OWN_LAND_WALK = {
+  behaviors: ['carrier', 'builder', 'digger', 'gather', 'plant', 'farm', 'workshop', 'hunt'] as Behavior[],
+  budget: 2000,
+  perTile: 64,
+};
+
+/**
  * Workers the player orders (as in Settlers 4 builders and diggers are made from free settlers, with
  * a tool, only as many as ordered); the defaults equal the start's, so nothing is recruited unasked.
  * `World.orderWorkers` changes them.
@@ -1063,10 +1077,12 @@ export function hpOf(kind: SettlerKind, level = 0): number {
  * Field units (direct army control, `field.ts`): a fighter on a field post engages enemy fighters
  * within `engageRadius` tiles (archers shoot within their range instead), looks around every
  * `scanEvery` ticks, gives up a chase beyond `chaseLimit` tiles from his post, and walks back to the
- * post once more than `slack` tiles from it. `formation`: tiles between neighbours of a formation.
+ * post once more than `slack` tiles from it. `formation`: tiles between the spots of a group sent
+ * somewhere (S4's `CGroupDestinations`: 2 of its tiles); `regroupRadius`: how far from a target its
+ * first member cannot walk to the group looks for a spot he can (S4: a spiral of 15 of its tiles).
  * A swordsman whose enemy is busy with a comrade waits beside him `waitBeside` ticks, then gives up.
  */
-export const FIELD = { engageRadius: 4, scanEvery: 5, chaseLimit: 7, slack: 1.5, formation: 1, waitBeside: 36 };
+export const FIELD = { engageRadius: 4, scanEvery: 5, chaseLimit: 7, slack: 1.5, formation: 1, regroupRadius: 5, waitBeside: 36 };
 
 // --------------------------------------------------------------- buildings
 
