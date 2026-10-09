@@ -1,5 +1,6 @@
 import { t } from './i18n';
 import type { SaveData } from '../sim/save';
+import type { MissionProgress } from '../tutorial/runner';
 
 /**
  * Save slots in browser storage, as in Settlers 4's load screen: any number of named saves plus one
@@ -19,6 +20,12 @@ export interface SlotMeta {
   size: number;
   players: number;
   auto?: boolean;
+  /**
+   * A tutorial mission under way (its step automaton's progress, `TutorialRunner.serialize`): the
+   * mission goes on from there when the slot is loaded. Not part of `SaveData`, which stays pure
+   * simulation state; the progress means nothing without the world it is saved with.
+   */
+  mission?: MissionProgress;
 }
 
 /** The part of `Storage` the slots use (a test passes a Map-backed fake). */
@@ -104,15 +111,27 @@ export class SaveSlots {
     return this.list()[0] ?? null;
   }
 
+  /** The slot's description, if it exists. */
+  meta(id: string): SlotMeta | null {
+    return this.list().find((m) => m.id === id) ?? null;
+  }
+
   /**
    * Stores `data` in slot `id` (a new slot when omitted; `AUTO_ID` for the autosave), described as
    * `name`. Returns the slot, or null if storage is unavailable or full.
    */
-  async write(data: SaveData, name: string, now: number, id?: string): Promise<SlotMeta | null> {
+  async write(data: SaveData, name: string, now: number, id?: string, extra: Pick<SlotMeta, 'mission'> = {}): Promise<SlotMeta | null> {
     if (!this.store) return null;
     const list = this.index();
     const slotId = id ?? `s${now.toString(36)}${list.length}`;
-    const meta: SlotMeta = { id: slotId, name, savedAt: now, ...describe(data), ...(slotId === AUTO_ID ? { auto: true } : {}) };
+    const meta: SlotMeta = {
+      id: slotId,
+      name,
+      savedAt: now,
+      ...describe(data),
+      ...(slotId === AUTO_ID ? { auto: true } : {}),
+      ...(extra.mission ? { mission: extra.mission } : {}),
+    };
     try {
       this.store.setItem(PREFIX + slotId, await pack(JSON.stringify(data)));
     } catch {

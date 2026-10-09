@@ -7,6 +7,7 @@ import { button, el, type View } from './dom';
 import { DistributionView, TransportView } from './economyPanel';
 import { t } from './i18n';
 import { groupName, resName } from './names';
+import { tag } from './uiTarget';
 
 type Page = 'stock' | 'distribution' | 'transport';
 
@@ -55,9 +56,9 @@ export class GoodsView implements View {
     }
     const pages = el('div', 'page-tabs');
     this.pageButtons = {
-      stock: button(t('goods.stock'), t('goods.stockTip'), () => this.show('stock')),
-      distribution: button(t('goods.distribution'), t('goods.distributionTip'), () => this.show('distribution')),
-      transport: button(t('goods.transport'), t('goods.transportTip'), () => this.show('transport')),
+      stock: tag(button(t('goods.stock'), t('goods.stockTip'), () => this.show('stock')), 'goods.stock'),
+      distribution: tag(button(t('goods.distribution'), t('goods.distributionTip'), () => this.show('distribution')), 'goods.distribution'),
+      transport: tag(button(t('goods.transport'), t('goods.transportTip'), () => this.show('transport')), 'goods.transport'),
     };
     pages.append(this.pageButtons.stock, this.pageButtons.distribution, this.pageButtons.transport);
     this.el.append(pages, this.stock, this.distribution.el, this.transport.el);

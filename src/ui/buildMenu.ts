@@ -5,7 +5,9 @@ import { LOCAL_PLAYER, type World } from '../sim/world';
 import { el, type View } from './dom';
 import { nextBuildingOfType } from './find';
 import { t } from './i18n';
+import { buildingOpen, tabOpen } from './locks';
 import { buildingName, categoryName } from './names';
+import { tag } from './uiTarget';
 import type { GameState, Placeable } from './state';
 
 /**
@@ -38,7 +40,10 @@ export class BuildView implements View {
   readonly el = el('div', 'view build-view');
   private readonly tabButtons: HTMLButtonElement[] = [];
   private readonly grids: HTMLElement[] = [];
-  private readonly buttons = new Map<BuildingType, { b: HTMLButtonElement; count: HTMLElement }>();
+  private readonly buttons = new Map<BuildingType, { b: HTMLButtonElement; count: HTMLElement; tip: string }>();
+  private readonly tabTips: string[] = [];
+  /** The locks last drawn (`GameState.locks`), so greying is redone only when they change. */
+  private locksSeen: unknown = undefined;
   private readonly title = el('h4', 'view-sub');
   private tab = 0;
   /** The building the last right click jumped to (the next one comes after it). */
@@ -52,18 +57,20 @@ export class BuildView implements View {
   ) {
     const tabs = el('div', 'cat-tabs');
     MENU.forEach(({ category, types }, k) => {
-      const tab = el('button', 'cat-tab');
+      const tab = tag(el('button', 'cat-tab'), `build.tab.${category}`);
       tab.title = t('build.tabTip', { name: categoryName(category) });
+      this.tabTips.push(tab.title);
       if (types[0]) tab.append(buildingIcon(types[0], 28));
       tab.onclick = () => {
-        this.showTab(k);
+        // A tab the tutorial has not opened yet stays shut.
+        if (tabOpen(this.state.locks, category)) this.showTab(k);
         tab.blur();
       };
       tabs.append(tab);
       this.tabButtons.push(tab);
       const grid = el('div', 'build-grid');
       types.forEach((type, i) => {
-        const b = el('button', 'build-btn');
+        const b = tag(el('button', 'build-btn'), `build.item.${type}`);
         b.title = t('build.buttonTip', { name: buildingName(type), n: i + 1 });
         const count = el('span', 'build-count', '0');
         const pic = el('span', 'build-pic');
@@ -72,7 +79,7 @@ export class BuildView implements View {
         cost.append(costLabel(type));
         b.append(count, pic, el('span', 'name', buildingName(type)), cost);
         b.onclick = () => {
-          this.select(this.state.placing === type ? null : type);
+          if (buildingOpen(this.state.locks, type)) this.select(this.state.placing === type ? null : type);
           b.blur();
         };
         b.oncontextmenu = (e) => {
@@ -84,7 +91,7 @@ export class BuildView implements View {
           this.focus(next);
         };
         grid.append(b);
-        this.buttons.set(type, { b, count });
+        this.buttons.set(type, { b, count, tip: b.title });
       });
       this.grids.push(grid);
     });
@@ -93,6 +100,14 @@ export class BuildView implements View {
   }
 
   showTab(t: number): void {
+    // Tab and the digit keys skip the tabs the tutorial keeps shut.
+    for (let k = 0; k < MENU.length; k++) {
+      const i = (((t + k) % MENU.length) + MENU.length) % MENU.length;
+      if (tabOpen(this.state.locks, MENU[i].category)) {
+        t = i;
+        break;
+      }
+    }
     this.tab = (t + MENU.length) % MENU.length;
     this.grids.forEach((g, i) => (g.hidden = i !== this.tab));
     this.tabButtons.forEach((b, i) => b.classList.toggle('active', i === this.tab));
@@ -103,12 +118,32 @@ export class BuildView implements View {
     this.showTab(this.tab + 1);
   }
 
-  /** The n-th building (1-based) of the open category. */
+  /** The n-th building (1-based) of the open category, unless the tutorial keeps it shut. */
   typeAt(n: number): BuildingType | undefined {
-    return MENU[this.tab].types[n - 1];
+    const type = MENU[this.tab].types[n - 1];
+    return type && buildingOpen(this.state.locks, type) ? type : undefined;
+  }
+
+  /** Greys out (with a lock and «opens later») the tabs and buildings the tutorial has not opened. */
+  private showLocks(): void {
+    const locks = this.state.locks;
+    if (locks === this.locksSeen) return;
+    this.locksSeen = locks;
+    MENU.forEach(({ category }, k) => {
+      const open = tabOpen(locks, category);
+      this.tabButtons[k].classList.toggle('locked', !open);
+      this.tabButtons[k].title = open ? this.tabTips[k] : `${this.tabTips[k]} — ${t('tut.ui.locked')}`;
+    });
+    for (const [type, { b, tip }] of this.buttons) {
+      const open = buildingOpen(locks, type);
+      b.classList.toggle('locked', !open);
+      b.title = open ? tip : `${tip} — ${t('tut.ui.locked')}`;
+    }
+    if (!tabOpen(locks, MENU[this.tab].category)) this.showTab(this.tab);
   }
 
   update(): void {
+    this.showLocks();
     const done = new Map<BuildingType, number>();
     const sites = new Map<BuildingType, number>();
     for (const b of this.world.buildings.values()) {

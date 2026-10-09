@@ -20,6 +20,7 @@ import {
   totalCost,
 } from './config';
 import { dropGoods, rebuildStacks } from './ground';
+import { applyScenario, type ScenarioDef } from './scenario';
 import { bedsFor, carriersFor, startBeds, updateStrikes } from './beds';
 import { setStopped } from './stop';
 import { landOf } from './land';
@@ -160,6 +161,11 @@ export interface WorldOptions {
    * `bonus` goods lie by that player's start tower.
    */
   difficulty?: AiLevel[];
+  /**
+   * A scenario's ready-made start (`scenario.ts`: finished buildings, goods, people, beds), applied
+   * after the players' own starts and before the computer players' start help.
+   */
+  scenario?: ScenarioDef;
 }
 
 /**
@@ -245,6 +251,11 @@ export class World {
   readonly stacks = new Set<number>();
   /** `stacks` in index order, rebuilt when a stack appears or goes (derived). */
   stackOrder: number[] | null = null;
+  /**
+   * Buildings a scenario named (`ScenarioBuilding.tag` → id), for whoever started it (the tutorial
+   * resolves its anchors from them at once). Not saved; nothing in the simulation reads it.
+   */
+  readonly tags = new Map<string, number>();
 
   constructor(seed = 1, opts: WorldOptions = {}) {
     this.rng = createRng(seed ^ 0x9e3779b9);
@@ -267,6 +278,7 @@ export class World {
       if (this.players[k] && Number.isFinite(team)) this.players[k].team = team;
     });
     resetSightMasks(this);
+    if (opts.scenario) applyScenario(this, opts.scenario);
     for (const p of opts.ai ?? []) {
       if (!this.players.some((pl) => pl.id === p)) continue;
       const level = opts.difficulty?.[p - 1] ?? 'medium';
@@ -849,6 +861,17 @@ export class World {
   /** Player command: the selected specialists on own land turn back into carriers. */
   dismissUnits(ids: readonly number[], player: PlayerId = LOCAL_PLAYER): number {
     return dismissUnits(this, ids, player);
+  }
+
+  /**
+   * Scenario command (missions, Settlers 4's `Goods.AddPileEx`): `n` units of `res` laid on the ground
+   * by the player's home, as the start goods lie. Deterministic, like any other command.
+   */
+  grant(res: Resource, n: number, player: PlayerId = LOCAL_PLAYER): boolean {
+    const p = this.players[player - 1];
+    if (!p || n <= 0 || !RESOURCES.includes(res)) return false;
+    dropGoods(this, p.home, res, Math.floor(n));
+    return true;
   }
 
   /** Player command: lay out a construction site. */

@@ -1,4 +1,5 @@
 import type { BuildingType } from '../sim/types';
+import type { Locks } from './locks';
 
 /** What the cursor is about to place: a building, or a command aimed at a tile. */
 export type Placeable = BuildingType | 'geologist' | 'pioneer' | 'thief';
@@ -30,6 +31,11 @@ export interface GameState {
   fog: boolean;
   /** The game menu (`PauseMenu`) is open: the game is paused and the map takes no input. */
   menu: boolean;
+  /**
+   * What a tutorial mission leaves open in the interface (`locks.ts`); null = everything (a normal
+   * game). The interface only: the simulation forbids nothing.
+   */
+  locks: Locks | null;
 }
 
 export const createState = (): GameState => ({
@@ -44,4 +50,5 @@ export const createState = (): GameState => ({
   hover: null,
   fog: true,
   menu: false,
+  locks: null,
 });

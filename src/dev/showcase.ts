@@ -6,6 +6,7 @@ import { ENDLESS } from '../sim/economy';
 import { formationSpots } from '../sim/field';
 import { enterGarrison } from '../sim/military';
 import { dropGoods } from '../sim/ground';
+import { placeFinished } from '../sim/scenario';
 import { RESOURCES, Terrain, type Building, type BuildingType, type Resource } from '../sim/types';
 import { LOCAL_PLAYER, World } from '../sim/world';
 
@@ -46,19 +47,11 @@ function placeNear(w: World, type: BuildingType, x: number, y: number, done = fa
   return null;
 }
 
-/** A finished building of `owner`'s on the free spot nearest (x, y), placed directly (dev aid). */
+/** A finished building of `owner`'s on the free spot nearest (x, y), placed directly (`scenario.ts`). */
 function placeFor(w: World, type: BuildingType, owner: number, x: number, y: number): Building | null {
-  for (let r = 0; r <= 10; r++) {
-    for (let dy = -r; dy <= r; dy++) {
-      for (let dx = -r; dx <= r; dx++) {
-        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r || !w.canPlace(type, x + dx, y + dy, owner)) continue;
-        const b = addBuilding(w, type, x + dx, y + dy, owner, true);
-        recomputeTerritory(w);
-        return b;
-      }
-    }
-  }
-  return null;
+  const b = placeFinished(w, type, owner, x, y, 10);
+  if (b) recomputeTerritory(w);
+  return b;
 }
 
 /** An own tile next to neutral land, on the side away from the other player (where to send a pioneer). */

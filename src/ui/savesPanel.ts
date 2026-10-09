@@ -64,6 +64,8 @@ export function savesPanel(spec: SavesSpec): HTMLElement {
       el('b', '', shownName(m)),
       el('span', '', t('saves.meta', { when: when(m.savedAt), size: `${m.size}×${m.size}`, players: m.players, time: gameTime(m.tick, TICKS_PER_SECOND) })),
     );
+    // A tutorial mission under way goes on from its step when loaded.
+    if (m.mission) info.append(el('span', 'save-mission', `${t('tut.menu.title')}: ${t(`tut.${m.mission.id}.title`)}`));
     const actions = el('div', 'save-actions');
     if (spec.mode === 'load') {
       const load = el('button', 'menu-small active', t('saves.load'));

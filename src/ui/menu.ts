@@ -1,6 +1,6 @@
 import type { AudioEngine } from '../audio/audio';
 import { el } from './dom';
-import { LANG_EVENT, t } from './i18n';
+import { LANG_EVENT, t, type Key } from './i18n';
 import { browserSlots, type SlotMeta } from './saves';
 import { savesPanel } from './savesPanel';
 import { defaultSetup, parseSetup, type GameSetup } from './setup';
@@ -9,15 +9,29 @@ import { settingsPanel } from './settingsPanel';
 
 /**
  * The main menu, laid out like Settlers 4's (a column of choices over a live scene; every look and
- * word ours): «Новая игра» (the setup screen), «Загрузить» (save slots), «Сетевая игра» (the same
+ * word ours): «Обучение» first (the tutorial missions, `src/tutorial`), «Новая игра» (the setup screen), «Загрузить» (save slots), «Сетевая игра» (the same
  * setup screen as a lobby, inactive until phase 7), «Настройки», «Об игре» and «Выход» (back to the
  * intro — a browser page has nothing to quit to). Plain DOM over the title scene; arrow keys move
  * between the choices, Esc goes back.
  */
-export type MenuScreen = 'main' | 'new' | 'network' | 'load' | 'settings' | 'about';
+export type MenuScreen = 'main' | 'tutorial' | 'new' | 'network' | 'load' | 'settings' | 'about';
+
+/** A tutorial mission as the menu lists it (`src/tutorial` supplies them through `MenuActions`). */
+export interface TutorialEntry {
+  id: string;
+  title: Key;
+  summary: Key;
+  minutes: number;
+  done: boolean;
+  /** Not playable yet: shown as coming. */
+  soon: boolean;
+}
 
 export interface MenuActions {
   start(setup: GameSetup): void;
+  /** The tutorial missions with their completion marks, and starting one. */
+  tutorials(): TutorialEntry[];
+  tutorial(id: string): void;
   load(meta: SlotMeta): void;
   /** Plays the intro again (from «Выход» and the settings). */
   intro(): void;
@@ -84,10 +98,12 @@ export class MainMenu {
     this.screen = screen;
     this.panel.innerHTML = '';
     this.panel.className = `menu-panel screen-${screen}`;
-    this.el.classList.toggle('wide', screen === 'new' || screen === 'network' || screen === 'load');
+    this.el.classList.toggle('wide', screen === 'new' || screen === 'network' || screen === 'load' || screen === 'tutorial');
     switch (screen) {
       case 'main':
         return this.main();
+      case 'tutorial':
+        return this.tutorialScreen();
       case 'new':
       case 'network':
         return this.setupScreen(screen === 'network');
@@ -124,7 +140,11 @@ export class MainMenu {
 
   private main(): void {
     const list = el('div', 'menu-list');
+    // Settlers 4: the tutorial is the first choice; softly lit while nothing was played or saved.
+    const tutorial = this.choice(t('tut.menu.title'), t('tut.menu.note'), () => this.show('tutorial'));
+    if (!this.actions.tutorials().some((m) => m.done) && this.slots.list().length === 0) tutorial.classList.add('suggest');
     list.append(
+      tutorial,
       this.choice(t('menu.new'), t('menu.newNote'), () => this.show('new')),
       this.choice(t('menu.load'), t('menu.loadNote'), () => this.show('load')),
       this.choice(t('menu.network'), t('menu.networkNote'), () => this.show('network'), true),
@@ -133,6 +153,34 @@ export class MainMenu {
       this.choice(t('menu.exit'), t('menu.exitNote'), () => this.actions.intro()),
     );
     this.panel.append(list);
+    this.focusFirst();
+  }
+
+  /** The tutorial: the missions in order, what each teaches, its length and whether it was completed. */
+  private tutorialScreen(): void {
+    this.heading(t('tut.menu.title'));
+    this.panel.append(el('p', 'menu-soon', t('tut.menu.intro')));
+    const list = el('div', 'tut-missions');
+    this.actions.tutorials().forEach((m, k) => {
+      const b = el('button', `tut-mission${m.done ? ' done' : ''}`);
+      const head = el('span', 'tm-head');
+      head.append(el('span', 'tm-number', t('tut.menu.number', { n: k + 1 })), el('span', 'tm-title', t(m.title)));
+      const foot = el('span', 'tm-foot');
+      foot.append(el('span', '', t('tut.menu.minutes', { n: m.minutes })));
+      if (m.soon) foot.append(el('span', 'tm-soon', t('tut.menu.soon')));
+      else if (m.done) foot.append(el('span', 'tm-done', t('tut.menu.done')));
+      b.append(head, el('span', 'tm-summary', t(m.summary)), foot);
+      b.disabled = m.soon;
+      b.onclick = () => {
+        this.audio.ui('click');
+        this.actions.tutorial(m.id);
+      };
+      list.append(b);
+    });
+    this.panel.append(list);
+    const row = el('div', 'menu-row');
+    this.back(row);
+    this.panel.append(row);
     this.focusFirst();
   }
 

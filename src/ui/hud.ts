@@ -19,6 +19,8 @@ import { SettlerInfoView } from './settlerInfo';
 import { UnitsView } from './unitsView';
 import { SettlersView } from './settlersView';
 import type { GameState, Placeable } from './state';
+import { menuOpen, type MenuId } from './locks';
+import { tag } from './uiTarget';
 import { StatsView } from './statsView';
 
 /**
@@ -30,7 +32,6 @@ import { StatsView } from './statsView';
  * ticker runs along the bottom of the view. All drawing is ours (CSS and inline SVG).
  */
 
-type MenuId = 'build' | 'goods' | 'settlers' | 'stats' | 'army' | 'options';
 
 const MENUS: { id: MenuId; glyph: GlyphName; title: Key }[] = [
   { id: 'build', glyph: 'build', title: 'hud.menu.build' },
@@ -64,6 +65,8 @@ export interface HudOptions {
   jump: (x: number, y: number) => void;
   /** The HUD this one replaces (see `memo`). */
   memo?: HudMemo;
+  /** A tutorial mission runs: its debrief replaces the end screen of a game. */
+  noEndScreen?: boolean;
 }
 
 export class Hud {
@@ -96,6 +99,10 @@ export class Hud {
   private readonly warned: WeakSet<object>;
   /** Space: the message it jumped to last (index among the local player's, from the newest), and when. */
   private jumped = { k: -1, at: -Infinity };
+  /** How often the camera went to a message (Space or a click on the ticker), for the tutorial. */
+  jumps = 0;
+  private readonly noEndScreen: boolean;
+  private locksSeen: unknown = undefined;
 
   constructor(
     root: HTMLElement,
@@ -106,6 +113,7 @@ export class Hud {
   ) {
     const select = (type: Placeable | null) => this.selectBuildType(type);
     this.jump = opts.jump;
+    this.noEndScreen = !!opts.noEndScreen;
     this.warned = opts.memo?.warned ?? new WeakSet<object>();
     this.ended = opts.memo?.ended ?? false;
     this.build = new BuildView(world, state, select, (b) => this.focusBuilding(b));
@@ -128,14 +136,17 @@ export class Hud {
 
     const side = el('aside', 'side');
     const frame = el('div', 'side-frame');
-    const map = el('div', 'mm-frame');
+    const map = tag(el('div', 'mm-frame'), 'minimap');
     map.append(opts.minimap);
     const tabs = el('nav', 'main-tabs');
     for (const m of MENUS) {
-      const b = el('button', 'gem');
+      const b = tag(el('button', 'gem'), `menu.${m.id}`);
       b.title = t(m.title);
       b.append(glyph(m.glyph));
       b.onclick = () => {
+        b.blur();
+        // A main menu the tutorial has not opened yet stays shut.
+        if (!menuOpen(this.state.locks, m.id)) return;
         this.state.selected = null;
         this.state.selectedSettler = null;
         this.state.selectedUnits = [];
@@ -151,7 +162,7 @@ export class Hud {
     side.append(frame);
 
     const strip = el('div', 'strip');
-    const pause = el('button', 'gem small');
+    const pause = tag(el('button', 'gem small'), 'speed.pause');
     pause.title = t('hud.pauseTip');
     pause.append(glyph('pause', 14));
     pause.onclick = () => {
@@ -165,10 +176,12 @@ export class Hud {
         state.speed = s;
         state.paused = false;
       }, 'speed-btn');
+      tag(b, `speed.${s}`);
       strip.append(b);
       this.speedButtons.set(s, b);
     }
 
+    tag(this.ticker, 'hud.ticker');
     this.endEl.hidden = true;
     this.parts = [side, strip, this.hintEl, this.ticker, this.endEl];
     root.append(...this.parts);
@@ -178,6 +191,11 @@ export class Hud {
   /** What a HUD built to replace this one (in another language) takes over. */
   memo(): HudMemo {
     return { menu: this.menu, ended: this.ended, stats: this.stats, warned: this.warned };
+  }
+
+  /** The open main menu, or null while a building's, settler's or units' window replaces it. */
+  get openMenu(): MenuId | null {
+    return this.shown === this.views[this.menu] ? this.menu : null;
   }
 
   /** Takes the HUD off the page (the minimap and sound controls go with the next one). */
@@ -279,6 +297,7 @@ export class Hud {
     const now = performance.now();
     const k = now - this.jumped.at < MESSAGE_CYCLE_MS ? (this.jumped.k + 1) % mine.length : 0;
     this.jumped = { k, at: now };
+    this.jumps++;
     const m = mine[mine.length - 1 - k];
     this.jump(m.x, m.y);
     this.toast(`${messageText(this.world, m)} (${k + 1}/${mine.length})`, { at: m });
@@ -311,7 +330,10 @@ export class Hud {
     if (at) {
       m.classList.add('jump');
       m.title = t('hud.messageTip');
-      m.onclick = () => this.jump(at.x, at.y);
+      m.onclick = () => {
+        this.jumps++;
+        this.jump(at.x, at.y);
+      };
     }
     this.ticker.append(m);
     while (this.ticker.children.length > 4) this.ticker.firstElementChild!.remove();
@@ -324,7 +346,16 @@ export class Hud {
     this.lastUpdate = nowMs;
     const { world, state } = this;
     const outcome = world.outcome(LOCAL_PLAYER);
-    if (outcome !== 'playing' && !this.ended) this.showEnd(outcome);
+    if (outcome !== 'playing' && !this.ended && !this.noEndScreen) this.showEnd(outcome);
+    if (state.locks !== this.locksSeen) {
+      this.locksSeen = state.locks;
+      for (const [m, b] of this.menuButtons) {
+        const open = menuOpen(state.locks, m);
+        b.classList.toggle('locked', !open);
+        b.title = open ? t(MENUS.find((x) => x.id === m)!.title) : `${t(MENUS.find((x) => x.id === m)!.title)} — ${t('tut.ui.locked')}`;
+      }
+      if (!menuOpen(state.locks, this.menu)) this.menu = 'build';
+    }
     this.stats.sample();
     this.showMessages();
 
@@ -362,7 +393,11 @@ export class Hud {
     this.strength.textContent = `${Math.round(world.strengthOf())}%`;
 
     for (const [key, b] of this.speedButtons) {
-      b.classList.toggle('active', key === 'pause' ? state.paused : !state.paused && state.speed === key);
+      const on = key === 'pause' ? state.paused : !state.paused && state.speed === key;
+      b.classList.toggle('active', on);
+      // The tutorial's highlight moves past a speed already chosen (or a faster one).
+      if (key === 'pause' ? on : !state.paused && state.speed >= key) b.dataset.uiOn = '1';
+      else delete b.dataset.uiOn;
     }
     const hint = t(
       state.placing === 'geologist'

@@ -26,6 +26,7 @@ import { glyph } from './icons';
 import { buildingName, profName, resLower, resName } from './names';
 import { refreshTradeCounts, tradeControls, tradeKey, tradeRows } from './tradeView';
 import type { GameState } from './state';
+import { tag } from './uiTarget';
 
 /**
  * The selected building's window, shown in the side panel's content area as in Settlers 4: its
@@ -212,7 +213,7 @@ export class InfoView implements View {
     if (movableWorkArea(b.type)) {
       // Settlers 4: the work area can be moved — choose a new centre with a click on the map.
       const area = el('div', 'info-actions');
-      const move = el('button', this.state.movingWorkArea === b.id ? 'active' : '', t('info.moveArea'));
+      const move = tag(el('button', this.state.movingWorkArea === b.id ? 'active' : '', t('info.moveArea')), 'info.workArea');
       move.title = t('info.moveAreaTip');
       move.onclick = () => {
         this.state.movingWorkArea = b.id;
@@ -232,7 +233,7 @@ export class InfoView implements View {
       this.el.append(area);
     }
     const warehouse = warehouseControls(this.world, b);
-    if (warehouse) this.el.append(warehouse);
+    if (warehouse) this.el.append(tag(warehouse, 'info.accept'));
     const trade = tradeControls(this.world, b);
     if (trade) this.el.append(trade);
     if (!def.playerBuildable) return;
@@ -242,14 +243,14 @@ export class InfoView implements View {
     if (shared && shared.length >= 2) this.el.append(shareControls(this.world, shared, () => (this.infoKey = '')));
     const actions = el('div', 'info-actions');
     if (!b.done || def.recipe || def.residence) {
-      const prio = el('button', b.priority ? 'active' : '', b.priority ? t('info.priorityOn') : t('info.priorityBtn'));
+      const prio = tag(el('button', b.priority ? 'active' : '', b.priority ? t('info.priorityOn') : t('info.priorityBtn')), 'info.priority');
       prio.title = t('info.priorityTip');
       prio.onclick = () => this.world.setPriority(b.id, !b.priority);
       actions.append(prio);
     }
     if (canStop(b)) {
       // Settlers 4's stop switch: no new work, nothing delivered, the goods at it go to others.
-      const stop = el('button', b.stopped ? 'active' : '', b.stopped ? t('info.start') : t('info.stop'));
+      const stop = tag(el('button', b.stopped ? 'active' : '', b.stopped ? t('info.start') : t('info.stop')), 'info.stop');
       stop.title = b.stopped ? t('info.startTip') : b.done ? t('info.stopTip') : t('info.stopSiteTip');
       stop.onclick = () => {
         this.world.setStopped(b.id, !b.stopped);
@@ -269,6 +270,7 @@ export class InfoView implements View {
       confirming ? (last ? t('info.demolishLast') : t('info.demolishSure')) : t('info.demolish'),
     );
     demolish.title = last ? t('info.demolishLastTip') : t('info.demolishTip');
+    tag(demolish, 'info.demolish');
     demolish.onclick = () => {
       if (!confirming) {
         this.confirmDemolish = b.id;

@@ -376,6 +376,10 @@ export const START_GUARANTEES = {
     { dx: -7, dy: 3, r: 2.3, chance: 0.85 },
     { dx: 4, dy: -12, r: 1.8, chance: 0.8 },
   ],
+  /** A grove of mature trees a short walk from the start (about 70 % of its tiles get a tree). */
+  grove: { dx: 8, dy: -3, r: 3.2 },
+  /** A pond inside the start's land: water within `r` of its centre, a sandy bank to `bank`. */
+  pond: { dx: -1, dy: 8, r: 1.7, bank: 2.7 },
 };
 
 /** Guaranteed lobes grow from their base radius on 64×64 by up to +0.8 tile on 256×256 and larger. */
@@ -492,12 +496,13 @@ export function generateMap(seed: number, size: number, starts: readonly Point[]
     }
 
     // Guarantee a grove a short walk from the castle.
-    const gx = cx + 8;
-    const gy = cy - 3;
+    const grove = START_GUARANTEES.grove;
+    const gx = cx + grove.dx;
+    const gy = cy + grove.dy;
     for (let y = gy - 3; y <= gy + 3; y++) {
       for (let x = gx - 3; x <= gx + 3; x++) {
         if (!map.inBounds(x, y)) continue;
-        if (Math.hypot(x - gx, y - gy) > 3.2) continue;
+        if (Math.hypot(x - gx, y - gy) > grove.r) continue;
         const i = map.idx(x, y);
         map.terrain[i] = Terrain.Grass;
         map.stone[i] = 0;
@@ -529,8 +534,9 @@ export function generateMap(seed: number, size: number, starts: readonly Point[]
     }
 
     // Guarantee a pond inside the starting territory: water for wells, fish for fishers.
-    const px = cx - 1;
-    const py = cy + 8;
+    const pond = START_GUARANTEES.pond;
+    const px = cx + pond.dx;
+    const py = cy + pond.dy;
     for (let y = py - 3; y <= py + 3; y++) {
       for (let x = px - 3; x <= px + 3; x++) {
         if (!map.inBounds(x, y)) continue;
@@ -538,10 +544,10 @@ export function generateMap(seed: number, size: number, starts: readonly Point[]
         const i = map.idx(x, y);
         map.ore[i] = 0;
         map.oreAmount[i] = 0;
-        if (d <= 1.7) {
+        if (d <= pond.r) {
           map.terrain[i] = Terrain.Water;
           map.fish[i] = FISH_MAX;
-        } else if (d <= 2.7 && map.terrain[i] !== Terrain.Water) {
+        } else if (d <= pond.bank && map.terrain[i] !== Terrain.Water) {
           map.terrain[i] = Terrain.Sand;
         } else continue;
         map.tree[i] = 0;

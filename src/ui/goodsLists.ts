@@ -2,6 +2,7 @@ import { wareIcon } from '../render/atlas';
 import { RESOURCES, type Resource } from '../sim/types';
 import { button, el } from './dom';
 import { t } from './i18n';
+import { tag, type UiTarget } from './uiTarget';
 
 /**
  * Two lists of goods with big icons, as in Settlers 4's warehouse window: what is in (accepted,
@@ -30,6 +31,8 @@ export interface GoodsListsSpec {
   corner?: (res: Resource) => string | null;
   /** Show the count on goods in the second list too (the warehouse shows its stock in both). */
   countBoth?: boolean;
+  /** A tutorial mark (`data-ui`) on a good in the second list (what a click would take in). */
+  tagOut?: (res: Resource) => UiTarget;
 }
 
 export function goodsLists(spec: GoodsListsSpec): HTMLElement {
@@ -51,6 +54,7 @@ export function goodsLists(spec: GoodsListsSpec): HTMLElement {
       const name = spec.nameOf(r);
       const item = button('', on ? spec.tipIn(name) : spec.tipOut(name), () => spec.set(r, !on), 'accept-item');
       item.append(wareIcon(r, 34));
+      if (!on && spec.tagOut) tag(item, spec.tagOut(r));
       if (on || spec.countBoth) {
         const label = on ? spec.corner?.(r) : null;
         if (label) item.append(el('span', 'trade-left', label));

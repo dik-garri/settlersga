@@ -3,7 +3,7 @@ import { AudioEngine } from './audio/audio';
 import { loadArt3d } from './render/art3d';
 import { SpriteAtlas } from './render/atlas';
 import { Camera } from './render/camera';
-import { toScreen } from './render/iso';
+import { toScreen, toTile } from './render/iso';
 import { GameRenderer } from './render/renderer';
 import { TICKS_PER_SECOND } from './sim/config';
 import { saveWorld } from './sim/save';
@@ -22,6 +22,20 @@ import { AUTO_ID, browserSlots, type SlotMeta } from './ui/saves';
 import { devWorldArgs, launchOf, worldArgs, type GameSetup } from './ui/setup';
 import { createState, isCommand } from './ui/state';
 import { TitleScene } from './ui/titleScene';
+import { MISSIONS, missionById } from './tutorial/missions';
+import { readMarks } from './tutorial/progress';
+import { missionWorld, TutorialRunner, type MissionProgress } from './tutorial/runner';
+import type { MissionDef, UiProbe } from './tutorial/types';
+import { TutorialView } from './tutorial/view';
+
+/** A tutorial mission to run in a game: from a step (0-based), or loaded with its progress. */
+type TutorialStart = { def: MissionDef; step: number } | { def: MissionDef; progress: MissionProgress };
+
+/** The mission of a loaded slot, if it was saved during one. */
+function savedMission(mission: MissionProgress | undefined): TutorialStart | undefined {
+  const def = mission ? missionById(mission.id) : undefined;
+  return def && mission ? { def, progress: mission } : undefined;
+}
 
 const TICK_MS = 1000 / TICKS_PER_SECOND;
 const MAX_TICKS_PER_FRAME = 20;
@@ -95,12 +109,21 @@ async function main() {
   }
   let world: World;
   let seed = 0;
+  let tutorial: TutorialStart | undefined;
   if (launch.kind === 'load') {
     const slots = browserSlots();
     const id = launch.slot ?? slots.latest()?.id;
     const data = id ? await slots.read(id) : null;
     if (!data) return title(app, atlas, audio, { setup: false, intro: false, notice: t('menu.saveNotFound') });
     world = World.load(data);
+    tutorial = savedMission(slots.meta(id!)?.mission);
+  } else if (launch.kind === 'tutorial') {
+    // A tutorial mission straight from the address (development: ?tutorial=<id>&step=<n>).
+    const def = missionById(launch.id);
+    if (!def || def.soon) return title(app, atlas, audio, { setup: false, intro: false });
+    world = missionWorld(def);
+    seed = def.world.seed;
+    tutorial = { def, step: launch.step - 1 };
   } else if (launch.kind === 'demo') {
     // A development showcase that builds itself up to show everything at once (src/dev).
     world = (await import('./dev/showcase')).buildShowcase();
@@ -114,9 +137,14 @@ async function main() {
     world = new World(args.seed, args.opts);
   }
   // The demo shows no fog unless asked (?fog=on).
-  const fog =
-    launch.kind === 'setup' ? launch.setup.fog : launch.kind === 'demo' ? params.get('fog') === 'on' : params.get('fog') !== 'off';
-  game(app, await atlas, audio, world, { fog, seed, autosave: launch.kind !== 'demo' });
+  const fog = tutorial
+    ? tutorial.def.world.fog && params.get('fog') !== 'off'
+    : launch.kind === 'setup'
+      ? launch.setup.fog
+      : launch.kind === 'demo'
+        ? params.get('fog') === 'on'
+        : params.get('fog') !== 'off';
+  game(app, await atlas, audio, world, { fog, seed, autosave: launch.kind !== 'demo', tutorial });
 }
 
 /** The intro (when due) and the main menu over the title scene, until a game starts. */
@@ -134,7 +162,7 @@ async function title(
   const scene = new TitleScene(app, atlas, audio);
   const intro = new Intro(scene, audio);
 
-  const begin = async (make: () => Promise<World | null>, fog: boolean, seed: number) => {
+  const begin = async (make: () => Promise<World | null>, fog: boolean, seed: number, tutorial?: TutorialStart) => {
     menu.el.classList.add('busy');
     menu.say(t('menu.preparing'));
     // Let the notice paint before the map is generated.
@@ -157,7 +185,7 @@ async function title(
     app.resize();
     // A refresh during the game returns to the menu, not to a stale ?menu=new.
     history.replaceState(null, '', withLang(location.pathname));
-    game(app, a, audio, world, { fog, seed, autosave: true });
+    game(app, a, audio, world, { fog, seed, autosave: true, tutorial });
   };
   const menu = new MainMenu(
     {
@@ -165,11 +193,26 @@ async function title(
         const { seed, opts } = worldArgs(setup, randomSeed());
         void begin(async () => new World(seed, opts), setup.fog, seed);
       },
-      load: (meta: SlotMeta) =>
-        void begin(async () => {
-          const data = await browserSlots().read(meta.id);
-          return data ? World.load(data) : null;
-        }, true, 0),
+      load: (meta: SlotMeta) => {
+        const mission = savedMission(meta.mission);
+        void begin(
+          async () => {
+            const data = await browserSlots().read(meta.id);
+            return data ? World.load(data) : null;
+          },
+          mission ? mission.def.world.fog : true,
+          0,
+          mission,
+        );
+      },
+      tutorials: () => {
+        const marks = readMarks();
+        return MISSIONS.map((m) => ({ id: m.id, title: m.title, summary: m.summary, minutes: m.minutes, done: !!marks.done[m.id], soon: !!m.soon }));
+      },
+      tutorial: (id: string) => {
+        const def = missionById(id);
+        if (def && !def.soon) void begin(async () => missionWorld(def), def.world.fog, def.world.seed, { def, step: 0 });
+      },
       intro: () => void playIntro(),
       artChanged: () => location.reload(),
     },
@@ -201,7 +244,7 @@ function game(
   atlas: SpriteAtlas,
   audio: AudioEngine,
   world: World,
-  opts: { fog: boolean; seed: number; autosave: boolean },
+  opts: { fog: boolean; seed: number; autosave: boolean; tutorial?: TutorialStart },
 ) {
   const state = createState();
   state.fog = opts.fog;
@@ -213,7 +256,10 @@ function game(
   renderer.onSound = (id, x, y) => audio.at(id, x, y);
 
   const slots = browserSlots();
-  const save = async (name: string, id?: string) => !!(await slots.write(saveWorld(world), name, Date.now(), id));
+  // A tutorial mission under way (`src/tutorial`): its progress goes into the save slot's description.
+  let tutorial: TutorialView | null = null;
+  const missionMeta = () => ({ mission: tutorial?.progress() ?? undefined });
+  const save = async (name: string, id?: string) => !!(await slots.write(saveWorld(world), name, Date.now(), id, missionMeta()));
   // Loading or leaving starts the page over: nothing of this game is left behind.
   const pause = new PauseMenu(world, state, {
     save,
@@ -226,23 +272,49 @@ function game(
   const mmWidth = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--mm-w')) || 252;
   const minimap = new Minimap(world, camera, state.fog, mmWidth);
   const sound = audioControls(audio);
+  const jump = (x: number, y: number) => {
+    const p = toScreen(x, y);
+    camera.centerOn(p.x, p.y - world.map.heightAt(x, y));
+  };
   const makeHud = (previous?: Hud) =>
     new Hud(
       hudEl,
       world,
       state,
       { onSave: () => pause.open('save'), onLoad: () => pause.open('load'), onMenu: () => pause.open('main') },
-      {
-        minimap: minimap.box,
-        sound,
-        jump: (x, y) => {
-          const p = toScreen(x, y);
-          camera.centerOn(p.x, p.y - world.map.heightAt(x, y));
-        },
-        memo: previous?.memo(),
-      },
+      { minimap: minimap.box, sound, jump, memo: previous?.memo(), noEndScreen: !!opts.tutorial },
     );
   let hud = makeHud();
+  /** What the tutorial's conditions see of the interface. */
+  const uiProbe = (): UiProbe => {
+    const c = toTile(camera.x, camera.y);
+    return {
+      menu: hud.openMenu,
+      selected: state.selected,
+      selectedUnits: state.selectedUnits.length,
+      groups: state.groups.map((g) => g.length),
+      camera: { x: c.x, y: c.y },
+      zoom: camera.zoom,
+      placing: state.placing,
+      speed: state.speed,
+      paused: state.paused,
+      jumps: hud.jumps,
+    };
+  };
+  if (opts.tutorial) {
+    const tut = opts.tutorial;
+    const runner =
+      'progress' in tut ? TutorialRunner.restore(tut.def, tut.progress) : TutorialRunner.start(tut.def, world, uiProbe(), { from: tut.step });
+    // The interface opens only what the mission has reached, from the first frame.
+    state.locks = runner.model(world).locks;
+    tutorial = new TutorialView(runner, world, hudEl, {
+      state,
+      jump,
+      marks: (m) => renderer.setGuide(m),
+      startMission: (id) => (location.href = withLang(`${location.pathname}?tutorial=${encodeURIComponent(id)}`)),
+      toMenu: () => (location.href = withLang(`${location.pathname}?menu`)),
+    });
+  }
   hudEl.append(pause.el);
   // Another language chosen in the settings: the side panel is built again in it (menus, windows,
   // statistics and messages carry over); the pause menu and the minimap redraw themselves.
@@ -262,6 +334,7 @@ function game(
     onMessage: (text) => hud.toast(text),
     onMenu: () => pause.open('main'),
     onLastMessage: () => hud.jumpToMessage(),
+    onSpace: () => tutorial?.space() ?? false,
   });
 
   // Autosave: every few game minutes into its own slot (compressed in the background).
@@ -269,7 +342,7 @@ function game(
   let nextAutosave = world.tick + autosaveEvery;
   const autosave = () => {
     nextAutosave = world.tick + autosaveEvery;
-    void slots.write(saveWorld(world), t('saves.auto'), Date.now(), AUTO_ID).then((m) => {
+    void slots.write(saveWorld(world), t('saves.auto'), Date.now(), AUTO_ID, missionMeta()).then((m) => {
       if (m) hud.toast(t('saves.auto'));
     });
   };
@@ -286,6 +359,8 @@ function game(
         world.step();
         acc -= TICK_MS;
         n++;
+        // The tutorial checks its conditions at least every five ticks, even in a long frame.
+        if (tutorial && world.tick % 5 === 0) tutorial.tick(uiProbe());
       }
       if (n === MAX_TICKS_PER_FRAME) acc = 0;
       if (opts.autosave && world.tick >= nextAutosave && world.outcome(1) === 'playing') autosave();
@@ -298,10 +373,15 @@ function game(
     const placing = state.placing && !isCommand(state.placing) ? state.placing : null;
     renderer.sync(acc / TICK_MS, now, view, input.ghost(), state.selected, state.hover, input.area(), placing, state.selectedSettler, state.selectedUnits, state.groups);
     hud.update(now);
+    // Once a frame as well: interface steps («Next», camera, menus) go on while the game is paused.
+    if (tutorial) {
+      tutorial.tick(uiProbe());
+      tutorial.update(now);
+    }
     minimap.update(now, app.screen.width, app.screen.height);
   });
 
-  Object.assign(window, { world, seed: opts.seed, state, renderer, camera, audio, pause });
+  Object.assign(window, { world, seed: opts.seed, state, renderer, camera, audio, pause, tutorial });
   if (opts.seed) console.info(`Settlers prototype, seed ${opts.seed} (add ?seed=${opts.seed} to replay this map)`);
   else console.info(`Game at tick ${world.tick}`);
 }

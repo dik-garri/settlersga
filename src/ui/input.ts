@@ -32,6 +32,8 @@ export interface InputCallbacks {
   onMenu(): void;
   /** Space: the camera to the last message, again for the one before (Settlers 4). */
   onLastMessage(): boolean;
+  /** Space, asked first: a tutorial step waiting for «Next» takes it (true), else the message jump runs. */
+  onSpace?(): boolean;
 }
 
 /** Mouse and keyboard: camera control, placement and selection. */
@@ -485,6 +487,7 @@ export class InputController {
       case 'Space':
         // Settlers 4: Space jumps to the last message (pressed again, the one before).
         e.preventDefault();
+        if (this.cb.onSpace?.()) break;
         if (!this.cb.onLastMessage()) this.cb.onMessage(t('input.noMessages'));
         break;
       case 'KeyP':

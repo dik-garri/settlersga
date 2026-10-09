@@ -19,6 +19,7 @@ import { button, el, type View } from './dom';
 import { goodsLists } from './goodsLists';
 import { lower, t } from './i18n';
 import { buildingName, profName, resName } from './names';
+import { tag } from './uiTarget';
 
 /**
  * Economy settings as in Settlers 4 (`sim/economy.ts`): the settlers menu's worker orders and the goods
@@ -46,7 +47,7 @@ export class WorkersView implements View {
     // Settlers 4's carrier reserve: no carrier takes up a job while no more than this are left.
     this.el.append(el('h4', '', t('eco.reserve')));
     this.el.append(el('p', 'muted', t('eco.reserveNote', { min: CARRIER_RESERVE.min })));
-    const keep = el('div', 'eco-row carrier-reserve');
+    const keep = tag(el('div', 'eco-row carrier-reserve'), 'settlers.reserve');
     const setReserve = (n: number) => {
       w.setCarrierReserve(n);
       this.update();
@@ -114,7 +115,7 @@ export class TransportView implements View {
       const first = i === 0;
       const last = i === order.length - 1;
       const up = button('↑', t('eco.up'), () => move(res, 'up'));
-      const top = button('⤒', t('eco.top'), () => move(res, 'top'));
+      const top = tag(button('⤒', t('eco.top'), () => move(res, 'top')), `transport.${res}.top`, first);
       const down = button('↓', t('eco.down'), () => move(res, 'down'));
       const bottom = button('⤓', t('eco.bottom'), () => move(res, 'bottom'));
       up.disabled = top.disabled = first;
@@ -250,6 +251,7 @@ export function warehouseControls(world: World, b: Building): HTMLElement | null
       nameOf,
       count: (res) => ({ value: b.output[res], dataKey: 'res' }),
       countBoth: true,
+      tagOut: (res) => `accept.${res}`,
     }),
   );
   return box;

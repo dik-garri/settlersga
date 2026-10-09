@@ -43,6 +43,7 @@ const YARD_RX = 30;
 const YARD_RY = 15;
 import { needsLevelling } from '../sim/digging';
 import { TradeRouteLayer } from './tradeRoutes';
+import { GuideLayer, type GuideMark } from './guide';
 import { WorkAreaLayer } from './workArea';
 import { pathLevel } from '../sim/paths';
 import { chatPartner } from '../sim/idle';
@@ -235,6 +236,8 @@ export class GameRenderer {
   private readonly tradeRoutes: TradeRouteLayer;
   /** Set by the input while the player picks a new work-area centre for a building. */
   workAreaPreview: { id: number; x: number; y: number } | null = null;
+  /** The tutorial's arrows and rings (`guide.ts`), above the objects and under the fog. */
+  private readonly guide: GuideLayer;
   /** Marker over the selected settler, above the objects (it must not hide behind houses). */
   private readonly settlerMark = new Graphics();
   /** Control-group numbers over selected units (pooled texts, see `markUnits`). */
@@ -337,6 +340,8 @@ export class GameRenderer {
     // Glints sit right on the ground; smoke and sparks above the objects but under the fog.
     this.world.addChildAt(this.effects.waterLayer, this.world.getChildIndex(this.ground) + 1);
     this.world.addChildAt(this.effects.fxLayer, this.world.getChildIndex(this.fog));
+    this.guide = new GuideLayer((x, y) => this.surface(x, y));
+    this.world.addChildAt(this.guide.g, this.world.getChildIndex(this.fog));
     app.stage.addChild(this.world);
     this.ghostSprite = new Sprite();
     this.ghostSprite.alpha = 0.75;
@@ -769,6 +774,12 @@ export class GameRenderer {
     this.drawHints(placing, timeMs);
     this.drawWorkArea(ghost, selected);
     this.tradeRoutes.update(selected);
+    this.guide.update(timeMs, view, this.world.scale.x);
+  }
+
+  /** The tutorial's marks on the map (none = nothing drawn). */
+  setGuide(marks: GuideMark[]): void {
+    this.guide.set(marks);
   }
 
   /** The work area: a centre being chosen, else the building being placed, else the selected one. */

@@ -6,7 +6,9 @@ import { nextSettlerOfKind } from './find';
 import { el, type View } from './dom';
 import { WorkersView } from './economyPanel';
 import { lower, t, type Key } from './i18n';
+import { commandOpen } from './locks';
 import { profName } from './names';
+import { tag } from './uiTarget';
 import type { GameState, Placeable } from './state';
 
 /** Errands sent from the settlers menu at a tile or a building, as in Settlers 4's specialists page. */
@@ -41,13 +43,14 @@ export class SettlersView implements View {
     this.el.append(el('h4', '', t('settlers.settlement')), this.summary, el('h4', '', t('settlers.specialists')));
     const grid = el('div', 'build-grid commands');
     for (const c of COMMANDS) {
-      const b = el('button', 'build-btn');
+      const b = tag(el('button', 'build-btn'), `settlers.cmd.${c.type}`);
       b.title = `${t(c.what)}: ${t(c.how)}`;
       const pic = el('span', 'build-pic');
       pic.append(settlerIcon(c.type, 52));
       b.append(pic, el('span', 'name', profName(c.type)), el('span', 'cost', t(c.what)));
       b.onclick = () => {
-        select(this.state.placing === c.type ? null : c.type);
+        // An errand the tutorial has not opened yet stays shut.
+        if (commandOpen(this.state.locks, c.type)) select(this.state.placing === c.type ? null : c.type);
         b.blur();
       };
       grid.append(b);
@@ -57,7 +60,10 @@ export class SettlersView implements View {
   }
 
   update(): void {
-    for (const [type, b] of this.commandButtons) b.classList.toggle('active', this.state.placing === type);
+    for (const [type, b] of this.commandButtons) {
+      b.classList.toggle('active', this.state.placing === type);
+      b.classList.toggle('locked', !commandOpen(this.state.locks, type as 'geologist'));
+    }
     let people = 0;
     let carriers = 0;
     let busy = 0;
@@ -85,7 +91,7 @@ export class SettlersView implements View {
       const grid = el('div', 'stats-grid');
       grid.append(line(t('settlers.total'), String(people)), line(t('settlers.carriersBusy'), `${busy} / ${carriers}`));
       // Only carriers need a bed (Settlers 4): the start's beds plus every finished house's.
-      const bedRow = line(t('settlers.beds'), `${carriers} / ${beds}`);
+      const bedRow = tag(line(t('settlers.beds'), `${carriers} / ${beds}`), 'settlers.beds');
       bedRow.title = t('settlers.bedsTip');
       grid.append(bedRow);
       if (striking > 0) {

@@ -2,7 +2,8 @@ import { button, el, type View } from './dom';
 import { t, type Key } from './i18n';
 import type { GameState } from './state';
 
-export const SPEEDS = [1, 2, 4];
+/** Game speeds offered by the strip and the options menu. */
+export const SPEEDS = [1, 2, 4] as const;
 /** The controls help: keys and what they do. */
 const HELP: [Key, Key][] = [
   ['help.camera', 'help.cameraDo'],

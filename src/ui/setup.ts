@@ -150,7 +150,7 @@ export function parseSetup(text: string | null): GameSetup | null {
 }
 
 /** Address parameters that describe a game directly (development): they skip the menu. */
-export const DEV_PARAMS = ['seed', 'size', 'players', 'teams', 'start', 'demo', 'art', 'fog', 'ai', 'levels', 'load'] as const;
+export const DEV_PARAMS = ['seed', 'size', 'players', 'teams', 'start', 'demo', 'art', 'fog', 'ai', 'levels', 'load', 'tutorial'] as const;
 
 /** What the page should start with, read from its address. */
 export type Launch =
@@ -158,6 +158,8 @@ export type Launch =
   | { kind: 'setup'; setup: GameSetup }
   | { kind: 'load'; slot: string | null }
   | { kind: 'demo' }
+  /** A tutorial mission (`?tutorial=<id>`, optionally `&step=<n>`, 1-based). */
+  | { kind: 'tutorial'; id: string; step: number }
   | { kind: 'dev' };
 
 export function launchOf(params: URLSearchParams): Launch {
@@ -170,6 +172,10 @@ export function launchOf(params: URLSearchParams): Launch {
     const v = params.get('load');
     // ?load=1 (or empty) = the latest save, as the single slot used to be.
     return { kind: 'load', slot: !v || v === '1' ? null : v };
+  }
+  if (params.has('tutorial')) {
+    const step = Number(params.get('step'));
+    return { kind: 'tutorial', id: params.get('tutorial') ?? '', step: Number.isInteger(step) && step > 0 ? step : 1 };
   }
   if (params.has('demo')) return { kind: 'demo' };
   if (DEV_PARAMS.some((p) => params.has(p))) return { kind: 'dev' };
