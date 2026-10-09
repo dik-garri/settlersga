@@ -82,9 +82,10 @@ export function dispatchTrade(w: World, owner: PlayerId): void {
   if (idle.length === 0) return;
   const order = transportOrder(w, owner);
   for (const m of w.buildings.values()) {
-    if (m.owner !== owner || !m.done || !isMarket(m) || !m.trade) continue;
+    // A stopped market sends no donkeys, and none go to a stopped one (`stop.ts`).
+    if (m.owner !== owner || !m.done || !isMarket(m) || !m.trade || m.stopped) continue;
     const to = routeTarget(w, m);
-    if (!to) continue;
+    if (!to || to.stopped) continue;
     // One donkey after another, while this market has a load to send.
     while (idle.length > 0) {
       const loads = packLoads(m, order);

@@ -12,6 +12,7 @@ import {
   GROUND,
   MAP_SIZE,
   OUTPUT_SHARES,
+  PROFESSIONS,
   SITE,
   SOLDIER_LEVELS,
   START_CONDITIONS,
@@ -19,6 +20,8 @@ import {
   totalCost,
 } from './config';
 import { dropGoods, rebuildStacks } from './ground';
+import { bedsFor, carriersFor, startBeds, updateStrikes } from './beds';
+import { setStopped } from './stop';
 import { landOf } from './land';
 import { levelTarget, needsDigger, needsLevelling } from './digging';
 import {
@@ -120,6 +123,8 @@ export interface Player {
   team?: number;
   /** Worker orders, toolsmith queue, goods distribution (`economy.ts`). */
   economy?: EconomyState;
+  /** Beds the player started with, besides its houses' (`beds.ts`, Settlers 4's initial free beds). */
+  startBeds?: number;
 }
 
 export interface WorldOptions {
@@ -262,7 +267,7 @@ export class World {
     const y = st.y - Math.floor(bh / 2);
     if (!this.canPlace(def.building, x, y, id, true)) throw new Error('start building placement failed');
     const tower = addBuilding(this, def.building, x, y, id, true);
-    const player: Player = { id, home: { ...tower.door }, economy: createEconomy(start) };
+    const player: Player = { id, home: { ...tower.door }, economy: createEconomy(start), startBeds: startBeds(def.carriers) };
     this.players.push(player);
     const fighters: [SettlerKind, number][] = [
       ['soldier', def.soldiers],
@@ -581,10 +586,23 @@ export class World {
   }
 
   /**
+   * Player command (Settlers 4's `Switch`): stop a workplace, warehouse, market or site, or let it run
+   * again (`stop.ts`).
+   */
+  setStopped(id: number, on: boolean, player: PlayerId = LOCAL_PLAYER): boolean {
+    return setStopped(this, id, on, player);
+  }
+
+  /** The player's beds, carriers and striking carriers (`beds.ts`, Settlers 4's strike). */
+  bedsOf(player: PlayerId = LOCAL_PLAYER): { beds: number; carriers: number; striking: number } {
+    return { beds: bedsFor(this, player), ...carriersFor(this, player) };
+  }
+
+  /**
    * Player command: tear down a building. As in Settlers 4 half of its materials (of a site, half of
    * what was built in) and every good lying at it stay on the ground (`GROUND`); every job involving
-   * it is cancelled (goods in hands are put down), its worker becomes a carrier again and the tiles
-   * become free.
+   * it is cancelled (goods in hands are put down), its worker keeps his profession and waits for the
+   * next workplace of it (`isReadyWorker`) and the tiles become free.
    */
   demolish(id: number, player: PlayerId = LOCAL_PLAYER): boolean {
     const b = this.buildings.get(id);
@@ -637,7 +655,9 @@ export class World {
 
   /**
    * Removes a building with no ownership checks (demolition, burning after a conquest): aborts every
-   * job involving it, sends its worker back to carrying and its soldiers to find another garrison,
+   * job involving it, leaves its worker jobless — he keeps his profession and his tool and takes the
+   * next workplace of it first, as in Settlers 4 (a recruit in training is a carrier again) — sends
+   * its soldiers to find another garrison,
    * frees the tiles and leaves its ruin's goods on and around the footprint (`ruinGoods`: `demolish`
    * gives back `GROUND.demolishShare` of its materials, `burn` `GROUND.burnShare`; `none` nothing).
    */
@@ -648,7 +668,7 @@ export class World {
       if (s.home === id) {
         abort(this, s);
         if (isFighter(s)) leaveGarrison(this, b, s);
-        else s.kind = 'carrier';
+        else if (PROFESSIONS[s.kind].transient) s.kind = 'carrier';
         s.home = null;
       }
       if (s.inside === id) s.inside = null;
@@ -773,7 +793,8 @@ export class World {
     for (const b of this.buildings.values()) {
       updateBuilding(this, b);
       if (b.done && isMilitary(b)) updateGarrison(this, b, assaults);
-      if (b.done && BUILDINGS[b.type].barracks) updateBarracks(this, b);
+      // A stopped barracks trains no one (`stop.ts`).
+      if (b.done && BUILDINGS[b.type].barracks && !b.stopped) updateBarracks(this, b);
     }
     // Intruding specialists unmasked and met (`intruders.ts`) before the settlers move this tick.
     updateIntruders(this);
@@ -781,6 +802,7 @@ export class World {
     removeDead(this);
     this.checkDefeats();
     pruneShots(this);
+    updateStrikes(this);
     if (this.tick % DISPATCH_EVERY === 0) dispatch(this);
     if (this.ai.length > 0) updateAi(this);
     updateFog(this);

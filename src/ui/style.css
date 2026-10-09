@@ -421,6 +421,18 @@ button.wide {
   margin-left: auto;
 }
 
+/* Settlers menu: a strike (carriers without beds, Settlers 4). */
+.stock-row.warn {
+  color: #8a1f17;
+  font-weight: 600;
+}
+
+.warn-note {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #8a1f17;
+}
+
 .page-tabs {
   display: flex;
   gap: 4px;

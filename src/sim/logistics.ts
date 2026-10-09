@@ -1,6 +1,7 @@
 import { canTakeUp, isReachable, isReadyWorker, nearestStorage } from './buildings';
 import { freeGoods, goodsOn, reserveGoods, stackTiles } from './ground';
 import { landAt, landOf } from './land';
+import { offered } from './stop';
 import { dispatchTrade, marketWants } from './trade';
 import { goldWanted, staffGarrisons, wantsRecruit, weaponsWanted } from './military';
 import { BUILD_TICKS_PER_UNIT, BUILDINGS, costOf, INPUT_CAP, ORDERABLE, PROFESSIONS, RESOURCE_INFO, SITE } from './config';
@@ -72,7 +73,8 @@ export function sitePile(b: Building, res: Resource): number {
  * of the material plus what is on the way stays under `SITE.pile`.
  */
 export function demand(w: World, b: Building, res: Resource): number {
-  if (!isReachable(w, b)) return 0;
+  // A stopped building or site asks for nothing (`stop.ts`).
+  if (!isReachable(w, b) || b.stopped) return 0;
   if (!b.done) {
     const needs = siteNeeds(b, res);
     if (needs <= 0 || (!b.levelled && b.diggerIds.length === 0)) return 0;
@@ -114,7 +116,8 @@ export function dispatch(w: World): void {
  * all stand on one piece of the owner's territory (`land.ts`); other pieces get goods by donkey.
  */
 function dispatchFor(w: World, owner: PlayerId): void {
-  const idle = w.settlers.filter((s) => s.owner === owner && s.kind === 'carrier' && s.tasks.length === 0);
+  // Striking carriers (no bed, `beds.ts`) take no job.
+  const idle = w.settlers.filter((s) => s.owner === owner && s.kind === 'carrier' && s.tasks.length === 0 && !s.strike);
   const pieceOfCarrier = idle.map((s) => landAt(w, s, owner));
   /** Idle carriers per piece of land, so pieces without any are skipped before searching. */
   const idleOn = new Map<number, number>();
@@ -148,8 +151,9 @@ function dispatchFor(w: World, owner: PlayerId): void {
   for (const b of own) {
     const kind = BUILDINGS[b.type].worker;
     if (!kind || !b.done || b.workerId !== null || b.workerRequested || !isReachable(w, b)) continue;
-    // A barracks calls its next recruit only when there is a weapon for him and room for a new fighter.
-    if (BUILDINGS[b.type].barracks && !wantsRecruit(w, b)) continue;
+    // A barracks calls its next recruit only when there is a weapon for him and room for a new fighter
+    // (and not while it is stopped: S4 recruits only inside the running check).
+    if (BUILDINGS[b.type].barracks && (b.stopped || !wantsRecruit(w, b))) continue;
     const r = ready.length > 0 ? takeReady(w, ready, kind, b, pieceOf(b), owner) : undefined;
     if (r) {
       b.workerRequested = true;
@@ -259,12 +263,13 @@ function dispatchFor(w: World, owner: PlayerId): void {
     if (!store) noStore.add(key);
     return store;
   };
-  // Surplus goes to the warehouses in the same transport priority, good by good.
-  const producers = own.filter((b) => b.done && !BUILDINGS[b.type].storage && isReachable(w, b));
+  // Surplus goes to the warehouses in the same transport priority, good by good — and so does what a
+  // stopped building or site offers that no consumer took (`stop.ts`).
+  const producers = own.filter((b) => (b.done || b.stopped) && !BUILDINGS[b.type].storage && isReachable(w, b));
   for (const res of order) {
     const limit = RESOURCE_INFO[res].storeLimit ?? Infinity;
     for (const b of producers) {
-      while (b.output[res] - b.outReserved[res] > 0 && storedOf(res) < limit) {
+      while (offered(b, res) > 0 && storedOf(res) < limit) {
         if (!hasIdle(pieceOf(b))) {
           if (pieceOf(b) !== 0) needy.add(pieceOf(b));
           break;
@@ -336,7 +341,7 @@ function stocked(b: Building, res: Resource): number {
 function acceptedGoods(w: World, owner: PlayerId): Set<Resource> {
   const out = new Set<Resource>();
   for (const b of w.buildings.values()) {
-    if (b.owner !== owner || !b.done || !BUILDINGS[b.type].storage) continue;
+    if (b.owner !== owner || !b.done || !BUILDINGS[b.type].storage || b.stopped) continue;
     for (const r of b.accept ?? []) out.add(r);
   }
   return out;
@@ -368,7 +373,8 @@ function nearestSupply(
     }
   };
   for (const b of own) {
-    if (b === target || !b.done || !isReachable(w, b) || b.output[res] - b.outReserved[res] <= 0) continue;
+    // Piles at finished buildings, and what a stopped site offers (`stop.ts`).
+    if (b === target || (!b.done && !b.stopped) || !isReachable(w, b) || offered(b, res) <= 0) continue;
     consider({ at: b.door, piece: pieceOf(b), b });
   }
   for (const sup of ground.get(res) ?? []) if (freeGoods(w, sup.tile!) > 0) consider(sup);

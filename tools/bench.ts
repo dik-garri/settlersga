@@ -41,6 +41,8 @@ const store = placeNear(w, 'warehouse', home.x + 3, home.y + 3, 12)!;
 store.done = true;
 for (const r of RESOURCES) w.setAccepts(store.id, r, true);
 while (w.settlers.length < target) spawnSettler(w, 'carrier', tower);
+// Beds for all of them (`beds.ts`): the bench measures workers, not a strike.
+w.players[0].startBeds = target;
 // Enough tools for every workplace, so the bench measures a working economy rather than idle huts.
 for (const tool of Object.values(PROFESSIONS).map((p) => p.tool)) if (tool) store.output[tool] = target;
 

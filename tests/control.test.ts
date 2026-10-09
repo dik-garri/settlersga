@@ -85,7 +85,7 @@ describe('priority', () => {
 });
 
 describe('demolition', () => {
-  it('frees the tiles, turns the worker back into a carrier, loses no carried goods and leaves half its materials', () => {
+  it('frees the tiles, leaves the worker jobless in his trade, loses no carried goods and leaves half its materials', () => {
     const w = richWorld();
     const c = base(w);
     const mill = placeNear(w, 'sawmill', c.x + 5, c.y - 1)!;
@@ -104,7 +104,8 @@ describe('demolition', () => {
     expect(groundUnits(w, 'plank') - ground.plank).toBeGreaterThanOrEqual(half('plank') + atMill.plank);
     expect(groundUnits(w, 'log') - ground.log).toBeGreaterThanOrEqual(atMill.log);
     expect(w.buildings.has(mill.id)).toBe(false);
-    expect(worker.kind).toBe('carrier');
+    // Settlers 4: he keeps his profession (and tool) and waits for the next sawmill.
+    expect(worker.kind).toBe('sawmiller');
     expect(worker.home).toBeNull();
     for (let dy = 0; dy < mill.h; dy++) {
       for (let dx = 0; dx < mill.w; dx++) expect(w.map.isWalkable(mill.x + dx, mill.y + dy)).toBe(true);

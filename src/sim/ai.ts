@@ -23,7 +23,7 @@
 import { duelWorth } from './combat';
 import { attackStrength } from './strength';
 import { isLimited, pilesUsed } from './storage';
-import { available, centerOf, claimsTerritory, doorOf, oreLeft, waitingFor } from './buildings';
+import { available, canTakeUp, centerOf, claimsTerritory, doorOf, isReadyWorker, oreLeft, waitingFor } from './buildings';
 import {
   AI,
   AI_LEVELS,
@@ -48,7 +48,7 @@ import { claimable, isFreeSpecialist, robbable } from './specialists';
 import { FIGHTERS, isFighter, isMilitary, keepOf } from './military';
 import { hasGatherTargetNear, isGatherTarget } from './nature';
 import { packsOf } from './trade';
-import { RESOURCES, Terrain, type Building, type BuildingType, type PlayerId, type Point, type Resource } from './types';
+import { RESOURCES, Terrain, type Building, type BuildingType, type PlayerId, type Point, type Resource, type SettlerKind } from './types';
 import { startPositions, type World } from './world';
 
 /** Per computer player; saved with the world. */
@@ -235,10 +235,12 @@ function think(w: World, ai: AiState): void {
   }
 
   // Keep enough idle carriers: they staff new workplaces, carry goods and become soldiers.
-  // Houses release their people over time, so settlers still to come count as available.
-  const idle = w.settlers.filter((s) => s.owner === me && s.kind === 'carrier' && s.tasks.length === 0).length;
+  // Houses release their people over time, so settlers still to come count as available. Carriers on
+  // strike (no bed, `beds.ts`) are no help: a new house takes them in first.
+  const idle = w.settlers.filter((s) => s.owner === me && s.kind === 'carrier' && s.tasks.length === 0 && !s.strike).length;
   const coming = own.reduce((n, b) => n + (BUILDINGS[b.type].residence?.capacity ?? 0) - b.spawned, 0);
-  if (idle + coming < AI.minIdleCarriers) {
+  const striking = w.bedsOf(me).striking;
+  if (idle + coming < AI.minIdleCarriers || striking > 0) {
     const houses = own.filter((b) => BUILDINGS[b.type].residence).length;
     const order = houses < 2 ? HOUSES : [...HOUSES].reverse();
     for (const type of order) {
@@ -1092,17 +1094,30 @@ class Context {
   }
 
   /**
-   * Its worker's tool is in stock (or a toolsmith exists to make one). The last `AI.keepTools` units
-   * are only for the first building of a type, so e.g. the first coal mine is never left without a
-   * pickaxe because a second stonecutter took it — which would starve the toolsmith of coal for good.
+   * A jobless worker of the profession waits for it (his workplace went: he kept his trade, Settlers
+   * 4), or its worker's tool is in stock (or a toolsmith exists to make one). The last `AI.keepTools`
+   * units are only for the first building of a type, so e.g. the first coal mine is never left without
+   * a pickaxe because a second stonecutter took it — which would starve the toolsmith of coal for good.
    */
   staffable(type: BuildingType, first: boolean): boolean {
     const worker = BUILDINGS[type].worker;
     const tool = worker ? PROFESSIONS[worker].tool : undefined;
     if (!tool) return true;
+    if (this.jobless(worker!) > 0) return true;
     const spare = available(this.w, this.me, tool) - waitingFor(this.w, this.me, tool);
     if (spare > (first ? 0 : AI.keepTools)) return true;
     return this.own.some((b) => b.done && b.workerId !== null && BUILDINGS[b.type].recipe?.outputChoice?.includes(tool));
+  }
+
+  /**
+   * Its jobless workers who could take up `kind` (`isReadyWorker`), less its workplaces of that kind
+   * already waiting for one (finished or under way): each of those will take one of them first.
+   */
+  jobless(kind: SettlerKind): number {
+    let n = 0;
+    for (const s of this.w.settlers) if (s.owner === this.me && isReadyWorker(s) && canTakeUp(s.kind, kind)) n++;
+    for (const b of this.own) if (BUILDINGS[b.type].worker === kind && b.workerId === null) n--;
+    return n;
   }
 
   /**
@@ -1358,7 +1373,7 @@ function unexploredStarts(w: World, me: PlayerId): Point[] {
  */
 function useSpecialists(w: World, ai: AiState, own: Building[]): void {
   const me = ai.player;
-  const idle = w.settlers.filter((s) => s.owner === me && s.kind === 'carrier' && s.tasks.length === 0).length;
+  const idle = w.settlers.filter((s) => s.owner === me && s.kind === 'carrier' && s.tasks.length === 0 && !s.strike).length;
   const has = (kind: 'pioneer' | 'thief') => w.settlers.some((s) => s.owner === me && s.kind === kind);
 
   // Pioneer: only with shovels to spare (diggers and foresters need them).

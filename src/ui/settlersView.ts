@@ -1,4 +1,5 @@
 import { settlerIcon } from '../render/atlas';
+import { isReadyWorker } from '../sim/buildings';
 import { PROFESSIONS } from '../sim/config';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { el, type View } from './dom';
@@ -13,7 +14,8 @@ export const COMMANDS: { type: 'geologist' | 'pioneer' | 'thief'; name: string; 
 ];
 
 /**
- * The settlers menu: who lives in the settlement, the specialists' errands (geologist, pioneer,
+ * The settlers menu: who lives in the settlement — beds and strikers (Settlers 4: carriers beyond the
+ * beds strike), workers waiting for a workplace —, the specialists' errands (geologist, pioneer,
  * thief — aimed at the map like a building) and the worker orders.
  */
 export class SettlersView implements View {
@@ -53,6 +55,7 @@ export class SettlersView implements View {
     let carriers = 0;
     let busy = 0;
     const kinds = new Map<string, number>();
+    const jobless = new Map<string, number>();
     for (const s of this.world.settlers) {
       if (s.owner !== LOCAL_PLAYER) continue;
       people++;
@@ -60,8 +63,10 @@ export class SettlersView implements View {
         carriers++;
         if (s.tasks.length > 0) busy++;
       } else kinds.set(s.kind, (kinds.get(s.kind) ?? 0) + 1);
+      if (isReadyWorker(s) && s.tasks.length === 0) jobless.set(s.kind, (jobless.get(s.kind) ?? 0) + 1);
     }
-    const key = `${people}|${carriers}|${busy}|${[...kinds].join()}`;
+    const { beds, striking } = this.world.bedsOf();
+    const key = `${people}|${carriers}|${busy}|${[...kinds].join()}|${beds}|${striking}|${[...jobless].join()}`;
     if (key !== this.summaryKey) {
       this.summaryKey = key;
       this.summary.innerHTML = '';
@@ -72,10 +77,27 @@ export class SettlersView implements View {
       };
       const grid = el('div', 'stats-grid');
       grid.append(line('Всего поселенцев', String(people)), line('Носильщики заняты', `${busy} / ${carriers}`));
+      // Only carriers need a bed (Settlers 4): the start's beds plus every finished house's.
+      const bedRow = line('Кровати (носильщики)', `${carriers} / ${beds}`);
+      bedRow.title = 'Кровати дают дома и начальный запас; носильщики сверх кроватей бастуют';
+      grid.append(bedRow);
+      if (striking > 0) {
+        const strike = line('Бастуют', String(striking));
+        strike.classList.add('warn');
+        strike.title = 'Носильщикам не хватает кроватей: они не работают, пока не будет нового дома';
+        grid.append(strike);
+      }
+      if (jobless.size > 0) {
+        const list = [...jobless].map(([k, n]) => `${PROFESSIONS[k as keyof typeof PROFESSIONS].name.toLowerCase()} ${n}`).join(', ');
+        const row = line('Без работы', String([...jobless.values()].reduce((a, b) => a + b, 0)));
+        row.title = `Ждут новое здание своего дела: ${list}`;
+        grid.append(row);
+      }
       for (const [kind, n] of [...kinds].sort((a, b) => b[1] - a[1])) {
         grid.append(line(PROFESSIONS[kind as keyof typeof PROFESSIONS].name, String(n)));
       }
       this.summary.append(grid);
+      if (striking > 0) this.summary.append(el('p', 'warn-note', 'Забастовка: носильщикам не хватает кроватей — постройте дом.'));
     }
     this.workers.update();
   }

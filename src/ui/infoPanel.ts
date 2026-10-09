@@ -20,6 +20,7 @@ import { barracksRows, garrisonSlotRows, recruitLevelControls, shareControls, su
 import { el, rowsTable, type View } from './dom';
 import { economyKey, economyRows, refreshStockCounts, stockText, toolOrderControls, warehouseControls } from './economyPanel';
 import { movableWorkArea, workRadius } from '../sim/workArea';
+import { canStop } from '../sim/stop';
 import { glyph } from './icons';
 import { refreshTradeCounts, tradeControls, tradeKey, tradeRows } from './tradeView';
 import type { GameState } from './state';
@@ -186,6 +187,9 @@ export class InfoView implements View {
     }
     rows.push(...tradeRows(this.world, b));
     if (b.priority) rows.push(['Приоритет', 'да']);
+    if (!enemy && b.stopped) {
+      rows.push(['Остановлено', b.done ? 'не работает, отдаёт свои товары' : 'стройка стоит, материалы отдаёт']);
+    }
     const key = JSON.stringify([
       b.id,
       rows,
@@ -257,6 +261,20 @@ export class InfoView implements View {
       prio.onclick = () => this.world.setPriority(b.id, !b.priority);
       actions.append(prio);
     }
+    if (canStop(b)) {
+      // Settlers 4's stop switch: no new work, nothing delivered, the goods at it go to others.
+      const stop = el('button', b.stopped ? 'active' : '', b.stopped ? '▶ Запустить' : '⏸ Остановить');
+      stop.title = b.stopped
+        ? 'Снова работать (строить) и заказывать товары'
+        : b.done
+          ? 'Не начинать новую работу и ничего не заказывать; товары у здания отдать другим'
+          : 'Отпустить строителей и землекопов, ничего не заказывать; материалы отдать другим стройкам';
+      stop.onclick = () => {
+        this.world.setStopped(b.id, !b.stopped);
+        stop.blur();
+      };
+      actions.append(stop);
+    }
     const confirming = this.confirmDemolish === b.id;
     // Warn before the last occupied military building goes: its fighters come out homeless, and once
     // they are gone too the player is out (`DEFEAT`). The land stays (Settlers 4).
@@ -327,6 +345,7 @@ export class InfoView implements View {
 
   private status(b: Building): string {
     const def = BUILDINGS[b.type];
+    if (b.stopped) return b.timer > 0 ? 'останавливается' : 'остановлено';
     if (def.barracks) {
       if (!BARRACKS_WEAPONS.some((r) => b.input[r] > 0)) return 'нет оружия';
       if (b.workerId === null) return wantsRecruit(this.world, b) ? 'ждёт новобранца' : 'гарнизоны полны';

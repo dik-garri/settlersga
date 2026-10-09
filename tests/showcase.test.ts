@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildShowcase } from '../src/dev/showcase';
+import { isReadyWorker } from '../src/sim/buildings';
 import { BUILDINGS, ORE_RESOURCES } from '../src/sim/config';
 import { hasSign, signLevel } from '../src/sim/specialists';
 import { isCutOff } from '../src/sim/land';
@@ -50,6 +51,10 @@ describe('dev showcase (?demo)', () => {
     expect(w.settlers.some((s) => s.kind === 'geologist' && s.errand)).toBe(true);
     // Goods lying on the ground (Settlers 4's piles: start goods, ruins), several kinds of them.
     expect(new Set([...w.stacks].map((i) => w.map.goods[i])).size).toBeGreaterThanOrEqual(4);
+    // Stopped by the player: a finished workshop and a site; a worker without a workplace.
+    expect(all.some((b) => b.stopped && b.done)).toBe(true);
+    expect(all.some((b) => b.stopped && !b.done)).toBe(true);
+    expect(w.settlers.some((s) => isReadyWorker(s) && s.kind === 'woodcutter')).toBe(true);
     // A field squad stands round its leader (direct army control).
     const leader = w.settlers.find((s) => s.kind === 'leader' && s.post);
     expect(leader).toBeDefined();

@@ -270,7 +270,7 @@ export function setAccepts(w: World, player: PlayerId, id: number, res: Resource
  * nearest warehouse on the same land piece that takes it (reservations move with them). With no such
  * warehouse they finish the trip: the good is stored there rather than lost.
  */
-function redirectDeliveries(w: World, b: Building, res: Resource): void {
+export function redirectDeliveries(w: World, b: Building, res: Resource): void {
   for (const s of w.settlers) {
     if (s.owner !== b.owner) continue;
     const k = s.tasks.findIndex((t) => t.t === 'drop' && t.b === b.id && t.res === res);

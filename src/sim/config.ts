@@ -765,6 +765,12 @@ export interface ProfessionDef {
   trade?: string;
   /** Further goods a barracks consumes to make this fighter, besides `tool` (the squad leader's sword). */
   kit?: Partial<Stock>;
+  /**
+   * A carrier only passing through the job (the recruit in training: Settlers 4 trains a carrier who
+   * leaves as a fighter): a carrier again when his workplace goes. Every other worker keeps his
+   * profession then and waits for the next workplace of it (`isReadyWorker`).
+   */
+  transient?: boolean;
   gather?: GatherDef;
   plant?: PlantDef;
   hunt?: HuntDef;
@@ -832,7 +838,7 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
   thief: { name: 'Вор', behavior: 'thief', hp: 20, cloaked: true, sight: 8 },
   donkeyrancher: { name: 'Погонщик', behavior: 'workshop' },
   donkey: { name: 'Осёл', behavior: 'donkey', roads: true },
-  recruit: { name: 'Новобранец', behavior: 'workshop' },
+  recruit: { name: 'Новобранец', behavior: 'workshop', transient: true },
   /** Settlers 4: 100 / 150 / 210 hit points, 10 / 14 / 20 a blow, a blow every 13 of its ticks. */
   soldier: {
     name: 'Мечник',
@@ -1762,6 +1768,24 @@ export const ANIMAL_START_CLEARANCE = 12;
 export function residentsOf(def: BuildingDef): number {
   return def.residence?.capacity ?? 0;
 }
+
+/**
+ * Beds a finished house gives its owner (`beds.ts`): as many as it releases residents — Settlers 4
+ * reads both from the residence's one `dummyValue` (`CEcoSectorMgr::GetNrOfCurrentTotalBeds`,
+ * `CEcoManager::GetNrOfSettlerComingOutOfResidence`).
+ */
+export function bedsOf(def: BuildingDef): number {
+  return residentsOf(def);
+}
+
+/**
+ * Beds and strike, as in Settlers 4 (`CEcoSectorMgr::CalculateInitialFreeBeds`,
+ * `UpdateStrikeSettlers`): a player starts with `round` × ⌈start carriers / `round`⌉ + `extra` beds
+ * (32 carriers: 50 beds) plus every finished house's; every `checkEvery` ticks (S4: every 32 of its
+ * ticks) carriers beyond the beds — busy or free, all count — put that many free carriers on strike,
+ * and room again calls strikers back (the latest first).
+ */
+export const BEDS = { round: 10, extra: 10, checkEvery: Math.round(s4Ticks(32)) };
 
 // ------------------------------------------------------------------- paths
 
