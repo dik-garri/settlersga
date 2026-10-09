@@ -426,5 +426,14 @@ export function buildShowcase(): World {
       m.touch(i);
     });
   }
+  // Burnt ruins of every footprint size (Settlers 4's smouldering remains after a conquest): finished
+  // buildings burnt on the spot, their remains kept smoking for good.
+  (['flowerbed', 'woodcutter', 'pigfarm', 'fortress'] as BuildingType[]).forEach((type, k) => {
+    const b = placeNear(w, type, cx - 14 + k * 7, cy + 16, true);
+    if (!b) return;
+    w.removeBuilding(b, 'burn');
+    const ruin = w.ruins[w.ruins.length - 1];
+    if (ruin) ruin.until = FROZEN;
+  });
   return w;
 }

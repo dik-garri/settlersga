@@ -2,7 +2,8 @@
 
     blender -b --factory-startup -P art/blender/build.py -- [names...]
 
-Names: settlers (every figure, see figures.py), signs (the geologist's signs, see signs.py), woodcutter, sawmill, stonecutter, tower, house_large, tree, deposit, piles (or piles:fish,coal), wares, icons (or icons:axe,saw: the menu icons) (default: all). Every sprite keeps the size and anchor
+Names: settlers (every figure, see figures.py), settlers:add (only the pose groups settlers.json
+lacks, appended to its last page), signs (the geologist's signs, see signs.py), woodcutter, sawmill, stonecutter, tower, house_large, tree, deposit, piles (or piles:fish,coal), stacks (or stacks:fish,coal: goods lying on the ground), ruins (ruin1..ruin4), wares, icons (or icons:axe,saw: the menu icons) (default: all). Every sprite keeps the size and anchor
 of the procedural sprite it replaces (src/render/sprites.ts, settlerArt.ts), so the game can swap
 them in without other changes.
 """
@@ -21,6 +22,7 @@ import goods  # noqa: E402
 import lib  # noqa: E402
 import buildings  # noqa: E402
 import nature  # noqa: E402
+import ruins  # noqa: E402
 import signs  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -308,6 +310,8 @@ SINGLE = {
 }
 # Tree variants and ground props (`-- trees`, `-- props`).
 SINGLE.update(nature.SINGLE)
+# Burnt ruins per footprint size (`-- ruins` or `-- ruin2`).
+SINGLE.update(ruins.SINGLE)
 
 
 #: Construction stages rendered before the finished building (0 stakes … 3 roof half on).
@@ -315,12 +319,14 @@ STAGES = 4
 
 def main():
     args = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
-    names = args or ['settlers', 'piles', 'wares', 'icons', 'millsails', 'signs', *SINGLE]
+    names = args or ['settlers', 'piles', 'stacks', 'wares', 'icons', 'millsails', 'signs', *SINGLE]
     os.makedirs(OUT, exist_ok=True)
     os.makedirs(TMP, exist_ok=True)
     for name in names:
         if name == 'deposit':
             todo = ['deposit0', 'deposit1', 'deposit2']
+        elif name == 'ruins':
+            todo = list(ruins.SINGLE)
         elif name in ('trees', 'props'):
             todo = list(nature.TREES if name == 'trees' else nature.PROPS)
         else:
@@ -330,9 +336,17 @@ def main():
             if n == 'settlers':
                 figures.build_settlers(OUT, TMP)
                 continue
+            if n == 'settlers:add':
+                # Only the pose groups the sheet lacks, appended to its last page.
+                figures.build_settlers(OUT, TMP, add=True)
+                continue
             if n == 'piles' or n.startswith('piles:'):
                 # `piles` renders every resource's piles, `piles:fish,coal` only those.
                 goods.render_piles(OUT, TMP, n.split(':', 1)[1].split(',') if ':' in n else None)
+                continue
+            if n == 'stacks' or n.startswith('stacks:'):
+                # Goods lying loose on bare ground: `stacks` for every resource, `stacks:fish,coal` those.
+                goods.render_stacks(OUT, TMP, n.split(':', 1)[1].split(',') if ':' in n else None)
                 continue
             if n == 'millsails':
                 _, w, h, ax, ay = SINGLE['mill']
@@ -349,6 +363,8 @@ def main():
                 goods.render_icons(OUT, TMP, n.split(':', 1)[1].split(',') if ':' in n else None)
                 continue
             build, w, h, ax, ay = SINGLE[n]
+            if n in ruins.SINGLE:
+                scene.cycles.device = 'CPU'  # few and small: spare the GPU (and the machine's heat)
             lib.setup_camera(scene, w, h, ax, ay)
             build()
             staged = any('stage' in o for o in scene.objects)

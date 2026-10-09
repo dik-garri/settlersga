@@ -170,6 +170,22 @@ export const ART3D_YARDS = ['warehouse'];
 export const ART3D_PILES: readonly Resource[] = RESOURCES;
 export const PILE_MAX = 8;
 export const PILE = { w: 44, h: 34, ax: 22, ay: 24 };
+/**
+ * Goods lying loose on bare ground (`ground.ts` stacks): `stacks-<res>.png`, a strip of `PILE_MAX`
+ * frames of `STACK` on a small patch of trodden earth (`render_stacks` in goods.py). Optional per
+ * resource: without its strip a stack is drawn as a door pile.
+ */
+export const STACK = { w: 56, h: 40, ax: 28, ay: 26 };
+/**
+ * Burnt ruins per footprint size (`ruins.py`): `ruin<n>` on the canvas of an n×n building, centred on
+ * the footprint centre like a building.
+ */
+export const ART3D_RUINS: Record<string, { w: number; h: number; ax: number; ay: number }> = {
+  ruin1: { w: 80, h: 120, ax: 40, ay: 92 },
+  ruin2: { w: 150, h: 140, ax: 75, ay: 100 },
+  ruin3: { w: 220, h: 190, ax: 110, ay: 135 },
+  ruin4: { w: 320, h: 290, ax: 160, ay: 200 },
+};
 
 /** Tree variants (`TREES` in art/blender/nature.py): 0–2 conifers, 3–5 broadleaf trees. */
 export const ART3D_TREES = 6;
@@ -199,6 +215,7 @@ export const ART3D_SPRITES: Record<string, { w: number; h: number; ax: number; a
   ),
   ...Object.fromEntries(Array.from({ length: ART3D_TREES }, (_, k) => [`tree${k}`, TREE])),
   ...Object.fromEntries(ART3D_PROPS.map((name) => [name, PROP])),
+  ...ART3D_RUINS,
   deposit0: { w: 64, h: 72, ax: 30, ay: 58 },
   deposit1: { w: 64, h: 72, ax: 30, ay: 58 },
   deposit2: { w: 64, h: 72, ax: 30, ay: 58 },
@@ -231,6 +248,15 @@ export async function loadArt3d(): Promise<Art3d> {
   const wares = (await (await fetch(`${base}wares.json`)).json()) as WaresMeta;
   const strips = [...ART3D_PILES.map((r) => `piles-${r}`), 'wares', 'millsails'];
   await Promise.all(strips.map(async (n) => images.set(n, await loadImage(`${base}${n}.png`))));
+  // Ground stacks are optional per resource (a stack without its strip is drawn as a door pile).
+  await Promise.all(
+    RESOURCES.map((r) =>
+      loadImage(`${base}stacks-${r}.png`).then(
+        (img) => images.set(`stacks-${r}`, img),
+        () => undefined,
+      ),
+    ),
+  );
   // Animal sheets are optional: a kind without one falls back to the procedural painter.
   await Promise.all(
     ANIMAL_KINDS.map((k) =>

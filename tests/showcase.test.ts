@@ -65,6 +65,8 @@ describe('dev showcase (?demo)', () => {
     expect(w.settlers.some((s) => isReadyWorker(s) && s.kind === 'woodcutter')).toBe(true);
     // Fields at every stage, stubble after the harvest included (Settlers 4's growth, audit item 16).
     for (let stage = 1; stage <= CROP_STUBBLE; stage++) expect(w.map.crop.includes(stage), `field stage ${stage}`).toBe(true);
+    // Burnt ruins of every footprint size, smoking for good.
+    for (const side of [1, 2, 3, 4]) expect(w.ruins.some((r) => r.w === side && r.until > 1e15), `ruin ${side}`).toBe(true);
     // A field squad stands round its leader (direct army control).
     const leader = w.settlers.find((s) => s.kind === 'leader' && s.post);
     expect(leader).toBeDefined();

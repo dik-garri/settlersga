@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { centerOf, spawnSettler } from '../src/sim/buildings';
-import { costOf, FLEE, GROUND, START_CONDITIONS, startGoods } from '../src/sim/config';
+import { costOf, FLEE, GROUND, RUIN, START_CONDITIONS, startGoods } from '../src/sim/config';
 import { dropGoods, goodsOn } from '../src/sim/ground';
 import { enterGarrison, killSettler } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
@@ -236,5 +236,22 @@ describe('defeat and stranded settlers (Settlers 4)', () => {
     enterGarrison(w, startTower(w), spawnSettler(w, 'soldier', startTower(w)));
     run(w, 20);
     expect(w.isDefeated(1)).toBe(false);
+  });
+
+  it('a burnt building leaves smoking remains for a while, a demolished one none; they are not saved', () => {
+    const w = new World(42);
+    const hut = place(w, 'woodcutter', 4, 4);
+    const shed = place(w, 'forester', -5, 4);
+    w.removeBuilding(shed, 'demolish');
+    expect(w.ruins).toHaveLength(0);
+    w.removeBuilding(hut, 'burn');
+    expect(w.ruins).toEqual([{ x: hut.x, y: hut.y, w: hut.w, h: hut.h, type: 'woodcutter', owner: 1, tick: w.tick, until: w.tick + RUIN.ticks }]);
+    // Nothing in the simulation reads them: the tile is free to walk and build on at once.
+    expect(w.map.building[w.map.idx(hut.x, hut.y)]).toBe(0);
+    expect(JSON.stringify(saveWorld(w))).not.toContain('ruins');
+    run(w, RUIN.ticks - 1);
+    expect(w.ruins).toHaveLength(1);
+    run(w, 1);
+    expect(w.ruins).toHaveLength(0);
   });
 });
