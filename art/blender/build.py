@@ -3,7 +3,7 @@
     blender -b --factory-startup -P art/blender/build.py -- [names...]
 
 Names: settlers (every figure, see figures.py), settlers:add (only the pose groups settlers.json
-lacks, appended to its last page), signs (the geologist's signs, see signs.py), woodcutter, sawmill, stonecutter, tower, house_large, tree, deposit, piles (or piles:fish,coal), stacks (or stacks:fish,coal: goods lying on the ground), ruins (ruin1..ruin4), wares, icons (or icons:axe,saw: the menu icons) (default: all). Every sprite keeps the size and anchor
+lacks, appended to its last page), signs (the geologist's signs, see signs.py), woodcutter, sawmill, stonecutter, tower, house_large, tree, deposit, piles (or piles:fish,coal), stacks (or stacks:fish,coal: goods lying on the ground), ruins (ruin1..ruin4), rocks (mountain stones and outcrops, see rocks.py), wares, icons (or icons:axe,saw: the menu icons) (default: all). Every sprite keeps the size and anchor
 of the procedural sprite it replaces (src/render/sprites.ts, settlerArt.ts), so the game can swap
 them in without other changes.
 """
@@ -22,6 +22,7 @@ import goods  # noqa: E402
 import lib  # noqa: E402
 import buildings  # noqa: E402
 import nature  # noqa: E402
+import rocks  # noqa: E402
 import ruins  # noqa: E402
 import signs  # noqa: E402
 
@@ -310,6 +311,8 @@ SINGLE = {
 }
 # Tree variants and ground props (`-- trees`, `-- props`).
 SINGLE.update(nature.SINGLE)
+# Mountain rocks: loose stones, boulders, outcrops (`-- rocks`).
+SINGLE.update(rocks.SINGLE)
 # Burnt ruins per footprint size (`-- ruins` or `-- ruin2`).
 SINGLE.update(ruins.SINGLE)
 
@@ -327,6 +330,8 @@ def main():
             todo = ['deposit0', 'deposit1', 'deposit2']
         elif name == 'ruins':
             todo = list(ruins.SINGLE)
+        elif name == 'rocks':
+            todo = list(rocks.ROCKS)
         elif name in ('trees', 'props'):
             todo = list(nature.TREES if name == 'trees' else nature.PROPS)
         else:
@@ -363,8 +368,10 @@ def main():
                 goods.render_icons(OUT, TMP, n.split(':', 1)[1].split(',') if ':' in n else None)
                 continue
             build, w, h, ax, ay = SINGLE[n]
-            if n in ruins.SINGLE:
+            if n in ruins.SINGLE or n in rocks.ROCKS:
                 scene.cycles.device = 'CPU'  # few and small: spare the GPU (and the machine's heat)
+                scene.render.threads_mode = 'FIXED'
+                scene.render.threads = 4
             lib.setup_camera(scene, w, h, ax, ay)
             build()
             staged = any('stage' in o for o in scene.objects)

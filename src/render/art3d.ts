@@ -201,6 +201,16 @@ export const ART3D_PROPS = [
   'prop-stones',
 ] as const;
 const PROP = { w: 32, h: 28, ax: 16, ay: 20 };
+/**
+ * Mountain rocks (`ROCKS` in art/blender/rocks.py): `rock-<size><v>`, registered as `rock:<size>:<v>`
+ * and placed by `rockLayout` (rocks.ts) — loose stones on slopes, boulders and 2×2 outcrops on peaks.
+ * The anchor is the rock's centre on the ground (an outcrop's footprint centre).
+ */
+export const ART3D_ROCKS: Record<'small' | 'medium' | 'large', { count: number; w: number; h: number; ax: number; ay: number }> = {
+  small: { count: 4, w: 52, h: 36, ax: 24, ay: 22 },
+  medium: { count: 3, w: 88, h: 72, ax: 40, ay: 48 },
+  large: { count: 4, w: 192, h: 150, ax: 90, ay: 104 },
+};
 /** Field decal and worn-path decal frames (`fields`, `paths` in art/textures/ground.py). */
 export const FIELD_FRAME = { w: 66, h: 40, ax: 33, ay: 24 };
 export const PATH_FRAME = { w: 80, h: 44, ax: 40, ay: 22 };
@@ -215,6 +225,11 @@ export const ART3D_SPRITES: Record<string, { w: number; h: number; ax: number; a
   ),
   ...Object.fromEntries(Array.from({ length: ART3D_TREES }, (_, k) => [`tree${k}`, TREE])),
   ...Object.fromEntries(ART3D_PROPS.map((name) => [name, PROP])),
+  ...Object.fromEntries(
+    Object.entries(ART3D_ROCKS).flatMap(([size, { count, ...c }]) =>
+      Array.from({ length: count }, (_, k) => [`rock-${size}${k}`, c]),
+    ),
+  ),
   ...ART3D_RUINS,
   deposit0: { w: 64, h: 72, ax: 30, ay: 58 },
   deposit1: { w: 64, h: 72, ax: 30, ay: 58 },

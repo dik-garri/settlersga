@@ -56,6 +56,7 @@ const YARD_RX = 30;
 const YARD_RY = 15;
 import { needsLevelling } from '../sim/digging';
 import { TradeRouteLayer } from './tradeRoutes';
+import { rockKey, rockLayout, type RockSize, type RockSpot } from './rocks';
 import { GuideLayer, type GuideMark } from './guide';
 import { WorkAreaLayer } from './workArea';
 import { pathLevel } from '../sim/paths';
@@ -102,6 +103,10 @@ const SIGN_SCALE = 0.82;
 /** Share of a burnt ruin's time (`RUIN`) over which it fades out at the end. */
 const RUIN_FADE = 0.15;
 
+/** The procedural art's rocks: its two boulder sprites stand for every size, at these scales. */
+const CLASSIC_ROCKS: Record<RockSize, number> = { small: 2, medium: 2, large: 2 };
+const CLASSIC_ROCK_SCALE: Record<RockSize, number> = { small: 0.45, medium: 0.85, large: 1.5 };
+
 /** Cheap deterministic per-tile hash for picking sprite variants. */
 function hash(i: number): number {
   let h = Math.imul(i ^ 0x5bd1e995, 0x27d4eb2d);
@@ -130,6 +135,8 @@ interface BuildingView {
   /** Tiles the body and the door pile are registered under (see `addStatic`). */
   at: { x: number; y: number };
   doorAt: { x: number; y: number };
+  /** Tiles the footprint and door cover (x0, y0, x1, y1), whose rocks give way to it. */
+  foot: readonly [number, number, number, number];
   body: Container;
   site: Sprite;
   main: Sprite;
@@ -230,7 +237,11 @@ export class GameRenderer {
    * fog — and is rebuilt by `ensureChunk` when it comes into view again. Buildings stay.
    */
   private readonly chunkHiddenAt: Float64Array;
-  private readonly boulders: Container[][] = [];
+  /** Rock sprites per chunk (`placeBoulders`), and the `rockKey` of the layout they show. */
+  private readonly boulders: Sprite[][] = [];
+  private rockKeys: Uint32Array;
+  /** Chunks whose rocks may have to move: tiles changed, a building came or went (`syncRocks`). */
+  private readonly rocksDirty = new Set<number>();
   /**
    * Plain sprites (trees, boulders) given back by unloaded chunks, reused by the next chunk built
    * (`takeSprite`): a fly-over of a big map otherwise makes and drops a forest's worth every second.
@@ -238,6 +249,7 @@ export class GameRenderer {
   private readonly spritePool: Sprite[] = [];
   private readonly groundTextures: Partial<Record<GroundKind, Texture[]>> = {};
   private readonly edgeTextures: Partial<Record<GroundKind, Texture[]>> = {};
+  private readonly rockTextures: Partial<Record<RockSize, Texture[]>> = {};
   /** Fog canvases and their textures given back by unloaded chunks, reused by the next one. */
   private readonly fogPool: { canvas: HTMLCanvasElement; tex: Texture }[] = [];
   /** One pixel buffer for every fog chunk redraw. */
@@ -420,6 +432,7 @@ export class GameRenderer {
     this.chunkReady = new Uint8Array(chunks);
     this.territoryPending = new Uint8Array(chunks);
     this.chunkHiddenAt = new Float64Array(chunks);
+    this.rockKeys = new Uint32Array(chunks);
     this.chunkBounds = new Float32Array(chunks * 4);
     this.groundSheet = new Texture({ source: this.atlas.get('ground:grass:0').source });
     for (let c = 0; c < chunks; c++) {
@@ -512,23 +525,60 @@ export class GameRenderer {
     }
   }
 
-  /** Cliffs are covered in boulders; walkable slopes only get the odd small stone. */
+  /**
+   * Mountain rocks (`rockLayout`): craggy outcrops and boulders on the impassable peaks, the odd small
+   * stone on walkable slopes, never on a tile with something on it. 3D art draws `rock:<size>:<v>`;
+   * the procedural art its two `boulder:*` sprites at a scale per size. Lit sprites are never
+   * mirrored (the light and shadow would flip); variety comes from the variants and their scale.
+   */
   private placeBoulders(c: number): void {
     const { map } = this.sim;
     const x0 = (c % map.chunksX) * CHUNK;
     const y0 = Math.floor(c / map.chunksX) * CHUNK;
-    for (let y = y0; y < Math.min(map.h, y0 + CHUNK); y++) {
-      for (let x = x0; x < Math.min(map.w, x0 + CHUNK); x++) {
-        const i = map.idx(x, y);
-        const kind = TERRAIN_KIND[map.terrain[i] as Terrain];
-        if (kind !== 'rock' && !(kind === 'mountain' && hash(i + 3) % 4 === 0)) continue;
-        const rock = this.takeSprite(this.atlas.get(`boulder:${hash(i + 7) % 2}`));
-        const p = this.surface(x, y);
-        rock.position.set(p.x + ((hash(i) >> 8) % 7) - 3, p.y + 2);
-        rock.scale.set((kind === 'rock' ? 0.8 : 0.4) + ((hash(i) >> 4) % 4) * 0.08);
-        rock.zIndex = depthOf(x, y);
-        this.addStatic(rock, x, y);
-        this.boulders[c].push(rock);
+    const spots = rockLayout(map, x0, y0, Math.min(map.w, x0 + CHUNK), Math.min(map.h, y0 + CHUNK), this.atlas.rocks ?? CLASSIC_ROCKS);
+    this.rockKeys[c] = rockKey(spots);
+    for (const r of spots) {
+      const rock = this.takeSprite(this.rockTexture(r));
+      const p = this.surface(r.x, r.y);
+      rock.position.set(p.x, p.y);
+      rock.scale.set(r.scale * (this.atlas.rocks ? 1 : CLASSIC_ROCK_SCALE[r.size]));
+      rock.zIndex = r.depth;
+      this.addStatic(rock, r.x, r.y);
+      this.boulders[c].push(rock);
+    }
+  }
+
+  private rockTexture(r: RockSpot): Texture {
+    if (!this.atlas.rocks) return this.atlas.get(`boulder:${r.variant % 2}`);
+    const list = (this.rockTextures[r.size] ??= []);
+    return (list[r.variant] ??= this.atlas.get(`rock:${r.size}:${r.variant}`));
+  }
+
+  /** Lays a built chunk's rocks out again if what stands on its tiles moved them. */
+  private refreshRocks(c: number): void {
+    if (!this.chunkReady[c]) return; // laid out from the current map when it is built
+    const { map } = this.sim;
+    const x0 = (c % map.chunksX) * CHUNK;
+    const y0 = Math.floor(c / map.chunksX) * CHUNK;
+    const spots = rockLayout(map, x0, y0, Math.min(map.w, x0 + CHUNK), Math.min(map.h, y0 + CHUNK), this.atlas.rocks ?? CLASSIC_ROCKS);
+    if (rockKey(spots) === this.rockKeys[c]) return;
+    for (const rock of this.boulders[c]) this.recycleStatic(rock, c);
+    this.boulders[c] = [];
+    this.placeBoulders(c);
+  }
+
+  private syncRocks(): void {
+    for (const c of this.rocksDirty) this.refreshRocks(c);
+    this.rocksDirty.clear();
+  }
+
+  /** Marks the chunks under a building's footprint and door for `syncRocks`. */
+  private rocksUnder(foot: readonly [number, number, number, number]): void {
+    const { map } = this.sim;
+    const [x0, y0, x1, y1] = foot;
+    for (let cy = Math.floor(y0 / CHUNK); cy <= Math.floor(y1 / CHUNK); cy++) {
+      for (let cx = Math.floor(x0 / CHUNK); cx <= Math.floor(x1 / CHUNK); cx++) {
+        if (cx >= 0 && cy >= 0 && cx < map.chunksX && cy < map.chunksY) this.rocksDirty.add(cx + cy * map.chunksX);
       }
     }
   }
@@ -825,6 +875,7 @@ export class GameRenderer {
     this.syncChangedTiles();
     this.sweepSigns();
     this.syncBuildings();
+    this.syncRocks();
     this.syncRuins();
     this.syncSettlers(alpha, timeMs);
     this.animals.sync(alpha, timeMs, view);
@@ -1205,7 +1256,7 @@ export class GameRenderer {
     this.chunkReady[c] = 0;
     disposeLayer(this.groundLayers[c]);
     this.groundLayers[c] = null;
-    for (const rock of this.boulders[c]) this.recycleStatic(rock as Sprite, c);
+    for (const rock of this.boulders[c]) this.recycleStatic(rock, c);
     this.boulders[c] = [];
     const x0 = (c % map.chunksX) * CHUNK;
     const y0 = Math.floor(c / map.chunksX) * CHUNK;
@@ -1284,6 +1335,7 @@ export class GameRenderer {
       // Chunks out of view keep a stale version and catch up once they are shown.
       if (!this.chunkVisible[c] || map.chunkVersion[c] === this.chunkSeen[c]) continue;
       this.chunkSeen[c] = map.chunkVersion[c];
+      this.rocksDirty.add(c);
       const x0 = (c % map.chunksX) * CHUNK;
       const y0 = Math.floor(c / map.chunksX) * CHUNK;
       for (let y = y0; y < Math.min(map.h, y0 + CHUNK); y++) {
@@ -1681,6 +1733,7 @@ export class GameRenderer {
       // Demolished.
       this.removeStatic(v.body, v.at.x, v.at.y);
       this.removeStatic(v.front, v.doorAt.x, v.doorAt.y);
+      this.rocksUnder(v.foot);
       this.buildingViews.delete(id);
       this.effects.detachBuilding(id);
     }
@@ -1805,6 +1858,13 @@ export class GameRenderer {
 
     this.addStatic(body, cx, cy);
     this.addStatic(front, b.door.x, b.door.y);
+    const foot = [
+      Math.min(b.x, b.door.x),
+      Math.min(b.y, b.door.y),
+      Math.max(b.x + b.w - 1, b.door.x),
+      Math.max(b.y + b.h - 1, b.door.y),
+    ] as const;
+    this.rocksUnder(foot);
     const v: BuildingView = {
       owner: b.owner,
       flag,
@@ -1812,6 +1872,7 @@ export class GameRenderer {
       banner,
       at: { x: cx, y: cy },
       doorAt: { ...b.door },
+      foot,
       body,
       site,
       main,

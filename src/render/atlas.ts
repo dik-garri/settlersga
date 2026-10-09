@@ -32,10 +32,12 @@ import {
   type GroundKind,
 } from './sprites';
 import { WALK_FRAMES, WORK_FRAMES } from './anim';
+import type { RockSize } from './rocks';
 import {
   ART3D_BUILDINGS,
   ART3D_PILES,
   ART3D_PROPS,
+  ART3D_ROCKS,
   ART3D_SPRITES,
   ART3D_STAGED,
   ART3D_STAGES,
@@ -188,11 +190,14 @@ export class SpriteAtlas {
   readonly treeVariants: number;
   /** Decorative ground props `prop:0..n-1` (3D art only; none in the procedural art). */
   readonly props: number;
+  /** Mountain rock sprites `rock:<size>:0..n-1` per size (3D art only; the procedural art has `boulder:*`). */
+  readonly rocks: Record<RockSize, number> | null;
 
   constructor(art3d: Art3d | null = null) {
     this.art3d = art3d;
     this.treeVariants = art3d ? ART3D_TREES : 4;
     this.props = art3d ? ART3D_PROPS.length : 0;
+    this.rocks = art3d ? { small: ART3D_ROCKS.small.count, medium: ART3D_ROCKS.medium.count, large: ART3D_ROCKS.large.count } : null;
     iconArt = art3d;
     const a = new AtlasBuilder();
     // Textured ground (`?art=3d`): seamless diamonds cut from one periodic texture per kind.
@@ -631,6 +636,10 @@ function addArt3d(a: AtlasBuilder, art: Art3d): void {
   for (let v = 0; v < ART3D_TREES; v++) one(`tree:${v}`, `tree${v}`);
   // Decorative ground props, scattered by the renderer over grass.
   ART3D_PROPS.forEach((name, k) => one(`prop:${k}`, name));
+  // Mountain rocks: loose stones, boulders and outcrops, placed by `rockLayout`.
+  for (const [size, { count }] of Object.entries(ART3D_ROCKS)) {
+    for (let v = 0; v < count; v++) one(`rock:${size}:${v}`, `rock-${size}${v}`);
+  }
   // Field decals per growth stage, and worn paths per level and variant.
   for (const [kind, stages] of Object.entries(art.ground.fields ?? {})) {
     const strip = art.images.get(`fields-${kind}`)!;
