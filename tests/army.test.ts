@@ -7,7 +7,7 @@ import { saveWorld } from '../src/sim/save';
 import type { Building, Settler } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { placeNear } from '../tools/scenario';
-import { base, startTower } from './helpers';
+import { base, dismissStandby, startTower } from './helpers';
 
 function run(world: World, ticks: number) {
   for (let i = 0; i < ticks; i++) world.step();
@@ -50,6 +50,10 @@ function frontLine(type: 'tower' | 'bigtower' = 'tower') {
   expect(ours && theirs).toBeTruthy();
   run(w, 3000);
   expect(ours.done && theirs.done).toBe(true);
+  // The start fighters still standing by (no slot left for them) are taken out of the picture.
+  dismissStandby(w, 1);
+  dismissStandby(w, 2);
+  w.step();
   return { w, ours, theirs };
 }
 
@@ -86,6 +90,8 @@ describe('defence', () => {
     const { w, ours, theirs } = frontLine();
     // One level-1 swordsman on each side, made unkillable so the duel lasts hundreds of blows.
     for (const extra of fighters(w, theirs).slice(1)) killSettler(w, extra);
+    // Nobody else of theirs comes to fill the slots or shoot (the start tower's archers would).
+    for (const o of w.settlers) if (o.owner === 2 && isFighter(o) && o.home !== theirs.id) killSettler(w, o);
     while (ours.garrison.length < 2) station(w, ours, 'soldier');
     w.step();
     expect(w.attack(theirs.id, 1)).toBe(1);

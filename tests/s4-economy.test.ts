@@ -5,7 +5,8 @@
  * donkeys with two packs of 8 from a 25 % ranch. (Mines' misses: `mining.test.ts`.)
  */
 import { describe, expect, it } from 'vitest';
-import { addBuilding, recomputeTerritory, spawnSettler, updateBuilding } from '../src/sim/buildings';
+import { addBuilding, spawnSettler, updateBuilding } from '../src/sim/buildings';
+import { recomputeTerritory } from '../src/sim/territory';
 import { BUILDINGS, CARRIER_RESERVE, DISPATCH_EVERY, PROFESSIONS, SITE, TRADE, TRANSPORT_PRIORITY } from '../src/sim/config';
 import { carrierReserve, spareCarriers, transportOrder } from '../src/sim/economy';
 import { landOf } from '../src/sim/land';
@@ -192,6 +193,21 @@ describe('carrier reserve (Settlers 4: 5 by default)', () => {
     run(w, 1200);
     expect(huts.filter((b) => b.workerRequested || b.workerId !== null).length).toBe(2);
     expect(carriersOf(w).length).toBe(n - 2);
+  });
+
+  it('does not hold back ready-made workers (the start smiths and miners are no carriers)', () => {
+    const w = new World(42);
+    const smith = w.settlers.find((s) => s.owner === 1 && s.kind === 'toolsmith' && s.home === null);
+    expect(smith).toBeDefined();
+    w.setCarrierReserve(CARRIER_RESERVE.max);
+    const c = base(w);
+    const b = placeNear(w, 'toolsmith', c.x + 5, c.y + 3)!;
+    b.done = true;
+    b.levelled = true;
+    const carriers = carriersOf(w).length;
+    run(w, 1500);
+    expect(b.workerId).toBe(smith!.id);
+    expect(carriersOf(w).length).toBe(carriers);
   });
 
   it('is clamped to Settlers 4’s range and survives save and load', () => {

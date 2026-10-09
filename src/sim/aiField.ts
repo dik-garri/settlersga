@@ -13,6 +13,7 @@ import type { World } from './world';
  * - hostile field units on or near its land, in its buildings' sight, are met by a field squad
  *   (`defend`);
  * - a scout walks to an enemy castle its buildings cannot see (`sendScout`, `updateScout`);
+ * - an enemy's last fighters, left standing when his towers fell, are hunted down (`hunt`);
  * - fighters left standing in the field when nothing needs them go back into garrisons (`sweep`).
  * Its squads are plain ids in the saved `AiState`; a squad leader comes along when one sits in a
  * building the group comes from (`orderMove` then forms the squad round him).
@@ -211,6 +212,70 @@ export function defend(w: World, ai: AiState, own: Building[]): void {
 }
 
 /**
+ * Hunts an enemy's last fighters (`DEFEAT.fighters`: he is out only when they are gone): his fighters
+ * seen outdoors in its buildings' sight, when it knows no military building of his (explored doors
+ * only, as `knownEnemies`) — stragglers left standing when his towers fell; field units near its land
+ * are left to `defend`. A field squad of `AI.huntRatio` times their number (at least `AI.huntMin`) of
+ * spares from its military buildings nearest them — only if its spares at least match them — is sent
+ * to the nearest one; field units engage what they meet (`field.ts`). Back into garrisons when none
+ * are left in sight. Public commands only (`releaseFighters`, `orderMove`, `orderGarrison`).
+ */
+export function hunt(w: World, ai: AiState, own: Building[]): void {
+  const me = ai.player;
+  const m = w.map;
+  const holding = new Set<PlayerId>();
+  for (const b of w.buildings.values()) {
+    if (b.owner === me || !isMilitary(b) || w.allied(b.owner, me) || !w.isExplored(b.door.x, b.door.y, me)) continue;
+    holding.add(b.owner);
+  }
+  const prey: Settler[] = [];
+  for (const s of w.settlers) {
+    if (s.inside !== null || w.allied(s.owner, me) || holding.has(s.owner) || w.isDefeated(s.owner)) continue;
+    if (!isFighter(s) || w.dying.has(s.id)) continue;
+    const x = Math.round(s.x);
+    const y = Math.round(s.y);
+    if (!m.inBounds(x, y) || !inBuildingSight(w, m.idx(x, y), me)) continue;
+    // Field units near its land are `defend`'s.
+    if (s.post && nearOwnLand(w, x, y, me, AI.defendMargin)) continue;
+    prey.push(s);
+  }
+  const squad = ai.hunt ? alive(w, me, ai.hunt.ids) : [];
+  if (prey.length === 0) {
+    if (ai.hunt) w.orderGarrison(squad.map((s) => s.id), null, me);
+    ai.hunt = undefined;
+    return;
+  }
+  const from: Point = squad.length > 0 ? squad[0] : w.homeOf(me);
+  let goal = prey[0];
+  for (const s of prey) if (dist(s, from) < dist(goal, from) || (dist(s, from) === dist(goal, from) && s.id < goal.id)) goal = s;
+  const at = { x: Math.round(goal.x), y: Math.round(goal.y) };
+  const need = Math.max(AI.huntMin, Math.ceil(prey.length * AI.huntRatio));
+  let ids = squad.map((s) => s.id);
+  if (ids.length < need) {
+    const sources = own
+      .filter((b) => b.done && isMilitary(b) && b.garrison.length > keepOf(b))
+      .sort((a, b) => dist(a.door, at) - dist(b.door, at) || a.id - b.id);
+    // Too few to outnumber them: not yet.
+    const spare = sources.reduce((n, b) => n + b.garrison.length - keepOf(b), 0);
+    if (ids.length + spare < prey.length) return;
+    const counts = new Map<number, number>();
+    let want = need - ids.length;
+    for (const b of sources) {
+      if (want <= 0) break;
+      const k = Math.min(want, b.garrison.length - keepOf(b));
+      counts.set(b.id, k);
+      want -= k;
+    }
+    const out = release(w, me, counts);
+    if (out.length > 0 && ids.length === 0) ai.stats.hunts = (ai.stats.hunts ?? 0) + 1;
+    ids = [...ids, ...out];
+  } else if (ai.hunt && dist(ai.hunt, at) <= 2) return; // on its way there already
+  if (ids.length === 0) return;
+  w.orderMove(ids, at.x, at.y, me);
+  ai.hunt = { ids, x: at.x, y: at.y };
+}
+
+/**
  * Sends one spare fighter (above `keepOf`) of the military building nearest `goal` there as a field
  * unit: a scout. What he sees is explored for good, so a castle forest, water or swamp keeps out of
  * its buildings' sight is still found. True if one went.
@@ -248,7 +313,12 @@ export function updateScout(w: World, ai: AiState, needed: boolean): boolean {
 /** Own fighters idle in the field that no strike, squad or scout of the AI holds go back into garrisons. */
 export function sweep(w: World, ai: AiState): void {
   const me = ai.player;
-  const held = new Set([...(ai.strike?.ids ?? []), ...(ai.defense?.ids ?? []), ...(ai.scout ? [ai.scout.id] : [])]);
+  const held = new Set([
+    ...(ai.strike?.ids ?? []),
+    ...(ai.defense?.ids ?? []),
+    ...(ai.hunt?.ids ?? []),
+    ...(ai.scout ? [ai.scout.id] : []),
+  ]);
   const stray: number[] = [];
   for (const s of w.settlers) {
     if (s.owner !== me || !s.post || s.inside !== null || s.tasks.length > 0 || s.opponent !== null) continue;

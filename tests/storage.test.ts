@@ -9,7 +9,7 @@ import { pilesUsed, storageRoom } from '../src/sim/storage';
 import { RESOURCES, Terrain, type Building } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { placeNear } from '../tools/scenario';
-import { base, depot, goodsInWorld, groundUnits, startTower } from './helpers';
+import { base, depot, goodsInWorld, groundUnits, noGeologists, startTower } from './helpers';
 
 function run(w: World, ticks: number) {
   for (let i = 0; i < ticks; i++) w.step();
@@ -175,6 +175,7 @@ describe('warehouse capacity (Settlers 4: piles of 8)', () => {
 describe('geologists are ordered (Settlers 4 settlers menu)', () => {
   it('a carrier takes up a hammer (used up), waits, goes when sent and waits again; dismissed, he puts it down', () => {
     const w = new World(42);
+    noGeologists(w);
     const hammers = goodsInWorld(w, 'hammer');
     expect(w.orderSpecialist('geologist', 1)).toBe(true);
     for (let i = 0; i < 1500 && !w.settlers.some((s) => s.kind === 'geologist'); i++) w.step();
@@ -210,6 +211,7 @@ describe('geologists are ordered (Settlers 4 settlers menu)', () => {
 
   it('busy ordered geologists: sending makes another on the spot, the order grows, both stay geologists', () => {
     const w = new World(42);
+    noGeologists(w);
     const hammers = goodsInWorld(w, 'hammer');
     w.orderSpecialist('geologist', 1);
     for (let i = 0; i < 1500 && !w.settlers.some((s) => s.kind === 'geologist'); i++) w.step();

@@ -18,7 +18,8 @@
  * Removing a settler must go through `killSettler`, which clears every reference to it; the settler
  * itself leaves `World.settlers` at the end of the tick (`removeDead`).
  */
-import { centerOf, claimsTerritory, recomputeTerritory } from './buildings';
+import { centerOf, claimsTerritory } from './buildings';
+import { claimChanged } from './territory';
 import { leaveSite } from './digging';
 import { spareCarriers } from './economy';
 import {
@@ -105,7 +106,7 @@ export function enterGarrison(w: World, b: Building, s: Settler): void {
   s.inside = b.id;
   s.x = s.px = b.door.x;
   s.y = s.py = b.door.y;
-  if (claimsTerritory(b) !== claimed) recomputeTerritory(w);
+  if (claimsTerritory(b) !== claimed) claimChanged(w, b);
 }
 
 export function leaveGarrison(w: World, b: Building, s: Settler): void {
@@ -113,7 +114,7 @@ export function leaveGarrison(w: World, b: Building, s: Settler): void {
   b.garrison = b.garrison.filter((id) => id !== s.id);
   if (s.home === b.id) s.home = null;
   if (s.inside === b.id) s.inside = null;
-  if (claimsTerritory(b) !== claimed) recomputeTerritory(w);
+  if (claimsTerritory(b) !== claimed) claimChanged(w, b);
 }
 
 /**
@@ -651,7 +652,8 @@ export function pruneShots(w: World): void {
 }
 
 /**
- * The attacker moves in: the building and its land change hands, enemy civil buildings there burn,
+ * The attacker moves in: the building changes hands and takes, as in Settlers 4 (`territory.ts`), the
+ * land of its disc its former owner covers no more; his buildings on land that changed hands burn,
  * and their people, homeless on foreign land, flee (`flee.ts`).
  */
 function conquer(w: World, b: Building, s: Settler): void {
@@ -664,25 +666,10 @@ function conquer(w: World, b: Building, s: Settler): void {
   b.owner = s.owner;
   b.priority = false;
   s.tasks.shift();
-  enterGarrison(w, b, s);
-  recomputeTerritory(w);
   // Burnt as in Settlers 4: no materials back, the goods lying at them stay on the ground (`GROUND`).
-  // A player left with no occupied military building is out at the next `checkDefeats`.
-  for (const o of [...w.buildings.values()]) {
-    if (isMilitary(o) || !onForeignLand(w, o)) continue;
-    w.removeBuilding(o, 'burn');
-  }
-}
-
-function onForeignLand(w: World, b: Building): boolean {
-  const m = w.map;
-  for (let dy = 0; dy < b.h; dy++) {
-    for (let dx = 0; dx < b.w; dx++) {
-      const owner = m.owner[m.idx(b.x + dx, b.y + dy)];
-      if (owner !== 0 && !w.allied(owner, b.owner)) return true;
-    }
-  }
-  return false;
+  // A player left with nothing to fight with is out at the next `checkDefeats`.
+  enterGarrison(w, b, s);
+  claimChanged(w, b);
 }
 
 /**

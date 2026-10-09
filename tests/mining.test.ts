@@ -6,7 +6,7 @@ import { saveWorld } from '../src/sim/save';
 import { Terrain, type Building } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { placeNear } from '../tools/scenario';
-import { clearGround, depot, startTower } from './helpers';
+import { clearGround, depot, noGeologists, startTower } from './helpers';
 
 function run(world: World, ticks: number) {
   for (let i = 0; i < ticks; i++) world.step();
@@ -204,6 +204,7 @@ describe('mines', () => {
 describe('geologist', () => {
   it('prospects the mountain around the target and stays a geologist, out there', () => {
     const w = richWorld();
+    noGeologists(w);
     const [spot] = ownedOre(w, 'coal');
     const hammers = available(w, 1, 'hammer');
     expect(w.sendGeologist(spot.x, spot.y)).toBe(true);

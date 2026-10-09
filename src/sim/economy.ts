@@ -34,7 +34,7 @@ export const ENDLESS = -1;
 export function createEconomy(start: StartLevel): EconomyState {
   const s = START_CONDITIONS[start];
   return {
-    orders: { builder: s.builders, digger: s.diggers },
+    orders: { builder: s.builders, digger: s.diggers, geologist: s.geologists },
     toolOrders: {},
     distribution: {},
     tally: {},

@@ -1,7 +1,10 @@
-import { TERRAIN_COST } from './config';
+import { GROUND, TERRAIN_COST } from './config';
 import type { GameMap } from './map';
 import { sameRegion } from './regions';
 import type { Point } from './types';
+
+/** A* cost of entering a tile with goods on the ground (Settlers 4's piles). */
+const PILE_COST = GROUND.pathCost;
 
 const DIRS: readonly [number, number, number][] = [
   [1, 0, 1],
@@ -203,8 +206,11 @@ export function findPath(
       }
       const ni = map.idx(nx, ny);
       if (closed[ni] === stamp) continue;
-      // Slow terrain (swamp) costs more to enter, so routes go around it when that is cheaper.
-      const ng = g[cur] + cost * TERRAIN_COST[map.terrain[ni]];
+      // Slow terrain costs more to enter, and so does a tile with goods lying on it (Settlers 4's
+      // piles, `GROUND.pathCost`), so routes go around them when that is cheaper. Never below 1: the
+      // octile heuristic stays admissible.
+      const enter = TERRAIN_COST[map.terrain[ni]];
+      const ng = g[cur] + cost * (map.goods[ni] !== 0 && enter < PILE_COST ? PILE_COST : enter);
       if (seen[ni] !== stamp || ng < g[ni]) {
         seen[ni] = stamp;
         g[ni] = ng;

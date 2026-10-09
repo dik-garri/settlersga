@@ -45,6 +45,8 @@ for (const seed of seeds) {
     [5, 'bakery', -6, -2],
     [5, 'house_medium', -1, -7],
     [10, 'tower', -9, -9],
+    // Trees do not spread by themselves (Settlers 4): a second forester among the woodcutters.
+    [10, 'forester', 7, -4],
     [15, 'fisher', -3, 7],
     [15, 'pigfarm', 6, -5],
     [15, 'slaughterhouse', -7, 5],

@@ -40,7 +40,7 @@ import {
   type AiLevel,
   type BuildingDef,
 } from './config';
-import { defend, sendScout, stageStrike, sweep, updateScout, updateStrike } from './aiField';
+import { defend, hunt, sendScout, stageStrike, sweep, updateScout, updateStrike } from './aiField';
 import { ENDLESS } from './economy';
 import { inBuildingSight, visionRadius } from './fog';
 import { isCutOff, landAt, landOf } from './land';
@@ -74,6 +74,8 @@ export interface AiState {
   strike?: { target: number; ids: number[]; until: number };
   /** A field squad out against hostile field units near its land, and where it was sent. */
   defense?: { ids: number[]; x: number; y: number };
+  /** A field squad hunting an enemy's last fighters (`hunt`, `AI.huntRatio`), and where it was sent. */
+  hunt?: { ids: number[]; x: number; y: number };
   /**
    * Since when its siege towards a castle it has not seen finds no spot to push on (forest, water or
    * swamp in the way); cleared when the siege places a building.
@@ -99,6 +101,7 @@ export interface AiState {
     /** Strikes gathered in the field, defence squads sent out, trade goods ordered, scouts sent. */
     staged?: number;
     scouts?: number;
+    hunts?: number;
     defended?: number;
     traded?: number;
   };
@@ -199,6 +202,7 @@ function think(w: World, ai: AiState): void {
     }
   }
   if (AI.fieldDefense) defend(w, ai, own);
+  hunt(w, ai, own);
   const attacked = attackIfStrong(w, ai);
   scoutIfStuck(w, ai, own);
   sweep(w, ai);
@@ -246,6 +250,9 @@ function think(w: World, ai: AiState): void {
   // Only the first mine of the plan that cannot be placed decides what geologists look for: later
   // failures (gold, stone…) must not overwrite a more urgent need such as coal for weapons.
   let sought = false;
+  /** A plan step waits for nothing but materials (none of them short for good). */
+  let saving = false;
+  const crampedNow = w.tick < (ai.crampedUntil ?? 0);
   for (const step of AI_PLAN) {
     if (count(step.type) >= step.count) continue;
     if (step.after && !prerequisiteMet(w, me, own, step.after)) continue;
@@ -256,6 +263,7 @@ function think(w: World, ai: AiState): void {
       continue;
     }
     if (!ctx.affordable(step.type) || !ctx.staffable(step.type, count(step.type) === 0)) {
+      if (AI.economyFirst && !ctx.affordable(step.type) && ctx.short.length === 0) saving = true;
       // A mine of a material it is short of (no producer left) is looked for even before it can pay.
       const mine = BUILDINGS[step.type].mine;
       if (mine && ctx.short.includes(mine.res) && !sought && !ctx.knowsOre(step.type)) {
@@ -266,6 +274,8 @@ function think(w: World, ai: AiState): void {
       continue;
     }
     if (BUILDINGS[step.type].garrison && !ctx.canMan(step.type)) continue;
+    // A later tower does not jump the queue while an earlier step saves up for its materials.
+    if (saving && BUILDINGS[step.type].garrison && !crampedNow) continue;
     const mine = BUILDINGS[step.type].mine;
     if (tryPlace(ctx, ai, step.type)) {
       if (mine && ai.wantOre === mine.res) ai.wantOre = null;
@@ -322,6 +332,9 @@ function think(w: World, ai: AiState): void {
   const garrisoned = military.filter((b) => BUILDINGS[b.type].garrison).length;
   if (
     !attacked &&
+    // Materials a plan step waits for are not spent on outposts (a big start army would otherwise
+    // turn every plank into a tower), unless it is cramped.
+    (!saving || cramped) &&
     (ai.wantOre !== null || cramped || !enemyInReach(w, me, military)) &&
     (ai.blockedUntil.frontier ?? -Infinity) <= w.tick &&
     (soldiers >= AI.frontierSoldiers || cramped) &&

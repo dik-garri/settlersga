@@ -1,4 +1,5 @@
-import { addBuilding, centerOf, doorOf, recomputeTerritory, ruinGoods, spawnSettler, updateBuilding } from './buildings';
+import { addBuilding, centerOf, doorOf, ruinGoods, spawnSettler, updateBuilding } from './buildings';
+import { claimChanged, clearLand, recomputeTerritory } from './territory';
 import {
   AI_LEVELS,
   type AiLevel,
@@ -171,8 +172,6 @@ export class World {
   territoryVersion = 0;
   /** Bumped whenever a building is added or removed (derived, not saved; drives fog vision). */
   buildingsVersion = 0;
-  /** Tiles pioneers ever claimed (`map.claimed`; derived, recounted on load) — lets territory skip the pass when 0. */
-  pioneerLand = 0;
   /** Piece of land of every owned tile (`land.ts`; derived from `map.owner`, rebuilt with the territory). */
   land = new Int32Array(0);
   landPieces = 0;
@@ -225,7 +224,6 @@ export class World {
       for (let i = 0; i < this.map.crop.length; i++) if (this.map.crop[i] > 0) this.fields.add(i);
       rebuildWorn(this);
       rebuildStacks(this);
-      for (const p of this.map.claimed) if (p !== 0) this.pioneerLand++;
       return;
     }
     const size = opts.size ?? MAP_SIZE;
@@ -277,10 +275,16 @@ export class World {
         else s.inside = null;
       }
     }
-    recomputeTerritory(this);
-    for (let i = 0; i < def.carriers; i++) spawnSettler(this, 'carrier', tower);
-    for (let i = 0; i < def.builders; i++) spawnSettler(this, 'builder', tower);
-    for (let i = 0; i < def.diggers; i++) spawnSettler(this, 'digger', tower);
+    claimChanged(this, tower);
+    const people: [SettlerKind, number][] = [
+      ['carrier', def.carriers],
+      ['builder', def.builders],
+      ['digger', def.diggers],
+      ['geologist', def.geologists],
+      ['donkey', def.donkeys],
+      ...(Object.entries(def.workers) as [SettlerKind, number][]),
+    ];
+    for (const [kind, n] of people) for (let i = 0; i < n; i++) spawnSettler(this, kind, tower);
     const c = centerOf(tower);
     for (const [res, n] of def.piles) dropGoods(this, { x: Math.round(c.x), y: Math.round(c.y) }, res, n);
     return player;
@@ -383,15 +387,18 @@ export class World {
   }
 
   /**
-   * A player with no occupied military building left is out (`DEFEAT`, Settlers 4's default rule;
-   * `checkDefeats`): its buildings burn — the goods lying at them stay on the ground (`GROUND`) —, its
-   * land is free for the others, and its settlers drop what they were doing and wander off until they
-   * die (`flee.ts`).
+   * A player with nothing left to fight with is out (`DEFEAT`, `checkDefeats`): its buildings burn —
+   * the goods lying at them stay on the ground (`GROUND`) —, its land goes back to nobody (and to
+   * whoever's towers cover it, `territory.ts`), and its settlers drop what they were doing and wander
+   * off until they die (`flee.ts`).
    */
   defeatPlayer(player: PlayerId): void {
     if (this.isDefeated(player)) return;
     this.defeated.push(player);
-    for (const b of [...this.buildings.values()]) if (b.owner === player) this.removeBuilding(b, 'burn');
+    for (const b of [...this.buildings.values()]) {
+      if (b.owner === player && this.buildings.has(b.id)) this.removeBuilding(b, 'burn');
+    }
+    clearLand(this, player);
     recomputeTerritory(this);
     for (const s of this.settlers) {
       if (s.owner !== player || this.dying.has(s.id)) continue;
@@ -403,11 +410,22 @@ export class World {
     }
   }
 
-  /** Every `DEFEAT.checkEvery` ticks: players with no occupied military building are defeated. */
+  /** Whether the player still has something to fight with: an occupied military building, or (`DEFEAT.fighters`) a fighter. */
+  holdsOn(player: PlayerId): boolean {
+    for (const b of this.buildings.values()) if (b.owner === player && b.done && isMilitary(b) && b.garrison.length > 0) return true;
+    if (!DEFEAT.fighters) return false;
+    return this.settlers.some((s) => s.owner === player && isFighter(s) && !this.dying.has(s.id));
+  }
+
+  /**
+   * Every `DEFEAT.checkEvery` ticks: players with no occupied military building — and no fighter
+   * left, with `DEFEAT.fighters` — are defeated.
+   */
   private checkDefeats(): void {
     if (this.tick < DEFEAT.afterTick || this.tick % DEFEAT.checkEvery !== 0) return;
     const holding = new Set<PlayerId>();
     for (const b of this.buildings.values()) if (b.done && isMilitary(b) && b.garrison.length > 0) holding.add(b.owner);
+    if (DEFEAT.fighters) for (const s of this.settlers) if (isFighter(s) && !this.dying.has(s.id)) holding.add(s.owner);
     for (const p of this.players) if (!holding.has(p.id) && !this.isDefeated(p.id)) this.defeatPlayer(p.id);
   }
 
@@ -654,7 +672,8 @@ export class World {
       const share = ruin === 'demolish' ? GROUND.demolishShare : GROUND.burnShare;
       for (const [res, n] of ruinGoods(b, share, GROUND.keepsGoods)) dropGoods(this, at, res, n);
     }
-    if (BUILDINGS[b.type].territory) recomputeTerritory(this);
+    // Its land stays its owner's; only what another player's towers now cover changes hands.
+    if (BUILDINGS[b.type].territory) claimChanged(this, b);
   }
 
   /** Player command: order `count` specialists (geologists, pioneers, thieves) — the same orders as workers. */

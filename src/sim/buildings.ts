@@ -393,38 +393,22 @@ export function claimsTerritory(b: Building): boolean {
   return def.worker === null || b.workerId !== null;
 }
 
+/** Workplace professions: some building's `worker`. */
+const WORKPLACE_KINDS: ReadonlySet<SettlerKind> = new Set(
+  Object.values(BUILDINGS).flatMap((d) => (d.worker ? [d.worker] : [])),
+);
+
 /**
- * Rebuilds per-tile ownership. Where claims overlap the nearest claiming building wins (ties: the
- * earlier one), so borders run between rival strongholds and a building always holds its own ground.
+ * A ready-made worker waiting for a workplace: a workplace profession with no home (Settlers 4's start
+ * smiths, miners and hunter, `START_CONDITIONS.workers`).
  */
-export function recomputeTerritory(w: World): void {
-  const m = w.map;
-  m.owner.fill(0);
-  const best = new Float32Array(m.w * m.h).fill(Infinity);
-  for (const b of w.buildings.values()) {
-    if (!claimsTerritory(b)) continue;
-    const r = BUILDINGS[b.type].territory!;
-    const c = centerOf(b);
-    for (let y = Math.floor(c.y - r); y <= Math.ceil(c.y + r); y++) {
-      for (let x = Math.floor(c.x - r); x <= Math.ceil(c.x + r); x++) {
-        const d = Math.hypot(x - c.x, y - c.y);
-        if (!m.inBounds(x, y) || d > r) continue;
-        const i = m.idx(x, y);
-        if (d < best[i]) {
-          best[i] = d;
-          m.owner[i] = b.owner;
-        }
-      }
-    }
-  }
-  // Pioneers' land (`specialists.ts`) where no military building claims the tile.
-  if (w.pioneerLand > 0) {
-    for (let i = 0; i < m.claimed.length; i++) {
-      const p = m.claimed[i];
-      if (p === 0 || m.owner[i] !== 0) continue;
-      if (w.defeated.includes(p)) m.claimed[i] = 0;
-      else m.owner[i] = p;
-    }
-  }
-  w.territoryVersion++;
+export function isReadyWorker(s: Settler): boolean {
+  return s.home === null && WORKPLACE_KINDS.has(s.kind);
+}
+
+/** Whether a ready-made worker of `kind` may take up a workplace of `job`: the same profession or trade. */
+export function canTakeUp(kind: SettlerKind, job: SettlerKind): boolean {
+  if (kind === job) return true;
+  const trade = PROFESSIONS[kind].trade;
+  return trade !== undefined && trade === PROFESSIONS[job].trade;
 }
