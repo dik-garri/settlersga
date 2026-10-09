@@ -250,8 +250,9 @@ export function updateSettler(w: World, s: Settler): void {
         b.builderIds = [];
         // Settlers 4: a site's priority goes once it needs nothing more.
         b.priority = false;
-        // A finished warehouse now serves its piece of land (`land.ts` caches by this version).
-        if (BUILDINGS[b.type].storage) w.buildingsVersion++;
+        // A finished warehouse now serves its piece of land (`land.ts` caches by this version); a
+        // finished lookout sees (`fog.ts` rebuilds vision on it too).
+        if (BUILDINGS[b.type].storage || BUILDINGS[b.type].vision) w.buildingsVersion++;
         // A new house gives beds and first takes in striking carriers (`beds.ts`).
         if (BUILDINGS[b.type].residence) houseBuilt(w, b);
         s.tasks.shift();

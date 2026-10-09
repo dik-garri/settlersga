@@ -170,6 +170,8 @@ world.getSettler(state.selectedSettler);
 
 // Товары на земле (клетки со стопками), статистика, население; склад принимает товар только после отметки
 world.stacks.size; world.stats.produced; world.stats.lost; world.settlers.length;
+// Бои по игрокам (убитые и павшие по видам, взятые и потерянные здания) и сообщения с местом на карте
+world.stats.war; world.messages.filter((m) => m.player === 1);
 world.setAccepts(skladId, 'plank', true);
 
 // Камера на клетку (x, y): экранные координаты = ((x - y) * 32, (x + y) * 16)

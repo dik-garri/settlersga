@@ -868,7 +868,8 @@ function attackIfStrong(w: World, ai: AiState): boolean {
   if (w.tick - ai.lastAttack < (pressing ? AI.followUpCooldown : t.attackCooldown)) return true;
   // No rush: the early game is for building up.
   if (w.tick < t.peaceTicks) return false;
-  if (!attackTriggered(w, ai)) return false;
+  // Settlers 4's roll starts an offensive; after a capture it presses on without one (ours).
+  if (!pressing && !attackTriggered(w, ai)) return false;
   const known = knownEnemies(w, me);
   const castles = knownCastles(w, me);
   // Where each enemy's castle is (or presumably is): attacks work towards it.

@@ -8,7 +8,7 @@ import type { World } from './world';
  * ever seen. What they see right now is derived, never saved:
  * - `vision` (bit player − 1): all of the player's land plus a `FOG.landBand` band beyond its edge,
  *   and the sight of his manned military buildings (`BuildingDef.sight`) and lookout towers (`vision`);
- *   rebuilt only when buildings, territory or the manned sighted buildings change (`stale`);
+ *   rebuilt only when buildings (manning a sighted one included) or territory change (`stale`);
  * - `seenUntil`: per player, the tick until which a tile stays in sight after a settler passed by;
  *   settlers stamp their surroundings every `FOG.settlerEvery` ticks.
  * Cost: O(settlers × disc) every few ticks plus O(map + border × band + sighted buildings × disc) per
@@ -23,12 +23,15 @@ import type { World } from './world';
 export interface FogState {
   vision: Uint8Array;
   seenUntil: Uint32Array[];
-  /** `buildingsVersion`, `territoryVersion` and `sighted(w)` the vision was built for. */
-  builtFor: [number, number, number];
+  /**
+   * `buildingsVersion` and `territoryVersion` the vision was built for. Manning or emptying a military
+   * building with `sight` and finishing a lookout bump `buildingsVersion` too (`military.ts`, `settlers.ts`).
+   */
+  builtFor: [number, number];
 }
 
 export function createFog(): FogState {
-  return { vision: new Uint8Array(0), seenUntil: [], builtFor: [-1, -1, -1] };
+  return { vision: new Uint8Array(0), seenUntil: [], builtFor: [-1, -1] };
 }
 
 /** Tile offsets within a radius, cached per radius. */
@@ -116,27 +119,12 @@ function rebuildVision(w: World): void {
     });
   }
   for (let i = 0; i < n; i++) explored[i] |= vision[i];
-  f.builtFor = [w.buildingsVersion, w.territoryVersion, sighted(w)];
-}
-
-/** Building types with a sight of their own (`vision` or `sight`). */
-const SIGHTED = (Object.keys(BUILDINGS) as (keyof typeof BUILDINGS)[]).filter((t) => visionRadius(t) > 0);
-
-/**
- * A signature of the buildings seeing now (their ids, summed): manning or emptying a tower, or
- * finishing a lookout, widens or narrows sight without touching the buildings or the land, so it
- * must also make the vision stale. A pass over the buildings per tick, only when such types exist.
- */
-function sighted(w: World): number {
-  if (SIGHTED.length === 0) return 0;
-  let sig = 0;
-  for (const b of w.buildings.values()) if (seeing(b)) sig += b.id * 2654435761 % 4294967291;
-  return sig;
+  f.builtFor = [w.buildingsVersion, w.territoryVersion];
 }
 
 function stale(w: World): boolean {
   const f = w.fog;
-  return f.builtFor[0] !== w.buildingsVersion || f.builtFor[1] !== w.territoryVersion || f.builtFor[2] !== sighted(w);
+  return f.builtFor[0] !== w.buildingsVersion || f.builtFor[1] !== w.territoryVersion;
 }
 
 /** Rebuilds the building vision if it is stale (e.g. right after a load); cheap otherwise. */
@@ -176,15 +164,44 @@ export function updateFog(w: World): void {
   if (stale(w)) rebuildVision(w);
   if (w.tick % FOG.settlerEvery !== 0) return;
   const until = w.tick + FOG.settlerEvery;
+  const explored = m.explored;
   for (const s of w.settlers) {
     if (s.inside !== null || w.dying.has(s.id)) continue; // inside: the building's vision covers it
     const bit = 1 << (s.owner - 1);
     const seen = f.seenUntil[s.owner - 1];
-    stamp(w, s.x, s.y, PROFESSIONS[s.kind].sight ?? FOG.settlerRadius, (i) => {
+    const r = PROFESSIONS[s.kind].sight ?? FOG.settlerRadius;
+    const x0 = Math.round(s.x);
+    const y0 = Math.round(s.y);
+    if (x0 < r || y0 < r || x0 + r >= m.w || y0 + r >= m.h) {
+      stamp(w, s.x, s.y, r, (i) => {
+        seen[i] = until;
+        explored[i] |= bit;
+      });
+      continue;
+    }
+    // Wholly inside the map: plain index offsets, no bounds checks.
+    const offs = discOffsets(r, m.w);
+    const at = y0 * m.w + x0;
+    for (let k = 0; k < offs.length; k++) {
+      const i = at + offs[k];
       seen[i] = until;
-      m.explored[i] |= bit;
-    });
+      explored[i] |= bit;
+    }
   }
+}
+
+/** `disc(r)` as index offsets on a map `width` tiles wide, cached. */
+const discIndex = new Map<number, Int32Array>();
+function discOffsets(r: number, width: number): Int32Array {
+  const key = r * 65536 + width;
+  let out = discIndex.get(key);
+  if (!out) {
+    const d = disc(r);
+    out = new Int32Array(d.length / 2);
+    for (let k = 0; k < out.length; k++) out[k] = d[k * 2 + 1] * width + d[k * 2];
+    discIndex.set(key, out);
+  }
+  return out;
 }
 
 export function isExplored(w: World, i: number, player: PlayerId): boolean {

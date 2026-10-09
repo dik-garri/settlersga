@@ -358,7 +358,14 @@ export class InfoView implements View {
     const outside = w !== undefined && w.inside === null;
     switch (behavior) {
       case 'workshop': {
-        const recipe = def.recipe!;
+        const recipe = def.recipe;
+        // Workplaces without a recipe: the infirmary's healer, the lookout's watchman.
+        if (!recipe) {
+          if (outside) return 'идёт на место';
+          if (def.infirmary) return b.patient !== undefined ? 'лечит бойца' : 'ждёт раненых';
+          if (def.alarm) return b.alarm ? 'тревога: враг рядом!' : 'на посту';
+          return 'работает';
+        }
         if (def.mine && oreLeft(this.world, b) === 0) return 'выработана';
         if (recipe.outputChoice && !chooseOutput(this.world, b, recipe)) return 'запас полон, заказов нет';
         if (RESOURCES.some((r) => b.output[r] + (recipe.outputs[r] ?? 0) > OUTPUT_CAP)) return 'склад полон';

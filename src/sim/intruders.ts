@@ -19,7 +19,7 @@ import { packsOf } from './trade';
 import { outdoorFighters } from './field';
 import { isArcher, isFighter, isMilitary, keepOf, sendOut } from './military';
 import { SPECIALIST_KINDS } from './specialists';
-import type { Building, PlayerId, Point, Settler, Task } from './types';
+import type { Building, PlayerId, Point, Settler, SettlerKind, Task } from './types';
 import type { World } from './world';
 
 const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -38,9 +38,15 @@ export function hostLand(w: World, s: Settler): PlayerId {
   return owner !== 0 && owner !== s.owner && !w.allied(owner, s.owner) ? owner : 0;
 }
 
+/** Kinds that may intrude: specialists, and professions that drop their load when hit (the donkey). */
+const INTRUDING = new Set<SettlerKind>([
+  ...SPECIALIST_KINDS,
+  ...(Object.keys(PROFESSIONS) as SettlerKind[]).filter((k) => PROFESSIONS[k].dropsLoad),
+]);
+
 /** A specialist, or a donkey with goods in its packs (`ProfessionDef.dropsLoad`): who may intrude. */
 function mayIntrude(s: Settler): boolean {
-  return SPECIALIST_KINDS.includes(s.kind) || (!!PROFESSIONS[s.kind].dropsLoad && s.carrying !== null);
+  return INTRUDING.has(s.kind) && (!PROFESSIONS[s.kind].dropsLoad || s.carrying !== null);
 }
 
 /** Whether `s` is an intruder outdoors on `host`'s land who may be attacked there now. */

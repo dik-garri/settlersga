@@ -132,6 +132,8 @@ export function enterGarrison(w: World, b: Building, s: Settler): void {
   const claimed = claimsTerritory(b);
   // Manned again from empty: a new door (Settlers 4 `InsertDoor` at the first fighter in).
   if (b.garrison.length === 0) delete b.doorHp;
+  // Manned from empty, it sees its `sight` (`fog.ts` rebuilds vision on this version).
+  if (b.garrison.length === 0 && BUILDINGS[b.type].sight) w.buildingsVersion++;
   b.garrison.push(s.id);
   s.post = null;
   s.home = b.id;
@@ -160,7 +162,10 @@ export function sendOut(w: World, b: Building, s: Settler): void {
 
 export function leaveGarrison(w: World, b: Building, s: Settler): void {
   const claimed = claimsTerritory(b);
+  const had = b.garrison.length;
   b.garrison = b.garrison.filter((id) => id !== s.id);
+  // Emptied, it no longer sees its `sight` (`fog.ts`).
+  if (had > 0 && b.garrison.length === 0 && BUILDINGS[b.type].sight) w.buildingsVersion++;
   if (s.home === b.id) s.home = null;
   if (s.inside === b.id) s.inside = null;
   if (claimsTerritory(b) !== claimed) claimChanged(w, b);
@@ -752,7 +757,9 @@ export function assaultTick(w: World, s: Settler, task: Extract<Task, { t: 'assa
     duelTick(w, s, d);
     // The last defender fell: he moves in at once (Settlers 4 `InsertTowerGuard` takes the building
     // when its last guard dies), before the defeat check could find his owner's land empty.
-    if (w.dying.has(d.id) && !w.dying.has(s.id) && b.garrison.length === 0 && canCapture(s)) conquer(w, b, s);
+    if (w.dying.has(d.id) && !w.dying.has(s.id) && w.buildings.get(b.id) === b && b.garrison.length === 0 && canCapture(s)) {
+      conquer(w, b, s);
+    }
     return;
   }
   const defenders = members(w, b);
@@ -919,6 +926,8 @@ export function killSettler(w: World, s: Settler): void {
   const fallen = warStats(w, s.owner).fallen;
   fallen[s.kind] = (fallen[s.kind] ?? 0) + 1;
   s.hp = 0;
+  // Who struck him down, if he was in a duel (an attacker taking his building, see below).
+  const killer = s.opponent !== null ? w.getSettler(s.opponent) : undefined;
   if (s.opponent !== null) {
     const o = w.getSettler(s.opponent);
     s.opponent = null;
@@ -936,8 +945,21 @@ export function killSettler(w: World, s: Settler): void {
   s.carrying = null;
   abort(w, s);
   s.tasks = [];
-  for (const b of w.buildings.values()) {
-    if (b.garrison.includes(s.id)) leaveGarrison(w, b, s);
+  for (const b of [...w.buildings.values()]) {
+    if (b.garrison.includes(s.id)) {
+      // The last defender falls to an attacker who can take the building: he moves in at once
+      // (Settlers 4 `InsertTowerGuard`), before the emptied building could lose its land and burn.
+      const t = killer?.tasks[0];
+      if (b.garrison.length === 1 && killer && !w.dying.has(killer.id) && t?.t === 'assault' && t.b === b.id && canCapture(killer) && !w.allied(killer.owner, b.owner)) {
+        b.garrison = [];
+        w.buildingsVersion++; // the owner changes: sight goes to the new one (`fog.ts`)
+        if (s.home === b.id) s.home = null;
+        if (s.inside === b.id) s.inside = null;
+        conquer(w, b, killer);
+        continue;
+      }
+      leaveGarrison(w, b, s);
+    }
     if (b.workerId === s.id) {
       b.workerId = null;
       b.workerRequested = false;

@@ -161,3 +161,15 @@
 - Декомпиляция S4 (GitHub: Settlers4-Reforged/S4Forge.RE): `ISettlerRole.cpp`, `CSoldierRole.cpp`, `CDonkeyRole.cpp`, `CBuilderRole.cpp`, `CDiggerRole.cpp`, `CBuildingSiteRole.cpp`, `CBuildingInfoMgr.h`.
 - Данные зданий S4 (GitHub: MadShadow-/OpenS4, `Config/Buildings/romanBuildings.json`): места строителей у римских зданий.
 - siedlercommunity.de: [Berufe](https://www.siedlercommunity.de/siedler4/berufe/), [Produktzyklen](https://www.siedlercommunity.de/siedler4/produktzyklen-warenketten/), [Bauwesen](https://www.siedlercommunity.de/siedler4/bauwesen/).
+
+## Лекарь, вор, смотровая башня, ИИ (9 октября 2026 года, [аудит](S4-AUDIT.md) п. 17, 18, 27, 29)
+
+| Что | S4 | У нас | Источник |
+|---|---|---|---|
+| Лазарет ищет раненых | раз в 31 тик S4 (≈ 2,2 с), 30 клеток спирали за раз | раз в 22 тика (`infirmary.scanEvery`), вся зона сразу | [код] `CSimpleBuildingRole::LogicUpdate`, ветка `BUILDING_HEALERHUT` |
+| Скорость лечения | в данных игры, в коде нет; «gemächlich» | 1 HP каждые 4 тика (мечник 1-го уровня — 40 с) | [оценка]; [сообщ.] siedlercommunity «Lazarett» |
+| Вора раскрывает враг рядом | проверка раз в 15 тиков S4 | раз в 10 тиков (`INTRUDERS.scanEvery`) | [код] `ISelectableSettlerRole::ThiefCheckMasquerade` |
+| Вор снова под маской | раз в 45 тиков S4 (≈ 3,2 с) | раз в 32 тика (`INTRUDERS.recloakEvery`) | там же |
+| Тревога смотровой башни | раз в 31 тик S4 | раз в 22 тика (`alarm.every`) | [код] `CLookoutTowerRole::LogicUpdate` |
+| Бросок атаки ИИ | раз в 512–768 тиков S4 (36–55 с) | 364–545 тиков (`AI.s4Attack.every`) | [код] `AI/CAITaskForce*` (через аудит) |
+| Шахта «выработана» | после > 15 пустых попыток подряд | так же (`MINING.emptyAfter`) | [код] `CMineRole::LogicUpdate` |
