@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { addBuilding, available, recomputeTerritory, spawnSettler } from '../src/sim/buildings';
+import { addBuilding, available, spawnSettler } from '../src/sim/buildings';
+import { recomputeTerritory } from '../src/sim/territory';
 import { BUILDINGS, GEOLOGIST, PIONEER, PROFESSIONS, STRENGTH } from '../src/sim/config';
 import { killSettler } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
@@ -65,8 +66,7 @@ describe('pioneer', () => {
     run(w, 3000);
     const gained = owned(w, 1) - before;
     expect(gained).toBeGreaterThan(5);
-    expect(w.pioneerLand).toBe(gained);
-    // Recomputing the territory keeps the claims.
+    // Settling the territory again keeps the claims: nobody else's tower covers them.
     recomputeTerritory(w);
     expect(owned(w, 1) - before).toBe(gained);
   });
@@ -74,13 +74,14 @@ describe('pioneer', () => {
   it('keeps claiming until no neutral land is left within his reach, then stays there (Settlers 4)', () => {
     const w = new World(42);
     const s = recruit(w, 'pioneer');
+    const before = owned(w, 1);
     const t = borderTile(w);
     expect(w.sendPioneer(t.x, t.y)).toBe(true);
     // At Settlers 4's pace per area (≈ 42 s a tile) he works for hours on open land.
     for (let i = 0; i < 600000 && s.errand; i++) w.step();
     expect(s.errand).toBeNull();
     // Far more than the old cap of 24 tiles an errand.
-    expect(w.pioneerLand).toBeGreaterThan(24);
+    expect(owned(w, 1) - before).toBeGreaterThan(24);
     // Nothing he could still walk to is left within his reach.
     const m = w.map;
     const at = m.idx(Math.round(s.x), Math.round(s.y));
@@ -107,11 +108,11 @@ describe('pioneer', () => {
     recruit(w, 'pioneer');
     const c = base(w);
     expect(w.sendPioneer(c.x + 1, c.y + 1)).toBe(false);
-    // A claimed tile inside another player's military land goes to that player.
+    // A claimed tile (no influence of its owner's) that another player's tower covers goes to that
+    // player when the territory there is settled again (Settlers 4's `SetOwner`).
     const other = base(w, 2);
     const i = w.map.idx(other.x + 1, other.y + 4);
-    w.map.claimed[i] = 1;
-    w.pioneerLand++;
+    w.map.owner[i] = 1;
     recomputeTerritory(w);
     expect(w.map.owner[i]).toBe(2);
   });

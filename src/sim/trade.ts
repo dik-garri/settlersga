@@ -180,10 +180,16 @@ export function donkeyAbort(w: World, s: Settler): void {
   }
 }
 
-/** Idle donkeys wait at the nearest market (or the ranch they came from), out of the way. */
+/**
+ * Idle donkeys wait at the nearest market, out of the way; with none (the start's donkeys, S4's
+ * `START_CONDITIONS.donkeys`) they step out of the building they are in and stand by.
+ */
 export function donkeyIdle(w: World, s: Settler): void {
-  const at = nearestMarket(w, s.owner, s) ?? (s.inside !== null ? w.buildings.get(s.inside) : undefined);
-  if (!at) return;
+  const at = nearestMarket(w, s.owner, s);
+  if (!at) {
+    s.inside = null;
+    return;
+  }
   if (Math.abs(s.x - at.door.x) <= 1 && Math.abs(s.y - at.door.y) <= 1) return;
   s.tasks = [{ t: 'goto', x: at.door.x, y: at.door.y, adj: true }];
 }

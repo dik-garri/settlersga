@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PROFESSIONS } from '../src/sim/config';
+import { PROFESSIONS, START_CONDITIONS } from '../src/sim/config';
 import { ENDLESS } from '../src/sim/economy';
 import { World } from '../src/sim/world';
 import { placeNear } from '../tools/scenario';
@@ -76,7 +76,8 @@ describe('tools', () => {
     const w = richWorld();
     const c = startTower(w);
     const builders = () => w.settlers.filter((s) => s.kind === 'builder').length;
-    expect(builders()).toBe(3);
+    const start = START_CONDITIONS.medium.builders;
+    expect(builders()).toBe(start);
     c.output.hammer = 4;
     for (const [dx, dy] of [
       [5, -1],
@@ -89,12 +90,12 @@ describe('tools', () => {
     }
     // More sites than builders, but nothing ordered: nobody is recruited.
     run(w, 200);
-    expect(builders()).toBe(3);
+    expect(builders()).toBe(start);
     expect(c.output.hammer).toBe(4);
-    // Ordered five: two carriers take hammers.
-    expect(w.orderWorkers('builder', 5)).toBe(true);
+    // Ordered two more: two carriers take hammers.
+    expect(w.orderWorkers('builder', start + 2)).toBe(true);
     run(w, 600);
-    expect(builders()).toBe(5);
+    expect(builders()).toBe(start + 2);
     expect(c.output.hammer).toBe(2);
     expect(w.orderWorkers('woodcutter', 3)).toBe(false); // only orderable professions
   });

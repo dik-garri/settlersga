@@ -1,4 +1,5 @@
-import { isReachable, recomputeTerritory } from './buildings';
+import { isReachable } from './buildings';
+import { claimChanged } from './territory';
 import { dropGoods, liftGoods, releaseGoods } from './ground';
 import {
   BUILD_TICKS_PER_UNIT,
@@ -234,7 +235,7 @@ export function updateSettler(w: World, s: Settler): void {
         if (BUILDINGS[b.type].storage) w.buildingsVersion++;
         s.tasks.shift();
         // A worker-less territory building (castle-like) claims land as soon as it stands.
-        if (BUILDINGS[b.type].territory && !BUILDINGS[b.type].worker) recomputeTerritory(w);
+        if (BUILDINGS[b.type].territory && !BUILDINGS[b.type].worker) claimChanged(w, b);
       }
       return;
     }
@@ -248,7 +249,7 @@ export function updateSettler(w: World, s: Settler): void {
       b.workerId = s.id;
       b.workerRequested = false;
       s.tasks.shift();
-      if (BUILDINGS[b.type].territory) recomputeTerritory(w);
+      if (BUILDINGS[b.type].territory) claimChanged(w, b);
       return;
     }
   }
@@ -538,7 +539,8 @@ function idle(w: World, s: Settler): void {
     case 'gather':
     case 'plant':
     case 'farm': {
-      if (!home) return;
+      // A ready-made worker (`START_CONDITIONS.workers`) waits with the others for a workplace.
+      if (!home) return restIdle(w, s);
       if (s.inside !== home.id) return goHome(s, home);
       // Farmers harvest first and only sow when nothing is ripe.
       if (prof.gather && startGathering(w, s, home)) return;
@@ -549,7 +551,8 @@ function idle(w: World, s: Settler): void {
 
     case 'workshop':
     case 'garrison':
-      if (home && s.inside !== home.id) goHome(s, home);
+      if (!home) return restIdle(w, s);
+      if (s.inside !== home.id) goHome(s, home);
       return;
 
     case 'prospect':
@@ -558,7 +561,7 @@ function idle(w: World, s: Settler): void {
       return geologistIdle(w, s);
 
     case 'hunt': {
-      if (!home) return;
+      if (!home) return restIdle(w, s);
       if (s.inside !== home.id) return goHome(s, home);
       const def = prof.hunt!;
       const prey = findGame(w, s, home, def.radius);

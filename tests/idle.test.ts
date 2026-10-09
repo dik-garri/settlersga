@@ -28,9 +28,13 @@ describe('idle crowds', () => {
     const c = base(w);
     startTower(w).output.plank = 60;
     startTower(w).output.stone = 30;
-    placeNear(w, 'house_small', c.x + 5, c.y - 1);
-    placeNear(w, 'house_small', c.x - 5, c.y + 3);
-    run(w, 4000);
+    const houses = [placeNear(w, 'house_small', c.x + 5, c.y - 1)!, placeNear(w, 'house_small', c.x - 5, c.y + 3)!];
+    let stood = -1;
+    for (let i = 0; i < 4000; i++) {
+      w.step();
+      if (stood < 0 && houses.every((h) => h.done)) stood = w.tick;
+    }
+    expect(stood).toBeGreaterThan(0);
     const idle = idleCarriers(w);
     expect(idle.length).toBeGreaterThan(8);
     for (const s of idle) {
@@ -46,8 +50,11 @@ describe('idle crowds', () => {
         expect(w.map.door[i]).toBe(0);
       }
     }
-    // The houses gather most of them, more than one place once a group is full.
-    expect(idle.filter((s) => BUILDINGS[w.buildings.get(s.idleAt!)!.type].residence).length).toBeGreaterThan(idle.length / 2);
+    // The houses gather most of those whose idle spell began once they stood, more than one place
+    // once a group is full.
+    const later = idle.filter((s) => s.idleTicks < w.tick - stood);
+    expect(later.length).toBeGreaterThan(4);
+    expect(later.filter((s) => BUILDINGS[w.buildings.get(s.idleAt!)!.type].residence).length).toBeGreaterThan(later.length / 2);
     expect(new Set(idle.map((s) => s.idleAt)).size).toBeGreaterThan(1);
     // Some of them are chatting in pairs, facing each other.
     run(w, 1500);

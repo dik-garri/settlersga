@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { addBuilding, recomputeTerritory } from '../src/sim/buildings';
+import { addBuilding } from '../src/sim/buildings';
+import { recomputeTerritory } from '../src/sim/territory';
 import { saveWorld } from '../src/sim/save';
 import { canProspect, claimable, SPECIALIST_ORDERS } from '../src/sim/specialists';
 import { Terrain, type Building, type Settler } from '../src/sim/types';

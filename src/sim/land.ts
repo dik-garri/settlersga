@@ -6,7 +6,7 @@ import type { World } from './world';
  * Pieces of land, as in Settlers 4: carriers work only on their player's own territory, so goods
  * move only between buildings standing on one connected piece of it. `World.land` gives every owned
  * tile the id of its piece (8-connected tiles of the same owner; 0 = nobody's land). It is derived
- * from `map.owner` and rebuilt lazily whenever `territoryVersion` moved (`recomputeTerritory`, a
+ * from `map.owner` and rebuilt lazily whenever `territoryVersion` moved (`territory.ts`, a
  * pioneer's claim, a load), so it is never saved.
  *
  * A piece cut off from every warehouse (a captured tower deep in enemy land, a pioneer's patch, land

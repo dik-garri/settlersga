@@ -36,13 +36,11 @@ export class GameMap {
   readonly explored: Uint8Array;
   /** Path wear from settlers' steps (`paths.ts`, `PATHS`): dusty path, then road. */
   readonly wear: Uint8Array;
-  /** Player id owning the tile's territory, 0 if nobody. */
-  readonly owner: Uint8Array;
   /**
-   * Player whose pioneer claimed the tile (0: nobody). Land military buildings claim wins over it;
-   * `recomputeTerritory` gives the rest of the claimed tiles to their claimant.
+   * Player id owning the tile, 0 if nobody. Saved state, not derived: land stays its owner's when the
+   * tower that claimed it goes, and changes hands only by Settlers 4's rule (`territory.ts`).
    */
-  readonly claimed: Uint8Array;
+  readonly owner: Uint8Array;
   /**
    * Goods lying on the ground (`ground.ts`, Settlers 4's piles): the kind (`RESOURCES` index + 1, 0 =
    * none), units (up to `GROUND.perStack`) and units already promised to a carrier. They block
@@ -90,7 +88,6 @@ export class GameMap {
     this.explored = new Uint8Array(n);
     this.wear = new Uint8Array(n);
     this.owner = new Uint8Array(n);
-    this.claimed = new Uint8Array(n);
     this.goods = new Uint8Array(n);
     this.goodsAmount = new Uint8Array(n);
     this.goodsReserved = new Uint8Array(n);

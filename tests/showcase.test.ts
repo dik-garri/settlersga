@@ -28,7 +28,7 @@ describe('dev showcase (?demo)', () => {
     const crowd = w.settlers.filter((s) => s.kind === 'carrier' && s.tasks.length === 0 && s.idleAt !== null);
     expect(crowd.filter((s) => s.inside === null).length).toBeGreaterThan(2);
     // Specialists at work: a pioneer has claimed land, a thief is on his errand.
-    expect(w.pioneerLand).toBeGreaterThan(0);
+    expect(w.settlers.some((s) => s.kind === 'pioneer' && (s.errand?.n ?? 0) > 0)).toBe(true);
     const thief = w.settlers.find((s) => s.kind === 'thief');
     expect(thief?.errand?.b).toBeDefined();
     // Trade: a market with a route, donkeys under way with goods, and land cut off from every warehouse.

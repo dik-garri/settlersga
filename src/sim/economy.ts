@@ -28,7 +28,7 @@ export const ENDLESS = -1;
 /** Fresh settings for a player starting with `start`'s workers. */
 export function createEconomy(start: StartLevel): EconomyState {
   const s = START_CONDITIONS[start];
-  return { orders: { builder: s.builders, digger: s.diggers }, toolOrders: {}, distribution: {}, tally: {} };
+  return { orders: { builder: s.builders, digger: s.diggers, geologist: s.geologists }, toolOrders: {}, distribution: {}, tally: {} };
 }
 
 export function economyOf(w: World, player: PlayerId): EconomyState {

@@ -76,9 +76,6 @@ export const UNREACHABLE_TICKS = 100;
  */
 export const BUILDER_STALL_TICKS = 120;
 
-export const START_CARRIERS = 12;
-/** Fighters each player starts with (medium start): swordsmen and archers. */
-export const START_SOLDIERS = 6;
 /** Military buildings keep at least this many soldiers when sending others out (to attack or to man towers). */
 export const GARRISON_KEEP = 1;
 /** Combat: soldiers within this distance (tiles, building centers) of the target can join an attack. */
@@ -111,9 +108,6 @@ export const SHOT_TICKS = 5;
 export const OUTPUT_SHARES: Partial<Record<Resource, number>> = { sword: 60, bow: 40, armor: 8 };
 /** A barracks only takes a recruit while the player keeps at least this many idle carriers. */
 export const BARRACKS_MIN_IDLE = 2;
-export const START_BUILDERS = 3;
-/** Diggers at the start: every site is cleared by one before the builders start (as in Settlers 4). */
-export const START_DIGGERS = 2;
 /** Spade strokes (one per `DIG_EVERY` ticks) to clear one footprint tile, on top of any levelling. */
 export const CLEAR_STROKES_PER_TILE = 6;
 /**
@@ -136,8 +130,12 @@ export const START_STONE = 27;
  * finished and manned by the start fighters as far as its slots go; the others stand by it) and the
  * goods lying on the ground round it in piles of up to `GROUND.perStack` — the Roman piles of
  * `Script/Internal/StartResources.txt` (`Goods.AddPileEx`, 11 / 22 / 35 piles), `piles` in that order.
- * Carriers, builders, diggers and fighters are ours (S4 gives more people and pre-trained smiths and
- * miners, which we have no use for); `soldiers` swordsmen and `archers` archers.
+ * The people are the Roman ones of the same script (`Settlers.AddSettlers`): carriers, builders,
+ * diggers, `soldiers` swordsmen and `archers` bowmen (all level 1, S4's `SWORDSMAN_01`/`BOWMAN_01`),
+ * `geologists` waiting for orders, `donkeys`, and `workers`: S4's ready-made smiths, miners and hunter,
+ * who wait (idle, with their tool) for a workplace of their profession and take it up before any
+ * carrier would (`dispatchFor`; S4's smith works either smithy, so ours takes up any profession of
+ * his `trade`).
  */
 export type StartLevel = 'low' | 'medium' | 'high';
 export interface StartDef {
@@ -149,7 +147,11 @@ export interface StartDef {
   diggers: number;
   soldiers: number;
   archers: number;
+  geologists: number;
+  donkeys: number;
+  workers: Partial<Record<SettlerKind, number>>;
 }
+
 export const START_CONDITIONS: Record<StartLevel, StartDef> = {
   low: {
     name: 'Мало',
@@ -159,11 +161,14 @@ export const START_CONDITIONS: Record<StartLevel, StartDef> = {
       ['stone', 6], ['stone', 5], ['stone', 5],
       ['shovel', 3], ['hammer', 3], ['axe', 2], ['pickaxe', 1], ['saw', 1],
     ],
-    carriers: 8,
-    builders: 2,
-    diggers: 1,
-    soldiers: 2,
-    archers: 1,
+    carriers: 16,
+    builders: 3,
+    diggers: 3,
+    soldiers: 6,
+    archers: 2,
+    geologists: 2,
+    donkeys: 0,
+    workers: { toolsmith: 1, miner: 2 },
   },
   medium: {
     name: 'Средне',
@@ -175,11 +180,14 @@ export const START_CONDITIONS: Record<StartLevel, StartDef> = {
       ['fish', 4], ['bread', 5], ['bread', 5], ['meat', 6],
       ['coal', 4], ['coal', 6], ['ironore', 5],
     ],
-    carriers: START_CARRIERS,
-    builders: START_BUILDERS,
-    diggers: START_DIGGERS,
-    soldiers: START_SOLDIERS - 2,
-    archers: 2,
+    carriers: 32,
+    builders: 5,
+    diggers: 5,
+    soldiers: 10,
+    archers: 4,
+    geologists: 3,
+    donkeys: 0,
+    workers: { toolsmith: 2, miner: 4 },
   },
   high: {
     name: 'Много',
@@ -192,11 +200,15 @@ export const START_CONDITIONS: Record<StartLevel, StartDef> = {
       ['fish', 4], ['fish', 4], ['bread', 8], ['bread', 8], ['meat', 5], ['meat', 3],
       ['coal', 8], ['coal', 8], ['coal', 6], ['coal', 4], ['ironore', 8], ['ironore', 4], ['goldore', 2],
     ],
-    carriers: 24,
-    builders: 5,
-    diggers: 3,
-    soldiers: 7,
-    archers: 3,
+    // S4's "many" start really has fewer builders and diggers than "medium" (and tools to make more).
+    carriers: 50,
+    builders: 2,
+    diggers: 2,
+    soldiers: 12,
+    archers: 6,
+    geologists: 5,
+    donkeys: 3,
+    workers: { toolsmith: 3, miner: 6, hunter: 1 },
   },
 };
 
@@ -219,6 +231,11 @@ export function startGoods(def: StartDef): Partial<Stock> {
  * lying at it (its piles, a warehouse's stock, a site's materials not yet built in) stay on the ground
  * whole (`keepsGoods`; S4 turns those piles into loose ones). They lie on and around the footprint and
  * belong to whoever owns that land. Sources in `docs/S4-PARITY.md`.
+ *
+ * A stack never blocks walking but makes a route through its tile dearer: S4's
+ * `CWorldManager::SetPileId` sets the tile's move-cost bits to 7, and its A* charges 4 × bits + 8 a
+ * step (`CAStar64::WorldMoveCosts`): 36 against open grass's 16 (bits 2). Our A* charges `pathCost`
+ * (that ratio) instead of the terrain's `TERRAIN_COST` to enter a tile with goods on it, if more.
  */
 export const GROUND = {
   perStack: 8,
@@ -226,14 +243,26 @@ export const GROUND = {
   demolishShare: 0.5,
   burnShare: 0,
   keepsGoods: true,
+  pathCost: 36 / 16,
 };
 
 /**
- * Defeat, as in Settlers 4's free games (`Game.DefaultPlayerLostCheck`: «keine besetzten Türme
- * mehr»): a player with no occupied military building left is out. Checked every `checkEvery` ticks
- * once `afterTick` has passed (S4: every 8 of its ticks after tick 140).
+ * Defeat in a free game: a player is out once he has no occupied military building left (Settlers 4's
+ * `Game.DefaultPlayerLostCheck`: «keine besetzten Türme mehr») and — with `fighters`, the project's
+ * rule — no fighter either (outdoors, homeless, in the field, in an infirmary; a recruit still in
+ * training does not count). S4's own check counts only the buildings: set `fighters` to false for it.
+ * Checked every `checkEvery` ticks once `afterTick` has passed (S4: every 8 of its ticks after 140).
  */
-export const DEFEAT = { checkEvery: Math.round(s4Ticks(8)), afterTick: Math.round(s4Ticks(140)) };
+export const DEFEAT = { checkEvery: Math.round(s4Ticks(8)), afterTick: Math.round(s4Ticks(140)), fighters: true };
+
+/**
+ * Who owns the land (`territory.ts`), Settlers 4's `CWorldManager::SetOwner`: a claiming building
+ * gives each tile of its disc `influence - perTile * distance` (S4: 50 - distance in its tiles, and
+ * one of ours is `S4_TILES_PER_TILE` of them), a player's influences add up to at most `cap` (S4: 254);
+ * a tile changes hands only when it is nobody's or its owner has no influence on it left, and then
+ * goes to the greatest influence.
+ */
+export const TERRITORY = { influence: 50, perTile: S4_TILES_PER_TILE, cap: 254 };
 
 /**
  * Settlers stranded on land that is not their owner's (or an ally's), as Settlers 4's `CFleeRole`: a
@@ -268,7 +297,7 @@ export const ORDERABLE: readonly SettlerKind[] = ['builder', 'digger', 'geologis
  * the errand is over and he stays where he stands.
  * - pioneer: claims neutral passable tiles (S4 `CheckLand`: they need not touch his owner's land — a
  *   new island of land is fine), one every `claimTicks` ticks of work, until none is left in reach;
- *   land a military building claims always wins over his (`recomputeTerritory`). S4 moves a border
+ *   his land has no influence, so a tower that covers it takes it (`territory.ts`). S4 moves a border
  *   stone every 4 s (siedlercommunity) plus a 0.64 s step, ≈ 4.6 s per S4 tile; our tile ≈ nine of
  *   them, so ≈ 42 s per our tile keeps the same pace per area: 40 s of work plus our ≈ 2 s step;
  * - geologist: puts a sign on every unexamined walkable mountain tile — on any land, his owner's,
@@ -667,6 +696,11 @@ export interface ProfessionDef {
   roads?: boolean;
   /** Tool a carrier must fetch from storage to take up the profession (it is used up). */
   tool?: Resource;
+  /**
+   * Professions of one trade are one to a ready-made worker (S4's start smiths, `START_CONDITIONS`):
+   * he takes up any workplace whose profession shares his trade.
+   */
+  trade?: string;
   /** Further goods a barracks consumes to make this fighter, besides `tool` (the squad leader's sword). */
   kit?: Partial<Stock>;
   gather?: GatherDef;
@@ -713,7 +747,7 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
   butcher: { name: 'Мясник', behavior: 'workshop', tool: 'axe' },
   miner: { name: 'Шахтёр', behavior: 'workshop', tool: 'pickaxe' },
   smelter: { name: 'Плавильщик', behavior: 'workshop' },
-  toolsmith: { name: 'Инструментальщик', behavior: 'workshop' },
+  toolsmith: { name: 'Инструментальщик', behavior: 'workshop', trade: 'smith' },
   /**
    * Ordered like the pioneer and the thief (`ORDERABLE`): a carrier takes up a hammer (used up, given
    * back on dismissal) and waits for errands (`World.sendGeologist`). Specialists' `hp` is Settlers
@@ -721,7 +755,7 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
    * wiki, units/geologist, units/pioneer, units/thief).
    */
   geologist: { name: 'Геолог', behavior: 'prospect', tool: 'hammer', hp: 25 },
-  weaponsmith: { name: 'Оружейник', behavior: 'workshop' },
+  weaponsmith: { name: 'Оружейник', behavior: 'workshop', trade: 'smith' },
   /** Specialists (`ORDERABLE`, `specialists.ts`). */
   pioneer: { name: 'Первопроходец', behavior: 'pioneer', tool: 'shovel', hp: 25 },
   /**
@@ -1440,6 +1474,12 @@ export const AI = {
   /** With at least this many soldiers and no enemy in reach, build military buildings towards the enemy… */
   frontierSoldiers: 8,
   /**
+   * …but not while a step of `AI_PLAN` waits only for materials (none of them short for good) and it
+   * is not cramped: the economy first, or a large start army (Settlers 4's) turns every plank into a
+   * tower.
+   */
+  economyFirst: true,
+  /**
    * While it knows no enemy building but sees foreign land, it puts up to this many lookout towers
    * (`def.vision`) at the border facing it: towers stop at the other's border, too far to see a castle.
    */
@@ -1546,6 +1586,14 @@ export const AI = {
   defendMargin: 0,
   defendRatio: 1.5,
   defendRange: 16,
+  /**
+   * The hunt (`DEFEAT.fighters`: a player is out only once his last fighter is): fighters of an enemy
+   * it knows no military building of — stragglers left standing when his towers fell — seen outdoors by
+   * its buildings are hunted by a field squad `huntRatio` times their number (at least `huntMin`), from
+   * the spares of its military buildings nearest them; back into garrisons when none are left in sight.
+   */
+  huntRatio: 1.5,
+  huntMin: 2,
   /**
    * Trade (`AiState.trade`): every `tradeEvery` ticks it checks for own workplaces on land cut off
    * from its warehouses; for the first such piece it builds a market there and one at home, a donkey

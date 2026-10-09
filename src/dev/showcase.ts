@@ -1,4 +1,5 @@
-import { addBuilding, recomputeTerritory, spawnSettler } from '../sim/buildings';
+import { addBuilding, spawnSettler } from '../sim/buildings';
+import { recomputeTerritory } from '../sim/territory';
 import { BUILD_TICKS_PER_UNIT, BUILDINGS, costOf, hpOf, totalCost } from '../sim/config';
 import { clearStrokes } from '../sim/digging';
 import { ENDLESS } from '../sim/economy';

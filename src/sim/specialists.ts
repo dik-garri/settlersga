@@ -21,10 +21,9 @@ import type { World } from './world';
  * `reach` of him. Then the errand is over and he stays standing where he is (`Settler.post`), waiting
  * for orders; nobody walks home. Tiles he finds no route to are skipped (`errand.skip`).
  *
- * Pioneer: claims neutral passable tiles (`claimable`), one per `claim` task. A claim is recorded in
- * `map.claimed` (saved) and the tile's `map.owner` is set at once; `recomputeTerritory` keeps giving
- * claimed tiles to their claimant wherever no military building claims them, so land a tower or castle
- * claims always wins, and the claim comes back if that building goes. Pioneers never claim owned land.
+ * Pioneer: claims neutral passable tiles (`claimable`), one per `claim` task: the tile's `map.owner`
+ * is set at once and stays his owner's like any land (`territory.ts`). It carries no influence, so
+ * another player's tower that covers it takes it, as in Settlers 4. Pioneers never claim owned land.
  *
  * Geologist: leaves a sign (`map.prospected`, per player) on every unexamined walkable mountain tile
  * (`prospectable`), his owner's, neutral or foreign, one per `prospect` task — the whole ridge.
@@ -248,9 +247,7 @@ export function claimTick(w: World, s: Settler, task: Extract<Task, { t: 'claim'
   if (!claimable(w, task.x, task.y, s.owner)) return;
   const m = w.map;
   const i = m.idx(task.x, task.y);
-  m.claimed[i] = s.owner;
   m.owner[i] = s.owner;
-  w.pioneerLand++;
   w.territoryVersion++;
   if (s.errand) s.errand.n = (s.errand.n ?? 0) + 1;
 }

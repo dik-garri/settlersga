@@ -1,5 +1,6 @@
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { addBuilding, recomputeTerritory, spawnSettler } from '../src/sim/buildings';
+import { addBuilding, spawnSettler } from '../src/sim/buildings';
+import { recomputeTerritory } from '../src/sim/territory';
 import { stageStrike } from '../src/sim/aiField';
 import { AI, BUILDINGS } from '../src/sim/config';
 import { isCutOff, landOf } from '../src/sim/land';
