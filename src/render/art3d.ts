@@ -20,7 +20,7 @@ export interface GroundMeta {
    * `ground-<kind>.png`; textures are seamless.
    */
   kinds: Record<string, number>;
-  /** Field decals per crop kind: `fields-<kind>.png`, a strip of that many growth stages (1…n). */
+  /** Field decals per crop kind: `fields-<kind>.png`, a strip of that many stages (1…n; grain: sown … ripe, then stubble). */
   fields?: Record<string, number>;
   /** Worn-path decals: `path-<level>.png` for levels 1…levels, each a strip of `variants` frames. */
   paths?: { levels: number; variants: number };

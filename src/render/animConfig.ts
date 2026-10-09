@@ -6,18 +6,18 @@
 import type { BuildingType, PlantKind, Resource, SettlerKind } from '../sim/types';
 
 /** Tools a settler can hold; each has a walking pose and the work actions that use it. */
-export const TOOLS = ['none', 'axe', 'hammer', 'pick', 'shovel', 'scythe', 'rod', 'bucket', 'sword', 'bow', 'carry'] as const;
+export const TOOLS = ['none', 'axe', 'hammer', 'pick', 'shovel', 'scythe', 'rod', 'bucket', 'sword', 'bow', 'carry', 'spear'] as const;
 export type ToolShape = (typeof TOOLS)[number];
 
-export type HatStyle = 'cap' | 'straw' | 'helmet' | 'hood' | 'chef' | 'bare' | 'plume' | 'galea1' | 'galea2' | 'galea3';
-export const HAT_STYLES: readonly HatStyle[] = ['cap', 'straw', 'helmet', 'hood', 'chef', 'bare', 'plume', 'galea1', 'galea2', 'galea3'];
+export type HatStyle = 'cap' | 'straw' | 'helmet' | 'hood' | 'chef' | 'bare' | 'plume' | 'galea1' | 'galea2' | 'galea3' | 'coif';
+export const HAT_STYLES: readonly HatStyle[] = ['cap', 'straw', 'helmet', 'hood', 'chef', 'bare', 'plume', 'galea1', 'galea2', 'galea3', 'coif'];
 
 /**
  * 3D outfits (`art/blender/figures.py` `OUTFITS`): what a profession wears over the tunic, rendered
  * as their own pose groups (`hold:<tool>@<outfit>`, `work:<action>@<outfit>`); professions without
- * one use the plain groups.
+ * one use the plain groups. Fighters' armour, and the healer's robe and the watchman's cape.
  */
-export type Outfit = 'legion' | 'archer' | 'leader';
+export type Outfit = 'legion' | 'archer' | 'leader' | 'healer' | 'watch';
 
 /** Synthesised sound effects (see `audio/sounds.ts`). */
 export type SoundId =
@@ -118,9 +118,12 @@ const STYLES: Partial<Record<SettlerKind, Partial<SettlerStyle>>> = {
   pioneer: { tunic: '#a8743a', hat: '#6b4a2a', hatStyle: 'straw', work: 'dig', holds: 'shovel' },
   thief: { tunic: '#2e2a30', hat: '#1e1b20', hatStyle: 'hood', work: 'sow' },
   donkeyrancher: { tunic: '#7a6a4a', hat: '#4a3a26', hatStyle: 'straw' },
-  // The infirmary's healer (a carrier's figure in white with a red cap) and the lookout's watchman.
-  healer: { tunic: '#ece6d8', hat: '#b8322a', hatStyle: 'cap' },
-  watchman: { tunic: '#556677', hat: '#3b2b1a', hatStyle: 'hood' },
+  // The infirmary's healer: a long linen robe with a stole, a satchel of herbs, a white coif; he
+  // works inside, so he needs no work pose.
+  healer: { tunic: '#ece6d8', hat: '#f2ede0', hatStyle: 'coif', outfit: 'healer' },
+  // The lookout's watchman: bare-headed (the classic art tints his hair), a wool shoulder cape, a
+  // horn at the hip, a spear upright in his hand.
+  watchman: { tunic: '#556677', hat: '#3b2b1a', hatStyle: 'bare', holds: 'spear', outfit: 'watch' },
 };
 
 /** Work done on a planting or gathering task overrides the profession's default `work`. */

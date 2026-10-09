@@ -1750,8 +1750,9 @@ export function paintField(ctx: Ctx, stage: number): void {
 
 /**
  * Stubble of a reaped field (`CROP_STUBBLE`): short pale stalks and a little straw over the furrows, drawn
- * around the tile centre (the caller translates there). The 3D art draws it over its sown-field frame
- * until `art/textures/ground.py` renders a stubble frame of its own.
+ * around the tile centre (the caller translates there). The 3D art has a stubble frame of its own in
+ * `fields-<crop>.png` (`art/textures/ground.py`); this one is for `?art=classic` and for a crop strip
+ * without that frame.
  */
 export function paintStubble(ctx: Ctx): void {
   const rng = createRng(97);
