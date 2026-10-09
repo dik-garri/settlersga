@@ -8,6 +8,22 @@ Ein Prototyp einer Wirtschaftsstrategie im Geiste von The Settlers 3/4: isometri
 
 **Im Browser spielen:** https://dik-garri.github.io/settlersga/ (wird bei jedem Push nach `main` automatisch gebaut und veröffentlicht).
 
+## Systemanforderungen
+
+Keine Installation — nur ein Browser. Auf schwachen Rechnern wurde das Spiel nicht gemessen, das Minimum unten ist daher eine Schätzung.
+
+- **Browser:** ein aktueller mit **WebGL 2** — Chrome / Edge 90+, Firefox 90+, Safari 15+ (praktisch alles seit 2021). Ton läuft über WebAudio und startet nach dem ersten Klick. Auf Handys öffnet sich das Spiel, die Steuerung ist aber für Maus und Tastatur gedacht.
+- **Download:** einmalig etwa 10 MB (≈ 9 MB Grafik, ≈ 1 MB Code), danach aus dem Browser-Cache. Spielstände liegen im Browser, ≈ 150 KB pro Partie auf 256 × 256.
+
+| | Minimum (Schätzung) | Komfortabel |
+|---|---|---|
+| Prozessor | 2 Kerne (aktueller Intel Core i3 / AMD Ryzen 3) | 4 Kerne und mehr |
+| Arbeitsspeicher | 4 GB (der Tab braucht ≈ 300–600 MB) | 8 GB |
+| Grafik | integrierte Grafik mit WebGL 2 (Intel UHD 620, Apple M1 u. ä.) | jede aktuelle dedizierte oder integrierte |
+| Bildschirm | 1280 × 720 | 1920 × 1080 und mehr (Retina wird unterstützt) |
+
+Am stärksten wirken Kartengröße und Spielerzahl: Karten 64–128 sind leicht, 512 und 1024 deutlich schwerer, besonders bei 2× / 4×. Zum Vergleich: Auf Apple Silicon rechnet eine 256 × 256-Karte mit 1000 Siedlern einen Spielschritt in ≈ 0,7 ms — etwa 15-mal schneller als nötig. Gezeichnet wird nur, was auf dem Bildschirm ist; ferne Kartenteile werden entladen. **Wenn es ruckelt:** kleinere Karte, kein 4×-Tempo, die klassische Grafik `?art=classic` (schont die Grafikkarte) oder andere Tabs schließen.
+
 ## Start
 
 Benötigt wird Node.js 20.19+.

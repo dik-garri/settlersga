@@ -8,6 +8,22 @@ A prototype economy strategy game in the spirit of The Settlers 3/4: isometric 2
 
 **Play in the browser:** https://dik-garri.github.io/settlersga/ (built and published automatically on every push to `main`).
 
+## System requirements
+
+No installation — just a browser. The game has not been measured on low-end machines, so the minimum below is an estimate.
+
+- **Browser:** a modern one with **WebGL 2** — Chrome / Edge 90+, Firefox 90+, Safari 15+ (practically anything released since 2021). Sound uses WebAudio and starts after the first click. Phones can open the game, but the controls are made for mouse and keyboard.
+- **Download:** about 10 MB once (≈ 9 MB art, ≈ 1 MB code), then from the browser cache. Saves live in the browser, ≈ 150 KB per 256 × 256 game.
+
+| | Minimum (estimate) | Comfortable |
+|---|---|---|
+| CPU | 2 cores (a recent Intel Core i3 / AMD Ryzen 3) | 4 cores or more |
+| Memory | 4 GB (the tab needs ≈ 300–600 MB) | 8 GB |
+| Graphics | integrated graphics with WebGL 2 (Intel UHD 620, Apple M1, …) | any recent dedicated or integrated GPU |
+| Screen | 1280 × 720 | 1920 × 1080 and up (Retina supported) |
+
+Map size and the number of players matter most: 64–128 maps are light, 512 and 1024 are noticeably heavier, especially at 2× / 4× speed. For reference, on Apple Silicon a 256 × 256 map with 1000 settlers computes one game step in ≈ 0.7 ms — about 15 times faster than needed. Only what is on screen is drawn, and far parts of the map are unloaded. **If it stutters:** use a smaller map, avoid 4× speed, try the classic art `?art=classic` (lighter on the GPU) or close other tabs.
+
 ## Running it
 
 You need Node.js 20.19+.
