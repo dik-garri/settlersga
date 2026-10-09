@@ -1,4 +1,4 @@
-import { BUILDINGS, CARRIER_RESERVE, ORDERABLE, PROFESSIONS, START_CONDITIONS, TRANSPORT_PRIORITY, type StartLevel } from './config';
+import { BUILDINGS, CARRIER_RESERVE, DISTRIBUTION_DEFAULTS, ORDERABLE, PROFESSIONS, START_CONDITIONS, TRANSPORT_PRIORITY, type StartLevel } from './config';
 import { nearestStorage } from './buildings';
 import { landOf } from './land';
 import { RESOURCES, type Building, type BuildingType, type PlayerId, type Resource, type SettlerKind, type Task } from './types';
@@ -11,10 +11,11 @@ import type { World } from './world';
  *   with the tool are recruited only up to that (`logistics.ts`);
  * - `toolOrders`: the toolsmith's order queue — units still to forge per tool, or `ENDLESS`; tools
  *   without orders are forged automatically, by need (`chooseOutput`);
- * - `distribution`: per good, weights between the building types that consume it (`DEFAULT_WEIGHT`
+ * - `distribution`: per good, weights between the building types that consume it (`defaultWeight`
  *   each unless set — Settlers 4 always shares a good with several consumer types by its distribution,
- *   `CEcoSector` over `CBuildingSupplyPriority`; its default percentages are not in our sources, so they
- *   are equal). `tally` counts units handed out per type, so deliveries follow the weights over time;
+ *   `CEcoSector` over `CBuildingSupplyPriority`; of its default percentages our sources give only bread
+ *   to the coal mine, 85 — `DISTRIBUTION_DEFAULTS` —, the rest are equal). `tally` counts units handed
+ *   out per type, so deliveries follow the weights over time;
  * - `recruitOrders`: Settlers 4's barracks orders — per fighting profession, per level (index), how
  *   many recruits are still wanted, or `ENDLESS`. None by default: a barracks recruits nobody unasked.
  * - `minCarriers`: the free-carrier reserve (`CARRIER_RESERVE`): no carrier takes up a job while the
@@ -261,18 +262,34 @@ export function distributableGoods(): Resource[] {
   return RESOURCES.filter((r) => consumersOf(r).length > 1);
 }
 
-/** Default weight of a consumer type when the player set none. */
+/** Default weight of a consumer type of a good without Settlers 4 defaults (`DISTRIBUTION_DEFAULTS`). */
 export const DEFAULT_WEIGHT = 50;
 
+/**
+ * Weight of a consumer type when the player set none: Settlers 4's default percent where our sources
+ * give it (`DISTRIBUTION_DEFAULTS`), the rest of the good's 100 shared equally by its other consumer
+ * types; `DEFAULT_WEIGHT` for goods without defaults.
+ */
+export function defaultWeight(res: Resource, type: BuildingType): number {
+  const given = DISTRIBUTION_DEFAULTS[res];
+  if (!given) return DEFAULT_WEIGHT;
+  const own = given[type];
+  if (own !== undefined) return own;
+  const consumers = consumersOf(res);
+  const rest = consumers.filter((t) => given[t] === undefined).length;
+  const used = consumers.reduce((n, t) => n + (given[t] ?? 0), 0);
+  return rest > 0 ? Math.max(0, Math.round((100 - used) / rest)) : 0;
+}
+
 export function distributionWeight(w: World, player: PlayerId, res: Resource, type: BuildingType): number {
-  return economyOf(w, player).distribution[res]?.[type] ?? DEFAULT_WEIGHT;
+  return economyOf(w, player).distribution[res]?.[type] ?? defaultWeight(res, type);
 }
 
 export function setDistribution(w: World, player: PlayerId, res: Resource, type: BuildingType, weight: number): boolean {
   if (!consumersOf(res).includes(type) || !Number.isFinite(weight)) return false;
   const eco = economyOf(w, player);
   const d = (eco.distribution[res] ??= {});
-  for (const t of consumersOf(res)) d[t] ??= DEFAULT_WEIGHT;
+  for (const t of consumersOf(res)) d[t] ??= defaultWeight(res, t);
   d[type] = Math.max(0, Math.min(100, Math.round(weight)));
   return true;
 }
@@ -284,7 +301,7 @@ export function setDistribution(w: World, player: PlayerId, res: Resource, type:
  */
 export function distributionKey(eco: EconomyState, res: Resource, b: Building): number {
   if (!b.done || consumersOf(res).length < 2) return 0;
-  const weight = eco.distribution[res]?.[b.type] ?? DEFAULT_WEIGHT;
+  const weight = eco.distribution[res]?.[b.type] ?? defaultWeight(res, b.type);
   if (weight <= 0) return Infinity;
   return (eco.tally[res]?.[b.type] ?? 0) / weight;
 }

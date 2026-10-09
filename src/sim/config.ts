@@ -140,6 +140,18 @@ export const TRANSPORT_PRIORITY: readonly Resource[] = [
   'sword', 'bow', 'armor', 'shovel', 'hammer', 'axe', 'pickaxe', 'saw', 'rod', 'scythe', 'gold', 'goldore',
 ];
 /**
+ * Default distribution percentages, as Settlers 4 sets them for a new economy sector
+ * (`CBuildingSupplyPriority::CreateAllRacesPriorities`/`CreateRomanPriorities`, static config section
+ * `BUILDINGSUPPLYPRIORITY`; a good's percentages over its consumer types add up to 100, `Result ==
+ * 100`). The decompilation resolves only one value — bread to the coal mine, 85 (`BREAD_COALMINE`,
+ * first entry) —; the other entries live in the game's data, not in our sources. So a listed good's
+ * remaining percent is shared equally by its other consumer types ([оценка]: bread 85 / 5 / 5 / 5 to
+ * coal, iron, gold and stone mines), and unlisted goods are shared equally (`DEFAULT_WEIGHT`).
+ */
+export const DISTRIBUTION_DEFAULTS: Partial<Record<Resource, Partial<Record<BuildingType, number>>>> = {
+  bread: { coalmine: 85 },
+};
+/**
  * Construction sites as in Settlers 4 (`CBuildingSiteRole::OrderMaterial`, `LogicUpdate`,
  * `CheckActivateUrgent*`; Settlers United wiki «Buildsite priority»): a site asks for each material
  * only while what lies at it plus what is on the way stays under `pile` (S4: 8 — why big buildings
@@ -708,7 +720,21 @@ export interface GrowthDef {
   stageTicks: number;
   /** A harvested field stays stubble this long before the tile is free again; absent: freed at once. */
   stubbleTicks?: number;
+  /**
+   * Steepest ground it is planted on, in Settlers 4 height units over two of its tiles
+   * (`CSearchRoutines::SearchGrainSeedPos`: `CalcRawness` ≤ 7; measured by `rawness` in nature.ts).
+   * Absent: any slope.
+   */
+  maxSlope?: number;
 }
+
+/**
+ * One Settlers 4 height unit in our height pixels (`map.height`): S4 raises a vertex by 0.0515625 of
+ * its tile width per unit (`CalcFinalHeightOffset`, `CalcStaticHeightOffset`: unit × 0.0515625 × the
+ * 24-px tile at zoom 1), and one of our tiles — 45.25 px long in the uncompressed view, √(32² + 32²) —
+ * is `S4_TILES_PER_TILE` of its tiles: 0.0515625 × 45.25 / 3 ≈ 0.78 px (docs/PROPORTIONS.md).
+ */
+export const S4_HEIGHT_PX = (0.0515625 * Math.hypot(32, 32)) / S4_TILES_PER_TILE;
 
 /**
  * Growth on Settlers 4's deterministic timers, no randomness: a field (`CPlant::LogicUpdate`) spends 30
@@ -719,7 +745,7 @@ export interface GrowthDef {
  */
 export const GROWTH: Record<PlantKind, GrowthDef> = {
   tree: { stageTicks: Math.round(s4Ticks(40 * 31)) },
-  grain: { stageTicks: Math.round(s4Ticks(30 * 31)), stubbleTicks: Math.round(s4Ticks(30 * 31)) },
+  grain: { stageTicks: Math.round(s4Ticks(30 * 31)), stubbleTicks: Math.round(s4Ticks(30 * 31)), maxSlope: 7 },
 };
 export const GROW_EVERY = 10;
 /** Ore kinds stored in `map.ore` (index + 1; 0 = none) and the resource a mine extracts. */

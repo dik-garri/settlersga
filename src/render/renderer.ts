@@ -1562,34 +1562,16 @@ export class GameRenderer {
         v.flag.position.set(top.x, top.y + 2);
         v.flagPlaced = true;
       }
-      // Carriers cannot reach it from any warehouse: only donkeys can supply it.
-      const cut = b.owner === LOCAL_PLAYER && isCutOff(this.sim, b);
-      if (cut && !v.cutoff) {
-        const top = this.atlas.topOf(`building:${b.type}`);
-        v.cutoff = new Sprite(this.atlas.get('cutoff'));
-        v.cutoff.anchor.copyFrom(v.cutoff.texture.defaultAnchor!);
-        v.cutoff.position.set(top.x + 10, top.y - 2);
-        v.body.addChild(v.cutoff);
-      }
-      if (v.cutoff) v.cutoff.visible = cut;
-      // Stopped by the player (Settlers 4's switch): a pause badge left of the cut-off one.
-      const stopped = b.owner === LOCAL_PLAYER && !!b.stopped;
-      if (stopped && !v.stopped) {
-        const top = this.atlas.topOf(`building:${b.type}`);
-        v.stopped = new Sprite(this.atlas.get('stopped'));
-        v.stopped.anchor.copyFrom(v.stopped.texture.defaultAnchor!);
-        v.stopped.position.set(top.x - 10, top.y - 2);
-        v.body.addChild(v.stopped);
-      }
-      if (v.stopped) v.stopped.visible = stopped;
       const progress = this.sim.buildProgress(b);
       const staged = this.atlas.has(`stage:${b.type}:0`);
       v.site.visible = !b.done && !staged;
+      let stageKey: string | null = null;
       if (!b.done && staged) {
         // Pre-rendered construction stages: stakes while the diggers clear the site, then the timber
         // frame, the lower walls and the walls with half the roof as the builders work.
         const stage = !b.levelled ? 0 : Math.min(ART3D_STAGES - 1, 1 + Math.floor(progress * (ART3D_STAGES - 1)));
-        v.main.texture = this.atlas.get(`stage:${b.type}:${stage}`);
+        stageKey = `stage:${b.type}:${stage}`;
+        v.main.texture = this.atlas.get(stageKey);
         v.main.anchor.copyFrom(v.main.texture.defaultAnchor!);
         v.main.visible = true;
       } else if (b.done) {
@@ -1603,8 +1585,43 @@ export class GameRenderer {
       } else {
         v.main.visible = false;
       }
+      // Carriers cannot reach it from any warehouse: only donkeys can supply it.
+      const cut = b.owner === LOCAL_PLAYER && isCutOff(this.sim, b);
+      if (cut && !v.cutoff) {
+        v.cutoff = new Sprite(this.atlas.get('cutoff'));
+        v.cutoff.anchor.copyFrom(v.cutoff.texture.defaultAnchor!);
+        v.body.addChild(v.cutoff);
+      }
+      if (v.cutoff) v.cutoff.visible = cut;
+      // Stopped by the player (Settlers 4's switch): a pause badge left of the cut-off one.
+      const stopped = b.owner === LOCAL_PLAYER && !!b.stopped;
+      if (stopped && !v.stopped) {
+        v.stopped = new Sprite(this.atlas.get('stopped'));
+        v.stopped.anchor.copyFrom(v.stopped.texture.defaultAnchor!);
+        v.body.addChild(v.stopped);
+      }
+      if (v.stopped) v.stopped.visible = stopped;
+      if (cut || stopped) {
+        // Over what is drawn now: a site's markers sit on its current stage, not on the finished roof.
+        const top = this.badgeTop(b, stageKey, progress);
+        v.cutoff?.position.set(top.x + 10, top.y - 2);
+        v.stopped?.position.set(top.x - 10, top.y - 2);
+      }
       this.syncPile(b, v);
     }
+  }
+
+  /**
+   * Where the markers over a building go (pause, cut off): the top of what is drawn now — the finished
+   * building, a site's current pre-rendered stage, or (classic art) the part of the building cropped
+   * by progress, but never below the site's own sprite.
+   */
+  private badgeTop(b: Building, stageKey: string | null, progress: number): { x: number; y: number } {
+    if (b.done) return this.atlas.topOf(`building:${b.type}`);
+    if (stageKey) return this.atlas.topOf(stageKey);
+    const top = this.atlas.topOf(`building:${b.type}`);
+    const site = this.atlas.topOf(`building:${siteSprite(b.w)}`);
+    return { x: top.x, y: Math.min(site.y, top.y * progress) };
   }
 
   /**

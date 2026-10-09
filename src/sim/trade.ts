@@ -97,7 +97,7 @@ export function dispatchTrade(w: World, owner: PlayerId): void {
       for (const l of loads) m.trade.loading[l.res] = (m.trade.loading[l.res] ?? 0) + l.n;
       s.hiredAt = { x: Math.round(s.x), y: Math.round(s.y) };
       s.path = [];
-      s.tasks = [{ t: 'goto', x: m.door.x, y: m.door.y }, ...loads, { t: 'goto', x: to.door.x, y: to.door.y }, { t: 'unload', b: to.id }];
+      s.tasks = [{ t: 'goto', x: m.door.x, y: m.door.y }, ...loads, { t: 'goto', x: to.door.x, y: to.door.y }, { t: 'unload', b: to.id, from: m.id }];
     }
   }
 }
@@ -214,6 +214,28 @@ function goHome(w: World, s: Settler): void {
   const piece = landAt(w, home, s.owner);
   if (piece === 0 || piece !== landAt(w, { x: Math.round(s.x), y: Math.round(s.y) }, s.owner)) return;
   s.tasks.push({ t: 'goto', x: home.x, y: home.y });
+}
+
+/**
+ * Settlers 4's `CTradingBuildingRole::Switch` → `CancelIncomingDeliverTraders` →
+ * `CDonkeyRole::TargetBuildingDestroyed`: a donkey on its way to a market that has just been stopped
+ * turns back to the market it loaded at (`unload.from`) and unloads there, so nothing is lost; with
+ * that market gone it goes to the nearest one (`donkeyAbort`). One that has loaded nothing yet drops
+ * the trip (its reservations are released) and is free again.
+ */
+export function turnBack(w: World, s: Settler): void {
+  const unload = s.tasks.find((t): t is Extract<Task, { t: 'unload' }> => t.t === 'unload');
+  for (const t of s.tasks) if (t.t === 'load') releaseLoad(w, t);
+  s.tasks = [];
+  s.path = [];
+  if (!s.carrying) return;
+  const from = unload?.from !== undefined ? w.buildings.get(unload.from) : undefined;
+  if (isMarket(from) && from.owner === s.owner && from.id !== unload?.b) {
+    s.tasks = [
+      { t: 'goto', x: from.door.x, y: from.door.y },
+      { t: 'unload', b: from.id },
+    ];
+  } else donkeyAbort(w, s);
 }
 
 /**

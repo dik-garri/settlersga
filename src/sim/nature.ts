@@ -6,6 +6,8 @@ import {
   GROW_EVERY,
   GROWTH,
   FISH_RESTOCK,
+  S4_HEIGHT_PX,
+  S4_TILES_PER_TILE,
   TERRAIN,
   TREE_MATURE,
   TREE_SPREAD,
@@ -83,9 +85,28 @@ function reap(w: World, i: number): void {
   m.touch(i);
 }
 
+/**
+ * Settlers 4's `CSearchRoutines::CalcRawness` on one of our tiles: the steepest height difference
+ * across it, in S4 height units (`S4_HEIGHT_PX`) over two S4 tiles — S4 compares the two neighbours
+ * either side of a vertex along each of its three axes; our tile edge is `S4_TILES_PER_TILE` S4 tiles
+ * long, its diagonal √2 times that.
+ */
+export function rawness(m: GameMap, x: number, y: number): number {
+  const a = m.vertexHeight(x, y);
+  const b = m.vertexHeight(x + 1, y);
+  const c = m.vertexHeight(x, y + 1);
+  const d = m.vertexHeight(x + 1, y + 1);
+  const edge = Math.max(Math.abs(a - b), Math.abs(c - d), Math.abs(a - c), Math.abs(b - d));
+  const diagonal = Math.max(Math.abs(a - d), Math.abs(b - c)) / Math.SQRT2;
+  return (Math.max(edge, diagonal) * 2) / S4_TILES_PER_TILE / S4_HEIGHT_PX;
+}
+
 function field(kind: PlantKind): PlantRule {
   const code = CROP_KINDS.indexOf(kind);
+  const maxSlope = GROWTH[kind].maxSlope;
   return {
+    // Settlers 4 sows only on ground no steeper than `GrowthDef.maxSlope` (`SearchGrainSeedPos`).
+    fits: (m, x, y) => maxSlope === undefined || rawness(m, x, y) <= maxSlope,
     // Fields stay walkable.
     isSafe: () => true,
     counts: (m, i) => m.crop[i] > 0 && m.crop[i] <= CROP_RIPE && m.cropKind[i] === code,
@@ -100,6 +121,8 @@ function field(kind: PlantKind): PlantRule {
 }
 
 interface PlantRule {
+  /** Cheap per-tile check of the ground (slope), run on every candidate; absent: any ground. */
+  fits?(m: GameMap, x: number, y: number): boolean;
   /** Costlier checks, run only on the chosen candidate and again at planting time. */
   isSafe(w: World, x: number, y: number): boolean;
   /** Whether a tile counts towards `PlantDef.maxNearby`. */
@@ -201,7 +224,8 @@ function plotLooksFree(w: World, x: number, y: number, owner: PlayerId, planting
 
 /** Full check, used when the planting actually happens. `planting` skips the planter's own reservation. */
 export function canPlant(w: World, what: PlantKind, x: number, y: number, owner: PlayerId, planting = false): boolean {
-  return plotLooksFree(w, x, y, owner, planting) && PLANT_RULES[what].isSafe(w, x, y);
+  const rule = PLANT_RULES[what];
+  return plotLooksFree(w, x, y, owner, planting) && (!rule.fits || rule.fits(w.map, x, y)) && rule.isSafe(w, x, y);
 }
 
 export function plant(w: World, what: PlantKind, i: number): void {
@@ -225,6 +249,7 @@ function plantingsNear(w: World, home: Building, def: PlantDef): number {
 /** A random reachable free plot around the hut, spreading plantings out; null when none or enough. */
 export function findPlotFor(w: World, s: Settler, home: Building, def: PlantDef): Target | null {
   if (def.maxNearby !== undefined && plantingsNear(w, home, def) >= def.maxNearby) return null;
+  const rule = PLANT_RULES[def.what];
   const candidates: Point[] = [];
   const r = def.radius;
   const c = workCentre(home);
@@ -232,6 +257,7 @@ export function findPlotFor(w: World, s: Settler, home: Building, def: PlantDef)
     for (let x = c.x - r; x <= c.x + r; x++) {
       const d = dist({ x, y }, c);
       if (d < 2 || d > r || !plotLooksFree(w, x, y, s.owner, false)) continue;
+      if (rule.fits && !rule.fits(w.map, x, y)) continue;
       if (def.what === 'tree' && treesAround(w.map, x, y) >= 4) continue;
       candidates.push({ x, y });
     }

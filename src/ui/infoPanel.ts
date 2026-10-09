@@ -142,6 +142,8 @@ export class InfoView implements View {
             : 'нет свободных носильщиков';
       rows.push(['Работник', workerName]);
       rows.push(['Статус', this.status(b)]);
+      // Army support buildings with a worker (the infirmary's healer, the lookout's watchman): their own rows.
+      rows.push(...(supportRows(this.world, b) ?? []));
       const gather = gatheredBy(b.type);
       const shared = this.sharedChoices(b);
       if (shared) {
@@ -173,7 +175,8 @@ export class InfoView implements View {
     }
     if (!enemy && b.done) rows.push(...economyRows(b));
     const radius = workRadius(b.type);
-    if (!enemy && radius !== null) {
+    // The infirmary shows its work area as «Зона поиска» (`supportRows`).
+    if (!enemy && radius !== null && !def.infirmary) {
       rows.push(['Зона работы', `${radius} клеток${b.workAt ? ', перенесена' : ''}`]);
     }
     rows.push(...tradeRows(this.world, b));

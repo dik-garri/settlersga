@@ -20,6 +20,7 @@ import { BUILDINGS } from './config';
 import { redirectDeliveries } from './economy';
 import { sitePile } from './logistics';
 import { abort } from './settlers';
+import { turnBack } from './trade';
 import { RESOURCES, type Building, type PlayerId, type Resource } from './types';
 import type { World } from './world';
 
@@ -55,6 +56,8 @@ export function setStopped(w: World, id: number, on: boolean, player: PlayerId):
       (t) => 'b' in t && t.b === id && (t.t === 'build' || t.t === 'dig' || t.t === 'load' || (drops && t.t === 'drop')),
     );
     if (hit) abort(w, s);
+    // Donkeys bringing goods to a stopped market (or market site) turn back (`turnBack`, S4).
+    else if (def.market && s.tasks.some((t) => t.t === 'unload' && t.b === id)) turnBack(w, s);
   }
   b.builderIds = [];
   b.diggerIds = [];

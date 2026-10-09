@@ -7,6 +7,7 @@ import { toScreen } from '../render/iso';
 import { Terrain, type BuildingType } from '../sim/types';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import { isCommand, type GameState, type Placeable } from './state';
+import { sameTypeAround, SELECT_RADIUS, SELECTION_MAX, toggleInSelection, withoutHealthy } from './selection';
 
 const KEY_PAN_SPEED = 900; // screen px per second
 const EDGE_PAN_SPEED = 700;
@@ -199,20 +200,21 @@ export class InputController {
       this.hintKey = '';
       return;
     }
-    const key = `${hover.x},${hover.y}|${this.state.selectedUnits.join(',')}`;
+    const alt = this.altHeld();
+    const key = `${hover.x},${hover.y}|${alt}|${this.state.selectedUnits.join(',')}`;
     if (key !== this.hintKey) {
       this.hintKey = key;
       const { fighters, specialists } = this.selection();
       const labels = new Set<string>();
       if (fighters.length > 0) {
-        const o = this.fighterOrderAt(hover.x, hover.y);
+        const o = alt ? 'move' : this.fighterOrderAt(hover.x, hover.y);
         labels.add(o === 'attack' ? 'Атаковать' : o === 'garrison' ? 'В гарнизон' : 'Идти сюда');
       }
       const b = this.knownBuildingAt(hover.x, hover.y);
       for (const id of specialists) {
         const s = this.world.getSettler(id)!;
         const order = SPECIALIST_ORDERS[s.kind];
-        labels.add(order && order.can(this.world, hover.x, hover.y, b, LOCAL_PLAYER) ? order.label : 'Идти сюда');
+        labels.add(!alt && order && order.can(this.world, hover.x, hover.y, b, LOCAL_PLAYER) ? order.label : 'Идти сюда');
       }
       this.hint.textContent = [...labels].join(' · ');
     }
@@ -289,7 +291,7 @@ export class InputController {
       this.box.hidden = true;
       const p = this.local(e);
       const inRect = this.renderer.settlersInRect(d.startX, d.startY, p.x, p.y);
-      let caught = this.ownUnits(inRect);
+      let caught = boxType(this.world, this.ownUnits(inRect));
       // Only own pack donkeys in the box: select them to look at (they take no orders).
       if (caught.length === 0) caught = this.ownDonkeys(inRect);
       if (caught.length === 1 && !e.shiftKey && LOOK_ONLY.has(this.world.getSettler(caught[0])!.kind)) {
@@ -298,7 +300,8 @@ export class InputController {
         this.state.selectedUnits = [];
         return;
       }
-      this.state.selectedUnits = e.shiftKey ? [...new Set([...this.state.selectedUnits, ...caught])] : caught;
+      const add = e.shiftKey || e.ctrlKey || e.metaKey;
+      this.state.selectedUnits = (add ? [...new Set([...this.state.selectedUnits, ...caught])] : caught).slice(0, SELECTION_MAX);
       if (this.state.selectedUnits.length > 0) {
         this.state.selected = null;
         this.state.selectedSettler = null;
@@ -307,7 +310,7 @@ export class InputController {
     }
     if (d.moved) return;
     if (d.button === 2) {
-      if (this.state.selectedUnits.length > 0 && !this.state.placing) this.order(this.local(e));
+      if (this.state.selectedUnits.length > 0 && !this.state.placing) this.order(this.local(e), e.altKey);
       else this.cancel();
       return;
     }
@@ -360,20 +363,23 @@ export class InputController {
     // A figure under the cursor wins over the ground and the building behind it.
     const sid = this.renderer.settlerAt(p.x, p.y);
     if (sid !== null && this.ownUnits([sid]).length > 0) {
-      // An own fighter or specialist: select it for orders (shift adds; a double click takes all of its
-      // kind on screen).
+      // An own fighter or specialist: select it for orders, with Settlers 4's modifiers (`selection.ts`):
+      // Alt — every unit of its type in its sector, Shift — those in the vicinity, Ctrl (⌘) — add or
+      // take out; a double click takes all of its kind on screen.
       const now = performance.now();
-      const kind = this.world.getSettler(sid)!.kind;
-      if (this.lastClick.id === sid && now - this.lastClick.at < DOUBLE_CLICK_MS) {
-        const [w, h] = this.view;
-        this.state.selectedUnits = this.ownUnits(this.renderer.settlersInRect(0, 0, w, h)).filter(
-          (id) => this.world.getSettler(id)!.kind === kind,
-        );
+      const unit = this.world.getSettler(sid)!;
+      const kind = unit.kind;
+      if (e.altKey) {
+        this.state.selectedUnits = sameTypeAround(this.world, unit, SELECT_RADIUS.sector, LOCAL_PLAYER);
       } else if (e.shiftKey) {
-        const set = new Set(this.state.selectedUnits);
-        if (set.has(sid)) set.delete(sid);
-        else set.add(sid);
-        this.state.selectedUnits = [...set];
+        this.state.selectedUnits = sameTypeAround(this.world, unit, SELECT_RADIUS.vicinity, LOCAL_PLAYER);
+      } else if (e.ctrlKey || e.metaKey) {
+        this.state.selectedUnits = toggleInSelection(this.world, this.state.selectedUnits, unit);
+      } else if (this.lastClick.id === sid && now - this.lastClick.at < DOUBLE_CLICK_MS) {
+        const [w, h] = this.view;
+        this.state.selectedUnits = this.ownUnits(this.renderer.settlersInRect(0, 0, w, h))
+          .filter((id) => this.world.getSettler(id)!.kind === kind)
+          .slice(0, SELECTION_MAX);
       } else {
         this.state.selectedUnits = [sid];
       }
@@ -402,9 +408,10 @@ export class InputController {
    * Right click with units selected, as in Settlers 4. Fighters: on an enemy military building —
    * attack it; on an own military building — go in; anywhere else — move there. Specialists: their
    * kind's action where it is possible (`SPECIALIST_ORDERS`: a geologist prospects a mountain, a
-   * pioneer claims neutral land, a thief robs an explored enemy store), else walk there.
+   * pioneer claims neutral land, a thief robs an explored enemy store), else walk there. With Alt
+   * (Settlers 4's «go to the location») everyone just walks there.
    */
-  private order(p: { x: number; y: number }): void {
+  private order(p: { x: number; y: number }, walkOnly = false): void {
     const { fighters, specialists } = this.selection();
     const t = this.tileAt(p.x, p.y);
     const tx = Math.round(t.x);
@@ -412,7 +419,7 @@ export class InputController {
     const b = this.knownBuildingAt(tx, ty);
     const said: string[] = [];
     if (fighters.length > 0) {
-      const o = this.fighterOrderAt(tx, ty);
+      const o = walkOnly ? 'move' : this.fighterOrderAt(tx, ty);
       if (o === 'attack') {
         const n = this.world.orderAttack(fighters, b!.id);
         said.push(n > 0 ? `В атаку: ${n}` : 'Эти бойцы сейчас не могут атаковать');
@@ -424,11 +431,13 @@ export class InputController {
       }
     }
     if (specialists.length > 0) {
-      const acting = specialists.filter((id) => {
-        const s = this.world.getSettler(id)!;
-        return SPECIALIST_ORDERS[s.kind]?.can(this.world, tx, ty, b, LOCAL_PLAYER) ?? false;
-      }).length;
-      const n = this.world.orderSpecialists(specialists, tx, ty, b ? b.id : null);
+      const acting = walkOnly
+        ? 0
+        : specialists.filter((id) => {
+            const s = this.world.getSettler(id)!;
+            return SPECIALIST_ORDERS[s.kind]?.can(this.world, tx, ty, b, LOCAL_PLAYER) ?? false;
+          }).length;
+      const n = this.world.orderSpecialists(specialists, tx, ty, b ? b.id : null, LOCAL_PLAYER, walkOnly);
       if (n === 0) said.push('Туда не пройти');
       else if (acting > 0) said.push(`За работу: ${acting}`);
     }
@@ -485,6 +494,21 @@ export class InputController {
         e.preventDefault();
         this.cb.onNextTab();
         break;
+      case 'AltLeft':
+      case 'AltRight':
+        // Alt is a selection and order modifier here (Settlers 4); keep the browser's menu bar shut.
+        e.preventDefault();
+        break;
+      case 'Backspace':
+        // Settlers 4: Backspace takes the healthy units out of the selection, the wounded stay.
+        if (this.state.selectedUnits.length > 0) {
+          e.preventDefault();
+          const before = this.state.selectedUnits.length;
+          this.state.selectedUnits = withoutHealthy(this.world, this.state.selectedUnits);
+          const left = this.state.selectedUnits.length;
+          this.cb.onMessage(left > 0 ? `Раненых в выделении: ${left} (здоровых убрано: ${before - left})` : 'Раненых в выделении нет');
+        }
+        break;
       default: {
         const m = /^Digit([1-9])$/.exec(e.code);
         if (!m) break;
@@ -540,8 +564,25 @@ export class InputController {
     return true;
   }
 
+  private altHeld(): boolean {
+    return this.keys.has('AltLeft') || this.keys.has('AltRight');
+  }
+
   private ownLiving(id: number): boolean {
     const s = this.world.getSettler(id);
     return !!s && !this.world.dying.has(id) && s.owner === LOCAL_PLAYER;
   }
+}
+
+/**
+ * What a selection box takes, as Settlers 4's `BoxSelection`: the highest category among the units in
+ * it — fighters (every kind together) before specialists —, and of specialists one kind only (the
+ * first found). At most `SELECTION_MAX`.
+ */
+function boxType(w: World, ids: number[]): number[] {
+  const fighters = ids.filter((id) => isFighter(w.getSettler(id)!));
+  if (fighters.length > 0) return fighters.slice(0, SELECTION_MAX);
+  if (ids.length === 0) return ids;
+  const kind = w.getSettler(ids[0])!.kind;
+  return ids.filter((id) => w.getSettler(id)!.kind === kind).slice(0, SELECTION_MAX);
 }

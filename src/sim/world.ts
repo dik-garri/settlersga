@@ -827,7 +827,8 @@ export class World {
 
   /**
    * Player command: right click with specialists selected (geologists, pioneers, thieves) at (x, y),
-   * on building `targetId` if any: each does his action there if possible, else walks there and waits.
+   * on building `targetId` if any: each does his action there if possible, else walks there and waits;
+   * with `walkOnly` (Alt + right click) all just walk there.
    */
   orderSpecialists(
     ids: readonly number[],
@@ -835,8 +836,9 @@ export class World {
     y: number,
     targetId: number | null = null,
     player: PlayerId = LOCAL_PLAYER,
+    walkOnly = false,
   ): number {
-    return orderSpecialists(this, ids, x, y, targetId, player);
+    return orderSpecialists(this, ids, x, y, targetId, player, walkOnly);
   }
 
   /** Player command: the selected specialists stop and wait where they stand. */

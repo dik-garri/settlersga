@@ -280,8 +280,11 @@ export type Task =
   | { t: 'steal'; x: number; y: number; n: number }
   /** Donkey at a marketplace loads `n` units of `res` from its input (reserved in `trade.loading`). */
   | { t: 'load'; b: number; res: Resource; n: number }
-  /** Donkey unloads what it carries onto the output pile of marketplace `b`. */
-  | { t: 'unload'; b: number };
+  /**
+   * Donkey unloads what it carries onto the output pile of marketplace `b`; `from` is the market it
+   * loaded at (Settlers 4's depart building), where it turns back to if `b` stops (`turnBack`).
+   */
+  | { t: 'unload'; b: number; from?: number };
 
 export interface Settler {
   id: number;

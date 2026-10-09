@@ -164,7 +164,10 @@ export function recruitKey(w: World): string {
   return FIGHTERS.map((k) => PROFESSIONS[k].combat!.levels.map((_, l) => w.recruitOrder(k, l)).join(',')).join('|');
 }
 
-/** Army buildings without a garrison: the lookout tower and the infirmary (Settlers 4's healer's hut). */
+/**
+ * Rows of the army buildings without a garrison — the lookout tower and the infirmary (Settlers 4's
+ * healer's hut) —, shown in the building window under its worker rows.
+ */
 export function supportRows(w: World, b: Building): Rows | null {
   const def = BUILDINGS[b.type];
   const keeper = w.getSettler(b.workerId);
@@ -185,7 +188,7 @@ export function supportRows(w: World, b: Building): Rows | null {
         'Пациент',
         p ? `${PROFESSIONS[p.kind].name}: ${Math.round(p.hp)} / ${maxHp(p)}${atDoor ? '' : ' (идёт)'}` : 'нет',
       ],
-      ['Зона поиска', `${def.infirmary.radius} клеток`],
+      ['Зона поиска', `${def.infirmary.radius} клеток${b.workAt ? ', перенесена' : ''}`],
     ];
   }
   return null;

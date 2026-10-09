@@ -690,7 +690,8 @@ function clearSpecialist(w: World, s: Settler): void {
 /**
  * Player command: a right click at (x, y) (on building `targetId`, if any) for the selected
  * specialists. Each does his kind's action there if it is possible; the rest walk there, spread out
- * around the spot, and wait. Returns how many obeyed.
+ * around the spot, and wait. With `walkOnly` (Settlers 4's Alt + right click, «go to the location»)
+ * they all just walk there. Returns how many obeyed.
  */
 export function orderSpecialists(
   w: World,
@@ -699,6 +700,7 @@ export function orderSpecialists(
   y: number,
   targetId: number | null,
   player: PlayerId,
+  walkOnly = false,
 ): number {
   const tx = Math.round(x);
   const ty = Math.round(y);
@@ -710,7 +712,7 @@ export function orderSpecialists(
     clearSpecialist(w, s);
     if (PROFESSIONS[s.kind].behavior === 'thief') orderedTo(w, s, b ? b.door.x : tx, b ? b.door.y : ty);
     const order = SPECIALIST_ORDERS[s.kind];
-    if (order && order.can(w, tx, ty, b, player) && order.apply(w, s, tx, ty, b)) n++;
+    if (!walkOnly && order && order.can(w, tx, ty, b, player) && order.apply(w, s, tx, ty, b)) n++;
     else walkers.push(s);
   }
   const spots = formationSpots(w, tx, ty, walkers.length);
