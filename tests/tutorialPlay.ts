@@ -1,5 +1,7 @@
 import { BUILDINGS } from '../src/sim/config';
-import type { BuildingType, Point } from '../src/sim/types';
+import { ENDLESS, workerOrder } from '../src/sim/economy';
+import { isFighter } from '../src/sim/military';
+import type { Building, BuildingType, Point, Settler } from '../src/sim/types';
 import type { World } from '../src/sim/world';
 import { missionWorld, TutorialRunner, type TutorialModel } from '../src/tutorial/runner';
 import type { MissionDef, MissionId, UiProbe } from '../src/tutorial/types';
@@ -122,13 +124,141 @@ export const SOLUTIONS: Partial<Record<MissionId, Record<string, Solution>>> = {
     ironmine: build('ironmine'),
     smelter: build('ironsmelter'),
     toolsmith: build('toolsmith'),
+    // The order is in the window of the finished smithy.
     order: (w, ui) => {
-      ui.selected = own(w, 'toolsmith')?.id ?? null;
+      const smith = own(w, 'toolsmith');
+      if (!smith?.done) return;
+      ui.selected = smith.id;
       w.orderTool('shovel', 2);
     },
     shovels: (_w, ui) => (ui.speed = 4),
   },
+  trade: {
+    // «+1» in the settlers menu's worker orders.
+    pioneer: (w, ui) => {
+      ui.menu = 'settlers';
+      if (workerOrder(w, 1, 'pioneer') < 1) w.orderSpecialist('pioneer', 1);
+    },
+    // The errand chosen in the settlers menu, then a click on the arrow.
+    claim: (w, ui, m) => {
+      const at = m.marks[0];
+      if (!at || w.settlers.some((s) => s.owner === 1 && s.kind === 'pioneer' && s.errand)) return;
+      ui.placing = 'pioneer';
+      if (w.sendPioneer(Math.round(at.x), Math.round(at.y))) ui.placing = null;
+    },
+    outpost: ack,
+    stonecutter: (w, _ui, m) => {
+      if (!marketNear(w, 'stonecutter', m.marks[0]) && m.marks[0]) placeAt(w, 'stonecutter', m.marks[0]);
+    },
+    market: build('market'),
+    ranch: build('donkeyranch'),
+    postMarket: (w, _ui, m) => {
+      if (!marketNear(w, 'market', m.marks[0]) && m.marks[0]) placeAt(w, 'market', m.marks[0]);
+    },
+    wait: (_w, ui) => (ui.speed = 2),
+    // The home market's window: the route to the outpost's market, then planks and stone.
+    route: (w) => {
+      const [here, there] = markets(w);
+      if (!here || !there) return;
+      w.setTradeRoute(here.id, there.id);
+      for (const res of ['plank', 'stone'] as const) w.orderTrade(here.id, res, ENDLESS);
+    },
+    built: (_w, ui) => (ui.speed = 4),
+    stop: (w) => {
+      const [here] = markets(w);
+      if (here) for (const res of ['plank', 'stone'] as const) w.orderTrade(here.id, res, 0);
+    },
+    back: (w) => {
+      const [here, there] = markets(w);
+      if (!here || !there) return;
+      w.setTradeRoute(there.id, here.id);
+      w.orderTrade(there.id, 'stone', ENDLESS);
+    },
+    stone: wait,
+  },
+  battle: {
+    bigtower: build('bigtower'),
+    wait: (_w, ui) => (ui.speed = 2),
+    // A click on the finished tower, then «Fill».
+    fill: (w, ui) => {
+      const t = own(w, 'bigtower');
+      if (!t) return;
+      ui.selected = t.id;
+      if ((t.wish?.melee ?? 0) + (t.wish?.ranged ?? 0) < 6) w.fillGarrison(t.id);
+    },
+    barracks: build('barracks'),
+    // The army menu's recruit orders: +5 swordsmen and +5 archers of level 1, +1 swordsman of level 2.
+    orders: (w, ui) => {
+      ui.menu = 'army';
+      if (w.recruitOrder('soldier', 0) === 0) w.orderRecruits('soldier', 0, 5);
+      if (w.recruitOrder('archer', 0) === 0) w.orderRecruits('archer', 0, 5);
+      if (w.recruitOrder('soldier', 1) === 0) w.orderRecruits('soldier', 1, 1);
+    },
+    recruits: (_w, ui) => (ui.speed = 4),
+    // A box round the fighters standing by the barracks.
+    select: (w, ui) => (ui.selectedUnits = freeFighters(w).length),
+    // A right click on the arrow.
+    move: (w, _ui, m) => {
+      const ids = freeFighters(w).filter((s) => !s.post).map((s) => s.id);
+      const at = m.marks[0];
+      if (at && ids.length > 0) w.orderMove(ids, Math.round(at.x), Math.round(at.y));
+    },
+    group: (w, ui) => (ui.groups[1] = fieldUnits(w).length),
+    scout: build('lookout'),
+    // The group (key 1), then a right click on the enemy tower.
+    attack: (w) => {
+      const target = enemyBuildingNear(w);
+      const ids = fieldUnits(w).filter((s) => !s.tasks.some((t) => t.t === 'assault')).map((s) => s.id);
+      if (target && ids.length > 0) w.orderAttack(ids, target.id);
+    },
+    infirmary: build('infirmary'),
+    // Everyone outside at the rival's last tower; with none left, at his last fighters.
+    victory: (w) => {
+      if (w.tick % 300 !== 0) return;
+      const ids = [...fieldUnits(w), ...freeFighters(w)].filter((s) => !s.tasks.some((t) => t.t === 'assault' || t.t === 'engage')).map((s) => s.id);
+      if (ids.length === 0) return;
+      const target = enemyBuildingNear(w);
+      if (target) w.orderAttack(ids, target.id);
+      else {
+        const foe = w.settlers.find((s) => s.owner === 2 && isFighter(s) && !w.dying.has(s.id));
+        if (foe) w.orderMove(ids, Math.round(foe.x), Math.round(foe.y));
+      }
+    },
+  },
 };
+
+/** Own fighters outdoors with no building of their own and none they are walking into. */
+function freeFighters(w: World): Settler[] {
+  return w.settlers.filter(
+    (s) => s.owner === 1 && isFighter(s) && !w.dying.has(s.id) && s.inside === null && s.home === null && !s.tasks.some((t) => t.t === 'join'),
+  );
+}
+
+/** Own fighters under direct orders (a post on the map). */
+function fieldUnits(w: World): Settler[] {
+  return freeFighters(w).filter((s) => !!s.post);
+}
+
+/** The rival's military building nearest the player's start that the player has seen. */
+function enemyBuildingNear(w: World): Building | undefined {
+  const home = w.homeOf(1);
+  const d = (b: Building) => Math.hypot(b.door.x - home.x, b.door.y - home.y);
+  return [...w.buildings.values()]
+    .filter((b) => b.owner === 2 && BUILDINGS[b.type].garrison && w.isExplored(b.door.x, b.door.y, 1))
+    .sort((a, b) => d(a) - d(b))[0];
+}
+
+/** An own building of the type within 6 tiles of the point, if any. */
+function marketNear(w: World, type: BuildingType, at: Point | undefined): boolean {
+  return !!at && [...w.buildings.values()].some((b) => b.owner === 1 && b.type === type && Math.hypot(b.door.x - at.x, b.door.y - at.y) < 8);
+}
+
+/** The player's markets: the one nearest home first, the one farthest from it second. */
+function markets(w: World): Building[] {
+  const home = w.homeOf(1);
+  const d = (b: Building) => Math.hypot(b.door.x - home.x, b.door.y - home.y);
+  return [...w.buildings.values()].filter((b) => b.owner === 1 && b.type === 'market').sort((a, b) => d(a) - d(b));
+}
 
 /** The tile within `reach` of `at` whose disc of radius `r` holds the most free plantable ground (the player's eye for a meadow). */
 export function freestMeadow(w: World, at: Point, reach: number, r: number): Point {
@@ -158,6 +288,8 @@ export interface Run {
   ui: UiProbe;
   /** Tick at which each step was entered. */
   entered: number[];
+  /** Steps shown with fewer marks on the map than they name (an anchor that found nothing). */
+  unmarked?: string[];
 }
 
 export function begin(def: MissionDef): Run {
@@ -179,6 +311,10 @@ export function play(run: Run, ticks: number, stopAt?: number): boolean {
     while (run.entered.length <= runner.stepIndex) run.entered.push(world.tick);
     if (stopAt !== undefined && runner.stepIndex >= stopAt) return false;
     const m = runner.model(world);
+    // Every arrow and ring of a step the player sees is on the map.
+    if (m.step && m.marks.length < (m.step.marker?.length ?? 0) + (m.step.ring ? 1 : 0)) {
+      (run.unmarked ??= []).includes(m.step.id) || run.unmarked.push(m.step.id);
+    }
     if (m.step) sol[m.step.id]?.(world, ui, m, runner);
   }
   return runner.finished === 'won';

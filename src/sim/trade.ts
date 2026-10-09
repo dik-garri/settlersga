@@ -193,6 +193,9 @@ export function unloadTick(w: World, s: Settler, task: Extract<Task, { t: 'unloa
       const used = Math.min(n, lacking);
       m.delivered[pack.res] += used;
       n -= used;
+    } else {
+      const got = (m.received ??= {});
+      got[pack.res] = (got[pack.res] ?? 0) + n;
     }
     m.output[pack.res] += n;
   }

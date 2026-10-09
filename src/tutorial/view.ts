@@ -11,7 +11,7 @@ import type { GuideMark } from '../render/guide';
 import { MISSIONS } from './missions';
 import { markDone } from './progress';
 import type { MissionProgress, TutorialModel, TutorialRunner } from './runner';
-import type { ParamSpec, UiProbe } from './types';
+import type { ModifierKey, ParamSpec, UiProbe } from './types';
 
 /**
  * The tutorial's face in the browser (docs/TUTORIAL.md §3.5–3.7): the goals panel over the game view
@@ -34,6 +34,14 @@ export interface TutorialHooks {
   toMenu: () => void;
 }
 
+/** Whether the keyboard is a Mac's (its Ctrl is ⌘, its Alt ⌥). */
+function onMac(): boolean {
+  return typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+}
+
+/** Modifier names on a Mac keyboard. */
+const MAC_KEYS: Record<ModifierKey, Key> = { ctrl: 'key.ctrlMac', alt: 'key.altMac', shift: 'key.shift' };
+
 /** A step's `{name}` placeholders filled in the current language. */
 export function textOf(key: Key, params?: Record<string, ParamSpec>): string {
   const out: Params = {};
@@ -42,6 +50,7 @@ export function textOf(key: Key, params?: Record<string, ParamSpec>): string {
     else if ('res' in spec) out[name] = resLower(spec.res);
     else if ('prof' in spec) out[name] = lower(profName(spec.prof));
     else if ('n' in spec) out[name] = spec.n;
+    else if ('key' in spec) out[name] = t(onMac() ? MAC_KEYS[spec.key] : (`key.${spec.key}` as const));
     else out[name] = t(spec.label);
   }
   return t(key, out);

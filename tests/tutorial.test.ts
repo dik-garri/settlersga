@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { TICKS_PER_SECOND } from '../src/sim/config';
+import { BUILDINGS, TICKS_PER_SECOND } from '../src/sim/config';
 import { saveWorld } from '../src/sim/save';
+import { isCutOff, landOf } from '../src/sim/land';
+import { isFighter } from '../src/sim/military';
 import { DICTS, LANGS } from '../src/ui/i18n';
 import type { BuildingType } from '../src/sim/types';
 import { World } from '../src/sim/world';
@@ -12,8 +14,8 @@ import { begin, own, play, type Run } from './tutorialPlay';
 const READY = MISSIONS.filter((m) => !m.soon);
 
 describe('tutorial missions', () => {
-  it('pass 2 has the first four missions ready, the rest listed as coming', () => {
-    expect(READY.map((m) => m.id)).toEqual(['forest', 'logistics', 'bread', 'metal']);
+  it('all six missions are ready', () => {
+    expect(READY.map((m) => m.id)).toEqual(['forest', 'logistics', 'bread', 'metal', 'trade', 'battle']);
     expect(MISSIONS.length).toBe(6);
   });
 
@@ -25,9 +27,10 @@ describe('tutorial missions', () => {
         // Live anchors (buildings the player makes) resolve once they exist.
         if (a.a === 'building' && a.owner !== 'scenario') continue;
         if (a.a === 'pile') continue;
+        // Spots are looked for when their step begins (land gained by then counts); the play test checks them.
+        if (a.a === 'spot') continue;
         expect(resolve(a), JSON.stringify(a)).not.toBeNull();
       }
-      for (const s of def.steps) for (const a of s.marker ?? []) if (a.a === 'spot') expect(resolve(a), s.id).not.toBeNull();
     });
 
     it(`${def.id}: a player following the steps wins within the time budget`, () => {
@@ -37,6 +40,8 @@ describe('tutorial missions', () => {
       const minutes = run.world.tick / TICKS_PER_SECOND / 60;
       process.stderr.write(`${def.id}: ${won ? 'won' : 'not won'} after ${minutes.toFixed(1)} min; steps entered at ${run.entered.map((t) => (t / 600).toFixed(1)).join(' ')}\n`);
       expect(won).toBe(true);
+      // Every arrow of every step shown was on the map.
+      expect(run.unmarked ?? []).toEqual([]);
       // Every step was entered in turn (none skipped by an index jump).
       expect(run.entered.length).toBe(def.steps.length + 1);
       for (let k = 1; k < run.entered.length; k++) expect(run.entered[k]).toBeGreaterThanOrEqual(run.entered[k - 1]);
@@ -61,7 +66,7 @@ describe('tutorial missions', () => {
       const data = JSON.parse(JSON.stringify(saveWorld(a.world)));
       const progress = JSON.parse(JSON.stringify(a.runner.serialize()));
       const world = World.load(data);
-      const b: Run = { world, runner: TutorialRunner.restore(def, progress), ui: { ...a.ui, camera: { ...a.ui.camera } }, entered: [...a.entered] };
+      const b: Run = { world, runner: TutorialRunner.restore(def, progress), ui: structuredClone(a.ui), entered: [...a.entered] };
       expect(b.runner.stepIndex).toBe(a.runner.stepIndex);
       expect(b.runner.serialize().anchors).toEqual(a.runner.serialize().anchors);
       expect(play(a, budget)).toBe(true);
@@ -90,7 +95,7 @@ describe('tutorial missions', () => {
     });
   }
 
-  it('missions still to come have their menu texts in every language', () => {
+  it('every mission has its menu texts in every language', () => {
     for (const def of MISSIONS) {
       for (const l of LANGS) {
         expect((DICTS[l] as Record<string, string>)[def.title], `${l} ${def.title}`).toBeTruthy();
@@ -134,6 +139,41 @@ describe('tutorial missions', () => {
     // No food at the start: the mine has eaten nothing yet; both towers are manned.
     expect(mine.attempts ?? 0).toBe(0);
     expect([...w.buildings.values()].filter((b) => b.owner === 1 && b.type === 'tower' && b.garrison.length > 0).length).toBe(2);
+  });
+
+  it('mission 5 starts with a manned outpost on land of its own, cut off from every warehouse', () => {
+    const def = MISSIONS.find((m) => m.id === 'trade')!;
+    const w = missionWorld(def);
+    const post = w.buildings.get(w.tags.get('outpost')!)!;
+    expect(post.type).toBe('tower');
+    expect(post.garrison.length).toBe(1);
+    // Its land is a piece of its own: no warehouse, not the home piece, not touching the home land.
+    expect(isCutOff(w, post)).toBe(true);
+    const home = w.buildingAt(w.homeOf(1).x, w.homeOf(1).y)!;
+    expect(landOf(w, post)).not.toBe(landOf(w, home));
+    // Rocks for its stonecutter on its land, a pickaxe by its door, two donkeys at home.
+    let stone = 0;
+    for (let i = 0; i < w.map.stone.length; i++) if (w.map.stone[i] > 0 && w.land[i] === landOf(w, post)) stone += w.map.stone[i];
+    expect(stone).toBeGreaterThan(20);
+    expect(w.settlers.filter((s) => s.owner === 1 && s.kind === 'donkey').length).toBe(2);
+  });
+
+  it('mission 6 gives the passive rival a poorer start and a second tower out towards the player', () => {
+    const def = MISSIONS.find((m) => m.id === 'battle')!;
+    const w = missionWorld(def);
+    expect(w.ai.length).toBe(0);
+    const towers = [...w.buildings.values()].filter((b) => b.owner === 2 && b.type === 'tower');
+    expect(towers.length).toBe(2);
+    const front = w.buildings.get(w.tags.get('front')!)!;
+    // Founded beyond the rival's own land, on the way to the player.
+    const d = (b: { door: { x: number; y: number } }, p: { x: number; y: number }) => Math.hypot(b.door.x - p.x, b.door.y - p.y);
+    expect(d(front, w.homeOf(2))).toBeGreaterThan((BUILDINGS.tower.territory ?? 0) + 5);
+    expect(d(front, w.homeOf(1))).toBeLessThan(Math.hypot(w.homeOf(1).x - w.homeOf(2).x, w.homeOf(1).y - w.homeOf(2).y));
+    expect(front.garrison.length).toBe(1);
+    const fighters = (p: number) => w.settlers.filter((s) => s.owner === p && isFighter(s)).length;
+    // Settlers 4's low start (6 swordsmen, 2 archers) plus the front tower's swordsman; the player's medium start.
+    expect(fighters(2)).toBe(9);
+    expect(fighters(1)).toBe(14);
   });
 
   it('mission 4 tops up bread and fish, counting what carriers hold', () => {

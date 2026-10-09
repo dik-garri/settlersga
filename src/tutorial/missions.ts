@@ -4,7 +4,7 @@ import type { Anchor, MissionDef } from './types';
 /**
  * The tutorial missions (docs/TUTORIAL.md §2), in the recommended order. Pure data: maps by seed and
  * size, places by anchors, texts by dictionary keys (`tut.<mission>.<step>`, `.more`, `.hint`,
- * `tut.<mission>.goal.<n>`). Missions marked `soon` are listed in the menu but come in a later pass.
+ * `tut.<mission>.goal.<n>`). A mission marked `soon` would be listed in the menu but not playable (none is now).
  * Seeds are chosen by `tests/tutorial.test.ts`: every anchor resolves and the mission can be won
  * within its time budget.
  */
@@ -217,7 +217,8 @@ const logistics: MissionDef = {
       hint: { text: 'tut.logistics.house.hint', after: 120 },
       ui: ['menu.build', 'build.tab.housing', 'build.item.house_small'],
       marker: [{ a: 'spot', type: 'house_small', near: home }],
-      done: { k: 'building', type: 'house_small' },
+      // The site is enough (the goals wait for the house itself): a lit button would ask for more.
+      done: { k: 'building', type: 'house_small', state: 'any' },
     },
     {
       id: 'priority',
@@ -536,7 +537,8 @@ const metal: MissionDef = {
       hint: { text: 'tut.metal.toolsmith.hint', after: 90 },
       ui: ['menu.build', 'build.tab.metal', 'build.item.toolsmith'],
       marker: [{ a: 'spot', type: 'toolsmith', near: home }],
-      done: { k: 'building', type: 'toolsmith' },
+      // The site is enough: a still lit button would ask for a second one while it is built.
+      done: { k: 'building', type: 'toolsmith', state: 'any' },
     },
     {
       id: 'order',
@@ -565,29 +567,383 @@ const metal: MissionDef = {
   ],
 };
 
-/** A mission of a later pass: listed in the menu as coming, what it opens already set (docs/TUTORIAL.md §2.5–2.8). */
-function later(id: MissionDef['id'], unlock: MissionDef['unlock'], minutes: number): MissionDef {
-  return {
-    id,
-    title: `tut.${id}.title`,
-    summary: `tut.${id}.summary`,
-    debrief: `tut.${id}.summary`,
-    world: { seed: 1, size: 64, players: 1, start: 'medium', fog: true },
-    unlock,
-    minutes,
-    objectives: [],
-    steps: [],
-    soon: true,
-  };
-}
+/** Mission 4's economy: wood and stone, the second tower and the food chain, all staffed. */
+const economy: ScenarioBuilding[] = [
+  ...woodAndStone,
+  { type: 'tower', near: { dx: -3, dy: 10 }, garrison: 1 },
+  { type: 'fisher', near: { dx: -3, dy: 5 }, worker: true },
+  { type: 'waterworks', near: { dx: 2, dy: 6 }, worker: true },
+  { type: 'farm', near: { dx: -9, dy: 9 }, worker: true },
+  { type: 'mill', near: { dx: -7, dy: 4 }, worker: true },
+  { type: 'bakery', near: { dx: -10, dy: 4 }, worker: true },
+];
+
+const outpost: Anchor = { a: 'building', type: 'tower', owner: 'scenario', tag: 'outpost' };
+/** Where the pioneer is sent: open land at the border towards the far guaranteed mountain. */
+const borderSpot: Anchor = {
+  a: 'nearest',
+  terrain: 'border',
+  from: { a: 'between', from: home, to: { a: 'guarantee', mountain: 1 }, t: 0.75 },
+};
+/** Markets: the one by the start tower, the one by the outpost (sites included). */
+const marketByHome: Anchor = { a: 'building', type: 'market', owner: 'me', near: home };
+const marketByPost: Anchor = { a: 'building', type: 'market', owner: 'me', near: outpost };
+const atHome = { near: home, r: 12 } as const;
+const atPost = { near: outpost, r: 10 } as const;
+
+/** Mission 5: the pioneer, land cut off from the warehouses, markets, the donkey ranch, a route there and back. */
+const trade: MissionDef = {
+  id: 'trade',
+  title: 'tut.trade.title',
+  summary: 'tut.trade.summary',
+  debrief: 'tut.trade.debrief',
+  world: { seed: 42, size: 64, players: 1, start: 'medium', fog: true },
+  scenario: [
+    {
+      player: 1,
+      buildings: [
+        ...economy,
+        // A manned tower far out on its own (Settlers 4 maps give such ones): land no carrier reaches.
+        // Its last settlers left a pickaxe behind.
+        { type: 'tower', near: { dx: 16, dy: -27 }, founding: true, garrison: 1, tag: 'outpost', piles: [['pickaxe', 1]] },
+      ],
+      // Two donkeys came along; feed for the ranch's next ones until the farm keeps up.
+      people: { donkey: 2 },
+      piles: [['grain', 8], ['water', 8]],
+    },
+  ],
+  unlock: { buildings: ['market', 'donkeyranch'], commands: ['pioneer', 'thief'] },
+  minutes: 18,
+  objectives: [
+    { text: 'tut.trade.goal.1', done: { k: 'claimed', min: 8 }, params: { n: { n: 8 } } },
+    { text: 'tut.trade.goal.2', done: { k: 'building', type: 'stonecutter', ...atPost }, params: { building: { building: 'stonecutter' } } },
+    { text: 'tut.trade.goal.3', done: { k: 'received', res: 'stone', min: 6, ...atHome }, params: { n: { n: 6 }, res: { res: 'stone' } } },
+  ],
+  steps: [
+    {
+      id: 'pioneer',
+      text: 'tut.trade.pioneer',
+      more: 'tut.trade.pioneer.more',
+      params: { menu: { label: 'hud.menu.settlers' }, prof: { prof: 'pioneer' }, res: { res: 'shovel' } },
+      ui: ['menu.settlers', 'settlers.order.pioneer'],
+      done: { k: 'units', kind: 'pioneer', min: 1 },
+    },
+    {
+      id: 'claim',
+      text: 'tut.trade.claim',
+      more: 'tut.trade.claim.more',
+      params: { prof: { prof: 'pioneer' }, cmd: { label: 'settlers.cmd.pioneer' } },
+      hint: { text: 'tut.trade.claim.hint', after: 60 },
+      ui: ['menu.settlers', 'settlers.cmd.pioneer'],
+      camera: borderSpot,
+      marker: [borderSpot],
+      done: { k: 'claimed', min: 1 },
+    },
+    {
+      id: 'outpost',
+      text: 'tut.trade.outpost',
+      more: 'tut.trade.outpost.more',
+      camera: outpost,
+      marker: [outpost],
+      done: { k: 'ack' },
+    },
+    {
+      id: 'stonecutter',
+      text: 'tut.trade.stonecutter',
+      more: 'tut.trade.stonecutter.more',
+      params: { building: { building: 'stonecutter' } },
+      ui: ['menu.build', 'build.tab.resources', 'build.item.stonecutter'],
+      camera: outpost,
+      marker: [{ a: 'spot', type: 'stonecutter', near: outpost, prefer: 'stone', within: 8 }],
+      done: { k: 'building', type: 'stonecutter', state: 'any', ...atPost },
+    },
+    {
+      id: 'market',
+      text: 'tut.trade.market',
+      more: 'tut.trade.market.more',
+      params: { building: { building: 'market' }, tab: { label: 'category.trade' } },
+      ui: ['menu.build', 'build.tab.trade', 'build.item.market'],
+      camera: home,
+      marker: [{ a: 'spot', type: 'market', near: home, within: 10 }],
+      done: { k: 'building', type: 'market', state: 'any', ...atHome },
+    },
+    {
+      id: 'ranch',
+      text: 'tut.trade.ranch',
+      more: 'tut.trade.ranch.more',
+      params: { building: { building: 'donkeyranch' } },
+      ui: ['menu.build', 'build.tab.trade', 'build.item.donkeyranch'],
+      marker: [{ a: 'spot', type: 'donkeyranch', near: home, within: 12 }],
+      done: { k: 'building', type: 'donkeyranch', state: 'any' },
+    },
+    {
+      id: 'postMarket',
+      text: 'tut.trade.postMarket',
+      more: 'tut.trade.postMarket.more',
+      params: { building: { building: 'market' } },
+      ui: ['menu.build', 'build.tab.trade', 'build.item.market'],
+      camera: outpost,
+      marker: [{ a: 'spot', type: 'market', near: outpost, within: 8 }],
+      done: { k: 'building', type: 'market', state: 'any', ...atPost },
+    },
+    {
+      id: 'wait',
+      text: 'tut.trade.wait',
+      more: 'tut.trade.wait.more',
+      params: { market: { building: 'market' }, ranch: { building: 'donkeyranch' } },
+      hint: { text: 'tut.trade.wait.hint', after: 120 },
+      ui: ['speed.2'],
+      camera: home,
+      marker: [marketByHome],
+      done: { k: 'all', of: [{ k: 'building', type: 'market', ...atHome }, { k: 'building', type: 'donkeyranch' }] },
+    },
+    {
+      id: 'route',
+      text: 'tut.trade.route',
+      more: 'tut.trade.route.more',
+      params: { plank: { res: 'plank' }, stone: { res: 'stone' }, list: { label: 'trade.notCarried' } },
+      hint: { text: 'tut.trade.route.hint', after: 60 },
+      ui: ['trade.route', 'trade.goods.plank', 'trade.goods.stone'],
+      marker: [marketByHome],
+      done: {
+        k: 'all',
+        of: [
+          { k: 'setting', is: { s: 'tradeRoute', res: 'plank', ...atHome } },
+          { k: 'setting', is: { s: 'tradeRoute', res: 'stone', ...atHome } },
+        ],
+      },
+    },
+    {
+      id: 'built',
+      text: 'tut.trade.built',
+      more: 'tut.trade.built.more',
+      params: { building: { building: 'stonecutter' }, market: { building: 'market' } },
+      hint: { text: 'tut.trade.built.hint', after: 120 },
+      ui: ['speed.4'],
+      camera: outpost,
+      marker: [outpost],
+      done: { k: 'all', of: [{ k: 'building', type: 'stonecutter', ...atPost }, { k: 'building', type: 'market', ...atPost }] },
+    },
+    {
+      id: 'stop',
+      text: 'tut.trade.stop',
+      more: 'tut.trade.stop.more',
+      params: { plank: { res: 'plank' }, stone: { res: 'stone' }, list: { label: 'trade.carried' } },
+      camera: home,
+      marker: [marketByHome],
+      done: {
+        k: 'all',
+        of: [
+          { k: 'setting', is: { s: 'tradeRoute', res: 'plank', ...atHome, off: true } },
+          { k: 'setting', is: { s: 'tradeRoute', res: 'stone', ...atHome, off: true } },
+        ],
+      },
+    },
+    {
+      id: 'back',
+      text: 'tut.trade.back',
+      more: 'tut.trade.back.more',
+      params: { res: { res: 'stone' }, list: { label: 'trade.notCarried' } },
+      hint: { text: 'tut.trade.back.hint', after: 60 },
+      // Only the route: the home market's window, if still open, would light its own stone.
+      ui: ['trade.route'],
+      camera: outpost,
+      marker: [marketByPost],
+      done: { k: 'setting', is: { s: 'tradeRoute', res: 'stone', ...atPost } },
+    },
+    {
+      id: 'stone',
+      text: 'tut.trade.stone',
+      more: 'tut.trade.stone.more',
+      params: { n: { n: 6 }, res: { res: 'stone' }, carried: { label: 'trade.carried' } },
+      hint: { text: 'tut.trade.stone.hint', after: 120 },
+      ui: ['speed.4'],
+      done: { k: 'received', res: 'stone', min: 6, ...atHome },
+    },
+  ],
+};
+
+const enemyHome: Anchor = { a: 'enemyHome' };
+/** Towards the rival: a point this far along the line from home to his start. */
+const toward = (t: number): Anchor => ({ a: 'between', from: home, to: enemyHome, t });
+const bigtower: Anchor = { a: 'building', type: 'bigtower', owner: 'me' };
+/** Where the squad gathers: open ground on the way, inside the big tower's land. */
+const rally: Anchor = { a: 'nearest', terrain: 'meadow', from: toward(0.33) };
+/** The rival's nearest tower the player has seen (none before scouting). */
+const enemyTower: Anchor = { a: 'building', type: 'tower', owner: 'enemy' };
+
+/**
+ * Mission 6: the big tower and its garrison, the barracks and recruit orders by level, selecting and
+ * ordering fighters, control groups, scouting, attack and capture, the healer, victory over a
+ * passive rival (Settlers 4's eighth tutorial: its computer player switched off).
+ */
+const battle: MissionDef = {
+  id: 'battle',
+  title: 'tut.battle.title',
+  summary: 'tut.battle.summary',
+  debrief: 'tut.battle.debrief',
+  // The rival is not in `ai`: he builds nothing, his fighters stand by his towers. He starts poorer.
+  world: { seed: 7, size: 96, players: 2, start: 'medium', starts: ['medium', 'low'], fog: true },
+  scenario: [
+    { player: 1, piles: [['sword', 8], ['bow', 6], ['gold', 8]] },
+    // A second tower out on its own towards the player, held by one swordsman.
+    { player: 2, buildings: [{ type: 'tower', near: { dx: 14, dy: 14 }, founding: true, garrison: 1, tag: 'front' }] },
+  ],
+  unlock: { buildings: ['tower', 'bigtower', 'barracks', 'lookout', 'infirmary'], menus: ['army'] },
+  // As in Settlers 4's eighth tutorial: weapons and gold never run out.
+  refill: [
+    { res: 'sword', below: 4, to: 6 },
+    { res: 'bow', below: 4, to: 6 },
+    { res: 'gold', below: 4, to: 6 },
+  ],
+  minutes: 15,
+  objectives: [
+    { text: 'tut.battle.goal.1', done: { k: 'garrison', type: 'bigtower', min: 3 }, params: { building: { building: 'bigtower' } } },
+    { text: 'tut.battle.goal.2', done: { k: 'units', kind: 'fighter', min: 8, relative: true }, params: { n: { n: 8 } } },
+    { text: 'tut.battle.goal.3', done: { k: 'captured', min: 1 } },
+    { text: 'tut.battle.goal.4', done: { k: 'outcome', is: 'won' } },
+  ],
+  steps: [
+    {
+      id: 'bigtower',
+      text: 'tut.battle.bigtower',
+      more: 'tut.battle.bigtower.more',
+      params: { building: { building: 'bigtower' }, tab: { label: 'category.military' } },
+      hint: { text: 'tut.battle.bigtower.hint', after: 60 },
+      ui: ['menu.build', 'build.tab.military', 'build.item.bigtower'],
+      camera: toward(0.2),
+      marker: [{ a: 'spot', type: 'bigtower', near: toward(0.22), prefer: 'border', within: 10 }],
+      done: { k: 'building', type: 'bigtower', state: 'any' },
+    },
+    {
+      id: 'wait',
+      text: 'tut.battle.wait',
+      more: 'tut.battle.wait.more',
+      params: { building: { building: 'bigtower' } },
+      ui: ['speed.2'],
+      marker: [bigtower],
+      done: { k: 'building', type: 'bigtower' },
+    },
+    {
+      id: 'fill',
+      text: 'tut.battle.fill',
+      more: 'tut.battle.fill.more',
+      params: { building: { building: 'bigtower' }, button: { label: 'army.fill' } },
+      hint: { text: 'tut.battle.fill.hint', after: 60 },
+      ui: ['garrison.fill'],
+      marker: [bigtower],
+      done: { k: 'garrison', type: 'bigtower', min: 3 },
+    },
+    {
+      id: 'barracks',
+      text: 'tut.battle.barracks',
+      more: 'tut.battle.barracks.more',
+      params: { building: { building: 'barracks' }, sword: { res: 'sword' }, bow: { res: 'bow' }, gold: { res: 'gold' } },
+      ui: ['menu.build', 'build.tab.military', 'build.item.barracks'],
+      camera: home,
+      marker: [{ a: 'spot', type: 'barracks', near: home, within: 10 }],
+      done: { k: 'building', type: 'barracks', state: 'any' },
+    },
+    {
+      id: 'orders',
+      text: 'tut.battle.orders',
+      more: 'tut.battle.orders.more',
+      params: { menu: { label: 'hud.menu.army' } },
+      hint: { text: 'tut.battle.orders.hint', after: 60 },
+      // The menu first: open, it is passed over; each row's button counts as used once the row holds an order.
+      ui: ['menu.army', 'recruit.soldier.1.plus5', 'recruit.archer.1.plus5', 'recruit.soldier.2.plus1'],
+      done: {
+        k: 'all',
+        of: [
+          { k: 'setting', is: { s: 'recruitOrder', kind: 'soldier', level: 1, min: 5 } },
+          { k: 'setting', is: { s: 'recruitOrder', kind: 'archer', level: 1, min: 5 } },
+          { k: 'setting', is: { s: 'recruitOrder', kind: 'soldier', level: 2, min: 1 } },
+        ],
+      },
+    },
+    {
+      id: 'recruits',
+      text: 'tut.battle.recruits',
+      more: 'tut.battle.recruits.more',
+      params: { n: { n: 8 }, building: { building: 'barracks' } },
+      hint: { text: 'tut.battle.recruits.hint', after: 120 },
+      ui: ['speed.4'],
+      marker: [{ a: 'building', type: 'barracks', owner: 'me' }],
+      done: { k: 'units', kind: 'fighter', min: 8, relative: true },
+    },
+    {
+      id: 'select',
+      text: 'tut.battle.select',
+      more: 'tut.battle.select.more',
+      params: { n: { n: 5 }, alt: { key: 'alt' }, shift: { key: 'shift' }, ctrl: { key: 'ctrl' } },
+      hint: { text: 'tut.battle.select.hint', after: 60 },
+      marker: [{ a: 'building', type: 'barracks', owner: 'me' }],
+      done: { k: 'ui', is: { u: 'selectedUnits', min: 5 } },
+    },
+    {
+      id: 'move',
+      text: 'tut.battle.move',
+      more: 'tut.battle.move.more',
+      params: { n: { n: 5 } },
+      hint: { text: 'tut.battle.move.hint', after: 90 },
+      camera: rally,
+      marker: [rally],
+      done: { k: 'units', kind: 'fighter', min: 5, near: rally, r: 4 },
+    },
+    {
+      id: 'group',
+      text: 'tut.battle.group',
+      more: 'tut.battle.group.more',
+      params: { ctrl: { key: 'ctrl' } },
+      done: { k: 'ui', is: { u: 'group', n: 1 } },
+    },
+    {
+      id: 'scout',
+      text: 'tut.battle.scout',
+      more: 'tut.battle.scout.more',
+      params: { building: { building: 'lookout' }, menu: { label: 'hud.menu.settlers' } },
+      hint: { text: 'tut.battle.scout.hint', after: 90 },
+      ui: ['menu.build', 'build.tab.military', 'build.item.lookout'],
+      marker: [{ a: 'spot', type: 'lookout', near: toward(0.42), prefer: 'border', within: 10 }],
+      done: { k: 'explored', at: enemyTower },
+    },
+    {
+      id: 'attack',
+      text: 'tut.battle.attack',
+      more: 'tut.battle.attack.more',
+      hint: { text: 'tut.battle.attack.hint', after: 120 },
+      camera: enemyTower,
+      marker: [enemyTower],
+      done: { k: 'captured', min: 1 },
+    },
+    {
+      id: 'infirmary',
+      text: 'tut.battle.infirmary',
+      more: 'tut.battle.infirmary.more',
+      params: { building: { building: 'infirmary' } },
+      ui: ['menu.build', 'build.tab.military', 'build.item.infirmary'],
+      marker: [{ a: 'spot', type: 'infirmary', near: rally, within: 10 }],
+      done: { k: 'building', type: 'infirmary', state: 'any' },
+    },
+    {
+      id: 'victory',
+      text: 'tut.battle.victory',
+      more: 'tut.battle.victory.more',
+      hint: { text: 'tut.battle.victory.hint', after: 150 },
+      camera: enemyHome,
+      marker: [enemyHome],
+      done: { k: 'outcome', is: 'won' },
+    },
+  ],
+};
 
 export const MISSIONS: readonly MissionDef[] = [
   forest,
   logistics,
   bread,
   metal,
-  later('trade', { buildings: ['market', 'donkeyranch'], commands: ['pioneer', 'thief'] }, 15),
-  later('battle', { buildings: ['tower', 'bigtower', 'barracks', 'lookout', 'infirmary'], menus: ['army'] }, 15),
+  trade,
+  battle,
 ];
 
 export const missionById = (id: string | null): MissionDef | undefined => MISSIONS.find((m) => m.id === id);

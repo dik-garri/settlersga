@@ -63,6 +63,9 @@ export class SettlersView implements View {
     for (const [type, b] of this.commandButtons) {
       b.classList.toggle('active', this.state.placing === type);
       b.classList.toggle('locked', !commandOpen(this.state.locks, type as 'geologist'));
+      // The tutorial's mark counts as used while one of them is out on an errand.
+      const out = this.world.settlers.some((s) => s.owner === LOCAL_PLAYER && s.kind === type && !!s.errand);
+      if (out !== (b.dataset.uiOn === '1')) tag(b, `settlers.cmd.${type as 'geologist'}`, out);
     }
     let people = 0;
     let carriers = 0;

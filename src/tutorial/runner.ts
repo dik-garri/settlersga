@@ -32,6 +32,8 @@ export interface MissionProgress {
   goals: boolean[];
   /** Fixed anchors resolved so far (`anchors.ts`). */
   anchors: Record<string, Point | null>;
+  /** The scenario's building names (`World.tags`, which the world does not save); absent in old saves. */
+  tags?: Record<string, number>;
   start: Snapshot;
   stepStart: Snapshot;
   stepUi: { camera: Point; zoom: number; jumps: number };
@@ -64,6 +66,7 @@ export function missionWorld(def: MissionDef): World {
     players: def.world.players,
     ai: def.world.ai ?? [],
     start: def.world.start,
+    starts: def.world.starts,
     scenario: def.scenario,
   };
   return new World(def.world.seed, opts);
@@ -93,6 +96,7 @@ export function anchorsOf(def: MissionDef): Anchor[] {
   const cond = (c: Condition): void => {
     if ('near' in c && c.near) out.push(c.near);
     if ('at' in c && c.at) out.push(c.at);
+    if (c.k === 'setting' && 'near' in c.is && c.is.near) out.push(c.is.near);
     if (c.k === 'all' || c.k === 'any') c.of.forEach(cond);
   };
   for (const s of def.steps) {
@@ -130,6 +134,7 @@ export class TutorialRunner {
       hint: false,
       goals: def.objectives.map(() => false),
       anchors: {},
+      tags: Object.fromEntries(world.tags),
       start,
       stepStart: start,
       stepUi: { camera: { ...ui.camera }, zoom: ui.zoom, jumps: ui.jumps },
@@ -167,7 +172,7 @@ export class TutorialRunner {
       world,
       player: this.p.player,
       ui,
-      anchor: anchorResolver(world, this.p.player, this.p.anchors),
+      anchor: anchorResolver(world, this.p.player, this.p.anchors, this.p.tags),
       start: this.p.start,
       step: this.p.stepStart,
       stepUi: this.p.stepUi,
@@ -185,7 +190,7 @@ export class TutorialRunner {
     const step = this.current;
     if (!step) return;
     for (const g of step.grant ?? []) world.grant(g.res, g.n, this.p.player);
-    const resolve = anchorResolver(world, this.p.player, this.p.anchors);
+    const resolve = anchorResolver(world, this.p.player, this.p.anchors, this.p.tags);
     this.camera = step.camera ? resolve(step.camera) : null;
   }
 
@@ -239,7 +244,7 @@ export class TutorialRunner {
   show(world: World): Point | null {
     const step = this.current;
     if (!step) return null;
-    const resolve = anchorResolver(world, this.p.player, this.p.anchors);
+    const resolve = anchorResolver(world, this.p.player, this.p.anchors, this.p.tags);
     const at = step.camera ?? step.marker?.[0] ?? step.ring?.at;
     return at ? resolve(at) : null;
   }
@@ -253,7 +258,7 @@ export class TutorialRunner {
 
   model(world: World): TutorialModel {
     const step = this.current;
-    const resolve = anchorResolver(world, this.p.player, this.p.anchors);
+    const resolve = anchorResolver(world, this.p.player, this.p.anchors, this.p.tags);
     const marks: GuideMark[] = [];
     if (step && !this.p.finished) {
       for (const a of step.marker ?? []) {

@@ -8,6 +8,7 @@ import { button, el } from './dom';
 import { goodsLists } from './goodsLists';
 import { t } from './i18n';
 import { profName, resName } from './names';
+import { tag } from './uiTarget';
 
 /**
  * Trade in the building window, as in Settlers 4: a marketplace's route (the destination market and
@@ -17,9 +18,12 @@ import { profName, resName } from './names';
 
 const nameOf = (r: Resource) => resName(r);
 
-/** The player's finished markets other than `b`. */
+/**
+ * The player's markets other than `b`, sites too: donkeys bring a market site what it still lacks
+ * (`unloadTick`), so a market on cut-off land can be built at all.
+ */
 function otherMarkets(world: World, b: Building): Building[] {
-  return [...world.buildings.values()].filter((m) => m.id !== b.id && m.owner === b.owner && m.done && BUILDINGS[m.type].market);
+  return [...world.buildings.values()].filter((m) => m.id !== b.id && m.owner === b.owner && BUILDINGS[m.type].market);
 }
 
 /** The player's donkeys: all of them and those standing idle. */
@@ -81,7 +85,7 @@ export function tradeRows(world: World, b: Building): [string, string][] {
 /** A string that changes whenever the market controls must be redrawn. */
 export function tradeKey(world: World, b: Building): string {
   if (!BUILDINGS[b.type].market) return '';
-  return JSON.stringify([b.trade?.to ?? null, b.trade?.orders ?? {}, otherMarkets(world, b).map((m) => m.id)]);
+  return JSON.stringify([b.trade?.to ?? null, b.trade?.orders ?? {}, otherMarkets(world, b).map((m) => [m.id, m.done])]);
 }
 
 /**
@@ -98,14 +102,15 @@ export function tradeControls(world: World, b: Building): HTMLElement | null {
   const to = b.trade?.to ?? null;
   const routes = el('div', 'info-actions');
   for (const m of markets) {
-    routes.append(
-      button(
-        t('trade.toMarket', { market: marketName(world, m), n: tilesBetween(b, m) }),
-        t('trade.toMarketTip'),
-        () => world.setTradeRoute(b.id, m.id),
-        m.id === to ? 'active' : '',
-      ),
+    const label = t('trade.toMarket', { market: marketName(world, m), n: tilesBetween(b, m) });
+    const go = button(
+      m.done ? label : `${label} ${t('trade.site')}`,
+      m.done ? t('trade.toMarketTip') : t('trade.toSiteTip'),
+      () => world.setTradeRoute(b.id, m.id),
+      m.id === to ? 'active' : '',
     );
+    // The tutorial's mark: any destination, until a route is chosen.
+    routes.append(tag(go, 'trade.route', to !== null));
   }
   if (to !== null) routes.append(button('✕', t('trade.clearRoute'), () => world.setTradeRoute(b.id, null)));
   box.append(routes);
@@ -123,6 +128,7 @@ export function tradeControls(world: World, b: Building): HTMLElement | null {
       noneTip: t('trade.noneTip'),
       allTip: t('trade.allTip'),
       nameOf,
+      tagOut: (r) => `trade.goods.${r}`,
       // The rest of a finite order (the AI places those) in the corner; units waiting on the market.
       corner: (r) => {
         const order = b.trade?.orders[r];

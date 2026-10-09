@@ -16,6 +16,9 @@ import { launchOf } from '../src/ui/setup';
 import { placeFinished } from '../src/sim/scenario';
 import { depot } from './helpers';
 
+/** The player's start tower's door. */
+const home0 = (w: World): Point => w.homeOf(1);
+
 const ui = (): UiProbe => ({ menu: 'build', selected: null, selectedUnits: 0, groups: [], camera: { x: 32, y: 32 }, zoom: 1, placing: null, speed: 1, paused: false, jumps: 0 });
 
 function probe(w: World, over: Partial<Probe> = {}): Probe {
@@ -60,6 +63,9 @@ describe('conditions', () => {
     mine.attempts = 10;
     const ci = w.map.idx(Math.round(coal.x), Math.round(coal.y));
     w.map.prospected[ci] |= 1;
+    // A market donkeys have brought 5 stone to.
+    const market = placeFinished(w, 'market', 1, home0(w).x + 4, home0(w).y + 4)!;
+    market.received = { stone: 5 };
     const yes = probe(w, { acked: true, ui: { ...ui(), camera: { x: 45, y: 32 }, zoom: 1.5, menu: 'goods', selected: store.id, selectedUnits: 3, groups: [0, 2], placing: 'sawmill', speed: 2, jumps: 1 } });
     const no = probe(w);
     const home = w.homeOf(1);
@@ -81,6 +87,10 @@ describe('conditions', () => {
         [{ k: 'prospected', at: { a: 'guarantee', mountain: 0, lobe: 0 }, r: 1, min: 1, ore: 'coal' }, yes],
       ],
       claimed: [[{ k: 'claimed', min: 0 }, yes]],
+      received: [
+        [{ k: 'received', res: 'stone', min: 5 }, yes],
+        [{ k: 'received', res: 'stone', min: 5, near: { a: 'home' }, r: 12 }, yes],
+      ],
       captured: [[{ k: 'captured', min: 0 }, yes]],
       outcome: [[{ k: 'outcome', is: 'playing' as 'won' }, yes]],
       all: [[{ k: 'all', of: [{ k: 'ack' }, { k: 'after', s: 0 }] }, yes]],
@@ -101,6 +111,7 @@ describe('conditions', () => {
       explored: { k: 'explored', at: { a: 'offset', from: { a: 'home' }, dx: -40, dy: -40 } },
       prospected: { k: 'prospected', at: { a: 'home' }, r: 2, min: 1 },
       claimed: { k: 'claimed', min: 1 },
+      received: { k: 'received', res: 'stone', min: 6 },
       captured: { k: 'captured', min: 1 },
       outcome: { k: 'outcome', is: 'won' },
       all: { k: 'all', of: [{ k: 'ack' }, { k: 'claimed', min: 99 }] },
@@ -111,6 +122,8 @@ describe('conditions', () => {
       for (const [c, p] of examples[kind]) expect(check(c, p), `${kind} yes`).toBe(true);
       expect(check(counter[kind], no), `${kind} no`).toBe(false);
     }
+    // Only markets near the point count.
+    expect(check({ k: 'received', res: 'stone', min: 1, near: { a: 'offset', from: { a: 'home' }, dx: -20, dy: -20 }, r: 5 }, yes)).toBe(false);
     // Only tiles found holding that ore count.
     expect(check({ k: 'prospected', at: { a: 'guarantee', mountain: 0, lobe: 0 }, r: 1, min: 1, ore: 'goldore' }, yes)).toBe(false);
     expect(home).toBeTruthy();
@@ -131,6 +144,11 @@ describe('conditions', () => {
       toolOrder: [{ k: 'setting', is: { s: 'toolOrder', res: 'axe', min: 2 } }, { k: 'setting', is: { s: 'toolOrder', res: 'saw', min: 1 } }, () => w.orderTool('axe', 2)],
       distribution: [{ k: 'setting', is: { s: 'distribution', res: 'bread' } }, { k: 'setting', is: { s: 'distribution', res: 'fish' } }, () => w.setDistribution('bread', 'coalmine', 50)],
       tradeRoute: [{ k: 'setting', is: { s: 'tradeRoute', res: 'plank' } }, { k: 'setting', is: { s: 'tradeRoute', res: 'plank' } }, () => {}],
+      recruitOrder: [
+        { k: 'setting', is: { s: 'recruitOrder', kind: 'soldier', level: 2, min: 2 } },
+        { k: 'setting', is: { s: 'recruitOrder', kind: 'soldier', level: 1, min: 1 } },
+        () => w.orderRecruits('soldier', 1, 2),
+      ],
     };
     expect(Object.keys(settings).sort()).toEqual([...SETTING_KINDS].sort());
     // «No» before the player did anything.
@@ -138,7 +156,7 @@ describe('conditions', () => {
     for (const kind of SETTING_KINDS) settings[kind][2]();
     w.setCarrierReserve(9);
     const yes = probe(w);
-    for (const kind of ['accepts', 'priority', 'stopped', 'transportTop', 'reserve', 'toolOrder', 'distribution']) {
+    for (const kind of ['accepts', 'priority', 'stopped', 'transportTop', 'reserve', 'toolOrder', 'distribution', 'recruitOrder']) {
       expect(check(settings[kind][0], yes), `${kind} yes`).toBe(true);
     }
     // A moved work area and a trade route need buildings of their own.
@@ -147,6 +165,19 @@ describe('conditions', () => {
     hut!.done = true;
     w.setWorkArea(hut!.id, { x: hut!.door.x + 1, y: hut!.door.y });
     expect(check(settings.workAt[0], probe(w))).toBe(true);
+    // A route with planks from a market near home; «off» holds where no market there orders the good.
+    const here = placeFinished(w, 'market', 1, sawmill.x + 3, sawmill.y - 4)!;
+    const there = placeFinished(w, 'market', 1, sawmill.x - 4, sawmill.y + 3)!;
+    const hc = anchorResolver(w, 1, {})({ a: 'home' })!;
+    const nearHere: Anchor = { a: 'offset', from: { a: 'home' }, dx: here.door.x - hc.x, dy: here.door.y - hc.y };
+    const off: Condition = { k: 'setting', is: { s: 'tradeRoute', res: 'plank', near: nearHere, r: 1, off: true } };
+    expect(check(off, probe(w))).toBe(true);
+    w.setTradeRoute(here.id, there.id);
+    w.orderTrade(here.id, 'plank', 3);
+    expect(check(settings.tradeRoute[0], probe(w))).toBe(true);
+    expect(check({ k: 'setting', is: { s: 'tradeRoute', res: 'plank', near: nearHere, r: 1 } }, probe(w))).toBe(true);
+    expect(check(off, probe(w))).toBe(false);
+    expect(check({ k: 'setting', is: { s: 'tradeRoute', res: 'stone' } }, probe(w))).toBe(false);
 
     const uiChecks: Record<string, [Condition, Partial<UiProbe>]> = {
       cameraMoved: [{ k: 'ui', is: { u: 'cameraMoved', tiles: 8 } }, { camera: { x: 45, y: 32 } }],
@@ -179,6 +210,7 @@ describe('anchors', () => {
     { a: 'nearest', terrain: 'water', from: { a: 'home' } },
     { a: 'nearest', terrain: 'meadow', from: { a: 'home' } },
     { a: 'nearest', terrain: 'forest', from: { a: 'home' } },
+    { a: 'nearest', terrain: 'border', from: { a: 'guarantee', mountain: 1 } },
     { a: 'spot', type: 'woodcutter', near: { a: 'guarantee', grove: true }, prefer: 'forest' },
     { a: 'spot', type: 'sawmill', near: { a: 'home' } },
     { a: 'spot', type: 'house_small', near: { a: 'home' }, prefer: 'meadow' },
@@ -199,6 +231,10 @@ describe('anchors', () => {
       }
       const water = resolve({ a: 'nearest', terrain: 'water', from: { a: 'home' } })!;
       expect(w.map.isWalkable(water.x, water.y)).toBe(false);
+      // Open land a pioneer can claim: nobody's, beside the player's own.
+      const border = resolve({ a: 'nearest', terrain: 'border', from: { a: 'guarantee', mountain: 1 } })!;
+      expect(w.map.owner[w.map.idx(border.x, border.y)]).toBe(0);
+      expect([[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => w.owns(border.x + dx, border.y + dy, 1))).toBe(true);
     }
   });
 
@@ -216,6 +252,14 @@ describe('anchors', () => {
     depot(w);
     expect(resolve(wh)).not.toBeNull();
     expect(resolve({ a: 'pile', res: 'plank', near: { a: 'home' } })).not.toBeNull();
+    // The own building nearest a point, rather than the newest.
+    const second = placeFinished(w, 'warehouse', 1, w.homeOf(1).x + 6, w.homeOf(1).y - 6)!;
+    const first = [...w.buildings.values()].find((b) => b.type === 'warehouse' && b.id !== second.id)!;
+    const at = (b: { x: number; y: number; w: number; h: number }) => ({ x: b.x + (b.w - 1) / 2, y: b.y + (b.h - 1) / 2 });
+    expect(resolve(wh)).toEqual(at(second));
+    const hc = resolve({ a: 'home' })!;
+    const nearFirst: Anchor = { a: 'offset', from: { a: 'home' }, dx: first.door.x - hc.x, dy: first.door.y - hc.y };
+    expect(resolve({ ...wh, near: nearFirst } as Anchor)).toEqual(at(first));
     // An enemy's building exists for the anchor only once its door is explored (the fog rule).
     expect(resolve({ a: 'building', type: 'tower', owner: 'enemy' })).toBeNull();
   });
