@@ -39,6 +39,9 @@ import {
   PATH_FRAME,
   PILE,
   PILE_MAX,
+  SIGN_LEVELS,
+  SIGN_VARIANTS,
+  signFrame,
   type Art3d,
 } from './art3d';
 import { addAnimalSprites } from './animals';
@@ -216,8 +219,14 @@ export class SpriteAtlas {
     }
     for (let v = 0; v < 4; v++) a.add(`tree:${v}`, 48, 80, 24, 72, (ctx) => paintTree(ctx, v));
     for (let v = 0; v < 2; v++) a.add(`boulder:${v}`, 52, 40, 26, 30, (ctx) => paintBoulder(ctx, v));
-    for (let code = 0; code <= ORE_RESOURCES.length; code++) {
-      a.add(`sign:${code}`, 18, 30, 6, 28, (ctx) => paintSign(ctx, oreOf(code)));
+    // Geologist's signs: `sign:<variant>:<ore code>:<symbols>` (code 0, level 0: the empty board).
+    for (let v = 0; v < SIGN_VARIANTS; v++) {
+      a.add(`sign:${v}:0:0`, 22, 26, 9, 22, (ctx) => paintSign(ctx, null, 0, v));
+      for (let code = 1; code <= ORE_RESOURCES.length; code++) {
+        for (let level = 1; level <= SIGN_LEVELS; level++) {
+          a.add(`sign:${v}:${code}:${level}`, 22, 26, 9, 22, (ctx) => paintSign(ctx, oreOf(code), level, v));
+        }
+      }
     }
     for (let v = 1; v <= 4; v++) {
       a.add(`field:grain:${v}`, 66, 40, 33, 24, (ctx) => paintField(ctx, v));
@@ -607,4 +616,19 @@ function addArt3d(a: AtlasBuilder, art: Art3d): void {
     for (let v = 0; v < paths!.variants; v++) a.add(`path:${level}:${v}`, f.w, f.h, f.ax, f.ay, (ctx) => drawFrame(ctx, strip, v, f.w, f.h));
   }
   for (let v = 0; v < 3; v++) one(`deposit:${v}`, `deposit${v}`);
+  // Geologist's signs, over the classic ones (same keys).
+  const signs = art.signs;
+  const sheet = art.images.get('signs');
+  if (signs && sheet) {
+    const [w, h, ax, ay] = signs.frame;
+    for (let v = 0; v < Math.min(SIGN_VARIANTS, signs.variants); v++) {
+      for (let code = 0; code <= ORE_RESOURCES.length; code++) {
+        const ore = oreOf(code);
+        for (let level = ore ? 1 : 0; level <= (ore ? SIGN_LEVELS : 0); level++) {
+          const k = signFrame(signs, v, ore, level);
+          a.add(`sign:${v}:${code}:${level}`, w, h, ax, ay, (ctx) => drawFrame(ctx, sheet, k, w, h));
+        }
+      }
+    }
+  }
 }

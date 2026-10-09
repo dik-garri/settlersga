@@ -29,6 +29,9 @@ const MAP_LAYERS = [
   'height',
 ] as const;
 type MapLayer = (typeof MAP_LAYERS)[number];
+/** Layers added later: saved always, loaded when present (older saves simply have none). */
+const LATER_LAYERS = ['signAt', 'signBy'] as const;
+type LaterLayer = (typeof LATER_LAYERS)[number];
 
 /** Plain-JSON snapshot of the whole simulation. */
 export interface SaveData {
@@ -39,7 +42,7 @@ export interface SaveData {
   territoryVersion: number;
   stats: World['stats'];
   players: Player[];
-  map: { w: number; h: number } & Record<MapLayer, string>;
+  map: { w: number; h: number } & Record<MapLayer, string> & Partial<Record<LaterLayer, string>>;
   buildings: Building[];
   settlers: Settler[];
   reservedTargets: number[];
@@ -70,7 +73,7 @@ function decodeInto(text: string, target: Uint8Array | Int32Array): void {
 
 export function saveWorld(w: World): SaveData {
   const map = { w: w.map.w, h: w.map.h } as SaveData['map'];
-  for (const layer of MAP_LAYERS) map[layer] = encode(w.map[layer]);
+  for (const layer of [...MAP_LAYERS, ...LATER_LAYERS]) map[layer] = encode(w.map[layer]);
   return structuredClone({
     version: SAVE_VERSION,
     tick: w.tick,
@@ -100,6 +103,10 @@ export function mapFromSave(data: SaveData): GameMap {
   }
   const map = new GameMap(data.map.w, data.map.h);
   for (const layer of MAP_LAYERS) decodeInto(data.map[layer], map[layer]);
+  for (const layer of LATER_LAYERS) {
+    const text = data.map[layer];
+    if (text !== undefined) decodeInto(text, map[layer]);
+  }
   return map;
 }
 

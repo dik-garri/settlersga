@@ -1,5 +1,5 @@
 import { nearestStorage } from './buildings';
-import { FIELD, GEOLOGIST, ORDERABLE, PIONEER, PROFESSIONS, THIEF } from './config';
+import { FIELD, GEOLOGIST, GEOLOGIST_SIGN, ORDERABLE, PIONEER, PROFESSIONS, THIEF } from './config';
 import { recountWorkers, workerOrder, workersOf } from './economy';
 import { restIdle } from './idle';
 import { formationSpots } from './field';
@@ -7,6 +7,7 @@ import { freeGoods, goodsOn, reserveGoods, stackTiles } from './ground';
 import { sameRegion } from './regions';
 import { abort, carryBack } from './settlers';
 import { RESOURCES, Terrain, type Building, type PlayerId, type Point, type Resource, type Settler, type SettlerKind, type Task } from './types';
+import type { GameMap } from './map';
 import type { World } from './world';
 
 /**
@@ -26,8 +27,10 @@ import type { World } from './world';
  * claimed tiles to their claimant wherever no military building claims them, so land a tower or castle
  * claims always wins, and the claim comes back if that building goes. Pioneers never claim owned land.
  *
- * Geologist: leaves a sign (`map.prospected`, per player) on every unexamined walkable mountain tile
- * (`prospectable`), his owner's, neutral or foreign, one per `prospect` task — the whole ridge.
+ * Geologist: puts up a sign (`map.signAt`/`signBy`; what his owner learns goes to `map.prospected`,
+ * per player, for good) on every walkable mountain tile without a sign of his owner's (`prospectable`),
+ * his owner's land, neutral or foreign, one per `prospect` task — the whole ridge. Signs come down
+ * after `GEOLOGIST_SIGN`'s lifetime (`signEnds`), and the tile may then be examined again.
  *
  * Thief: `sendThief` points him at a foreign, explored building with goods at its door (or in stock);
  * he walks there unnoticed, takes one unit of its most plentiful good in `THIEF.stealTicks` and carries
@@ -50,7 +53,28 @@ export function claimable(w: World, x: number, y: number, _player: PlayerId): bo
 export function prospectable(w: World, x: number, y: number, player: PlayerId): boolean {
   const m = w.map;
   if (!m.inBounds(x, y)) return false;
-  return m.terrain[m.idx(x, y)] === Terrain.Mountain && m.isWalkable(x, y) && !w.isProspected(x, y, player);
+  return m.terrain[m.idx(x, y)] === Terrain.Mountain && m.isWalkable(x, y) && !hasSign(w, m.idx(x, y), player);
+}
+
+/** Tick at which the sign on tile `i` comes down (`GEOLOGIST_SIGN`), 0 if none was ever put up there. */
+export function signEnds(m: GameMap, i: number): number {
+  const at = m.signAt[i];
+  if (at === 0) return 0;
+  let h = Math.imul(i ^ 0x2c1b3c6d, 0x27d4eb2d);
+  h ^= h >>> 15;
+  return at - 1 + GEOLOGIST_SIGN.lifetime + ((h >>> 0) % (GEOLOGIST_SIGN.spread + 1));
+}
+
+/** Whether a sign of `player`'s geologists stands on tile `i`. */
+export function hasSign(w: World, i: number, player: PlayerId): boolean {
+  return w.map.signBy[i] === player && w.tick < signEnds(w.map, i);
+}
+
+/** Symbols on a sign for `amount` units of ore under the tile: 1 (a little), 2 or 3 (a lot); 0 for none. */
+export function signLevel(amount: number): number {
+  if (amount <= 0) return 0;
+  const [some, lots] = GEOLOGIST_SIGN.levels;
+  return amount < some ? 1 : amount < lots ? 2 : 3;
 }
 
 // ---------------------------------------------------------------- the search (S4 SearchPosition)
@@ -512,7 +536,10 @@ export function geologistIdle(w: World, s: Settler): void {
   const e = s.errand;
   if (e) {
     const taken = takenBy(w, s, 'prospect');
-    const t = nextTile(w, s, e, GEOLOGIST, (i, x, y) => !taken.has(i) && prospectable(w, x, y, s.owner));
+    const since = (e.since ??= w.tick);
+    // Never twice in one errand, even where a sign of his has come down meanwhile (on a long ridge).
+    const again = (i: number) => w.map.signBy[i] === s.owner && w.map.signAt[i] - 1 >= since;
+    const t = nextTile(w, s, e, GEOLOGIST, (i, x, y) => !taken.has(i) && prospectable(w, x, y, s.owner) && !again(i));
     if (t) {
       e.n ??= 0;
       s.tasks = [
@@ -538,9 +565,11 @@ export function prospectTick(w: World, s: Settler, task: Extract<Task, { t: 'pro
   const bit = 1 << (s.owner - 1);
   if (!(w.map.prospected[i] & bit)) {
     w.map.prospected[i] |= bit;
-    w.map.touch(i);
     w.stats.prospected++;
   }
+  w.map.signAt[i] = w.tick + 1;
+  w.map.signBy[i] = s.owner;
+  w.map.touch(i);
   if (s.errand) s.errand.n = (s.errand.n ?? 0) + 1;
   s.tasks.shift();
 }

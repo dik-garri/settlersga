@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildShowcase } from '../src/dev/showcase';
-import { BUILDINGS } from '../src/sim/config';
+import { BUILDINGS, ORE_RESOURCES } from '../src/sim/config';
+import { hasSign, signLevel } from '../src/sim/specialists';
 import { isCutOff } from '../src/sim/land';
 import { pathLevel } from '../src/sim/paths';
 import type { BuildingType } from '../src/sim/types';
@@ -36,6 +37,17 @@ describe('dev showcase (?demo)', () => {
     expect(w.settlers.some((s) => s.kind === 'donkey' && s.tasks.length > 0)).toBe(true);
     expect(w.settlers.some((s) => s.kind === 'donkey' && s.carrying !== null)).toBe(true);
     expect(all.some((b) => b.owner === 1 && isCutOff(w, b))).toBe(true);
+    // A field of geologist's signs: every ore with one, two and three symbols, and bare boards.
+    const signs = new Set<string>();
+    for (let i = 0; i < w.map.signAt.length; i++) {
+      if (!hasSign(w, i, 1)) continue;
+      const level = signLevel(w.map.oreAmount[i]);
+      signs.add(level ? `${w.map.ore[i]}:${level}` : 'none');
+    }
+    for (let code = 1; code <= ORE_RESOURCES.length; code++) {
+      for (let level = 1; level <= 3; level++) expect(signs.has(`${code}:${level}`), `sign ${code}:${level}`).toBe(true);
+    }
+    expect(w.settlers.some((s) => s.kind === 'geologist' && s.errand)).toBe(true);
     // Goods lying on the ground (Settlers 4's piles: start goods, ruins), several kinds of them.
     expect(new Set([...w.stacks].map((i) => w.map.goods[i])).size).toBeGreaterThanOrEqual(4);
     // A field squad stands round its leader (direct army control).

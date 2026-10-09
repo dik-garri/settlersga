@@ -32,6 +32,13 @@ export class GameMap {
   readonly oreAmount: Uint8Array;
   /** Bit (player − 1) set once that player's geologist examined the tile. */
   readonly prospected: Uint8Array;
+  /**
+   * The geologist's sign standing on the tile: tick it was put up + 1 (0 = none) and the player whose
+   * geologist put it up. It comes down after `GEOLOGIST_SIGN`'s lifetime (`signEnds`); `prospected`
+   * keeps what was learnt.
+   */
+  readonly signAt: Int32Array;
+  readonly signBy: Uint8Array;
   /** Bit (player − 1) set once that player has seen the tile (fog of war; see fog.ts). */
   readonly explored: Uint8Array;
   /** Path wear from settlers' steps (`paths.ts`, `PATHS`): dusty path, then road. */
@@ -87,6 +94,8 @@ export class GameMap {
     this.ore = new Uint8Array(n);
     this.oreAmount = new Uint8Array(n);
     this.prospected = new Uint8Array(n);
+    this.signAt = new Int32Array(n);
+    this.signBy = new Uint8Array(n);
     this.explored = new Uint8Array(n);
     this.wear = new Uint8Array(n);
     this.owner = new Uint8Array(n);
@@ -151,7 +160,7 @@ export class GameMap {
 
   /**
    * Records that a tile's visible contents changed, so views only re-scan dirty chunks.
-   * Every runtime write to `tree`, `stone`, `crop`, `prospected`, `goods`/`goodsAmount`, or `oreAmount`
+   * Every runtime write to `tree`, `stone`, `crop`, `prospected`, `signAt`, `goods`/`goodsAmount`, or `oreAmount`
    * reaching 0 must call this.
    */
   touch(i: number): void {

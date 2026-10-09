@@ -1509,33 +1509,78 @@ export const ORE_COLORS: Record<string, string> = {
   stone: '#b8b0a0',
 };
 
-/** Geologist's sign, 18×30 with the post foot at (6, 28). `ore` null = nothing found. */
-export function paintSign(ctx: Ctx, ore: string | null): void {
-  ctx.translate(6, 28);
-  ctx.strokeStyle = '#5e3b1f';
-  ctx.lineWidth = 1.6;
+/**
+ * Geologist's sign, 22×26 with the stake's foot at (9, 22): a warm wooden board on a short stake with
+ * `level` (1–3) painted symbols of `ore` — black lumps of coal, rust-red lumps of iron ore, gold bars,
+ * white stone blocks — or bare (`ore` null). Variant 0: two planks; 1: one board with an arched top.
+ */
+export function paintSign(ctx: Ctx, ore: string | null, level: number, variant: number): void {
+  ctx.translate(9, 22);
+  // Soft shadow towards the lower right, as the sun stands at the upper left.
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
   ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(0, -22);
-  ctx.stroke();
-  ctx.fillStyle = '#d9c39a';
-  ctx.fillRect(-1, -24, 12, 9);
-  ctx.strokeStyle = '#8a6a3c';
+  ctx.ellipse(5, 0.5, 7, 1.8, 0.25, 0, Math.PI * 2);
+  ctx.fill();
+  const lean = variant === 0 ? 0.06 : -0.07;
+  ctx.rotate(lean);
+  ctx.fillStyle = '#4a2c16';
+  ctx.fillRect(-0.9, -12, 1.8, 12);
+  const bx = -8;
+  const by = -17;
+  const bw = 16;
+  const bh = 10;
+  ctx.fillStyle = '#c47a34';
+  ctx.strokeStyle = '#5a3416';
   ctx.lineWidth = 0.8;
-  ctx.strokeRect(-1, -24, 12, 9);
-  if (ore) {
-    ctx.beginPath();
-    ctx.arc(5, -19.5, 3, 0, Math.PI * 2);
-    ctx.fillStyle = ORE_COLORS[ore];
-    ctx.fill();
+  ctx.beginPath();
+  if (variant === 0) {
+    ctx.rect(bx + 0.5, by, bw - 0.5, bh / 2 - 0.3);
+    ctx.rect(bx, by + bh / 2 + 0.3, bw - 1, bh / 2 - 0.3);
   } else {
-    ctx.strokeStyle = '#7a2e24';
+    ctx.moveTo(bx, by + bh);
+    ctx.lineTo(bx, by + 2.5);
+    ctx.quadraticCurveTo(bx + bw / 2, by - 2, bx + bw, by + 2.5);
+    ctx.lineTo(bx + bw, by + bh);
+    ctx.closePath();
+  }
+  ctx.fill();
+  ctx.stroke();
+  // Grain and a lighter top edge.
+  ctx.strokeStyle = 'rgba(255,214,150,0.35)';
+  ctx.beginPath();
+  ctx.moveTo(bx + 1.5, by + 1.5);
+  ctx.lineTo(bx + bw - 2, by + 1.5);
+  ctx.stroke();
+  if (!ore) return;
+  const spots = [[[0, 0]], [[-3.6, 0], [3.6, 0]], [[-3.6, 1.6], [3.6, 1.6], [0, -2]]][Math.min(3, Math.max(1, level)) - 1];
+  const cx = bx + bw / 2;
+  const cy = by + bh / 2 + 0.3;
+  ctx.lineWidth = 0.6;
+  ctx.strokeStyle = '#2a160a';
+  for (const [dx, dy] of spots) {
+    const x = cx + dx;
+    const y = cy + dy;
     ctx.beginPath();
-    ctx.moveTo(2.5, -22);
-    ctx.lineTo(7.5, -17);
-    ctx.moveTo(7.5, -22);
-    ctx.lineTo(2.5, -17);
+    if (ore === 'goldore') {
+      ctx.moveTo(x - 2.8, y + 1.4);
+      ctx.lineTo(x + 2.8, y + 1.4);
+      ctx.lineTo(x + 1.8, y - 1.4);
+      ctx.lineTo(x - 1.8, y - 1.4);
+      ctx.closePath();
+      ctx.fillStyle = '#f4c21c';
+    } else if (ore === 'stone') {
+      ctx.rect(x - 2.7, y - 1.4, 5.4, 2.8);
+      ctx.fillStyle = '#eeeef0';
+    } else {
+      ctx.ellipse(x, y, 2.5, 2, 0, 0, Math.PI * 2);
+      ctx.fillStyle = ore === 'coal' ? '#151417' : '#80381e';
+    }
+    ctx.fill();
     ctx.stroke();
+    if (ore !== 'stone') {
+      ctx.fillStyle = ore === 'goldore' ? '#fff3a8' : ore === 'coal' ? '#6c6e74' : '#c8ccd4';
+      ctx.fillRect(x - 1.2, y - 1.1, 1.4, 0.7);
+    }
   }
 }
 

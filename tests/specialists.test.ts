@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { addBuilding, available, recomputeTerritory, spawnSettler } from '../src/sim/buildings';
-import { BUILDINGS, GEOLOGIST, PIONEER, PROFESSIONS, STRENGTH } from '../src/sim/config';
+import { BUILDINGS, GEOLOGIST, GEOLOGIST_SIGN, PIONEER, PROFESSIONS, STRENGTH } from '../src/sim/config';
 import { killSettler } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
 import { sameRegion } from '../src/sim/regions';
-import { canProspect, claimable, isFreeSpecialist, prospectable } from '../src/sim/specialists';
+import { canProspect, claimable, hasSign, isFreeSpecialist, prospectable, signEnds, signLevel } from '../src/sim/specialists';
 import { attackStrength, defenceStrength, settlementValue, strengthFor } from '../src/sim/strength';
 import { Terrain, type Building, type Settler } from '../src/sim/types';
 import { World } from '../src/sim/world';
@@ -293,6 +293,44 @@ describe('geologist (Settlers 4: the whole ridge, then he stays)', () => {
     }
     return best;
   }
+
+  it("puts up signs that come down after a while; what was learnt stays and the tile may be signed again", () => {
+    const w = new World(123);
+    const geo = geologist(w);
+    const spot = mountain(w, true)!;
+    expect(w.sendGeologist(spot.x, spot.y)).toBe(true);
+    const m = w.map;
+    let first = -1;
+    for (let k = 0; k < 4000 && first < 0; k++) {
+      w.step();
+      first = m.signBy.findIndex((p) => p === 1);
+    }
+    expect(first).toBeGreaterThanOrEqual(0);
+    const x = first % m.w;
+    const y = Math.floor(first / m.w);
+    expect(hasSign(w, first, 1)).toBe(true);
+    expect(hasSign(w, first, 2)).toBe(false);
+    expect(prospectable(w, x, y, 1)).toBe(false);
+    expect(prospectable(w, x, y, 2)).toBe(true);
+    const ends = signEnds(m, first);
+    expect(ends - (m.signAt[first] - 1)).toBeGreaterThanOrEqual(GEOLOGIST_SIGN.lifetime);
+    expect(ends - (m.signAt[first] - 1)).toBeLessThanOrEqual(GEOLOGIST_SIGN.lifetime + GEOLOGIST_SIGN.spread);
+    // Keep him from coming back to it within this errand, then let the sign come down.
+    geo.errand = null;
+    geo.tasks = [];
+    run(w, ends - w.tick);
+    expect(hasSign(w, first, 1)).toBe(false);
+    expect(w.isProspected(x, y, 1)).toBe(true);
+    expect(prospectable(w, x, y, 1)).toBe(true);
+    // Sent again, he puts it up anew.
+    expect(w.sendGeologist(x, y)).toBe(true);
+    for (let k = 0; k < 4000 && !hasSign(w, first, 1); k++) w.step();
+    expect(hasSign(w, first, 1)).toBe(true);
+    expect(signLevel(0)).toBe(0);
+    expect(signLevel(GEOLOGIST_SIGN.levels[0] - 1)).toBe(1);
+    expect(signLevel(GEOLOGIST_SIGN.levels[0])).toBe(2);
+    expect(signLevel(GEOLOGIST_SIGN.levels[1])).toBe(3);
+  });
 
   it('examines every mountain tile within his reach as he goes, then stays where he finished', () => {
     const w = new World(123);

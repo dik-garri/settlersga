@@ -291,10 +291,12 @@ export interface Settler {
    * Specialist errand (`specialists.ts`): the spot a pioneer was sent to claim land around or a
    * geologist to prospect around, or the building `b` a thief was sent to rob. `n` counts the tiles
    * worked so far (absent until he has picked his first: until then he searches from the spot, after
-   * that from where he stands); `skip` lists tiles (indices) he found no route to. Absent on everyone
+   * that from where he stands); `skip` lists tiles (indices) he found no route to; `since` is the tick
+   * a geologist began it (set on his first search): he never signs a tile twice in one errand, even
+   * where his sign has already come down (`GEOLOGIST_SIGN`). Absent on everyone
    * else (and on saves made before specialists).
    */
-  errand?: { x: number; y: number; b?: number; n?: number; skip?: number[] } | null;
+  errand?: { x: number; y: number; b?: number; n?: number; skip?: number[]; since?: number } | null;
   /**
    * Fleeing (`flee.ts`, Settlers 4's `CFleeRole`): legs walked so far, stranded on land that is not
    * his owner's or with his player defeated; he dies after `FLEE.legs`. Absent on everyone else.

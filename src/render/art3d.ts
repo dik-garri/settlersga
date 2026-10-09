@@ -44,6 +44,30 @@ export interface IconsMeta {
   order: string[];
 }
 
+/**
+ * `signs.json` written by `art/blender/signs.py`: the geologist's signs, one `frame` each in
+ * `signs.png` — per board variant the empty board, then every ore of `ores` with 1…`levels` symbols
+ * (`signFrame`).
+ */
+export interface SignsMeta {
+  frame: [number, number, number, number];
+  variants: number;
+  levels: number;
+  ores: string[];
+}
+
+/** Board variants of the geologist's signs (`VARIANTS` in signs.py; the classic painter has as many). */
+export const SIGN_VARIANTS = 2;
+/** Most symbols on a sign (`LEVELS` in signs.py; `signLevel` in the sim gives 1…3). */
+export const SIGN_LEVELS = 3;
+
+/** Frame of the sign with `level` symbols of `ore` (null: the empty board) on board `variant`. */
+export function signFrame(meta: SignsMeta, variant: number, ore: string | null, level: number): number {
+  const per = 1 + meta.ores.length * meta.levels;
+  const k = ore === null ? -1 : meta.ores.indexOf(ore);
+  return variant * per + (k < 0 ? 0 : 1 + k * meta.levels + Math.min(meta.levels, Math.max(1, level)) - 1);
+}
+
 export interface Art3d {
   images: Map<string, HTMLImageElement>;
   /** Settler and soldier figures (`settlers.json` + pages). */
@@ -52,6 +76,8 @@ export interface Art3d {
   wares: WaresMeta;
   /** Menu icons (`icons.png`, in `images` as `icons`); optional: without them the UI uses `wares`. */
   icons?: IconsMeta;
+  /** Geologist's signs (`signs.png`, in `images` as `signs`); optional: without them the classic painter. */
+  signs?: SignsMeta;
 }
 
 /** Frames of the 3D mill sails over a quarter turn (`SAIL_FRAMES` in buildings.py); same canvas as the mill. */
@@ -232,5 +258,13 @@ export async function loadArt3d(): Promise<Art3d> {
       return meta;
     })
     .catch(() => undefined);
-  return { images, settlers, ground, wares, icons };
+  const signs = await fetch(`${base}signs.json`)
+    .then((r) => (r.ok ? (r.json() as Promise<SignsMeta>) : undefined))
+    .then(async (meta) => {
+      if (!meta) return undefined;
+      images.set('signs', await loadImage(`${base}signs.png`));
+      return meta;
+    })
+    .catch(() => undefined);
+  return { images, settlers, ground, wares, icons, signs };
 }

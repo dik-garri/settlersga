@@ -1,5 +1,5 @@
 import { addBuilding, recomputeTerritory, spawnSettler } from '../sim/buildings';
-import { BUILD_TICKS_PER_UNIT, BUILDINGS, costOf, hpOf, totalCost } from '../sim/config';
+import { BUILD_TICKS_PER_UNIT, BUILDINGS, costOf, hpOf, ORE_RESOURCES, totalCost } from '../sim/config';
 import { clearStrokes } from '../sim/digging';
 import { ENDLESS } from '../sim/economy';
 import { formationSpots } from '../sim/field';
@@ -262,6 +262,33 @@ export function buildShowcase(): World {
     }
   }
   run(w, 600);
+  // A field of geologist's signs on that mountain: every ore with one, two and three symbols (the
+  // nearest tiles get those, the ore under them set to match), then the mountain's own ore, and bare
+  // boards where there is none. The geologist below goes on round it.
+  if (best >= 0) {
+    const bx = best % m.w;
+    const by = Math.floor(best / m.w);
+    const field: number[] = [];
+    for (let y = by - 4; y <= by + 4; y++) {
+      for (let x = bx - 4; x <= bx + 4; x++) {
+        if (!m.inBounds(x, y) || Math.hypot(x - bx, y - by) > 3.6) continue;
+        const i = m.idx(x, y);
+        if (m.terrain[i] === Terrain.Mountain && m.isWalkable(x, y) && m.building[i] === 0) field.push(i);
+      }
+    }
+    field.sort((a, b) => Math.hypot((a % m.w) - bx, Math.floor(a / m.w) - by) - Math.hypot((b % m.w) - bx, Math.floor(b / m.w) - by) || a - b);
+    const samples = ORE_RESOURCES.flatMap((_, k) => [1, 2, 3].map((level) => ({ code: k + 1, amount: [8, 28, 60][level - 1] })));
+    field.forEach((i, k) => {
+      if (k < samples.length) {
+        m.ore[i] = samples[k].code;
+        m.oreAmount[i] = samples[k].amount;
+      }
+      m.prospected[i] |= 1 << (LOCAL_PLAYER - 1);
+      m.signAt[i] = w.tick + 1;
+      m.signBy[i] = LOCAL_PLAYER;
+      m.touch(i);
+    });
+  }
   // Sent last, so he is still out prospecting when the demo opens.
   if (best >= 0) {
     spawnSettler(w, 'carrier', c); // an idle carrier to become the geologist

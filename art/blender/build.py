@@ -2,7 +2,7 @@
 
     blender -b --factory-startup -P art/blender/build.py -- [names...]
 
-Names: settlers (every figure, see figures.py), woodcutter, sawmill, stonecutter, tower, house_large, tree, deposit, piles (or piles:fish,coal), wares, icons (or icons:axe,saw: the menu icons) (default: all). Every sprite keeps the size and anchor
+Names: settlers (every figure, see figures.py), signs (the geologist's signs, see signs.py), woodcutter, sawmill, stonecutter, tower, house_large, tree, deposit, piles (or piles:fish,coal), wares, icons (or icons:axe,saw: the menu icons) (default: all). Every sprite keeps the size and anchor
 of the procedural sprite it replaces (src/render/sprites.ts, settlerArt.ts), so the game can swap
 them in without other changes.
 """
@@ -21,6 +21,7 @@ import goods  # noqa: E402
 import lib  # noqa: E402
 import buildings  # noqa: E402
 import nature  # noqa: E402
+import signs  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 OUT = os.path.join(ROOT, 'public', 'art', '3d')
@@ -314,7 +315,7 @@ STAGES = 4
 
 def main():
     args = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
-    names = args or ['settlers', 'piles', 'wares', 'icons', 'millsails', *SINGLE]
+    names = args or ['settlers', 'piles', 'wares', 'icons', 'millsails', 'signs', *SINGLE]
     os.makedirs(OUT, exist_ok=True)
     os.makedirs(TMP, exist_ok=True)
     for name in names:
@@ -339,6 +340,9 @@ def main():
                 continue
             if n == 'wares':
                 goods.render_wares(OUT, TMP)
+                continue
+            if n == 'signs':
+                signs.render_signs(OUT, TMP)
                 continue
             if n == 'icons' or n.startswith('icons:'):
                 # `icons` renders every resource's menu icon, `icons:axe,saw` only those.

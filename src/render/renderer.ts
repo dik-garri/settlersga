@@ -34,7 +34,8 @@ import { holdFrames, setFrame, workFrames, type Settler3d } from './settler3d';
 import { maxHp } from '../sim/military';
 import { BODY_STAND, BODY_WORK, CARRY_AT } from './settlerArt';
 import { depthOf, HALF_H, HALF_W, toScreen, toTile } from './iso';
-import { ART3D_BANNERS, ART3D_STAGES, ART3D_YARDS, CARRIED_WARE_3D_SCALE, PILE_MAX, SETTLER_3D_SCALE } from './art3d';
+import { ART3D_BANNERS, ART3D_STAGES, ART3D_YARDS, CARRIED_WARE_3D_SCALE, PILE_MAX, SETTLER_3D_SCALE, SIGN_VARIANTS } from './art3d';
+import { signEnds, signLevel } from '../sim/specialists';
 
 /** Piles shown on an open storage yard without a pile limit, and the ring they stand on (screen px from its centre). */
 const YARD_KINDS = 8;
@@ -70,6 +71,12 @@ const MAX_READY_CHUNKS = 600;
 
 /** First-time chunk builds allowed per frame (see `syncVisibleChunks`). */
 const CHUNK_BUILDS_PER_FRAME = 6;
+
+/** Ticks between re-checks of the standing geologist's signs, and the fade-out at the end of a sign's life. */
+const SIGN_SWEEP_TICKS = 5;
+const SIGN_FADE_TICKS = 200;
+/** Signs are drawn a little smaller than rendered: about half a settler's height, as in Settlers 4. */
+const SIGN_SCALE = 0.82;
 
 /** Cheap deterministic per-tile hash for picking sprite variants. */
 function hash(i: number): number {
@@ -263,9 +270,15 @@ export class GameRenderer {
   /** Worn path decals per tile (`paths.ts`) and the level last drawn. */
   private readonly pathSprites: (Sprite | null)[];
   private readonly pathState: Uint8Array;
-  /** Geologist signs for the local player; state is ore code + 1, 0 = none. */
+  /**
+   * Geologist signs of the local player's geologists, one per tile: the sprite and its drawn state
+   * (1 + ore code × 4 + symbols, 0 = none). `liveSigns` lists the tiles with a sprite, re-checked every
+   * `SIGN_SWEEP_TICKS` (a sign comes down by time, which touches no chunk; mines change the amount).
+   */
   private readonly signSprites: (Sprite | null)[];
   private readonly signState: Uint8Array;
+  private readonly liveSigns = new Set<number>();
+  private signSweptAt = -Infinity;
   /** Goods lying on the ground (`ground.ts`): one pile per tile, and its drawn kind × 16 + units (0 = none). */
   private readonly goodsSprites: (Container | null)[];
   private readonly goodsState: Uint16Array;
@@ -739,6 +752,7 @@ export class GameRenderer {
     this.syncVisibleChunks();
     this.unloadHiddenChunks(timeMs);
     this.syncChangedTiles();
+    this.sweepSigns();
     this.syncBuildings();
     this.syncSettlers(alpha, timeMs);
     this.animals.sync(alpha, timeMs, view);
@@ -1124,6 +1138,7 @@ export class GameRenderer {
         this.treeState[i] = 0;
         this.depositState[i] = 0;
         this.signState[i] = 0;
+        this.liveSigns.delete(i);
         this.goodsState[i] = 0;
         this.cropState[i] = 0;
         this.pathState[i] = 0;
@@ -1407,25 +1422,55 @@ export class GameRenderer {
     s.anchor.copyFrom(s.texture.defaultAnchor!);
   }
 
+  /** Re-checks the standing signs every few ticks: they fade out and come down by time. */
+  private sweepSigns(): void {
+    const tick = this.sim.tick;
+    if (tick - this.signSweptAt < SIGN_SWEEP_TICKS && tick >= this.signSweptAt) return;
+    this.signSweptAt = tick;
+    for (const i of this.liveSigns) this.syncSign(i);
+  }
+
+  /**
+   * The local player's geologist's sign on a tile (`map.signAt`/`signBy`, Settlers 4's boards): the
+   * board variant by tile hash, the ore under the tile and one to three symbols by its amount
+   * (`signLevel`), set a little off the tile centre so a field of signs is not a grid; it fades out over
+   * its last `SIGN_FADE_TICKS`. None where a building stands now.
+   */
   private syncSign(i: number): void {
     const { map } = this.sim;
-    const seen = (map.prospected[i] & (1 << (LOCAL_PLAYER - 1))) !== 0;
-    const state = seen ? map.ore[i] * (map.oreAmount[i] > 0 ? 1 : 0) + 1 : 0;
-    if (state === this.signState[i]) return;
-    this.signState[i] = state;
+    const ends = map.signBy[i] === LOCAL_PLAYER && map.building[i] === 0 ? signEnds(map, i) : 0;
+    const left = ends - this.sim.tick;
+    const level = left > 0 ? signLevel(map.oreAmount[i]) : 0;
+    const code = level > 0 ? map.ore[i] : 0;
+    const state = left > 0 ? 1 + code * 4 + level : 0;
     const x = i % map.w;
     const y = Math.floor(i / map.w);
     let s = this.signSprites[i];
-    if (!s) {
-      s = new Sprite();
-      const p = this.surface(x, y);
-      s.position.set(p.x + 8, p.y + 4);
-      s.zIndex = depthOf(x, y) + 0.02;
-      this.addStatic(s, x, y);
-      this.signSprites[i] = s;
+    if (state !== this.signState[i]) {
+      this.signState[i] = state;
+      if (state === 0) {
+        if (s) this.removeStatic(s, x, y);
+        this.signSprites[i] = null;
+        this.liveSigns.delete(i);
+        return;
+      }
+      if (!s) {
+        const h = hash(i * 13 + 5);
+        const dx = ((h & 0xff) / 255 - 0.5) * 0.4;
+        const dy = (((h >>> 8) & 0xff) / 255 - 0.5) * 0.4;
+        s = new Sprite();
+        s.scale.set(SIGN_SCALE);
+        const p = this.surface(x + dx, y + dy);
+        s.position.set(p.x, p.y);
+        s.zIndex = depthOf(x + dx, y + dy);
+        this.addStatic(s, x + dx, y + dy);
+        this.signSprites[i] = s;
+        this.liveSigns.add(i);
+      }
+      s.texture = this.atlas.get(`sign:${hash(i) % SIGN_VARIANTS}:${code}:${level}`);
+      s.anchor.copyFrom(s.texture.defaultAnchor!);
     }
-    s.texture = this.atlas.get(`sign:${state - 1}`);
-    s.anchor.copyFrom(s.texture.defaultAnchor!);
+    if (s) s.alpha = Math.min(1, left / SIGN_FADE_TICKS);
   }
 
   /**

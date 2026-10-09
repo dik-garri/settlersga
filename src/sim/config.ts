@@ -280,6 +280,22 @@ export const ORDERABLE: readonly SettlerKind[] = ['builder', 'digger', 'geologis
  */
 export const PIONEER = { reach: 5.3, window: 5, claimTicks: 400 };
 export const GEOLOGIST = { reach: 10.6, window: 9, ticks: 21 };
+/**
+ * The geologist's signs (`map.signAt`/`signBy`). Settlers 2 and 3 take them down after a while (S2:
+ * the-settlers wiki; S3: the jsettlers remake, `RessourceSignMapObject`, 4 min plus up to 5 random);
+ * Settlers 4 is assumed to do the same, its time unverified (docs/TIMINGS.md). A sign stands
+ * `lifetime` plus up to `spread` ticks (per tile, by a hash, so a field of signs thins out instead of
+ * vanishing at once); what the player learnt stays (`map.prospected`), and his geologists may put a
+ * new sign where his old one came down. The board shows one, two or three symbols for an ore amount
+ * below `levels[0]`, below `levels[1]`, or more — S4's 1/2/3 signs for fill levels 1–5, 6–10 and
+ * 11–15 (Settlers United wiki, mining mechanics); our natural ore holds 12–28 units a tile, the
+ * guaranteed start lobes 64–96.
+ */
+export const GEOLOGIST_SIGN = {
+  lifetime: 4 * 60 * TICKS_PER_SECOND,
+  spread: 5 * 60 * TICKS_PER_SECOND,
+  levels: [20, 40] as const,
+};
 export const THIEF = { stealTicks: 30 };
 
 /** Work areas (`workArea.ts`): a moved centre may lie at most `maxShift` × the work radius from the door. */
