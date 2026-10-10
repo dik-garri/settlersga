@@ -141,7 +141,7 @@ export class TutorialRunner {
       finished: null,
     });
     const from = Math.max(0, Math.min(opts.from ?? 0, def.steps.length - 1));
-    for (let k = 0; k < from; k++) for (const g of def.steps[k].grant ?? []) world.grant(g.res, g.n, player);
+    for (let k = 0; k < from; k++) for (const g of def.steps[k].grant ?? []) world.issue({ kind: 'grant', player, res: g.res, n: g.n });
     r.enter(from, world, ui);
     return r;
   }
@@ -189,7 +189,7 @@ export class TutorialRunner {
     this.version++;
     const step = this.current;
     if (!step) return;
-    for (const g of step.grant ?? []) world.grant(g.res, g.n, this.p.player);
+    for (const g of step.grant ?? []) world.issue({ kind: 'grant', player: this.p.player, res: g.res, n: g.n });
     const resolve = anchorResolver(world, this.p.player, this.p.anchors, this.p.tags);
     this.camera = step.camera ? resolve(step.camera) : null;
   }
@@ -199,7 +199,7 @@ export class TutorialRunner {
     if (this.p.finished) return;
     for (const r of this.def.refill ?? []) {
       const have = onHand(world, this.p.player, r.res);
-      if (have < r.below) world.grant(r.res, r.to - have, this.p.player);
+      if (have < r.below) world.issue({ kind: 'grant', player: this.p.player, res: r.res, n: r.to - have });
     }
     // Steps already done on entering are passed at once; an «ack» step always waits.
     for (let guard = 0; guard <= this.def.steps.length; guard++) {

@@ -323,20 +323,20 @@ export class InputController {
     const tile = this.tileAt(p.x, p.y);
     const { placing } = this.state;
     if (this.state.movingWorkArea !== null) {
-      const ok = this.world.setWorkArea(this.state.movingWorkArea, { x: Math.round(tile.x), y: Math.round(tile.y) });
+      const ok = this.world.issue({ kind: 'setWorkArea', player: LOCAL_PLAYER, id: this.state.movingWorkArea, at: { x: Math.round(tile.x), y: Math.round(tile.y) } });
       this.cb.onMessage(ok ? t('input.workArea.moved') : t('input.workArea.tooFar'));
       if (ok) this.state.movingWorkArea = null;
       return;
     }
     if (placing === 'pioneer') {
-      const ok = this.world.sendPioneer(Math.round(tile.x), Math.round(tile.y));
+      const ok = this.world.issue({ kind: 'sendPioneer', player: LOCAL_PLAYER, x: Math.round(tile.x), y: Math.round(tile.y) });
       this.cb.onMessage(ok ? t('input.pioneer.sent') : t('input.pioneer.failed'));
       if (ok && !e.shiftKey) this.cb.onSelectBuildType(null);
       return;
     }
     if (placing === 'thief') {
       const target = this.world.buildingAt(Math.round(tile.x), Math.round(tile.y));
-      const ok = target ? this.world.sendThief(target.id) : false;
+      const ok = target ? this.world.issue({ kind: 'sendThief', player: LOCAL_PLAYER, target: target.id }) : false;
       this.cb.onMessage(ok ? t('input.thief.sent') : t('input.thief.failed'));
       if (ok && !e.shiftKey) this.cb.onSelectBuildType(null);
       return;
@@ -344,7 +344,7 @@ export class InputController {
     if (placing === 'geologist') {
       const gx = Math.round(tile.x);
       const gy = Math.round(tile.y);
-      const ok = this.world.sendGeologist(gx, gy);
+      const ok = this.world.issue({ kind: 'sendGeologist', player: LOCAL_PLAYER, x: gx, y: gy });
       this.cb.onMessage(ok ? t('input.geologist.sent') : this.geologistBlocker(gx, gy));
       if (ok && !e.shiftKey) this.cb.onSelectBuildType(null);
       return;
@@ -356,7 +356,7 @@ export class InputController {
         this.cb.onMessage(outside ? t('input.place.outside') : t('input.place.cannot'));
         return;
       }
-      const b = this.world.placeBuilding(placing, a.x, a.y);
+      const b = this.world.issue({ kind: 'placeBuilding', player: LOCAL_PLAYER, type: placing, x: a.x, y: a.y });
       if (!b) {
         this.cb.onMessage(t('input.place.unreachable'));
         return;
@@ -425,12 +425,12 @@ export class InputController {
     if (fighters.length > 0) {
       const o = walkOnly ? 'move' : this.fighterOrderAt(tx, ty);
       if (o === 'attack') {
-        const n = this.world.orderAttack(fighters, b!.id);
+        const n = this.world.issue({ kind: 'orderAttack', player: LOCAL_PLAYER, ids: fighters, target: b!.id });
         said.push(n > 0 ? t('input.order.attack', { n }) : t('input.order.cannotAttack'));
       } else if (o === 'garrison') {
-        const n = this.world.orderGarrison(fighters, b!.id);
+        const n = this.world.issue({ kind: 'orderGarrison', player: LOCAL_PLAYER, ids: fighters, target: b!.id });
         said.push(n > 0 ? t('input.order.garrison', { n }) : t('input.order.noRoom'));
-      } else if (this.world.orderMove(fighters, tx, ty) === 0) {
+      } else if (this.world.issue({ kind: 'orderMove', player: LOCAL_PLAYER, ids: fighters, x: tx, y: ty }) === 0) {
         said.push(t('input.order.noWay'));
       }
     }
@@ -441,7 +441,7 @@ export class InputController {
             const s = this.world.getSettler(id)!;
             return SPECIALIST_ORDERS[s.kind]?.can(this.world, tx, ty, b, LOCAL_PLAYER) ?? false;
           }).length;
-      const n = this.world.orderSpecialists(specialists, tx, ty, b ? b.id : null, LOCAL_PLAYER, walkOnly);
+      const n = this.world.issue({ kind: 'orderSpecialists', player: LOCAL_PLAYER, ids: specialists, x: tx, y: ty, target: b ? b.id : null, walkOnly });
       if (n === 0) said.push(t('input.order.noWay'));
       else if (acting > 0) said.push(t('input.order.toWork', { n: acting }));
     }

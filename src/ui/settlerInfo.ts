@@ -111,7 +111,7 @@ export class SettlerInfoView implements View {
     if (SENDABLE[s.kind]) {
       box.append(
         button(t('units.dismiss'), t('settler.dismissTip'), () => {
-          const ok = this.world.dismissSpecialist(s.kind);
+          const ok = this.world.issue({ kind: 'dismissSpecialist', player: LOCAL_PLAYER, prof: s.kind });
           this.actions.toast(ok ? t('settler.dismissed') : t('settler.noFreeSpecialist'));
         }),
       );

@@ -27,6 +27,7 @@ import { readMarks } from './tutorial/progress';
 import { missionWorld, TutorialRunner, type MissionProgress } from './tutorial/runner';
 import type { MissionDef, UiProbe } from './tutorial/types';
 import { TutorialView } from './tutorial/view';
+import { replayTools } from './dev/replayTools';
 
 /** A tutorial mission to run in a game: from a step (0-based), or loaded with its progress. */
 type TutorialStart = { def: MissionDef; step: number } | { def: MissionDef; progress: MissionProgress };
@@ -384,7 +385,7 @@ function game(
     minimap.update(now, app.screen.width, app.screen.height);
   });
 
-  Object.assign(window, { world, seed: opts.seed, state, renderer, camera, audio, pause, tutorial });
+  Object.assign(window, { world, seed: opts.seed, state, renderer, camera, audio, pause, tutorial, replay: replayTools(world) });
   if (opts.seed) console.info(`Settlers prototype, seed ${opts.seed} (add ?seed=${opts.seed} to replay this map)`);
   else console.info(`Game at tick ${world.tick}`);
 }

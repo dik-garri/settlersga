@@ -49,7 +49,7 @@ export class WorkersView implements View {
     this.el.append(el('p', 'muted', t('eco.reserveNote', { min: CARRIER_RESERVE.min })));
     const keep = tag(el('div', 'eco-row carrier-reserve'), 'settlers.reserve');
     const setReserve = (n: number) => {
-      w.setCarrierReserve(n);
+      w.issue({ kind: 'setCarrierReserve', player: LOCAL_PLAYER, count: n });
       this.update();
     };
     keep.append(
@@ -69,7 +69,7 @@ export class WorkersView implements View {
       const row = el('div', 'eco-row');
       row.append(settlerIcon(kind, 28), el('span', 'eco-name', profName(kind)), el('b', '', `${have} / ${ordered}`));
       const set = (n: number) => {
-        w.orderWorkers(kind, Math.max(0, n));
+        w.issue({ kind: 'orderWorkers', player: LOCAL_PLAYER, prof: kind, count: Math.max(0, n) });
         this.update();
       };
       row.append(
@@ -78,7 +78,7 @@ export class WorkersView implements View {
         tag(button('+1', t('eco.orderOne'), () => set(ordered + 1)), `settlers.order.${kind}`, ordered > have),
         button('+5', t('eco.orderFive'), () => set(ordered + 5)),
         button('↩', t('eco.dismissOne'), () => {
-          w.dismissSpecialist(kind);
+          w.issue({ kind: 'dismissSpecialist', player: LOCAL_PLAYER, prof: kind });
           this.update();
         }),
       );
@@ -108,7 +108,7 @@ export class TransportView implements View {
     this.el.append(el('p', 'muted', t('eco.transportNote')));
     const list = el('div', 'transport-list');
     const move = (res: Resource, how: TransportMove) => {
-      w.moveTransport(res, how);
+      w.issue({ kind: 'moveTransport', player: LOCAL_PLAYER, res, how });
       this.update();
     };
     order.forEach((res, i) => {
@@ -159,7 +159,7 @@ export class DistributionView implements View {
         slider.max = '100';
         slider.step = '10';
         slider.value = String(weight);
-        slider.oninput = () => w.setDistribution(res, type, Number(slider.value));
+        slider.oninput = () => w.issue({ kind: 'setDistribution', player: LOCAL_PLAYER, res, type, weight: Number(slider.value) });
         slider.onchange = () => this.update();
         row.append(buildingIcon(type, 22), el('span', 'eco-name', buildingName(type)), slider, el('b', '', `${Math.round((100 * weight) / total)}%`));
         block.append(row);
@@ -236,10 +236,10 @@ export function toolOrderControls(world: World, b: Building): HTMLElement | null
     const row = tag(el('div', 'eco-row'), `info.toolOrder.${res}`);
     row.append(wareIcon(res, 18), el('span', 'eco-name', nameOf(res)), el('b', '', n === undefined ? '—' : n === ENDLESS ? '∞' : String(n)));
     row.append(
-      button('+1', t('eco.toolOne'), () => world.orderTool(res, 1)),
-      button('+5', t('eco.toolFive'), () => world.orderTool(res, 5)),
-      button('∞', t('eco.toolEndless'), () => world.orderTool(res, ENDLESS)),
-      button('✕', t('eco.cancelOrder'), () => world.orderTool(res, 0)),
+      button('+1', t('eco.toolOne'), () => world.issue({ kind: 'orderTool', player: LOCAL_PLAYER, res, count: 1 })),
+      button('+5', t('eco.toolFive'), () => world.issue({ kind: 'orderTool', player: LOCAL_PLAYER, res, count: 5 })),
+      button('∞', t('eco.toolEndless'), () => world.issue({ kind: 'orderTool', player: LOCAL_PLAYER, res, count: ENDLESS })),
+      button('✕', t('eco.cancelOrder'), () => world.issue({ kind: 'orderTool', player: LOCAL_PLAYER, res, count: 0 })),
     );
     box.append(row);
   }
@@ -256,7 +256,7 @@ export function warehouseControls(world: World, b: Building): HTMLElement | null
       inTitle: t('eco.accepts'),
       outTitle: t('eco.refuses'),
       isIn: (res) => !!b.accept?.includes(res),
-      set: (res, on) => world.setAccepts(b.id, res, on),
+      set: (res, on) => world.issue({ kind: 'setAccepts', player: LOCAL_PLAYER, id: b.id, res, on }),
       tipIn: (name) => t('eco.tipIn', { name }),
       tipOut: (name) => t('eco.tipOut', { name }),
       noneTip: t('eco.noneTip'),

@@ -33,7 +33,7 @@ export function shareControls(w: World, choices: readonly Resource[], onChange: 
     const pct = Math.round((100 * w.shareOf(r)) / total);
     row.append(el('span', 'share-name', `${resName(r)} ${pct}%`));
     const step = (d: number) => () => {
-      w.setShare(r, Math.max(0, Math.min(100, w.shareOf(r) + d)));
+      w.issue({ kind: 'setShare', player: LOCAL_PLAYER, res: r, weight: Math.max(0, Math.min(100, w.shareOf(r) + d)) });
       onChange();
     };
     row.append(button('−', t('army.shareLess', { name: resLower(r) }), step(-10)), button('+', t('army.shareMore', { name: resLower(r) }), step(10)));
@@ -78,14 +78,14 @@ export function garrisonControls(w: World, b: Building, onChange: () => void): H
     row.append(
       tag(
         button('−', t('army.wishLess', { name }), () => {
-          w.changeGarrison(b.id, archer, -1);
+          w.issue({ kind: 'changeGarrison', player: LOCAL_PLAYER, id: b.id, archer, delta: -1 });
           onChange();
         }),
         `garrison.${archer ? 'ranged' : 'melee'}.minus`,
       ),
       tag(
         button('+', t('army.wishMore', { name }), () => {
-          w.changeGarrison(b.id, archer, 1);
+          w.issue({ kind: 'changeGarrison', player: LOCAL_PLAYER, id: b.id, archer, delta: 1 });
           onChange();
         }),
         `garrison.${archer ? 'ranged' : 'melee'}.plus`,
@@ -98,14 +98,14 @@ export function garrisonControls(w: World, b: Building, onChange: () => void): H
   actions.append(
     tag(
       button(t('army.fill'), t('army.fillTip'), () => {
-        w.fillGarrison(b.id);
+        w.issue({ kind: 'fillGarrison', player: LOCAL_PLAYER, id: b.id });
         onChange();
       }),
       'garrison.fill',
       wish.melee >= slotsOf(b, false) && wish.ranged >= slotsOf(b, true),
     ),
     button(t('army.withdraw'), t('army.withdrawTip'), () => {
-      w.withdrawGarrison(b.id);
+      w.issue({ kind: 'withdrawGarrison', player: LOCAL_PLAYER, id: b.id });
       onChange();
     }),
   );
@@ -154,13 +154,13 @@ export function recruitOrderControls(w: World, onChange: () => void): HTMLElemen
       row.title = t('army.needs', { list: needText(kind, level) });
       row.append(settlerIcon(kind, 18), el('span', 'eco-name', name), el('b', '', orderText(n)));
       const order = (count: number) => () => {
-        w.orderRecruits(kind, level, count);
+        w.issue({ kind: 'orderRecruits', player: LOCAL_PLAYER, prof: kind, level, count });
         onChange();
       };
       const mark = `recruit.${kind}.${(level + 1) as 1 | 2 | 3}` as const;
       row.append(
         button('−', t('eco.less1'), () => {
-          w.reduceRecruits(kind, level, 1);
+          w.issue({ kind: 'reduceRecruits', player: LOCAL_PLAYER, prof: kind, level, count: 1 });
           onChange();
         }),
         // The tutorial's marks count as used once the row holds an order.
