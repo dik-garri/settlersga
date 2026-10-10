@@ -19,6 +19,7 @@
     "art:quantize": "python3 art/tools/quantize.py $(ls public/art/3d/*.png | grep -vE 'ground-')"
   },
   "dependencies": {
+    "peerjs": "^1.5.5",
     "pixi.js": "^8.22.0"
   },
   "devDependencies": {

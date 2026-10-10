@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Net test (dev)</title>
+    <style>
+      body { font: 14px system-ui, sans-serif; margin: 16px; background: #f4efe4; color: #2b2116; }
+      button, input { font: inherit; padding: 4px 8px; }
+      #log { white-space: pre-wrap; background: #fffaf0; border: 1px solid #c9b48f; padding: 8px; height: 320px; overflow: auto; font: 12px ui-monospace, monospace; }
+      .row { margin: 8px 0; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+      #status { font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <h3>Network smoke test (dev only, not in the build)</h3>
+    <p>Open this page in two tabs: «Host» in one, then type its code and «Join» in the other.</p>
+    <div class="row">
+      <button id="host">Host</button>
+      <input id="code" placeholder="code" size="8" />
+      <button id="join">Join</button>
+      <span id="status">idle</span>
+    </div>
+    <div class="row">
+      <input id="text" placeholder="message" />
+      <button id="send">Send</button>
+      <button id="ping">Ping</button>
+      <button id="lockstep" title="host: start a lockstep run with every connected peer">Lockstep</button>
+      <button id="close">Close</button>
+    </div>
+    <div class="row" id="ls"></div>
+    <div id="log"></div>
+    <script type="module" src="/src/net/nettest.ts"></script>
+  </body>
+</html>
