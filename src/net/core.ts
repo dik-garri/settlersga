@@ -5,6 +5,7 @@ import { NetChat, type ChatTo, type NetChatLine, type SayResult } from './chat';
 import { DelayTuner } from './delay';
 import type { DesyncReport, Seat } from './lockstep';
 import { NetMatch, type MatchEvent, type Snapshot } from './match';
+import { cleanName } from './names';
 import { bindLockstep, type LockstepSession } from './session';
 import { NetStatus } from './status';
 import type { PeerId, Transport } from './transport';
@@ -19,8 +20,9 @@ import type { PeerId, Transport } from './transport';
  * to its computer and has no way back; so do we at once (`aiTakeover` at the turn the host
  * announces), but for `REJOIN_GRACE_MS` the player may come back with the room code. His browser
  * opens the lobby, whose `hello` reaches the host's game here: the host answers with the seats
- * that are free to take (`ingame`), the browser asks for one (`rejoin`), the host's player confirms
- * (`rejoinAsked` → `acceptRejoin`), and then:
+ * that are free to take (`ingame`, with the names their players had — `names`), the browser asks for
+ * one (`rejoin`: the seat its tab remembers, else the one with its player's name) and says its name,
+ * the host's player confirms (`rejoinAsked` with the name → `acceptRejoin`), and then:
  * 1. the lockstep makes the seat active again from the next turn it seals (`Lockstep.rejoin`, the
  *    returned turn; announced in that turn as `rejoined`, where every machine gives the seat back —
  *    `seatControl`, the computer lets go);
@@ -63,9 +65,9 @@ export interface ResumeInfo {
 }
 
 /** The rejoin messages on the lobby channel (the returning browser runs a `LobbyClient`). */
-export type RejoinToHost = { ch: 'lobby'; k: 'hello'; build: string; seat?: Seat } | { ch: 'lobby'; k: 'rejoin'; seat: Seat };
+export type RejoinToHost = { ch: 'lobby'; k: 'hello'; build: string; seat?: Seat; name?: string } | { ch: 'lobby'; k: 'rejoin'; seat: Seat; name?: string };
 export type RejoinToClient =
-  | { ch: 'lobby'; k: 'ingame'; vacant: Seat[]; busy: Seat[] }
+  | { ch: 'lobby'; k: 'ingame'; vacant: Seat[]; busy: Seat[]; names: [Seat, string][] }
   | { ch: 'lobby'; k: 'refuse'; why: 'version' | 'started' | 'denied'; build: string }
   | { ch: 'lobby'; k: 'resume'; start: NetStartBase; resume: ResumeInfo; chat: NetChatLine[] };
 
@@ -80,8 +82,11 @@ export interface NetCoreHooks {
   hostLost?(): void;
   /** A chat line this browser may read. */
   chat?(line: NetChatLine): void;
-  /** Host: a player who left asks for his seat back — answer with `acceptRejoin`/`refuseRejoin`. */
-  rejoinAsked?(seat: Seat): void;
+  /**
+   * Host: a player who left asks for his seat back — answer with `acceptRejoin`/`refuseRejoin`.
+   * `name` is the name he gives now (null: none), to compare with the seat's (`nameOf`).
+   */
+  rejoinAsked?(seat: Seat, name: string | null): void;
   /** Host: a seat's player left. */
   seatLeft?(seat: Seat): void;
 }
@@ -102,6 +107,11 @@ export interface NetCoreOptions {
   resume?: ResumeInfo;
   /** Chat lines so far (the lobby's, or the host's for a returning player). */
   chat?: NetChatLine[];
+  /**
+   * The human players' names by seat (the setup's, docs/NETWORK.md section 15): the host tells a
+   * returning browser whose seats are free. Interface data — never part of the world or its sums.
+   */
+  names?: ReadonlyMap<Seat, string>;
   /** Ticks between two autosaves (network saves at a common turn). */
   autosaveEvery?: number;
   /** Whether the host adapts the input delay (default true). */
@@ -128,6 +138,8 @@ export class NetCore {
   /** Host: when each seat's player left (vacant seats), and who asks for which seat. */
   private readonly leftAt = new Map<Seat, number>();
   private readonly asks = new Map<PeerId, Seat>();
+  /** Host: the name each asking browser gave. */
+  private readonly askNames = new Map<PeerId, string>();
   private readonly offs: (() => void)[] = [];
 
   constructor(private readonly o: NetCoreOptions) {
@@ -185,7 +197,10 @@ export class NetCore {
     if (this.isHost) {
       this.offs.push(
         transport.on('message', (from, msg) => this.desk(from, msg)),
-        transport.on('leave', (peer) => void this.asks.delete(peer)),
+        transport.on('leave', (peer) => {
+          this.asks.delete(peer);
+          this.askNames.delete(peer);
+        }),
       );
     }
     // Turns sealed between the snapshot and now: ask for them at once.
@@ -249,6 +264,18 @@ export class NetCore {
     return [...new Set(this.asks.values())].sort((a, b) => a - b);
   }
 
+  /** Host: the name the latest browser asking for a seat gave (null: none). */
+  askerName(seat: Seat): string | null {
+    let name: string | null = null;
+    for (const [peer, s] of this.asks) if (s === seat) name = this.askNames.get(peer) ?? null;
+    return name;
+  }
+
+  /** A seat's player name as the game started (null: none known). */
+  nameOf(seat: Seat): string | null {
+    return this.o.names?.get(seat) ?? null;
+  }
+
   /**
    * Host: the returning player gets his seat back (roadmap 6.7). The lockstep takes his batches
    * again from the next turn it seals, where every machine gives the seat back; his browser gets a
@@ -257,7 +284,11 @@ export class NetCore {
   acceptRejoin(seat: Seat): boolean {
     const peer = [...this.asks].find(([, s]) => s === seat)?.[0];
     if (!this.isHost || !peer || !this.vacantSeats().includes(seat)) return false;
-    for (const [p, s] of [...this.asks]) if (s === seat) this.asks.delete(p);
+    for (const [p, s] of [...this.asks]) {
+      if (s !== seat) continue;
+      this.asks.delete(p);
+      this.askNames.delete(p);
+    }
     const input = this.session.lockstep.rejoin(seat);
     if (input === null) return false;
     this.seats.set(seat, peer);
@@ -285,6 +316,7 @@ export class NetCore {
     for (const [peer, s] of [...this.asks]) {
       if (s !== seat) continue;
       this.asks.delete(peer);
+      this.askNames.delete(peer);
       this.o.transport.send(peer, { ch: 'lobby', k: 'refuse', why: 'denied', build: this.o.build } satisfies RejoinToClient);
       this.o.transport.kick(peer);
     }
@@ -309,11 +341,19 @@ export class NetCore {
         t.kick(from);
         return;
       }
-      t.send(from, { ch: 'lobby', k: 'ingame', vacant, busy } satisfies RejoinToClient);
+      const names: [Seat, string][] = [];
+      for (const s of [...vacant, ...busy]) {
+        const name = this.nameOf(s);
+        if (name) names.push([s, name]);
+      }
+      t.send(from, { ch: 'lobby', k: 'ingame', vacant, busy, names } satisfies RejoinToClient);
     } else if (m.k === 'rejoin' && Number.isInteger(m.seat) && this.vacantSeats().includes(m.seat)) {
       if (this.asks.get(from) === m.seat) return;
+      const name = cleanName(m.name);
       this.asks.set(from, m.seat);
-      this.hooks.rejoinAsked?.(m.seat);
+      if (name) this.askNames.set(from, name);
+      else this.askNames.delete(from);
+      this.hooks.rejoinAsked?.(m.seat, name);
     }
   }
 

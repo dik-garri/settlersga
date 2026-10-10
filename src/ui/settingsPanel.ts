@@ -1,16 +1,52 @@
 import type { AudioEngine } from '../audio/audio';
 import { el } from './dom';
 import { lang, LANG_NAMES, LANGS, setLang, t, type Lang } from './i18n';
+import { NAME_MAX } from '../net/names';
+import { chosenName, defaultName, setOwnName } from './playerNames';
 import { readPrefs, writePrefs } from './prefs';
 
 /**
- * «Настройки», shared by the main menu and the in-game pause menu: sound (on/off, volume, music),
+ * The player's name (docs/NETWORK.md section 15): a field over `Prefs.name` — the default name as a
+ * hint while none is chosen; cleaned and kept when it changes (Enter or leaving the field), then
+ * `onChange` gets the name in force (the network lobby tells the host). Typing stays in the field.
+ */
+/** Fired on `window` when the player's own name changed (a game on one machine shows it at once). */
+export const NAME_EVENT = 'namechange';
+
+export function nameField(onChange?: (name: string) => void): HTMLElement {
+  const r = el('label', 'set-row name-row');
+  const input = el('input');
+  input.type = 'text';
+  input.maxLength = NAME_MAX;
+  input.placeholder = defaultName();
+  input.value = chosenName() ?? '';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  input.title = t('settings.nameTip');
+  const apply = () => {
+    const name = setOwnName(input.value);
+    input.value = chosenName() ?? '';
+    window.dispatchEvent(new Event(NAME_EVENT));
+    onChange?.(name);
+  };
+  input.onchange = apply;
+  input.onkeydown = (e) => {
+    // The game's and the menu's keys stay out of the field.
+    e.stopPropagation();
+    if (e.key === 'Enter') input.blur();
+  };
+  r.append(el('span', 'set-name', t('settings.name')), input);
+  return r;
+}
+
+/**
+ * «Настройки», shared by the main menu and the in-game pause menu: the player's name, sound (on/off, volume, music),
  * graphics (3D or classic art), the intro, and the language (Russian, English, German). The art is
  * chosen when the game starts: in the menu `onArt` reloads at once, in a game it applies next time.
  * The language applies at once (`setLang` tells the menus and the HUD to draw themselves again) and is
  * kept in the preferences.
  */
-export function settingsPanel(audio: AudioEngine, opts: { onArt?: () => void; onShowIntro?: () => void }): HTMLElement {
+export function settingsPanel(audio: AudioEngine, opts: { onArt?: () => void; onShowIntro?: () => void; netGame?: boolean }): HTMLElement {
   const box = el('div', 'settings');
   const row = (label: string, ...control: HTMLElement[]) => {
     const r = el('label', 'set-row');
@@ -25,6 +61,9 @@ export function settingsPanel(audio: AudioEngine, opts: { onArt?: () => void; on
     c.onchange = () => change(c.checked);
     return c;
   };
+
+  box.append(el('h4', '', t('settings.player')), nameField());
+  if (opts.netGame) box.append(el('p', 'muted', t('settings.nameNextGame')));
 
   box.append(el('h4', '', `🌐 ${t('settings.language')}`));
   const language = el('select');

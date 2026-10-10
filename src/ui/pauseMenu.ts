@@ -131,7 +131,7 @@ export class PauseMenu {
       }
       case 'settings':
         title(t('menu.settings'));
-        this.panel.append(settingsPanel(this.audio, {}));
+        this.panel.append(settingsPanel(this.audio, { netGame: !!this.state.net }));
         back();
         break;
       case 'quit': {

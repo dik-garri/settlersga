@@ -6,6 +6,7 @@ import { TICKS_PER_SECOND } from '../sim/config';
 import type { World } from '../sim/world';
 import { button, el } from './dom';
 import { t } from './i18n';
+import { rejoinAskText } from './netGame';
 
 /**
  * The network game's own interface (roadmap 6.4): a small status box under the speed strip — every
@@ -30,12 +31,14 @@ export interface NetPanelOptions {
   seats: readonly Seat[];
   local: Seat;
   host: Seat;
+  /** A human seat's player name (`NetGame.nameOf`). */
+  nameOf: (seat: Seat) => string;
   /** Host: disconnect a seat (its player leaves; the computer takes over). */
   kick: ((seat: Seat) => void) | null;
   /** Opens or closes the chat box. */
   chat: () => void;
   /** Host: the seats returning players ask for, and the answers. */
-  rejoin: { asked: () => Seat[]; accept: (seat: Seat) => void; refuse: (seat: Seat) => void } | null;
+  rejoin: { asked: () => Seat[]; askerName: (seat: Seat) => string | null; accept: (seat: Seat) => void; refuse: (seat: Seat) => void } | null;
 }
 
 export class NetPanel {
@@ -48,16 +51,16 @@ export class NetPanel {
   update(nowMs: number): void {
     if (nowMs - this.last < 250) return;
     this.last = nowMs;
-    const { world, match, status, local, host } = this.o;
+    const { world, match, status, local, host, nameOf } = this.o;
     const waiting = match.waitingMs >= SHOW_WAIT_MS ? status.waiting(true) : [];
     const rows = this.o.seats.map((seat) => {
       const ai = world.aiLevel(seat) !== null;
       const ping = ai ? null : status.ping(seat);
-      return { seat, ai, ping: ping === null ? null : Math.round(ping / 10) * 10 };
+      return { seat, name: nameOf(seat), ai, ping: ping === null ? null : Math.round(ping / 10) * 10 };
     });
     const canKick = !!this.o.kick && match.waitingMs >= KICK_AFTER_MS;
     const delay = match.lockstep.delay;
-    const asked = this.o.rejoin?.asked() ?? [];
+    const asked = (this.o.rejoin?.asked() ?? []).map((s) => ({ seat: s, text: rejoinAskText(nameOf(s), this.o.rejoin?.askerName(s) ?? null) }));
     const key = JSON.stringify([rows, waiting, canKick, match.paused, match.pausedBy, match.speed, match.stopped, delay, asked]);
     if (key === this.key) return;
     this.key = key;
@@ -66,8 +69,9 @@ export class NetPanel {
       const line = el('div', 'np-row');
       const dot = el('span', 'np-dot');
       dot.style.background = PLAYER_COLORS[(r.seat - 1) % PLAYER_COLORS.length];
-      const who = r.seat === local ? t('net.you') : r.ai ? t('net.computer') : r.seat === host ? t('lobby.host') : t('common.player', { id: r.seat });
-      line.append(dot, el('span', 'np-name', `${t('common.player', { id: r.seat })} · ${who}`));
+      const who = r.seat === local ? t('net.you') : r.ai ? t('net.computer') : r.seat === host ? t('net.hostMark') : '';
+      line.append(dot, el('span', 'np-name', who ? `${r.name} · ${who}` : r.name));
+      line.title = t('common.player', { id: r.seat });
       if (r.ping !== null) line.append(el('span', 'np-ping', t('lobby.ping', { n: r.ping })));
       this.el.append(line);
     }
@@ -76,20 +80,20 @@ export class NetPanel {
     const lag = el('div', 'np-note', t('net.delay', { n: delay, ms: Math.round(delay * turnMs) }));
     lag.title = t('net.delayTip');
     this.el.append(lag);
-    if (match.paused && match.pausedBy !== null) this.el.append(el('div', 'np-note', t('net.pausedBy', { id: match.pausedBy })));
+    if (match.paused && match.pausedBy !== null) this.el.append(el('div', 'np-note', t('net.pausedBy', { who: nameOf(match.pausedBy) })));
     if (waiting.length > 0) {
-      const w = el('div', 'np-wait', t('net.waiting', { who: waiting.map((s) => t('common.player', { id: s })).join(', ') }));
+      const w = el('div', 'np-wait', t('net.waiting', { who: waiting.map((s) => nameOf(s)).join(', ') }));
       this.el.append(w);
       if (canKick) {
         for (const s of waiting) {
           if (s === local) continue;
-          this.el.append(button(t('net.disconnect', { id: s }), t('net.disconnectTip'), () => this.o.kick?.(s), 'np-kick'));
+          this.el.append(button(t('net.disconnect', { who: nameOf(s) }), t('net.disconnectTip'), () => this.o.kick?.(s), 'np-kick'));
         }
       }
     }
-    for (const s of asked) {
+    for (const { seat: s, text } of asked) {
       const box = el('div', 'np-ask');
-      box.append(el('div', 'np-wait', t('net.rejoinAsk', { id: s })));
+      box.append(el('div', 'np-wait', text));
       const row = el('div', 'np-buttons');
       row.append(
         button(t('net.rejoinAccept'), t('net.rejoinAcceptTip'), () => this.o.rejoin?.accept(s), 'np-kick active'),

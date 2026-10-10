@@ -17,6 +17,11 @@ export interface GameState {
    * network game the seat the lobby gave this browser.
    */
   readonly localPlayer: PlayerId;
+  /**
+   * The human players' names by player id (`playerNames.ts`): in a network game from the setup the
+   * host sent at «Start», on one machine the own name. Interface data only, never the world's.
+   */
+  names: ReadonlyMap<PlayerId, string>;
   speed: number;
   paused: boolean;
   placing: Placeable | null;
@@ -74,6 +79,7 @@ export function chooseSpeed(state: GameState, s: number): void {
 
 export const createState = (localPlayer: PlayerId = LOCAL_PLAYER): GameState => ({
   localPlayer,
+  names: new Map(),
   speed: 1,
   paused: false,
   placing: null,

@@ -1,6 +1,7 @@
 import { AI_LEVEL_IDS, ECONOMY, GAME_MODES, START_CONDITIONS, type AiLevel, type GameMode, type StartLevel } from '../sim/config';
 import type { Resource } from '../sim/types';
 import type { WorldOptions } from '../sim/world';
+import { cleanName } from '../net/names';
 import { normaliseCode } from '../net/transport';
 import { t } from './i18n';
 import { aiLevelName } from './names';
@@ -51,6 +52,12 @@ export interface SlotSetup {
   /** Difficulty when the computer plays the slot. */
   level: AiLevel;
   race: RaceId;
+  /**
+   * The name of the person playing it (`cleanName`; docs/NETWORK.md section 15): set by the network
+   * lobby at «Start» and kept in network saves, so a loaded game seats its players by name. Interface
+   * data only — `worldArgs` leaves it out, the world never sees it.
+   */
+  name?: string;
 }
 
 export interface GameSetup {
@@ -176,11 +183,13 @@ export function parseSetup(text: string | null): GameSetup | null {
   const def = defaultSetup();
   const slots = Array.from({ length: MAX_SLOTS }, (_, k): SlotSetup => {
     const x = (raw.slots as Partial<SlotSetup>[])[k] ?? {};
+    const name = cleanName(x.name);
     return {
       kind: oneOf(x.kind, SLOT_KINDS, def.slots[k].kind),
       team: Number.isInteger(x.team) && x.team! >= 1 && x.team! <= MAX_SLOTS ? x.team! : k + 1,
       level: oneOf(x.level, AI_LEVEL_IDS, 'medium'),
       race: oneOf(x.race, RACES.map((r) => r.id), 'romans'),
+      ...(name ? { name } : {}),
     };
   });
   const mode = raw.mode === 'network' ? 'network' : 'single';
