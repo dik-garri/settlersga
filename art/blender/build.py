@@ -371,7 +371,7 @@ def main():
             # `tower:posts` renders nothing and only prints the posts and banner points.
             n, _, only = n.partition(':')
             build, w, h, ax, ay = SINGLE[n]
-            if only == 'front':
+            if only == 'front' or os.environ.get('ART_CPU'):
                 scene.cycles.device = 'CPU'  # a few small frames: spare the GPU (and the machine's heat)
                 scene.render.threads_mode = 'FIXED'
                 scene.render.threads = 4

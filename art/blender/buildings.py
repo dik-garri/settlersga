@@ -42,38 +42,79 @@ def note_banner(name, point):
     print('banner', name, BANNER_AT[name], 'sprite', w, h, cam.type)
 
 
-# Where a military building's garrison stands on its top (Settlers 4 shows the soldiers inside on the
-# platform behind the parapet), screen points from the sprite anchor like BANNER_AT (art3d.ts copies
-# them into ART3D_POSTS); the objects in front of them are tagged `front` (`mark_front`) and rendered
-# again on their own as `<name>-front.png`, which the game draws over the figures.
+# Where a military building's garrison is seen (Settlers 4): the archers on the top behind the parapet,
+# the swordsmen looking out of windows in the stone. Screen points from the sprite anchor like
+# BANNER_AT (art3d.ts copies them into ART3D_POSTS, `ranged` and `melee`); what stands before them —
+# the walls round the windows, the near rails or merlons — is tagged `front` (`mark_front`) and rendered
+# again on its own as `<name>-front.png`, which the game draws over the figures. A window's dark opening
+# is tagged `window`: the front pass leaves a hole there, through which the swordsman shows.
 POSTS = {}
 
 
-def note_posts(name, points):
-    """Records (and prints) the garrison's posts on the top, in sprite pixels from the anchor."""
+#: How tall a figure on a building is (the game's settler at its `CREW_SCALE`), in world units: a
+#: swordsman at a window stands this far below its top, so that his head shows under the lintel.
+CREW_HEIGHT = 0.8
+
+
+def note_posts(name, ranged, melee, at=lambda p: p):
+    """Records (and prints) the garrison's posts, in sprite pixels from the anchor: the archers' on the
+    top (world points), and for each window (`garrison_window`'s, before `at` maps the model to its
+    final scale) where the swordsman's feet go and how far above them its sill is (`cut`, screen px)."""
     scene = bpy.context.scene
     ox, oy = lib.screen_point(scene, (0, 0, 0))
-    out = []
-    for p in points:
+
+    def px(p):
         sx, sy = lib.screen_point(scene, p)
-        out.append((round(sx - ox, 1), round(sy - oy, 1)))
-    POSTS[name] = out
-    print('posts', name, out)
+        return (round(sx - ox, 1), round(sy - oy, 1))
+
+    windows = []
+    for (x, y, top, sill) in melee:
+        tx, ty, tz = at((x, y, top))
+        feet = (tx, ty, tz - CREW_HEIGHT)
+        sz = at((x, y, sill))[2]
+        windows.append((*px(feet), round(px((tx, ty, sz))[1] * -1 + px(feet)[1], 1)))
+    POSTS[name] = {'ranged': [px(at(p)) for p in ranged], 'melee': windows}
+    print('posts', name, POSTS[name])
 
 
 def mark_front(test):
-    """Tags `front` the meshes standing in front of the garrison's posts: `test(centre, top)` on each
-    object's world bounding box (its centre and highest z)."""
+    """Tags `front` the meshes standing before the garrison's posts: `test(centre, top)` on each
+    object's world bounding box (its centre and highest z). Window openings never are (they are the
+    holes the swordsmen look out of), nor the ground pad."""
     from mathutils import Vector
 
     bpy.context.view_layer.update()
     for obj in bpy.context.scene.objects:
-        if obj.type != 'MESH' or obj.name == 'ShadowCatcher':
+        if obj.type != 'MESH' or obj.name == 'ShadowCatcher' or obj.get('window'):
             continue
         corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
         centre = sum(corners, Vector()) / 8
-        if test(centre, max(v.z for v in corners)):
+        top = max(v.z for v in corners)
+        if top > 0.05 and test(centre, top):
             obj['front'] = 1
+
+
+def garrison_window(face, at, plane, zc, w, h, dark, stones, out=0.13):
+    """A window a swordsman of the garrison looks out of, standing `out` proud of a −Y (face 'y', `plane`
+    its y) or +X (face 'x', `plane` its x) wall at `at` along it, centred at height zc: a dark opening
+    (tagged `window`) between stone jambs, under a lintel, on a sill. Returns the point just inside it
+    with the heights of its top and sill (for `note_posts`)."""
+    k = len(stones)
+    if face == 'y':
+        y = plane - out
+        lib.box((at, y, zc), (w, 0.03, h), dark)['window'] = 1
+        for sx in (-1, 1):
+            lib.box((at + sx * (w / 2 + 0.035), y - 0.01, zc), (0.07, 0.07, h + 0.02), stones[(sx + 2) % k], bevel=0.015)
+        lib.box((at, y - 0.015, zc + h / 2 + 0.045), (w + 0.16, 0.09, 0.09), stones[2 % k], bevel=0.02)
+        lib.box((at, y - 0.025, zc - h / 2 - 0.03), (w + 0.12, 0.1, 0.06), stones[3 % k], bevel=0.02)
+        return (at, y + 0.1, zc + h / 2, zc - h / 2)
+    x = plane + out
+    lib.box((x, at, zc), (0.03, w, h), dark)['window'] = 1
+    for sy in (-1, 1):
+        lib.box((x + 0.01, at + sy * (w / 2 + 0.035), zc), (0.07, 0.07, h + 0.02), stones[(sy + 2) % k], bevel=0.015)
+    lib.box((x + 0.015, at, zc + h / 2 + 0.045), (0.09, w + 0.16, 0.09), stones[2 % k], bevel=0.02)
+    lib.box((x + 0.025, at, zc - h / 2 - 0.03), (0.1, w + 0.12, 0.06), stones[3 % k], bevel=0.02)
+    return (x - 0.1, at, zc + h / 2, zc - h / 2)
 
 
 def _b():
@@ -508,10 +549,10 @@ def rod(a, b, r, mat, verts=10):
     return obj
 
 
-# Garrison posts (model units from the top's centre): only as many as can be seen, the rest of a bigger
-# garrison stays inside; none right behind the banner, whose cloth would hide them.
-TOWER_POSTS = ((-0.12, -0.38), (0.38, 0.12), (0.28, -0.28))
-BIGTOWER_POSTS = ((-0.5, -0.4), (0.45, 0.5), (0.55, -0.5), (0.0, -0.6), (0.6, 0.0))
+# Archers' posts on the top (model units from the top's centre), one per archer slot of the garrison;
+# none right behind the banner, whose cloth would hide them. The swordsmen's are the windows.
+TOWER_POSTS = ((-0.12, -0.38), (0.38, 0.12))
+BIGTOWER_POSTS = ((-0.15, -0.55), (0.55, 0.15), (0.42, -0.42))
 FORTRESS_POSTS = ((0.55, 0.05), (-0.1, -0.5), (0.1, 0.6), (-0.6, 0.05), (0.62, 0.55))
 
 
@@ -564,11 +605,11 @@ def build_tower():
     for z in (0.22, 0.4):
         lib.box((dxc, fy - 0.085, z), (dw + 0.02, 0.012, 0.035), iron, bevel=0.004)
     lib.box((dxc, fy - 0.09, 0.12 + dh + 0.06), (dw + 0.16, 0.1, 0.12), blocks[2], bevel=0.025)
-    # Dark lookout opening high on the right face.
-    rx = cx + (s0 + s1) / 2 / 2 + 0.12
-    lib.box((rx + 0.02, cy - 0.05, H - 0.42), (0.06, 0.26, 0.32), dark)
-    lib.box((rx + 0.05, cy - 0.05, H - 0.25), (0.1, 0.36, 0.08), blocks[0], bevel=0.02)
-    lib.box((rx + 0.05, cy - 0.05, H - 0.59), (0.1, 0.34, 0.06), blocks[3], bevel=0.02)
+    # The swordsman's window high on the right face (Settlers 4: he looks out of the stone, the archers
+    # stand on the platform).
+    wz = H - 0.4
+    face = cx + (s0 + (s1 - s0) * (wz - 0.12) / (H - 0.12)) / 2
+    window_at = garrison_window('x', cy - 0.05, face, wz, 0.32, 0.4, dark, blocks, out=0.16)
     lib.tag(3)
 
     # Overhanging timber platform: joists poking out, a plank floor, a box railing of round beams.
@@ -596,10 +637,11 @@ def build_tower():
         rod((xa + ix, ya + iy, zt - 0.03), (xb - ix, yb - iy, zb + 0.03), r * 0.75, wood)
     lib.tag(4)
     note_banner('tower', (cx, cy, top + 0.12))
-    # The garrison on the platform: left, right and front of the banner pole, the near rails in front.
+    # The archers on the platform left and right of the banner pole behind the near rails; the swordsman
+    # at his window, behind the shaft's walls.
     floor = top + 0.13
-    mark_front(lambda c, z: z > floor + 0.05 and (c.y < cy - ps / 2 + 0.12 or c.x > cx + ps / 2 - 0.12))
-    note_posts('tower', [(cx + dx, cy + dy, floor) for (dx, dy) in TOWER_POSTS])
+    mark_front(lambda c, z: z < floor - 0.03 or (z > floor + 0.05 and (c.y < cy - ps / 2 + 0.12 or c.x > cx + ps / 2 - 0.12)))
+    note_posts('tower', [(cx + dx, cy + dy, floor) for (dx, dy) in TOWER_POSTS], [window_at])
 
 
 # ------------------------------------------------------------------------------------- large house
@@ -2781,10 +2823,12 @@ def build_fortress():
     for (tx, ty) in ((x0, y0), (x1, y0)):
         round_tower(tx, ty, 0.27, 0.1, DH + 0.35, walls, blocks, rnd, rows=6)
     lib.tag(None, split=lambda o: 2 if o.location.z < 0.6 else 3)
-    for z in (0.7, 1.1):
-        for sx in (-0.33, 0.33):
-            slit(dx + sx, y0, z, 'y', dark, blocks[2])
-        slit(x1, dy + 0.1, z, 'x', dark, blocks[2])
+    for sx in (-0.33, 0.33):
+        slit(dx + sx, y0, 0.7, 'y', dark, blocks[2])
+    slit(x1, dy + 0.1, 0.7, 'x', dark, blocks[2])
+    # The swordsmen's windows high in the donjon (Settlers 4: archers on the top, swordsmen at windows).
+    windows = [garrison_window('y', dx + sx, y0, 1.08, 0.26, 0.34, dark, blocks, out=0.12) for sx in (-0.25, 0.27)]
+    windows += [garrison_window('x', dy + sy, x1, 1.08, 0.26, 0.34, dark, blocks, out=0.12) for sy in (0.05, 0.45)]
     gate(dx, y0 - 0.02, 0.1, 0.4, 0.6, door, blocks, iron)
     battlements(x0, x1, y0 - 0.02, y1, DH, blocks, rnd, size=0.18)
     lib.tag(3)
@@ -2806,79 +2850,105 @@ def build_fortress():
         lib.box((gx, fy, (wh + 0.12) / 2), (0.16, 0.22, wh + 0.12), blocks[rnd.randrange(len(blocks))], bevel=0.02)
     lib.tag(4)
     # The donjon's top: its front merlons and both front turrets with their cones stand before the posts.
+    # The walls below the roof stand before the swordsmen at the windows.
     turrets = ((x0, y0), (x1, y0))
-    mark_front(lambda c, z: z > DH + 0.01 and (c.y < y0 + 0.1 or c.x > x1 - 0.1
-                                               or any(math.hypot(c.x - tx, c.y - ty) < 0.45 for (tx, ty) in turrets)))
+    mark_front(lambda c, z: z < DH - 0.003 or (z > DH + 0.01 and (c.y < y0 + 0.1 or c.x > x1 - 0.1
+                                               or any(math.hypot(c.x - tx, c.y - ty) < 0.45 for (tx, ty) in turrets))))
     at = scale_scene(4 / 3, kz=1.45)
     note_banner('fortress', at((dx, dy, DH + 0.2)))
-    note_posts('fortress', [at((dx + px, dy + py, DH)) for (px, py) in FORTRESS_POSTS])
+    note_posts('fortress', [(dx + px, dy + py, DH) for (px, py) in FORTRESS_POSTS], windows, at)
 
 
 def build_bigtower():
-    """The big tower: wider and a little taller than the small tower, squat as in Settlers 4 (a small
-    house plus 10–20 %, ≈ 4.5 settler heights), all stone — a broad square shaft with quoins, a strapped
-    door, slits, a corbelled crenellated fighting top with a small slate-roofed watch turret at the back
-    corner. The banner stands in the middle of the top."""
+    """The big tower after Settlers 4's: two stone piers — a broad one with the door and a narrow one —
+    with a passage between them through which the ground shows, under one wide timber fighting
+    platform laid across both, railed on corner and middle posts with X-braces. The archers stand on the
+    platform, the swordsmen look out of windows in the piers; the owner's banner stands in its middle.
+    A small house plus 10–20 % (≈ 4.5 settler heights) and broader than the small tower."""
     rnd = random.Random(31)
     walls, blocks = stone_walls(), block_mats()
-    slate = slate_mats('bsl')
     door, iron = door_mat(), lib.mat_flat('iron', (0.36, 0.37, 0.4), rough=0.35)
     dark = lib.mat_flat('dark', (0.05, 0.04, 0.03))
     beam = beam_mat()
+    wood = lib.mat_grain('brail', (0.5, 0.32, 0.12), (0.8, 0.58, 0.28), scale=5, stretch=(1, 1, 8), bump=0.6)
     plank = lib.mat_grain('bplank', (0.42, 0.26, 0.1), (0.66, 0.46, 0.2), scale=4, stretch=(1, 9, 1), bump=0.7)
     earth_pad((0.1, -0.2, 0), 1.05, 1.12, seed=31)
     lib.tag(0)
     corner_stakes(-0.9, 0.9, -0.9, 0.9)
     lib.tag(0, until=0)
 
-    cx, cy, s0, s1, H = 0.05, 0.05, 1.6, 1.46, 0.92
-    lib.box((cx, cy, 0.06), (s0 + 0.12, s0 + 0.12, 0.12), blocks[1], bevel=0.02)
+    H = 0.9
+    y0, y1 = -0.78, 0.84
+    piers = ((-0.86, -0.4), (0.1, 0.9))  # the narrow one, the passage, the broad one with the door
+    for (a, b) in piers:
+        lib.box(((a + b) / 2, (y0 + y1) / 2, 0.06), (b - a + 0.1, y1 - y0 + 0.1, 0.12), blocks[1], bevel=0.02)
     lib.tag(1)
-    scaffold(cx - s0 / 2 - 0.1, cx + s0 / 2 + 0.1, cy - s0 / 2 - 0.1, cy + s0 / 2 + 0.1, 1.45, beam)
+    scaffold(-0.95, 1.0, y0 - 0.1, y1 + 0.1, 1.45, beam)
     lib.tag(1, until=3)
     courses = 6
-    for c in range(courses):
-        t0, t1 = c / courses, (c + 1) / courses
-        z0, z1 = 0.12 + (H - 0.12) * t0, 0.12 + (H - 0.12) * t1
-        s = s0 + (s1 - s0) * (t0 + t1) / 2
-        x0, x1, y0, y1 = cx - s / 2, cx + s / 2, cy - s / 2, cy + s / 2
-        lib.box((cx, cy, (z0 + z1) / 2), (s, s, z1 - z0), walls)
-        stone_course(x0, x1, y0, y1, z0, z1, blocks, rnd, block=0.3, depth=0.1)
-        quoins(x0, x1, y0, y1, z0, z1, blocks, rnd)
+    for (a, b) in piers:
+        for c in range(courses):
+            t0, t1 = c / courses, (c + 1) / courses
+            z0, z1 = 0.12 + (H - 0.12) * t0, 0.12 + (H - 0.12) * t1
+            i = 0.05 * (t0 + t1) / 2  # a little narrower upwards
+            xa, xb, ya, yb = a + i, b - i, y0 + i, y1 - i
+            lib.box(((xa + xb) / 2, (ya + yb) / 2, (z0 + z1) / 2), (xb - xa, yb - ya, z1 - z0), walls)
+            stone_course(xa, xb, ya, yb, z0, z1, blocks, rnd, block=0.26, depth=0.09)
+            quoins(xa, xb, ya, yb, z0, z1, blocks, rnd)
     lib.tag(None, split=lambda o: 2 if o.location.z < H * 0.45 else 3)
-    fy = cy - s0 / 2 - 0.11
-    dxc, dw, dh = cx - 0.12, 0.42, 0.56
-    lib.box((dxc, fy - 0.03, 0.12 + dh / 2), (dw + 0.04, 0.04, dh + 0.02), dark)
+    # Strapped plank door in the broad pier's front, under a stone lintel.
+    fy = y0 - 0.12
+    dxc, dw, dh = 0.68, 0.34, 0.5
+    lib.box((dxc, fy + 0.02, 0.12 + dh / 2), (dw + 0.04, 0.04, dh + 0.02), dark)
     for k in range(4):
-        lib.box((dxc - dw / 2 + (k + 0.5) * dw / 4, fy - 0.06, 0.12 + dh / 2), (dw / 4 * 0.92, 0.035, dh), door,
-                bevel=0.006)
+        lib.box((dxc - dw / 2 + (k + 0.5) * dw / 4, fy - 0.01, 0.12 + dh / 2), (dw / 4 * 0.92, 0.035, dh), door, bevel=0.006)
     for z in (0.24, 0.46):
-        lib.box((dxc, fy - 0.085, z), (dw + 0.02, 0.012, 0.035), iron, bevel=0.004)
-    lib.box((dxc, fy - 0.09, 0.12 + dh + 0.06), (dw + 0.18, 0.1, 0.12), blocks[2], bevel=0.025)
-    for z in (0.66,):
-        slit(cx + 0.42, cy - (s0 + s1) / 4 - 0.08, z, 'y', dark, blocks[2])
-        slit(cx + (s0 + s1) / 4 + 0.08, cy - 0.1, z, 'x', dark, blocks[2])
+        lib.box((dxc, fy - 0.035, z), (dw + 0.02, 0.012, 0.035), iron, bevel=0.004)
+    lib.box((dxc, fy - 0.04, 0.12 + dh + 0.06), (dw + 0.18, 0.1, 0.12), blocks[2], bevel=0.025)
+    # Windows for the swordsmen: the narrow pier's front, the broad pier's front beside the door, its side.
+    wz, ww, wh = 0.56, 0.3, 0.4
+    i = 0.05 * 0.55
+    windows = [
+        garrison_window('y', -0.63, y0 + i, wz, ww, wh, dark, blocks),
+        garrison_window('y', 0.31, y0 + i, wz, ww, wh, dark, blocks),
+        garrison_window('x', 0.12, piers[1][1] - i, wz, ww, wh, dark, blocks),
+    ]
+    # Heavy beams over the passage's mouths carry the platform.
+    for (y, dy) in ((y0 - 0.06, -0.02), (y1 + 0.02, 0.02)):
+        lib.box(((piers[0][1] + piers[1][0]) / 2, y + dy, H - 0.08), (piers[1][0] - piers[0][1] + 0.2, 0.13, 0.14), beam,
+                bevel=0.012)
     lib.tag(3)
-    # Fighting top: a corbelled parapet a little wider than the shaft, plank floor, merlons.
-    ts = s1 + 0.22
-    tx0, tx1, ty0, ty1 = cx - ts / 2, cx + ts / 2, cy - ts / 2, cy + ts / 2
-    lib.box((cx, cy, H + 0.05), (ts, ts, 0.1), blocks[0], bevel=0.02)
+
+    # The platform: joists across both piers, poking out, a plank floor, a railing on posts.
+    px0, px1, py0, py1 = -0.95, 1.01, y0 - 0.13, y1 + 0.1
     for k in range(7):
-        t = -ts / 2 + (k + 0.5) * ts / 7
-        lib.box((cx, cy + t, H + 0.11), (ts - 0.2, ts / 7 - 0.012, 0.03), plank, bevel=0.006)
-    lib.box((cx, ty0 + 0.05, H + 0.2), (ts, 0.1, 0.2), walls)
-    lib.box((tx1 - 0.05, cy, H + 0.2), (0.1, ts, 0.2), walls)
-    battlements(tx0, tx1, ty0, ty1, H + 0.3, blocks, rnd, size=0.18)
-    wx, wy = tx0 + 0.25, ty1 - 0.25
-    lib.box((wx, wy, H + 0.31), (0.4, 0.4, 0.42), walls)
-    stone_course(wx - 0.2, wx + 0.2, wy - 0.2, wy + 0.2, H + 0.12, H + 0.52, blocks, rnd, block=0.16, depth=0.05)
-    hip_roof(wx, wy, 0.4, 0.4, H + 0.52, 0.3, slate, lib.mat_flat('sridge', (0.2, 0.24, 0.3)), rnd,
-             overhang=0.07, size=0.1, shape='scale', ridge_frac=0.0)
+        x = px0 + 0.06 + k * (px1 - px0 - 0.12) / 6
+        lib.box((x, (py0 + py1) / 2, H + 0.04), (0.08, py1 - py0 + 0.14, 0.08), beam, bevel=0.01)
+    n = 11
+    for k in range(n):
+        y = py0 + (k + 0.5) * (py1 - py0) / n
+        lib.box(((px0 + px1) / 2, y, H + 0.11), (px1 - px0, (py1 - py0) / n - 0.012, 0.04), plank,
+                rot=(0, 0, rnd.uniform(-0.01, 0.01)), bevel=0.008)
+    rail, r = 0.44, 0.055
+    zb, zt = H + 0.16, H + 0.13 + rail
+    corners = [(px0, py0), (px1, py0), (px1, py1), (px0, py1)]
+    for k in range(4):
+        (xa, ya), (xb, yb) = corners[k], corners[(k + 1) % 4]
+        xm, ym = (xa + xb) / 2, (ya + yb) / 2
+        for (x, y) in ((xa, ya), (xm, ym)):
+            lib.cylinder((x, y, H + 0.1 + (rail + 0.08) / 2), r * 1.15, rail + 0.1, wood, verts=12)
+        for z in (zb, zt):
+            rod((xa, ya, z), (xb, yb, z), r, wood)
+        for (pa, pb) in (((xa, ya), (xm, ym)), ((xm, ym), (xb, yb))):
+            ix, iy = (pb[0] - pa[0]) * 0.1, (pb[1] - pa[1]) * 0.1
+            rod((pa[0] + ix, pa[1] + iy, zb + 0.03), (pb[0] - ix, pb[1] - iy, zt - 0.03), r * 0.75, wood)
+            rod((pa[0] + ix, pa[1] + iy, zt - 0.03), (pb[0] - ix, pb[1] - iy, zb + 0.03), r * 0.75, wood)
     lib.tag(4)
-    note_banner('bigtower', (cx + 0.15, cy - 0.12, H + 0.14))
-    floor = H + 0.125
-    mark_front(lambda c, z: z > floor + 0.05 and (c.y < ty0 + 0.12 or c.x > tx1 - 0.12))
-    note_posts('bigtower', [(cx + dx, cy + dy, floor) for (dx, dy) in BIGTOWER_POSTS])
+    floor = H + 0.13
+    cx, cy = (px0 + px1) / 2, (py0 + py1) / 2
+    note_banner('bigtower', (cx, cy + 0.1, floor))
+    mark_front(lambda c, z: z < floor - 0.03 or (z > floor + 0.05 and (c.y < py0 + 0.12 or c.x > px1 - 0.12)))
+    note_posts('bigtower', [(cx + dx, cy + dy, floor) for (dx, dy) in BIGTOWER_POSTS], windows)
 
 
 def build_lookout():

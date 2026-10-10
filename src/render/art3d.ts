@@ -145,47 +145,74 @@ export const ART3D_STAGED = Object.keys(ART3D_BUILDINGS);
 export const ART3D_BANNERS: Record<string, { x: number; y: number }> = {
   tower: { x: 3.2, y: -40.0 },
   fortress: { x: 17.1, y: -98.0 },
-  bigtower: { x: 4.2, y: -37.2 },
+  bigtower: { x: 4.6, y: -41.7 },
 };
 /**
- * A place on a military building's top where one of its garrison is drawn (Settlers 4 shows the soldiers
- * inside standing on the platform behind the parapet): feet in sprite pixels from the footprint centre,
- * the direction (`DIRS` index) he faces while nothing happens, and — classic art only — how high above
- * his feet the parapet in front of him reaches (the figure is cut off below that line).
+ * A place where one of a military building's garrison is drawn: feet in sprite pixels from the
+ * footprint centre and the direction (`DIRS` index) he faces while nothing happens; `window` for a
+ * swordsman looking out of a window in the stone (he keeps to that side), and how high above his feet
+ * whatever stands before him ends, in screen px (the figure is cut off below that line: the classic
+ * art's parapets and sills, the 3D windows' sills — `note_posts` prints it).
  */
 export interface GarrisonPost {
   x: number;
   y: number;
   dir: number;
+  window?: boolean;
   cut?: number;
 }
 /**
- * Garrison posts on the 3D military buildings (printed by buildings.py's `note_posts`; the model
- * offsets are `TOWER_POSTS` etc. there), in the order they are taken: only as many as can be seen, the
- * rest of a bigger garrison stays out of sight. The parts of the model before them are drawn again
- * over the figures (`<type>-front.png`, registered as `front:<type>`). The lookout has no garrison:
- * its watchman works inside, as in Settlers 4.
+ * Where a military building's garrison is seen, as in Settlers 4: the archers on the top behind the
+ * parapet (`ranged`, one post per archer slot), the swordsmen at windows in the stone (`melee`); the
+ * rest of a garrison (the fortress's fifth archer has a post, its swordsmen four windows) stays out of
+ * sight.
  */
-export const ART3D_POSTS: Record<string, readonly GarrisonPost[]> = {
-  tower: [
-    { x: -12.8, y: -36.2, dir: 3 },
-    { x: 19.2, y: -36.2, dir: 1 },
-    { x: 3.2, y: -31.4, dir: 2 },
-  ],
-  bigtower: [
-    { x: -25.6, y: -42.6, dir: 3 },
-    { x: 33.6, y: -41.8, dir: 1 },
-    { x: 4.8, y: -24.2, dir: 2 },
-    { x: -16.0, y: -31.4, dir: 3 },
-    { x: 22.4, y: -31.4, dir: 1 },
-  ],
-  fortress: [
-    { x: 42.7, y: -76.0, dir: 2 },
-    { x: -8.5, y: -78.1, dir: 3 },
-    { x: 46.9, y: -97.3, dir: 1 },
-    { x: -6.4, y: -100.5, dir: 3 },
-    { x: 67.0, y: -85.2, dir: 1 },
-  ],
+export interface GarrisonPosts {
+  ranged: readonly GarrisonPost[];
+  melee: readonly GarrisonPost[];
+}
+/**
+ * Garrison posts on the 3D military buildings (printed by buildings.py's `note_posts`; the archers'
+ * model offsets are `TOWER_POSTS` etc. there, the windows `garrison_window`). The parts of the model
+ * before them — the walls round the windows, the near rails or merlons — are drawn again over the
+ * figures (`<type>-front.png`, registered as `front:<type>`; the windows are holes in it). The lookout
+ * has no garrison: its watchman works inside, as in Settlers 4.
+ */
+export const ART3D_POSTS: Record<string, GarrisonPosts> = {
+  tower: {
+    ranged: [
+      { x: -12.8, y: -36.2, dir: 3 },
+      { x: 19.2, y: -36.2, dir: 1 },
+    ],
+    melee: [{ x: 18.9, y: 13.4, dir: 1, window: true, cut: 15.7 }],
+  },
+  bigtower: {
+    ranged: [
+      { x: -21.0, y: -33.7, dir: 3 },
+      { x: 23.8, y: -33.7, dir: 1 },
+      { x: 1.4, y: -26.7, dir: 2 },
+    ],
+    melee: [
+      { x: -45.2, y: 4.0, dir: 3, window: true, cut: 15.7 },
+      { x: -15.1, y: 19.0, dir: 3, window: true, cut: 15.6 },
+      { x: 32.7, y: 14.1, dir: 1, window: true, cut: 15.7 },
+    ],
+  },
+  fortress: {
+    ranged: [
+      { x: 42.7, y: -76.0, dir: 2 },
+      { x: -8.5, y: -78.1, dir: 3 },
+      { x: 46.9, y: -97.3, dir: 1 },
+      { x: -6.4, y: -100.5, dir: 3 },
+      { x: 67.0, y: -85.2, dir: 1 },
+    ],
+    melee: [
+      { x: -25.4, y: -33.4, dir: 3, window: true, cut: 12.0 },
+      { x: -3.2, y: -22.3, dir: 3, window: true, cut: 12.0 },
+      { x: 51.0, y: -29.1, dir: 1, window: true, cut: 12.1 },
+      { x: 68.1, y: -37.7, dir: 1, window: true, cut: 12.0 },
+    ],
+  },
 };
 /**
  * Live-effect anchors of 3D buildings, from the sprite anchor (printed by buildings.py's `note_fx`

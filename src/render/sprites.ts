@@ -6,7 +6,7 @@ import type { BuildingType, Resource } from '../sim/types';
 import { CROP_STUBBLE } from '../sim/config';
 import { createRng } from '../sim/rng';
 import { HALF_H, HALF_W } from './iso';
-import type { GarrisonPost } from './art3d';
+import type { GarrisonPosts } from './art3d';
 
 type Ctx = CanvasRenderingContext2D;
 type V3 = readonly [number, number, number];
@@ -815,7 +815,8 @@ function paintTower(ctx: Ctx): void {
   }
   frontQuad(ctx, a, 0.05, 0.4, 6, 22, '#3d2a1a');
   frontQuad(ctx, a, -0.12, 0.08, 40, 50, '#2c2724');
-  sideQuad(ctx, a, -0.1, 0.1, 44, 54, '#221e1b');
+  // The swordsman's window (`GARRISON_POSTS`).
+  sideQuad(ctx, a, -0.22, 0.22, 40, 58, '#221e1b');
   // Wooden lookout: a parapet of boards, corner posts carrying a pointed roof high enough for the
   // garrison to stand under it (`GARRISON_POSTS`), and the player's banner.
   const p = a + 0.12;
@@ -970,11 +971,10 @@ function paintBigTower(ctx: Ctx): void {
     line(ctx, [a, t, z], [a, t, z + 7], shade(stone, 0.6));
   }
   frontQuad(ctx, a, 0.08, 0.48, 8, 26, '#3d2a1a');
-  for (const z of [38, 60]) {
-    frontQuad(ctx, a, -0.3, -0.12, z, z + 9, '#2c2724');
-    sideQuad(ctx, a, -0.25, -0.07, z + 3, z + 12, '#221e1b');
-    sideQuad(ctx, a, 0.2, 0.38, z + 3, z + 12, '#221e1b');
-  }
+  // The swordsmen's windows (`GARRISON_POSTS`).
+  frontQuad(ctx, a, -0.38, -0.02, 50, 68, '#2c2724');
+  sideQuad(ctx, a, -0.4, -0.04, 50, 68, '#221e1b');
+  sideQuad(ctx, a, 0.1, 0.46, 50, 68, '#221e1b');
   // Crenellated platform.
   const p = a + 0.14;
   box(ctx, 0, 0, p, p, H, 6, shade(stone, 1.05));
@@ -1023,8 +1023,11 @@ function paintFortress(ctx: Ctx): void {
     merlon(-hw + 0.1, t);
   }
   box(ctx, 0, 0, 0.72, 0.72, H, 44, '#b0aa9c');
-  frontQuad(ctx, 0.72, -0.16, 0.16, H + 22, H + 34, '#3a3430');
-  sideQuad(ctx, 0.72, -0.16, 0.16, H + 22, H + 34, '#2c2724');
+  // The swordsmen's windows (`GARRISON_POSTS`).
+  for (const [d0, d1] of [[-0.5, -0.2], [0.2, 0.5]]) {
+    frontQuad(ctx, 0.72, d0, d1, H + 16, H + 34, '#3a3430');
+    sideQuad(ctx, 0.72, d0, d1, H + 16, H + 34, '#2c2724');
+  }
   pyramidRoof(ctx, 0.82, H + 44, 40, '#8e2e24');
   for (let t = -hw + 0.1; t <= hw; t += 0.38) {
     merlon(t, hh - 0.1);
@@ -1047,29 +1050,46 @@ export const BANNERS: Partial<Record<BuildingType, { x: number; y: number }>> = 
 };
 
 /**
- * Where the classic military buildings show their garrison (see `GarrisonPost`; `ART3D_POSTS` for the
- * 3D art): on the small tower's parapet under its roof, round the big tower's roof inside the merlons,
- * on the fortress's wall walk before the keep. Each figure is cut off `cut` px above its feet, where
- * the parapet before it ends.
+ * Where the classic military buildings show their garrison (see `GarrisonPosts`; `ART3D_POSTS` for the
+ * 3D art): archers on the small tower's parapet under its roof, round the big tower's roof inside the
+ * merlons and on the fortress's wall walk; swordsmen in the windows (the painters'
+ * dark openings, the figure cut off at the sill). Each figure is cut off `cut` px above its feet.
  */
-export const GARRISON_POSTS: Partial<Record<BuildingType, readonly GarrisonPost[]>> = {
-  tower: [
-    { x: -14.4, y: -71, dir: 3, cut: 9 },
-    { x: 14.4, y: -71, dir: 1, cut: 9 },
-    { x: 0, y: -59, dir: 2, cut: 9 },
-  ],
-  bigtower: [
-    { x: -21, y: -78, dir: 3, cut: 6 },
-    { x: 21, y: -78, dir: 1, cut: 6 },
-    { x: 0, y: -68, dir: 2, cut: 6 },
-  ],
-  fortress: [
-    { x: 0, y: 2, dir: 2, cut: 7 },
-    { x: -41.6, y: -15, dir: 3, cut: 7 },
-    { x: 41.6, y: -15, dir: 1, cut: 7 },
-    { x: -57.6, y: -23.2, dir: 3, cut: 7 },
-    { x: 67, y: -28, dir: 1, cut: 7 },
-  ],
+export const GARRISON_POSTS: Partial<Record<BuildingType, GarrisonPosts>> = {
+  tower: {
+    ranged: [
+      { x: -14.4, y: -71, dir: 3, cut: 9 },
+      { x: 14.4, y: -71, dir: 1, cut: 9 },
+    ],
+    melee: [{ x: 16, y: -18, dir: 1, window: true, cut: 14 }],
+  },
+  bigtower: {
+    ranged: [
+      { x: -21, y: -78, dir: 3, cut: 6 },
+      { x: 21, y: -78, dir: 1, cut: 6 },
+      { x: 0, y: -68, dir: 2, cut: 6 },
+    ],
+    melee: [
+      { x: -26.2, y: -29.3, dir: 3, window: true, cut: 14 },
+      { x: 26.9, y: -29.6, dir: 1, window: true, cut: 14 },
+      { x: 10.9, y: -21.6, dir: 1, window: true, cut: 14 },
+    ],
+  },
+  fortress: {
+    ranged: [
+      { x: 0, y: 2, dir: 2, cut: 7 },
+      { x: -41.6, y: -15, dir: 3, cut: 7 },
+      { x: 41.6, y: -15, dir: 1, cut: 7 },
+      { x: -57.6, y: -23.2, dir: 3, cut: 7 },
+      { x: 67, y: -28, dir: 1, cut: 7 },
+    ],
+    melee: [
+      { x: -34.2, y: -32.1, dir: 3, window: true, cut: 14 },
+      { x: -11.8, y: -20.9, dir: 3, window: true, cut: 14 },
+      { x: 34.2, y: -32.1, dir: 1, window: true, cut: 14 },
+      { x: 11.8, y: -20.9, dir: 1, window: true, cut: 14 },
+    ],
+  },
 };
 
 function paintSite(ctx: Ctx, half: number): void {

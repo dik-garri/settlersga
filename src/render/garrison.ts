@@ -1,13 +1,15 @@
 /**
- * The garrison on a military building's top, as in Settlers 4: the fighters inside stand on the
- * platform behind the parapet, looking out and now and then glancing round; garrison archers turn to
- * whoever they shoot at, draw and loose (`work:shoot`), and swordsmen brandish their swords while the
- * building is assaulted. Render-only: it reads `Building.garrison`, the fighters' `inside` and
- * `reload`, `World.shots` (`by`, `from`) and the attackers' `assault` tasks.
+ * The garrison of a military building on view, as in Settlers 4: its archers stand on the top behind
+ * the parapet, its swordsmen look out of windows in the stone, all looking out and now and then
+ * glancing round; garrison archers turn to whoever they shoot at, draw and loose (`work:shoot`), and
+ * swordsmen brandish their swords while the building is assaulted. Render-only: it reads
+ * `Building.garrison`, the fighters' `inside` and `reload`, `World.shots` (`by`, `from`) and the
+ * attackers' `assault` tasks.
  *
- * Posts come from the art: `ART3D_POSTS` (recorded by Blender, with the parts before them drawn again
- * over the figures as `front:<type>`) or `GARRISON_POSTS` (classic art, where each figure is cut off
- * at its parapet line instead). Figures live in a layer of the building's body container, so they cull
+ * Posts come from the art, archers' and swordsmen's apart: `ART3D_POSTS` (recorded by Blender, with the
+ * parts before them — walls round the windows, near rails — drawn again over the figures as
+ * `front:<type>`, the windows holes in it) or `GARRISON_POSTS` (classic art, where each figure is cut
+ * off at its parapet or sill line instead). Figures live in a layer of the building's body container, so they cull
  * with it; they are pooled, posed only while the building is on screen, and given back to the pool
  * when it is not. Nothing is allocated per frame.
  */
@@ -18,7 +20,7 @@ import type { World } from '../sim/world';
 import type { SettlerTextures } from './atlas';
 import { dirTowards, FACES_AWAY, idleDir, MIRRORED, PAINTED_DIR, WALK_FRAMES, workFrame } from './anim';
 import { ACTIONS, styleOf, type ActionId } from './animConfig';
-import { ART3D_POSTS, SETTLER_3D_SCALE, type GarrisonPost } from './art3d';
+import { ART3D_POSTS, SETTLER_3D_SCALE, type GarrisonPost, type GarrisonPosts } from './art3d';
 import { holdFrames, setFrame, workFrames, type Settler3d } from './settler3d';
 import { BODY_STAND, BODY_WORK } from './settlerArt';
 import { GARRISON_POSTS } from './sprites';
@@ -50,7 +52,7 @@ interface Crew {
   layer: Container;
   /** What stands before the posts, drawn over the figures (3D art), shown once the building is done. */
   front: Sprite | null;
-  posts: readonly GarrisonPost[];
+  posts: GarrisonPosts;
   figures: Figure[];
 }
 
@@ -77,6 +79,8 @@ export class GarrisonLayer {
   /** Classic art: textures cut off `cut` px above the feet, per cut. */
   private readonly crops = new Map<number, Map<Texture, Texture | null>>();
   private readonly members: Settler[] = [];
+  /** The post of each of `members`. */
+  private readonly memberPosts: GarrisonPost[] = [];
   private readonly hatTints = new Map<string, number>();
 
   constructor(
@@ -89,7 +93,7 @@ export class GarrisonLayer {
   ) {}
 
   /** Where a building type's garrison stands in the current art (null: none shown). */
-  postsOf(type: BuildingType): readonly GarrisonPost[] | null {
+  postsOf(type: BuildingType): GarrisonPosts | null {
     return (this.s3d ? ART3D_POSTS[type] : GARRISON_POSTS[type]) ?? null;
   }
 
@@ -147,14 +151,14 @@ export class GarrisonLayer {
         crew.body.parent !== null &&
         crew.body.visible &&
         (b.owner === this.me || !this.fogOn || this.sim.isVisible(b.door.x, b.door.y, this.me));
-      const n = show ? this.collect(b, crew.posts.length) : 0;
+      const n = show ? this.collect(b, crew.posts) : 0;
       while (crew.figures.length > n) this.release(crew.figures.pop()!);
       while (crew.figures.length < n) {
         const fig = this.take();
         crew.layer.addChild(fig.root);
         crew.figures.push(fig);
       }
-      for (let k = 0; k < n; k++) this.pose(crew.figures[k], this.members[k], crew.posts[k], b, timeMs);
+      for (let k = 0; k < n; k++) this.pose(crew.figures[k], this.members[k], this.memberPosts[k], b, timeMs);
     }
   }
 
@@ -178,17 +182,28 @@ export class GarrisonLayer {
     }
   }
 
-  /** The fighters inside who show, archers first (they are the ones who act from the top), into `members`. */
-  private collect(b: Building, max: number): number {
+  /**
+   * The fighters inside who show, into `members` with their posts: archers on the top's posts,
+   * swordsmen at the windows, in garrison order, as many of each as there are posts.
+   */
+  private collect(b: Building, posts: GarrisonPosts): number {
     const out = this.members;
+    const at = this.memberPosts;
     out.length = 0;
-    for (let pass = 0; pass < 2; pass++) {
-      for (const id of b.garrison) {
-        if (out.length >= max) return out.length;
-        const s = this.sim.getSettler(id);
-        if (!s || s.inside !== b.id) continue;
-        if (!!PROFESSIONS[s.kind].combat?.ranged === (pass === 0)) out.push(s);
+    at.length = 0;
+    let ranged = 0;
+    let melee = 0;
+    for (const id of b.garrison) {
+      const s = this.sim.getSettler(id);
+      if (!s || s.inside !== b.id) continue;
+      if (PROFESSIONS[s.kind].combat?.ranged) {
+        if (ranged >= posts.ranged.length) continue;
+        at.push(posts.ranged[ranged++]);
+      } else {
+        if (melee >= posts.melee.length) continue;
+        at.push(posts.melee[melee++]);
       }
+      out.push(s);
     }
     return out.length;
   }
@@ -237,8 +252,9 @@ export class GarrisonLayer {
       const left = s.reload / Math.max(1, combat!.every);
       f = timeMs - shot.ms < LOOSE_MS ? 3 : left > 0.6 ? 0 : left > 0.25 ? 1 : 2;
     } else if (foe) {
-      // The building is assaulted: archers aim, swordsmen brandish their swords at the attackers.
-      dir = dirTowards(cx, cy, foe.x, foe.y, dir);
+      // The building is assaulted: archers aim, swordsmen brandish their swords at the attackers (out
+      // of their window, whichever side the attackers are).
+      if (!post.window) dir = dirTowards(cx, cy, foe.x, foe.y, dir);
       action = combat?.ranged ? 'shoot' : style.work;
       f = combat?.ranged ? 2 : workFrame(timeMs, s.id, ACTIONS[action].loopMs * 1.6);
     } else dir = idleDir(timeMs, s.id, post.dir);
@@ -247,9 +263,11 @@ export class GarrisonLayer {
     const s3d = this.s3d;
     if (s3d) {
       const fr = action ? workFrames(s3d, action, style.outfit)[dir][f] : holdFrames(s3d, style.holds, style.outfit)[dir][WALK_FRAMES];
-      setFrame(fig.body, fr.full);
+      // A swordsman at a window is cut off at its sill (the figure is drawn scaled).
+      const cut = (post.cut ?? 0) / (SETTLER_3D_SCALE * CREW_SCALE);
+      this.put(fig.body, fr.full, cut);
       fig.tunic.visible = fr.tint !== null;
-      if (fr.tint) setFrame(fig.tunic, fr.tint);
+      if (fr.tint) this.put(fig.tunic, fr.tint, cut);
       fig.tunic.tint = tint;
       fig.head.visible = false;
       const hat = s3d.hats[hatStyle][dir];
@@ -260,7 +278,7 @@ export class GarrisonLayer {
       }
       fig.hat.tint = style.fighter ? 0xffffff : this.hatTint(style.hat);
       fig.arm.visible = fr.over !== null && hat !== null;
-      if (fr.over && hat) setFrame(fig.arm, fr.over);
+      if (fr.over && hat) this.put(fig.arm, fr.over, cut);
       fig.root.scale.set(SETTLER_3D_SCALE * CREW_SCALE);
       return;
     }
