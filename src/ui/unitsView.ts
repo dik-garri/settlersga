@@ -92,20 +92,20 @@ export class UnitsView implements View {
     const actions = el('div', 'info-actions');
     actions.append(
       button(t('units.hold'), t('units.holdTip'), () =>
-        this.toast(t('units.holding', { n: this.world.orderHold(fighterIds()) + this.world.holdSpecialists(specialistIds()) })),
+        this.toast(t('units.holding', { n: this.world.issue({ kind: 'orderHold', player: LOCAL_PLAYER, ids: fighterIds() }) + this.world.issue({ kind: 'holdSpecialists', player: LOCAL_PLAYER, ids: specialistIds() }) })),
       ),
     );
     if (fighters.length > 0) {
       actions.append(
         button(t('units.garrison'), t('units.garrisonTip'), () =>
-          this.toast(t('units.returning', { n: this.world.orderGarrison(fighterIds(), null) })),
+          this.toast(t('units.returning', { n: this.world.issue({ kind: 'orderGarrison', player: LOCAL_PLAYER, ids: fighterIds(), target: null }) })),
         ),
       );
     }
     if (specialists.length > 0) {
       actions.append(
         button(t('units.dismiss'), t('units.dismissTip'), () => {
-          const n = this.world.dismissUnits(specialistIds());
+          const n = this.world.issue({ kind: 'dismissUnits', player: LOCAL_PLAYER, ids: specialistIds() });
           this.toast(n > 0 ? t('units.dismissed', { n }) : t('units.dismissOwnLand'));
         }),
       );

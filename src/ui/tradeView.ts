@@ -106,13 +106,13 @@ export function tradeControls(world: World, b: Building): HTMLElement | null {
     const go = button(
       m.done ? label : `${label} ${t('trade.site')}`,
       m.done ? t('trade.toMarketTip') : t('trade.toSiteTip'),
-      () => world.setTradeRoute(b.id, m.id),
+      () => world.issue({ kind: 'setTradeRoute', player: LOCAL_PLAYER, id: b.id, to: m.id }),
       m.id === to ? 'active' : '',
     );
     // The tutorial's mark: any destination, until a route is chosen.
     routes.append(tag(go, 'trade.route', to !== null));
   }
-  if (to !== null) routes.append(button('✕', t('trade.clearRoute'), () => world.setTradeRoute(b.id, null)));
+  if (to !== null) routes.append(button('✕', t('trade.clearRoute'), () => world.issue({ kind: 'setTradeRoute', player: LOCAL_PLAYER, id: b.id, to: null })));
   box.append(routes);
 
   box.append(el('h4', '', t('trade.what')));
@@ -122,7 +122,7 @@ export function tradeControls(world: World, b: Building): HTMLElement | null {
       inTitle: t('trade.carried'),
       outTitle: t('trade.notCarried'),
       isIn: (r) => carried(b, r),
-      set: (r, on) => world.orderTrade(b.id, r, on ? ENDLESS : 0),
+      set: (r, on) => world.issue({ kind: 'orderTrade', player: LOCAL_PLAYER, id: b.id, res: r, count: on ? ENDLESS : 0 }),
       tipIn: (name) => t('trade.tipIn', { name }),
       tipOut: (name) => t('trade.tipOut', { name }),
       noneTip: t('trade.noneTip'),

@@ -1,5 +1,6 @@
 import type { AiState } from './ai';
 import type { Animal } from './animals';
+import type { Command } from './commands';
 import { GameMap } from './map';
 import type { Building, PlayerId, Settler } from './types';
 import type { Player, World } from './world';
@@ -32,6 +33,8 @@ type MapLayer = (typeof MAP_LAYERS)[number];
 /** Layers added later: saved always, loaded when present (older saves simply have none). */
 const LATER_LAYERS = ['signAt', 'signBy'] as const;
 type LaterLayer = (typeof LATER_LAYERS)[number];
+/** Every map layer a save holds (`stateChecksum` hashes the same ones). */
+export const SAVED_LAYERS = [...MAP_LAYERS, ...LATER_LAYERS] as const;
 
 /** Plain-JSON snapshot of the whole simulation. */
 export interface SaveData {
@@ -53,6 +56,10 @@ export interface SaveData {
   nextAnimalId: number;
   animalRngState: number;
   idleRngState: number;
+  /** Commands scheduled for a later tick (`World.schedule`); absent in older saves. */
+  commands?: Command[];
+  /** `World.nextCommandSeq`; absent in older saves. */
+  commandSeq?: number;
 }
 
 function encode(a: Uint8Array | Uint16Array | Int32Array): string {
@@ -73,7 +80,7 @@ function decodeInto(text: string, target: Uint8Array | Uint16Array | Int32Array)
 
 export function saveWorld(w: World): SaveData {
   const map = { w: w.map.w, h: w.map.h } as SaveData['map'];
-  for (const layer of [...MAP_LAYERS, ...LATER_LAYERS]) map[layer] = encode(w.map[layer]);
+  for (const layer of SAVED_LAYERS) map[layer] = encode(w.map[layer]);
   return structuredClone({
     version: SAVE_VERSION,
     tick: w.tick,
@@ -94,6 +101,8 @@ export function saveWorld(w: World): SaveData {
     nextAnimalId: w.nextAnimalId,
     animalRngState: w.animalRng.state,
     idleRngState: w.idleRng.state,
+    commands: w.pendingCommands,
+    commandSeq: w.nextCommandSeq,
   });
 }
 
@@ -132,4 +141,6 @@ export function restoreWorld(w: World, raw: SaveData): void {
   w.nextAnimalId = data.nextAnimalId;
   w.animalRng.state = data.animalRngState;
   w.idleRng.state = data.idleRngState;
+  w.pendingCommands.push(...(data.commands ?? []));
+  w.nextCommandSeq = data.commandSeq ?? 0;
 }

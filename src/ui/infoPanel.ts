@@ -229,7 +229,7 @@ export class InfoView implements View {
         const back = el('button', '', t('info.areaBack'));
         back.title = t('info.areaBackTip');
         back.onclick = () => {
-          this.world.setWorkArea(b.id, null);
+          this.world.issue({ kind: 'setWorkArea', player: LOCAL_PLAYER, id: b.id, at: null });
           back.blur();
         };
         area.append(back);
@@ -249,7 +249,7 @@ export class InfoView implements View {
     if (!b.done || def.recipe || def.residence) {
       const prio = tag(el('button', b.priority ? 'active' : '', b.priority ? t('info.priorityOn') : t('info.priorityBtn')), 'info.priority');
       prio.title = t('info.priorityTip');
-      prio.onclick = () => this.world.setPriority(b.id, !b.priority);
+      prio.onclick = () => this.world.issue({ kind: 'setPriority', player: LOCAL_PLAYER, id: b.id, on: !b.priority });
       actions.append(prio);
     }
     if (canStop(b)) {
@@ -257,7 +257,7 @@ export class InfoView implements View {
       const stop = tag(el('button', b.stopped ? 'active' : '', b.stopped ? t('info.start') : t('info.stop')), 'info.stop');
       stop.title = b.stopped ? t('info.startTip') : b.done ? t('info.stopTip') : t('info.stopSiteTip');
       stop.onclick = () => {
-        this.world.setStopped(b.id, !b.stopped);
+        this.world.issue({ kind: 'setStopped', player: LOCAL_PLAYER, id: b.id, on: !b.stopped });
         stop.blur();
       };
       actions.append(stop);
@@ -281,7 +281,7 @@ export class InfoView implements View {
         return;
       }
       this.confirmDemolish = null;
-      if (this.world.demolish(b.id)) this.state.selected = null;
+      if (this.world.issue({ kind: 'demolish', player: LOCAL_PLAYER, id: b.id })) this.state.selected = null;
     };
     actions.append(demolish);
     // Settlers 4: the next building (or site) of this type, the camera follows.
@@ -350,7 +350,7 @@ export class InfoView implements View {
     go.disabled = available === 0;
     go.title = available > 0 ? t('info.attackTip') : t('info.noAttackers');
     go.onclick = () => {
-      const sent = this.world.attack(b.id, this.attackCount);
+      const sent = this.world.issue({ kind: 'attack', player: LOCAL_PLAYER, target: b.id, count: this.attackCount });
       this.toast(sent > 0 ? t('input.order.attack', { n: sent }) : t('info.nobodyToSend'));
     };
     actions.append(less, more, go);

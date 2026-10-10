@@ -1,7 +1,7 @@
 import { FIELD, GEOLOGIST, GEOLOGIST_SIGN, ORDERABLE, oreOf, PIONEER, PROFESSIONS, TERRAIN, THIEF } from './config';
 import { influenced } from './territory';
 import { postMessage } from './messages';
-import { recountWorkers, spareCarriers, workerOrder, workersOf } from './economy';
+import { orderWorkers, recountWorkers, spareCarriers, workerOrder, workersOf } from './economy';
 import { restIdle } from './idle';
 import { formationSpots } from './field';
 import { freeGoods, goodsOn, liftGoods, reserveGoods, stackTiles } from './ground';
@@ -482,7 +482,7 @@ export function dismissSpecialist(w: World, kind: Settler['kind'], player: Playe
  */
 function toCarrier(w: World, s: Settler, player: PlayerId, lowerOrder = true): void {
   const kind = s.kind;
-  if (lowerOrder) w.orderWorkers(kind, Math.max(0, workerOrder(w, player, kind) - 1), player);
+  if (lowerOrder) orderWorkers(w, player, kind, Math.max(0, workerOrder(w, player, kind) - 1));
   s.kind = 'carrier';
   s.hp = 0;
   s.errand = null;
@@ -582,7 +582,7 @@ export function sendGeologist(w: World, x: number, y: number, player: PlayerId):
   best.tasks.push({ t: 'retool', kind: 'geologist', errand: { x, y } });
   recountWorkers(w);
   const count = workersOf(w, player, 'geologist');
-  if (count > workerOrder(w, player, 'geologist')) w.orderWorkers('geologist', count, player);
+  if (count > workerOrder(w, player, 'geologist')) orderWorkers(w, player, 'geologist', count);
   return true;
 }
 
