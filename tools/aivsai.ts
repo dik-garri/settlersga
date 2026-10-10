@@ -3,8 +3,9 @@
  * growth every few minutes and how the game ends.
  *
  *   npm run sim:ai -- --seeds=42,7 --minutes=150 --players=2 --passive=0 --levels=easy,hard
+ *   npm run sim:ai -- --mode=economy        # economic victory (`modes.ts`): decided after 60 minutes
  */
-import { PROFESSIONS, TICKS_PER_SECOND, type AiLevel } from '../src/sim/config';
+import { GAME_MODES, PROFESSIONS, TICKS_PER_SECOND, type AiLevel, type GameMode } from '../src/sim/config';
 import { isArcher, isFighter } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
 import { World } from '../src/sim/world';
@@ -20,13 +21,15 @@ const every = Number(arg('every', '10'));
 const teams = arg('teams', '') ? arg('teams', '').split(',').map(Number) : undefined;
 /** --levels=easy,hard: difficulty per player (`AI_LEVELS`, default medium). */
 const difficulty = arg('levels', '') ? (arg('levels', '').split(',') as AiLevel[]) : undefined;
+/** --mode=economy|coop: victory mode (`GAME_MODES`, default conquest). */
+const mode = (GAME_MODES as readonly string[]).includes(arg('mode', 'conquest')) ? (arg('mode', 'conquest') as GameMode) : 'conquest';
 const perMinute = TICKS_PER_SECOND * 60;
 
 for (const seed of seeds) {
   const ai = Array.from({ length: players }, (_, k) => k + 1).filter((p) => !(passive && p === 1));
-  const w = new World(seed, { size, players, ai, teams, difficulty });
+  const w = new World(seed, { size, players, ai, teams, difficulty, mode: mode === 'conquest' ? undefined : mode });
   console.log(
-    `seed ${seed} · ${size}×${size} · players ${players} · AI ${ai.join(',')}${passive ? ' · player 1 passive' : ''}${teams ? ` · teams ${teams.join(',')}` : ''}${difficulty ? ` · levels ${difficulty.join(',')}` : ''}`,
+    `seed ${seed} · ${size}×${size} · players ${players} · AI ${ai.join(',')}${passive ? ' · player 1 passive' : ''}${teams ? ` · teams ${teams.join(',')}` : ''}${difficulty ? ` · levels ${difficulty.join(',')}` : ''}${w.rules ? ` · mode ${w.rules.mode}${w.rules.goods ? ` (${w.rules.goods.join(',')})` : ''}` : ''}`,
   );
   const t0 = performance.now();
   // Every defeat with its time, in order (the first one is what earlier versions reported).
@@ -58,7 +61,11 @@ for (const seed of seeds) {
     }
   }
   const winner = w.players.find((p) => w.outcome(p.id) === 'won');
-  const end = fallen.join(', ') + (winner ? ` · player ${winner.id} won at ${(w.tick / perMinute).toFixed(1)} min` : '');
+  const eco = w.result
+    ? ` by economy (${w.result.by}: goods ${w.result.tally.winsA}:${w.result.tally.winsB}, sum ${w.result.tally.sumA}:${w.result.tally.sumB})`
+    : '';
+  const won = winner ? `player ${winner.id} won at ${(w.tick / perMinute).toFixed(1)} min${eco}` : '';
+  const end = [fallen.join(', '), won].filter(Boolean).join(' · ');
   console.log(`  result: ${end || 'nobody defeated'} · ${((performance.now() - t0) / (w.tick || 1)).toFixed(3)} ms/tick`);
 }
 

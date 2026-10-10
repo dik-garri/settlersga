@@ -19,7 +19,7 @@ import type { GameState, Placeable } from './state';
 const res = resLower;
 
 /** Specialists the player sends with a click on the map (the side panel's settlers menu does the same). */
-const SENDABLE: Partial<Record<SettlerKind, Placeable>> = { pioneer: 'pioneer', thief: 'thief', geologist: 'geologist' };
+const SENDABLE: Partial<Record<SettlerKind, Placeable>> = { pioneer: 'pioneer', thief: 'thief', geologist: 'geologist', saboteur: 'saboteur' };
 
 export class SettlerInfoView implements View {
   readonly el = el('div', 'view info-view');
@@ -158,6 +158,7 @@ export class SettlerInfoView implements View {
         if (next?.t === 'prospect') return t('doing.toMountain');
         if (s.fled !== undefined) return t('doing.homeless');
         if (next?.t === 'steal') return t('doing.sneaking');
+        if (next?.t === 'sabotage') return t('doing.toSabotage', { b: at(next.b) });
         if (next?.t === 'claim') return t('doing.toBorder');
         if (next?.t === 'load') return t('doing.toLoad', { b: at(next.b) });
         if (next?.t === 'unload') {
@@ -199,6 +200,8 @@ export class SettlerInfoView implements View {
         return t('doing.claim');
       case 'steal':
         return t('doing.steal');
+      case 'sabotage':
+        return t('doing.sabotage', { b: at(task.b) });
       case 'enter':
         return t('doing.enter', { b: at(task.b) });
       case 'wait':

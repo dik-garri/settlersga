@@ -1,5 +1,6 @@
 import { settlerIcon } from '../render/atlas';
 import { isReadyWorker } from '../sim/buildings';
+import { NETWORK_ONLY } from '../sim/config';
 import type { Settler, SettlerKind } from '../sim/types';
 import type { World } from '../sim/world';
 import { nextSettlerOfKind } from './find';
@@ -12,10 +13,11 @@ import { tag } from './uiTarget';
 import type { GameState, Placeable } from './state';
 
 /** Errands sent from the settlers menu at a tile or a building, as in Settlers 4's specialists page. */
-export const COMMANDS: { type: 'geologist' | 'pioneer' | 'thief'; what: Key; how: Key }[] = [
+export const COMMANDS: { type: 'geologist' | 'pioneer' | 'thief' | 'saboteur'; what: Key; how: Key }[] = [
   { type: 'geologist', what: 'settlers.cmd.geologist', how: 'settlers.cmd.geologistHow' },
   { type: 'pioneer', what: 'settlers.cmd.pioneer', how: 'settlers.cmd.pioneerHow' },
   { type: 'thief', what: 'settlers.cmd.thief', how: 'settlers.cmd.thiefHow' },
+  { type: 'saboteur', what: 'settlers.cmd.saboteur', how: 'settlers.cmd.saboteurHow' },
 ];
 
 /**
@@ -43,6 +45,8 @@ export class SettlersView implements View {
     this.el.append(el('h4', '', t('settlers.settlement')), this.summary, el('h4', '', t('settlers.specialists')));
     const grid = el('div', 'build-grid commands');
     for (const c of COMMANDS) {
+      // The saboteur only in a game that has him (Settlers 4: network games).
+      if (NETWORK_ONLY.includes(c.type) && !world.rules?.saboteurs) continue;
       const b = tag(el('button', 'build-btn'), `settlers.cmd.${c.type}`);
       b.title = `${t(c.what)}: ${t(c.how)}`;
       const pic = el('span', 'build-pic');

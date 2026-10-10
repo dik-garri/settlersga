@@ -2,6 +2,7 @@ import { buildingIcon } from '../render/atlas';
 import {
   BUILDINGS,
   buildersOf,
+  buildingHp,
   costOf,
   gatheredBy,
   INPUT_CAP,
@@ -100,6 +101,8 @@ export class InfoView implements View {
     const canSend = enemy && def.garrison && b.done ? this.world.availableAttackers(b.id, this.me) : 0;
     // Out of sight (fog of war) other players' buildings show only what is known from afar.
     const sighted = !this.state.fog || this.world.isVisible(b.door.x, b.door.y, this.me);
+    // Damaged by saboteurs (`SABOTEUR`): its hit points left.
+    if (b.hp !== undefined && (!enemy || sighted)) rows.push([t('info.hp'), `${b.hp} / ${buildingHp(b.type)}`]);
     if (enemy) {
       rows.push([t('info.owner'), t(this.world.allied(b.owner, this.me) ? 'info.ownerAlly' : 'info.ownerPlayer', { id: b.owner })]);
       if (!sighted) rows.push([t('army.sight'), t('info.noSight')]);

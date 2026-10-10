@@ -1367,3 +1367,31 @@ button.wide {
   opacity: 0.5;
   cursor: default;
 }
+
+/* The victory mode under the readout, and the economic comparison (`modeView.ts`). */
+.readout-mode {
+  margin-top: 3px;
+  padding-top: 3px;
+  border-top: 1px solid rgba(58, 34, 8, 0.25);
+  font-size: 12px;
+  color: #3a2208;
+  text-align: center;
+}
+
+.eco-table td.lead {
+  font-weight: bold;
+  color: #1f5a12;
+}
+
+.eco-table tr.eco-sum td {
+  border-top: 1px solid rgba(58, 34, 8, 0.25);
+  font-style: italic;
+}
+
+.eco-table th.mine {
+  text-decoration: underline;
+}
+
+.eco-name canvas {
+  vertical-align: middle;
+}

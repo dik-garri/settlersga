@@ -1,6 +1,6 @@
 import { addBuilding, spawnSettler } from '../sim/buildings';
 import { recomputeTerritory } from '../sim/territory';
-import { BUILD_TICKS_PER_UNIT, BUILDINGS, costOf, CROP_KINDS, CROP_RIPE, CROP_STUBBLE, hpOf, ORE_RESOURCES, totalCost } from '../sim/config';
+import { BUILD_TICKS_PER_UNIT, BUILDINGS, buildingHp, costOf, CROP_KINDS, CROP_RIPE, CROP_STUBBLE, hpOf, ORE_RESOURCES, totalCost } from '../sim/config';
 import { clearStrokes } from '../sim/digging';
 import { ENDLESS } from '../sim/economy';
 import { formationSpots } from '../sim/field';
@@ -132,7 +132,8 @@ function run(w: World, ticks: number): void {
 
 export function buildShowcase(): World {
   // A second, passive player far away: someone for the thief to rob.
-  const w = new World(SHOWCASE_SEED, { size: SIZE, players: 2 });
+  // Saboteurs allowed (as in a network game), so the showcase can show one at work.
+  const w = new World(SHOWCASE_SEED, { size: SIZE, players: 2, saboteurs: true });
   // No headquarters (Settlers 4): the start tower, its goods on the ground round it.
   const home = w.homeOf(LOCAL_PLAYER);
   const c = w.buildingAt(home.x, home.y)!;
@@ -428,5 +429,22 @@ export function buildShowcase(): World {
     const ruin = w.ruins[w.ruins.length - 1];
     if (ruin) ruin.until = FROZEN;
   });
+  // A saboteur (network games) set on a hut of the other player's, already damaged (placed last, so
+  // he is still at work as the demo opens; the hut falls within a minute or so and burns).
+  const hut = placeFor(w, 'woodcutter', 2, other.x - 8, other.y + 6);
+  if (hut) {
+    hut.unreachableUntil = FROZEN;
+    for (let y = hut.y - 3; y <= hut.door.y + 3; y++) {
+      for (let x = hut.x - 3; x <= hut.door.x + 3; x++) if (m.inBounds(x, y)) m.explored[m.idx(x, y)] |= 1;
+    }
+    hut.hp = Math.ceil(buildingHp(hut.type) * 0.8);
+    const own = [...w.buildings.values()].find((b) => b.owner === LOCAL_PLAYER && b.done)!;
+    const sab = spawnSettler(w, 'saboteur', own);
+    sab.inside = null;
+    sab.hp = hpOf('saboteur');
+    sab.x = sab.px = hut.door.x - 2;
+    sab.y = sab.py = hut.door.y + 1;
+    w.sendSaboteur(hut.id);
+  }
   return w;
 }

@@ -29,6 +29,8 @@ import {
   AI_LEVELS,
   AI_PLAN,
   ATTACK_RANGE,
+  LEVEL_RES,
+  SOLDIER_LEVELS,
   BUILD_DIG_SLOPE,
   BUILD_MAX_SLOPE,
   BUILDINGS,
@@ -41,7 +43,9 @@ import {
   type BuildingDef,
 } from './config';
 import { defend, hunt, idleFighters, muster, sendScout, stageStrike, updateScout, updateStrike } from './aiField';
-import { ENDLESS } from './economy';
+import { ENDLESS, recruitOrder } from './economy';
+import { economyEndTick } from './modes';
+import { canStop } from './stop';
 import { inBuildingSight, visionRadius } from './fog';
 import { isCutOff, landAt, landOf } from './land';
 import { claimable, isFreeSpecialist, robbable } from './specialists';
@@ -195,6 +199,40 @@ function storeWanted(own: Building[]): boolean {
   return limited && stores < AI.maxStores && free < AI.storeFreePiles;
 }
 
+/**
+ * Economic mode (`modes.ts`): in the last `AI.economyHold` ticks before the count, the goods that are
+ * counted are kept — every site and workshop of its own that would use one up without making one is
+ * stopped (`setStopped`: what lies there still counts), and recruit orders whose weapons or gold are
+ * counted are dropped (`orderRecruits` 0). Public commands only; true while holding (it then places
+ * nothing new). Conquest games never get here.
+ */
+function economyHold(w: World, me: PlayerId, own: Building[]): boolean {
+  const goods = w.rules?.mode === 'economy' && !w.result ? w.rules.goods : undefined;
+  if (!goods || w.tick < economyEndTick() - AI.economyHold) return false;
+  const counted = (r: string) => goods.includes(r as Resource);
+  for (const b of own) {
+    if (b.stopped || !canStop(b)) continue;
+    const def = BUILDINGS[b.type];
+    let spends = false;
+    if (!b.done) spends = Object.keys(def.cost).some(counted);
+    else if (def.recipe) {
+      const ins = [...Object.keys(def.recipe.inputs), ...(def.recipe.inputsAnyOf ?? [])];
+      const outs = [...Object.keys(def.recipe.outputs), ...(def.recipe.outputChoice ?? [])];
+      spends = ins.some(counted) && !outs.some(counted);
+    }
+    if (spends) w.setStopped(b.id, true, me);
+  }
+  for (const kind of FIGHTERS) {
+    const prof = PROFESSIONS[kind];
+    const kitCounted = [prof.tool, ...Object.keys(prof.kit ?? {})].some((r) => r !== undefined && counted(r));
+    for (let level = 0; level < (prof.combat?.levels.length ?? 1); level++) {
+      const takes = kitCounted || (counted(LEVEL_RES) && (SOLDIER_LEVELS[level]?.cost ?? 0) > 0);
+      if (takes && recruitOrder(w, me, kind, level) !== 0) w.orderRecruits(kind, level, 0, me);
+    }
+  }
+  return true;
+}
+
 function think(w: World, ai: AiState): void {
   const me = ai.player;
   const own = [...w.buildings.values()].filter((b) => b.owner === me);
@@ -232,6 +270,8 @@ function think(w: World, ai: AiState): void {
     useSpecialists(w, ai, own);
   }
 
+  // Economic mode, close to the count: keep the counted goods, build nothing new.
+  if (economyHold(w, me, own)) return;
   const sites = own.filter((b) => !b.done);
   if (sites.length >= tuning(ai).maxOpenSites) return;
   const ctx = new Context(w, me, own, ai.wantOre);

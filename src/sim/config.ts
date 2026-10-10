@@ -331,6 +331,96 @@ export const GROUND = {
 export const DEFEAT = { checkEvery: Math.round(s4Ticks(8)), afterTick: Math.round(s4Ticks(140)), fighters: true };
 
 /**
+ * Victory modes of a free game (`modes.ts`), after Settlers 4's (manual §4.4; `CGameType::m_iMode`:
+ * 1 conflict, 2 cooperation, 3 economy, 5 free settle):
+ * - `conquest` — S4's conflict mode: the last alliance standing wins (`DEFEAT`);
+ * - `economy` — S4's economic mode (`ECONOMY`): the conquest rules still run, and after the time
+ *   limit the alliances' stock of seven goods decides (`ScriptEconomyModeVictoryConditionCheck`);
+ * - `coop` — S4's cooperation mode on our random maps: every human in one team against the computer
+ *   players (S4 plays it only on cooperation maps with their own goal; ours have none, so the goal is
+ *   the conquest of every computer player). The teams are the setup's (`ui/setup.ts` `worldArgs`);
+ *   the simulation plays it exactly like `conquest`.
+ */
+export type GameMode = 'conquest' | 'economy' | 'coop';
+export const GAME_MODES: readonly GameMode[] = ['conquest', 'economy', 'coop'];
+
+/**
+ * Settlers 4's economic mode (decompiled `ScriptEconomyModeVictoryConditionCheck`,
+ * `CStateLobbyGameSettings::CreateRandomGoods`): the lobby draws `goods` distinct goods at random from
+ * `pool` (every good but S4's excluded ones — of ours the pig: S4 skips none, agave, ammo, battle axe,
+ * blowgun, goat, gunpowder, honey, mead, pig, sheep, tequila, wine, backpack catapult, goose,
+ * explosive arrow, sunflower and its oil); after `minutes` of play (S4: `ticks × 71 ms / 60 s ≥ 60`)
+ * alliance 1 and all the others together compare, good by good, their current stock (`CStatistic::
+ * GetGood`: every pile on their land — `CPile::AdjustStatistic` —, goods in hands not counted): the
+ * side ahead in more goods wins; equal — the greater sum of all seven; equal again — a coin (the
+ * game's random number). Only alliance 1 or alliance 2 can win (S4's event 0x37 carries 1 or 2).
+ */
+export const ECONOMY = {
+  minutes: 60,
+  goods: 7,
+  pool: [
+    'log',
+    'plank',
+    'stone',
+    'water',
+    'fish',
+    'grain',
+    'flour',
+    'bread',
+    'meat',
+    'coal',
+    'ironore',
+    'goldore',
+    'iron',
+    'gold',
+    'axe',
+    'saw',
+    'pickaxe',
+    'shovel',
+    'scythe',
+    'rod',
+    'hammer',
+    'sword',
+    'bow',
+    'armor',
+  ] as readonly Resource[],
+};
+
+/**
+ * The saboteur, Settlers 4's specialist of network games only (manual §10.5; Settlers United wiki,
+ * units/saboteur; decompiled `CWarriorBehavior`, `IBuildingRole::Decrease`, `CBuilding::Decrease`):
+ * 25 hit points, a pickaxe for tool (the manual's shovel and pickaxe were corrected later), disguised
+ * like the thief but without his far sight. He attacks enemy buildings — any but the Dark Tribe's,
+ * harbours and shipyards (`BuildingDef.sabotageImmune`; we have none of those) — from their builder
+ * spots (`buildersOf`: no more saboteurs on a building than it has builders), unmasked by the attack
+ * (manual). A blow does `damage` (6, not scaled by fighting strength) less the buildings' armour:
+ * `(damage − armor) / 2`, at least 1 (`IBuildingRole::Decrease`, armour 5: one hit point a blow); at
+ * 0 the building is destroyed (`DestroyBuilding`: it burns). After a target falls he goes for the
+ * nearest enemy building within `scan` of himself (S4 `WarriorAttackScanSaboteur`: 21 S4 tiles, a
+ * builder spot within 12), else he stays where he is.
+ * Unverified, ours: `every` (the swordsman's cadence, 13 S4 ticks; S4's saboteur hit chance
+ * `g_uSaboteurHitChange` comes from data we do not have — every blow lands) and the buildings' hit
+ * points (`buildingHp`: S4 keeps them per building type in data we do not have — a building stands
+ * as long as it was dear, 10 per unit of its cost, between 20 and 255, S4's byte; the big tower
+ * «holds twice as long» as the small one, siedler-games: 140 against 50).
+ */
+export const SABOTEUR = {
+  damage: 6,
+  armor: 5,
+  every: s4Ticks(13),
+  scan: 21 / S4_TILES_PER_TILE,
+  spot: 12 / S4_TILES_PER_TILE,
+  hpPerCost: 10,
+  hp: { min: 20, max: 255 },
+};
+
+/** Hit points a blow of `damage` takes from a building (Settlers 4 `IBuildingRole::Decrease`). */
+export function buildingDamage(damage: number): number {
+  if (damage <= 0) return 0;
+  return Math.max(1, Math.floor((damage - SABOTEUR.armor) / 2));
+}
+
+/**
  * Who owns the land (`territory.ts`), Settlers 4's `CWorldManager::SetOwner`: a claiming building
  * gives each tile of its disc `influence - perTile * distance` (S4: 50 - distance in its tiles, and
  * one of ours is `S4_TILES_PER_TILE` of them), a player's influences add up to at most `cap` (S4: 254);
@@ -374,7 +464,9 @@ export const OWN_LAND_WALK = {
  * a tool, only as many as ordered); the defaults equal the start's, so nothing is recruited unasked.
  * `World.orderWorkers` changes them.
  */
-export const ORDERABLE: readonly SettlerKind[] = ['builder', 'digger', 'geologist', 'pioneer', 'thief'];
+export const ORDERABLE: readonly SettlerKind[] = ['builder', 'digger', 'geologist', 'pioneer', 'thief', 'saboteur'];
+/** Orderable only in a game that allows them (`World.rules.saboteurs`: network games, as in Settlers 4). */
+export const NETWORK_ONLY: readonly SettlerKind[] = ['saboteur'];
 
 /**
  * Specialists (Settlers 4), ordered like workers and sent on errands (`specialists.ts`). The pioneer
@@ -814,6 +906,7 @@ export type Behavior =
   | 'digger'
   | 'pioneer'
   | 'thief'
+  | 'saboteur'
   | 'donkey';
 
 export interface GatherDef {
@@ -996,6 +1089,11 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
    * Sees 25 S4 tiles (Settlers United changelog), ≈ 8 of ours.
    */
   thief: { behavior: 'thief', hp: 20, cloaked: true, sight: 10 },
+  /**
+   * Settlers 4's saboteur (`SABOTEUR`, network games only): a pickaxe, 25 hit points, disguised like
+   * the thief but without his far sight; attacks enemy buildings (`specialists.ts`).
+   */
+  saboteur: { behavior: 'saboteur', tool: 'pickaxe', hp: 25, cloaked: true },
   donkeyrancher: { behavior: 'workshop' },
   /** Settlers 4 `CDonkeyRole::TakeJob`: a loaded donkey of a player is vulnerable (`ENTITY_FLAG_VulnerableMask`). */
   donkey: { behavior: 'donkey', roads: true, dropsLoad: true },
@@ -1129,6 +1227,10 @@ export interface StorageDef {
 export interface BuildingDef {
   w: number;
   h: number;
+  /** Hit points against saboteurs (`SABOTEUR`); absent: by cost (`buildingHp`). */
+  hp?: number;
+  /** Saboteurs cannot harm it (Settlers 4: the Dark Tribe's buildings, harbours, shipyards). */
+  sabotageImmune?: boolean;
   /** Materials needed to construct. */
   cost: Partial<Stock>;
   worker: SettlerKind | null;
@@ -1556,6 +1658,13 @@ export function totalCost(type: BuildingType): number {
   return Object.values(BUILDINGS[type].cost).reduce((sum, n) => sum + (n ?? 0), 0);
 }
 
+/** A building's hit points against saboteurs (`SABOTEUR`): `BuildingDef.hp`, else by its cost. */
+export function buildingHp(type: BuildingType): number {
+  const def = BUILDINGS[type];
+  if (def.hp !== undefined) return def.hp;
+  return Math.max(SABOTEUR.hp.min, Math.min(SABOTEUR.hp.max, Math.round(SABOTEUR.hpPerCost * totalCost(type))));
+}
+
 /**
  * Builders that work on one site at once, from Settlers 4's building data (`m_iBuilderNumber`, the
  * Roman buildings: each has that many builder spots around it). Types not listed: by footprint.
@@ -1804,6 +1913,12 @@ export const AI = {
    * `recruitLevels` (`AI_LEVELS`; Settlers 4's AI: level 1, on «normal» and «hard» 2 and 3 as well).
    */
   recruitKinds: ['soldier', 'archer'] as readonly SettlerKind[],
+  /**
+   * Economic mode (`modes.ts`): for the last `economyHold` ticks before the count it keeps the goods
+   * that are counted — stops its sites and workshops that would use one up without making one, and
+   * drops recruit orders that take one (ours: S4's AI has no such rule we know of).
+   */
+  economyHold: 10 * 60 * TICKS_PER_SECOND,
   /**
    * Garrisons (`muster`): its military buildings within `fillRange` tiles of a known enemy military
    * building, or at its border (land not its own at any of `borderSamples` points just beyond their

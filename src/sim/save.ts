@@ -1,6 +1,7 @@
 import type { AiState } from './ai';
 import type { Animal } from './animals';
 import type { Command } from './commands';
+import type { GameResult, GameRules } from './modes';
 import { GameMap } from './map';
 import type { Building, PlayerId, Settler } from './types';
 import type { Player, World } from './world';
@@ -60,6 +61,10 @@ export interface SaveData {
   commands?: Command[];
   /** `World.nextCommandSeq`; absent in older saves. */
   commandSeq?: number;
+  /** `World.rules` (victory mode, economic goods, saboteurs); absent = conquest (older saves too). */
+  rules?: GameRules;
+  /** `World.result` (an economic victory); absent while undecided. */
+  result?: GameResult;
 }
 
 function encode(a: Uint8Array | Uint16Array | Int32Array): string {
@@ -103,6 +108,8 @@ export function saveWorld(w: World): SaveData {
     idleRngState: w.idleRng.state,
     commands: w.pendingCommands,
     commandSeq: w.nextCommandSeq,
+    rules: w.rules,
+    result: w.result,
   });
 }
 
@@ -143,4 +150,6 @@ export function restoreWorld(w: World, raw: SaveData): void {
   w.idleRng.state = data.idleRngState;
   w.pendingCommands.push(...(data.commands ?? []));
   w.nextCommandSeq = data.commandSeq ?? 0;
+  w.rules = data.rules;
+  w.result = data.result;
 }

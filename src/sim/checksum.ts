@@ -127,7 +127,7 @@ export function sectionChecksums(w: World): Record<ChecksumSection, string> {
     }),
     settlers: of((h) => h.value(w.settlers)),
     buildings: of((h) => h.value([...w.buildings.values()])),
-    players: of((h) => h.value({ players: w.players, defeated: w.defeated, territoryVersion: w.territoryVersion })),
+    players: of((h) => h.value({ players: w.players, defeated: w.defeated, territoryVersion: w.territoryVersion, rules: w.rules, result: w.result })),
     rest: of((h) =>
       h.value({
         stats: w.stats,
@@ -166,6 +166,9 @@ export function stateChecksum(w: World): string {
     idleRngState: w.idleRng.state,
     commands: w.pendingCommands,
     commandSeq: w.nextCommandSeq,
+    // Absent (undefined, so not hashed) in a conquest game: its sums stay what they were.
+    rules: w.rules,
+    result: w.result,
   });
   return (h.h >>> 0).toString(16).padStart(8, '0');
 }

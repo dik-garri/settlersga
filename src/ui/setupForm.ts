@@ -1,14 +1,19 @@
 import { PLAYER_COLORS } from '../render/sprites';
-import { AI_LEVEL_IDS, START_CONDITIONS, type StartLevel } from '../sim/config';
+import { wareIcon } from '../render/atlas';
+import { AI_LEVEL_IDS, ECONOMY, START_CONDITIONS, type GameMode, type StartLevel } from '../sim/config';
+import type { Resource } from '../sim/types';
 import { t } from './i18n';
-import { startName } from './names';
+import { modeName, resName, startName } from './names';
 import { el } from './dom';
 import {
   activeSlots,
   levelName,
   MAP_SIZES,
   MAX_SLOTS,
+  modesFor,
   RACES,
+  randomGoods,
+  setVictory,
   raceName,
   slotKindName,
   setupProblem,
@@ -67,6 +72,47 @@ export function setupForm(setup: GameSetup, changed: (problem: string | null) =>
     parent.append(r);
   };
 
+  /**
+   * The seven goods of the economic mode: drawn at random when the mode is chosen (Settlers 4's
+   * lobby), shown as icons; the dice draws seven others, and each can be swapped for another good
+   * (our addition: S4 only draws them).
+   */
+  const goodsPicker = (): HTMLElement => {
+    const wrap = el('div', 'eco-goods');
+    wrap.append(el('div', 'set-name', t('setup.goods')));
+    const list = el('div', 'eco-goods-list');
+    const goods = setup.goods ?? [];
+    goods.forEach((res, k) => {
+      const item = el('label', 'eco-good');
+      item.title = resName(res);
+      const s = el('select');
+      for (const r of ECONOMY.pool) {
+        if (r !== res && goods.includes(r)) continue;
+        const o = el('option', '', resName(r));
+        o.value = r;
+        s.append(o);
+      }
+      s.value = res;
+      s.disabled = ro;
+      s.onchange = () => {
+        goods[k] = s.value as Resource;
+        render();
+      };
+      item.append(wareIcon(res, 24), s);
+      list.append(item);
+    });
+    const dice = el('button', 'menu-small', t('setup.dice'));
+    dice.type = 'button';
+    dice.disabled = ro;
+    dice.title = t('setup.goodsDiceTip');
+    dice.onclick = () => {
+      setup.goods = randomGoods();
+      render();
+    };
+    wrap.append(list, dice, el('p', 'muted', t('setup.goodsNote', { n: ECONOMY.minutes, k: ECONOMY.goods })));
+    return wrap;
+  };
+
   const render = () => {
     box.innerHTML = '';
     const map = el('div', 'setup-map');
@@ -106,6 +152,18 @@ export function setupForm(setup: GameSetup, changed: (problem: string | null) =>
         (v) => (setup.start = v),
       ),
     );
+    // Victory mode (Settlers 4's conflict, economic and cooperation modes) and the economic goods.
+    const modes = modesFor(setup);
+    const victory = setup.victory ?? 'conquest';
+    const modeSel = select(
+      modes.map((m): [GameMode, string] => [m, modeName(m)]),
+      victory,
+      (v) => setVictory(setup, v),
+    );
+    modeSel.title = t(`mode.${victory}Tip`);
+    field(map, t('setup.mode'), modeSel);
+    if (victory === 'economy') map.append(goodsPicker());
+    if (victory === 'coop') map.append(el('p', 'muted', t('setup.coopNote')));
     const fog = el('input');
     fog.type = 'checkbox';
     fog.checked = setup.fog;
@@ -131,17 +189,19 @@ export function setupForm(setup: GameSetup, changed: (problem: string | null) =>
         k === 0 ? ['human'] : setup.mode === 'network' ? ['ai', 'remote', 'closed'] : ['ai', 'closed'];
       const off = slot.kind === 'closed';
       const label = opts.who?.(k) ?? null;
+      // Cooperation fixes the teams: the humans together (1), the computers (2).
+      const coop = victory === 'coop';
       const team = select(
         Array.from({ length: MAX_SLOTS }, (_, t): [number, string] => [t + 1, `${t + 1}`]),
-        slot.team,
+        coop ? (slot.kind === 'ai' ? 2 : 1) : slot.team,
         (v) => {
           slot.team = v;
           if (k === opts.ownSlot) opts.onTeam?.(v);
         },
-        off,
+        off || coop,
       );
       // A joined player may still choose its own team (the host decides the rest).
-      if (ro && k === opts.ownSlot) team.disabled = false;
+      if (ro && k === opts.ownSlot && !coop) team.disabled = false;
       table.append(
         swatch,
         label !== null

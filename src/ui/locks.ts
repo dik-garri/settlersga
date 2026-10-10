@@ -13,7 +13,7 @@ export type MenuId = 'build' | 'goods' | 'settlers' | 'stats' | 'army' | 'option
 export const MENU_IDS: readonly MenuId[] = ['build', 'goods', 'settlers', 'stats', 'army', 'options'];
 
 /** Errands aimed at the map from the settlers menu. */
-export type CommandId = 'geologist' | 'pioneer' | 'thief';
+export type CommandId = 'geologist' | 'pioneer' | 'thief' | 'saboteur';
 
 /** What is open (everything else is locked). */
 export interface Locks {

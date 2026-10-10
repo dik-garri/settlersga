@@ -1,4 +1,4 @@
-import type { AiLevel, Category, MessageKind, ResourceGroup, StartLevel } from '../sim/config';
+import type { AiLevel, Category, GameMode, MessageKind, ResourceGroup, StartLevel } from '../sim/config';
 import type { BuildingType, Resource, SettlerKind } from '../sim/types';
 import { lower, t, type Key } from './i18n';
 
@@ -16,6 +16,7 @@ export const categoryName = (c: Category): string => t(`category.${c}`);
 export const groupName = (g: ResourceGroup): string => t(`group.${g}`);
 export const startName = (s: StartLevel): string => t(`start.${s}`);
 export const aiLevelName = (l: AiLevel): string => t(`ai.${l}`);
+export const modeName = (m: GameMode): string => t(`mode.${m}`);
 export const messageTemplate = (k: MessageKind) => `msg.${k}` as const;
 
 /** What a right click makes a specialist do where his order applies (`SPECIALIST_ORDERS`; the cursor hint). */
@@ -23,6 +24,7 @@ const ORDER_LABELS: Partial<Record<SettlerKind, Key>> = {
   geologist: 'order.geologist',
   pioneer: 'order.pioneer',
   thief: 'order.thief',
+  saboteur: 'order.saboteur',
 };
 export const orderLabel = (kind: SettlerKind): string => {
   const key = ORDER_LABELS[kind];

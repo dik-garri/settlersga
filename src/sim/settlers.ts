@@ -27,7 +27,18 @@ import { sameRegion } from './regions';
 import { pathSpeed, wearTile } from './paths';
 import { restIdle } from './idle';
 import { donkeyAbort, donkeyIdle, loadTick, marketOrdered, releaseLoad, unloadTick } from './trade';
-import { claimTick, geologistIdle, pioneerIdle, prospectTick, skipErrandTile, specialistPostIdle, stealTick, thiefIdle } from './specialists';
+import {
+  claimTick,
+  geologistIdle,
+  pioneerIdle,
+  prospectTick,
+  sabotageTick,
+  saboteurIdle,
+  skipErrandTile,
+  specialistPostIdle,
+  stealTick,
+  thiefIdle,
+} from './specialists';
 import { chaseTick } from './intruders';
 import { houseBuilt } from './beds';
 import { recountWorkers, workerOrder, workersOf } from './economy';
@@ -201,6 +212,8 @@ export function updateSettler(w: World, s: Settler): void {
       return claimTick(w, s, task);
     case 'steal':
       return stealTick(w, s, task);
+    case 'sabotage':
+      return sabotageTick(w, s, task);
     case 'load':
       if (!loadTick(w, s, task)) abort(w, s);
       return;
@@ -330,7 +343,7 @@ const SITE_SPOTS: readonly [number, number][] = [
   [1, 1],
 ];
 
-function siteSpot(w: World, b: Building, k: number): Point {
+export function siteSpot(w: World, b: Building, k: number): Point {
   const m = w.map;
   const door = m.idx(b.door.x, b.door.y);
   let n = 0;
@@ -370,6 +383,15 @@ function routeFailed(w: World, s: Settler): void {
     skipErrandTile(w, s, next.x, next.y);
     s.tasks.splice(0, 2);
     s.path = [];
+    return;
+  }
+  // A saboteur skips a builder spot he cannot reach (the enemy building is not marked unreachable:
+  // that would hold up its owner's carriers).
+  const head = s.tasks[0];
+  if (next?.t === 'sabotage' && head?.t === 'goto') {
+    skipErrandTile(w, s, head.x, head.y);
+    s.path = [];
+    s.tasks = [{ t: 'wait', n: PATH_FAIL_BACKOFF }];
     return;
   }
   const target = s.tasks.find((t) => 'b' in t);
@@ -525,6 +547,9 @@ function idle(w: World, s: Settler): void {
     case 'thief':
       if (specialistPostIdle(s)) return;
       return thiefIdle(w, s);
+
+    case 'saboteur':
+      return saboteurIdle(w, s);
 
     case 'donkey':
       return donkeyIdle(w, s);

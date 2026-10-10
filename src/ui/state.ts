@@ -3,11 +3,11 @@ import { LOCAL_PLAYER } from '../sim/world';
 import type { Locks } from './locks';
 
 /** What the cursor is about to place: a building, or a command aimed at a tile. */
-export type Placeable = BuildingType | 'geologist' | 'pioneer' | 'thief';
+export type Placeable = BuildingType | 'geologist' | 'pioneer' | 'thief' | 'saboteur';
 
 /** Placeables that are commands aimed at a tile or building, not buildings. */
 export const isCommand = (p: Placeable | null): p is Exclude<Placeable, BuildingType> =>
-  p === 'geologist' || p === 'pioneer' || p === 'thief';
+  p === 'geologist' || p === 'pioneer' || p === 'thief' || p === 'saboteur';
 
 /** UI state shared between input handling, HUD and the game loop. */
 export interface GameState {

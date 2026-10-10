@@ -1,5 +1,5 @@
 import { buildingIcon, settlerIcon, wareIcon } from '../render/atlas';
-import { BUILDINGS, CARRIER_RESERVE, INPUT_CAP, ORDERABLE } from '../sim/config';
+import { BUILDINGS, CARRIER_RESERVE, INPUT_CAP, NETWORK_ONLY, ORDERABLE } from '../sim/config';
 import {
   carrierReserve,
   consumersOf,
@@ -42,7 +42,9 @@ export class WorkersView implements View {
 
   update(): void {
     const w = this.world;
-    const workers = ORDERABLE.map((k) => [workersOf(w, this.me, k), workerOrder(w, this.me, k)]);
+    // The saboteur only in a game that has him (Settlers 4: network games).
+    const kinds = ORDERABLE.filter((k) => !NETWORK_ONLY.includes(k) || !!w.rules?.saboteurs);
+    const workers = kinds.map((k) => [workersOf(w, this.me, k), workerOrder(w, this.me, k)]);
     const reserve = carrierReserve(w, this.me);
     const key = JSON.stringify([workers, reserve]);
     if (key === this.key) return;
@@ -68,7 +70,7 @@ export class WorkersView implements View {
     this.el.append(keep);
     this.el.append(el('h4', '', t('eco.workers')));
     this.el.append(el('p', 'muted', t('eco.workersNote')));
-    ORDERABLE.forEach((kind, i) => {
+    kinds.forEach((kind, i) => {
       const [have, ordered] = workers[i];
       const row = el('div', 'eco-row');
       row.append(settlerIcon(kind, 28), el('span', 'eco-name', profName(kind)), el('b', '', `${have} / ${ordered}`));
