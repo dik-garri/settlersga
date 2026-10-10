@@ -9,6 +9,7 @@ import {
   BUILDINGS,
   DEFEAT,
   DISPATCH_EVERY,
+  type GameMode,
   GROUND,
   MAP_SIZE,
   RUIN,
@@ -46,6 +47,7 @@ import {
   updateGarrison,
 } from './military';
 import type { GameMessage } from './messages';
+import { checkVictory, rulesOf, type GameResult, type GameRules } from './modes';
 import {
   aheadResult,
   commandOrder,
@@ -165,6 +167,16 @@ export interface WorldOptions {
    */
   scenario?: ScenarioDef;
   /**
+   * Victory mode (`GAME_MODES`, `modes.ts`; default `conquest`). `economy` compares the alliances'
+   * stock of `economyGoods` after `ECONOMY.minutes`; `coop` plays as conquest (its teams come from the
+   * setup).
+   */
+  mode?: GameMode;
+  /** Economic mode: the goods compared (`ECONOMY.pool`); missing ones are drawn from the seed. */
+  economyGoods?: Resource[];
+  /** Saboteurs may be ordered (Settlers 4: in network games only; `SABOTEUR`). */
+  saboteurs?: boolean;
+  /**
    * A replay (`replay.ts`): the command log of a game started with the same seed and options. The
    * computer players keep their level and start help but do not think; the world applies the logged
    * commands itself, each at the point of the tick it was first applied at.
@@ -247,6 +259,10 @@ export class World {
   readonly ai: AiState[] = [];
   /** Players with no occupied military building left (`DEFEAT`), in order of defeat (saved). */
   readonly defeated: PlayerId[] = [];
+  /** The rules this game plays by (`modes.ts`, saved); undefined = conquest without saboteurs. */
+  rules: GameRules | undefined = undefined;
+  /** How the game was decided, when not by conquest (economic victory, `modes.ts`; saved). */
+  result: GameResult | undefined = undefined;
   /** Current sight per player (derived; what was ever seen is `map.explored`). See fog.ts. */
   readonly fog: FogState = createFog();
   nextId = 1;
@@ -314,6 +330,7 @@ export class World {
       if (this.players[k] && Number.isFinite(team)) this.players[k].team = team;
     });
     resetSightMasks(this);
+    this.rules = rulesOf(seed, opts.mode, opts.economyGoods, opts.saboteurs);
     if (opts.scenario) applyScenario(this, opts.scenario);
     for (const p of opts.ai ?? []) {
       if (!this.players.some((pl) => pl.id === p)) continue;
@@ -505,6 +522,7 @@ export class World {
    * this one is, else 'playing'.
    */
   outcome(player: PlayerId = LOCAL_PLAYER): 'playing' | 'won' | 'lost' {
+    if (this.result) return this.result.winners.includes(player) ? 'won' : 'lost';
     if (this.isDefeated(player)) return 'lost';
     const foes = this.players.filter((p) => !this.allied(p.id, player));
     return foes.length > 0 && foes.every((p) => this.isDefeated(p.id)) ? 'won' : 'playing';
@@ -900,6 +918,11 @@ export class World {
     return this.apply({ kind: 'sendThief', player, target: targetId });
   }
 
+  /** Player command: send an idle saboteur against an enemy building (`specialists.ts`; network games only). */
+  sendSaboteur(targetId: number, player: PlayerId = LOCAL_PLAYER): boolean {
+    return this.apply({ kind: 'sendSaboteur', player, target: targetId });
+  }
+
   /** Player command: an idle specialist on own land becomes a carrier again; the order drops by one. */
   dismissSpecialist(kind: SettlerKind, player: PlayerId = LOCAL_PLAYER): boolean {
     return this.apply({ kind: 'dismissSpecialist', player, prof: kind });
@@ -989,6 +1012,7 @@ export class World {
     for (const s of this.settlers) if (!this.dying.has(s.id)) updateSettler(this, s);
     removeDead(this);
     this.checkDefeats();
+    checkVictory(this);
     pruneShots(this);
     if (this.ruins.some((r) => r.until <= this.tick)) this.ruins = this.ruins.filter((r) => r.until > this.tick);
     updateStrikes(this);

@@ -21,6 +21,7 @@ import { SettlersView } from './settlersView';
 import { canChangeSpeed, chooseSpeed, setPaused, type GameState, type Placeable } from './state';
 import { menuOpen, type MenuId } from './locks';
 import { tag } from './uiTarget';
+import { economyTable, economyVerdict, modeLine } from './modeView';
 import { StatsView } from './statsView';
 
 /**
@@ -85,6 +86,8 @@ export class Hud {
   private readonly people = el('b', '', '0');
   private readonly soldiers = el('b', '', '0');
   private readonly strength = el('b', '', '0%');
+  /** The victory mode and, in the economic mode, the time to the count (`modeLine`). */
+  private readonly modeEl = el('div', 'readout-mode');
   private readonly speedButtons = new Map<number | 'pause', HTMLButtonElement>();
   private readonly hintEl = el('div', 'hint');
   private readonly ticker = el('div', 'ticker');
@@ -225,7 +228,9 @@ export class Hud {
       cell(settlerIcon('soldier', 26), this.soldiers, t('hud.readout.fighters')),
       cell(el('span', 'strength-ico', '⚔'), this.strength, t('hud.readout.strength')),
     );
-    box.append(goods, army);
+    this.modeEl.hidden = true;
+    this.modeEl.title = t('ecowin.modeTip');
+    box.append(goods, army, this.modeEl);
     return box;
   }
 
@@ -389,6 +394,9 @@ export class Hud {
     this.people.textContent = String(people);
     this.soldiers.textContent = String(fighters);
     this.strength.textContent = `${Math.round(world.strengthOf(this.state.localPlayer))}%`;
+    const mode = modeLine(world);
+    this.modeEl.hidden = mode === null;
+    if (mode !== null && this.modeEl.textContent !== mode) this.modeEl.textContent = mode;
 
     for (const [key, b] of this.speedButtons) {
       const on = key === 'pause' ? state.paused : !state.paused && state.speed === key;
@@ -404,6 +412,8 @@ export class Hud {
           ? 'hud.hint.pioneer'
           : state.placing === 'thief'
             ? 'hud.hint.thief'
+            : state.placing === 'saboteur'
+              ? 'hud.hint.saboteur'
             : state.placing
               ? 'hud.hint.placing'
               : state.selectedUnits.length > 0
@@ -432,9 +442,15 @@ export class Hud {
       [t('end.land'), `${land ? Math.round((100 * ownLand) / land) : 0}%`],
     ];
     this.endEl.innerHTML = '';
+    // Decided by the economic count (`World.result`), or by conquest.
+    const eco = world.result?.reason === 'economy';
+    const text = eco ? economyVerdict(world, this.state.localPlayer) : outcome === 'won' ? t('end.wonText') : t('end.lostText');
     this.endEl.append(
       el('h2', outcome === 'won' ? 'won' : 'lost', outcome === 'won' ? t('end.won') : t('end.lost')),
-      el('p', '', outcome === 'won' ? t('end.wonText') : t('end.lostText')),
+      el('p', '', text),
+    );
+    if (eco && world.result) this.endEl.append(el('h4', '', t('ecowin.title')), economyTable(world, this.state.localPlayer, world.result.tally));
+    this.endEl.append(
       rowsTable(rows),
       el('h4', '', t('end.score')),
       scoreTable(world, this.state.localPlayer),

@@ -1,4 +1,5 @@
-import { AI_LEVEL_IDS, START_CONDITIONS, type AiLevel, type StartLevel } from '../sim/config';
+import { AI_LEVEL_IDS, ECONOMY, GAME_MODES, START_CONDITIONS, type AiLevel, type GameMode, type StartLevel } from '../sim/config';
+import type { Resource } from '../sim/types';
 import type { WorldOptions } from '../sim/world';
 import { normaliseCode } from '../net/transport';
 import { t } from './i18n';
@@ -55,6 +56,15 @@ export interface SlotSetup {
 export interface GameSetup {
   /** `network` = the network lobby (`lobby.ts`): same screen, players over the network allowed. */
   mode: 'single' | 'network';
+  /**
+   * Victory mode (`GAME_MODES`; Settlers 4's conflict, economic and cooperation modes). Default
+   * `conquest`. `coop` only in the network lobby (S4: multiplayer only): every human in team 1, the
+   * computers in team 2. `economy` also against computers on one machine (S4 offers it only over the
+   * network; our single game stands in for a network game with computer players).
+   */
+  victory?: GameMode;
+  /** Economic mode: the goods compared (`ECONOMY.goods` of `ECONOMY.pool`; S4 draws them at random). */
+  goods?: Resource[];
   size: number;
   /** Map seed; null = a random one at the start. */
   seed: number | null;
@@ -70,12 +80,36 @@ const slot = (kind: SlotKind, team: number): SlotSetup => ({ kind, team, level: 
 export function defaultSetup(): GameSetup {
   return {
     mode: 'single',
+    victory: 'conquest',
     size: DEFAULT_MAP_SIZE,
     seed: null,
     start: 'medium',
     fog: true,
     slots: [slot('human', 1), slot('ai', 2), slot('closed', 3), slot('closed', 4)],
   };
+}
+
+/** Victory modes the setup offers: cooperation only over the network (Settlers 4: multiplayer only). */
+export function modesFor(s: GameSetup): GameMode[] {
+  return GAME_MODES.filter((m) => m !== 'coop' || s.mode === 'network');
+}
+
+/**
+ * Seven distinct goods drawn at random from `ECONOMY.pool`, as Settlers 4's lobby does when it opens
+ * in economic mode (`CStateLobbyGameSettings::CreateRandomGoods`). `random` is the interface's own
+ * dice (the chosen goods go into the world's options, so the game stays deterministic).
+ */
+export function randomGoods(random: () => number = Math.random): Resource[] {
+  const left = [...ECONOMY.pool];
+  const out: Resource[] = [];
+  while (out.length < ECONOMY.goods && left.length > 0) out.push(left.splice(Math.floor(random() * left.length), 1)[0]);
+  return out;
+}
+
+/** Sets the victory mode: entering the economic mode draws its goods, as S4's lobby does. */
+export function setVictory(s: GameSetup, m: GameMode, random: () => number = Math.random): void {
+  s.victory = m;
+  if (m === 'economy' && (s.goods?.length ?? 0) !== ECONOMY.goods) s.goods = randomGoods(random);
 }
 
 /** The slots that take part, in player order (closed ones are skipped). */
@@ -88,6 +122,10 @@ export function setupProblem(s: GameSetup): string | null {
   if (s.slots.some((x, k) => k > 0 && x.kind === 'human')) return t('setup.problem.secondHuman');
   if (s.mode === 'single' && active.some((x) => x.kind === 'remote')) return t('setup.problem.remote');
   if (active.some((x) => !RACES.find((r) => r.id === x.race)?.ready)) return t('setup.problem.race');
+  if (s.victory === 'coop') {
+    if (!active.some((x) => x.kind === 'ai')) return t('setup.problem.coopNoAi');
+    return null;
+  }
   if (active.length > 1 && new Set(active.map((x) => x.team)).size === 1) return t('setup.problem.oneTeam');
   return null;
 }
@@ -99,7 +137,9 @@ export function worldArgs(s: GameSetup, randomSeed: number): { seed: number; opt
   active.forEach((x, k) => {
     if (x.kind === 'ai') ai.push(k + 1);
   });
-  const teams = active.map((x) => x.team);
+  const victory = s.victory ?? 'conquest';
+  // Cooperation: every human (here and over the network) in team 1, the computers in team 2.
+  const teams = active.map((x) => (victory === 'coop' ? (x.kind === 'ai' ? 2 : 1) : x.team));
   // Teams only matter when two players share one; otherwise everyone is on their own, as by default.
   const shared = new Set(teams).size < teams.length;
   const difficulty = active.map((x) => x.level);
@@ -112,6 +152,10 @@ export function worldArgs(s: GameSetup, randomSeed: number): { seed: number; opt
       teams: shared ? teams : undefined,
       difficulty: ai.length > 0 && difficulty.some((l) => l !== 'medium') ? difficulty : undefined,
       start: s.start,
+      mode: victory === 'conquest' ? undefined : victory,
+      economyGoods: victory === 'economy' ? s.goods : undefined,
+      // The saboteur exists only in network games (Settlers 4).
+      saboteurs: s.mode === 'network' ? true : undefined,
     },
   };
 }
@@ -139,8 +183,16 @@ export function parseSetup(text: string | null): GameSetup | null {
       race: oneOf(x.race, RACES.map((r) => r.id), 'romans'),
     };
   });
+  const mode = raw.mode === 'network' ? 'network' : 'single';
+  let victory = oneOf(raw.victory, GAME_MODES, 'conquest');
+  if (victory === 'coop' && mode !== 'network') victory = 'conquest';
+  const goods = Array.isArray(raw.goods)
+    ? (raw.goods as unknown[]).filter((r, k, all): r is Resource => ECONOMY.pool.includes(r as Resource) && all.indexOf(r) === k).slice(0, ECONOMY.goods)
+    : [];
   return {
-    mode: raw.mode === 'network' ? 'network' : 'single',
+    mode,
+    victory,
+    goods: victory === 'economy' && goods.length === ECONOMY.goods ? goods : victory === 'economy' ? randomGoods() : undefined,
     size: MAP_SIZES.includes(Number(raw.size)) ? Number(raw.size) : def.size,
     seed: Number.isInteger(raw.seed) && raw.seed! >= 0 ? raw.seed! : null,
     start: oneOf(raw.start, Object.keys(START_CONDITIONS) as StartLevel[], def.start),
@@ -150,7 +202,7 @@ export function parseSetup(text: string | null): GameSetup | null {
 }
 
 /** Address parameters that describe a game directly (development): they skip the menu. */
-export const DEV_PARAMS = ['seed', 'size', 'players', 'teams', 'start', 'demo', 'art', 'fog', 'ai', 'levels', 'load', 'tutorial'] as const;
+export const DEV_PARAMS = ['seed', 'size', 'players', 'teams', 'start', 'demo', 'art', 'fog', 'ai', 'levels', 'load', 'tutorial', 'mode', 'saboteurs'] as const;
 
 /** What the page should start with, read from its address. */
 export type Launch =
@@ -191,7 +243,8 @@ export function launchOf(params: URLSearchParams): Launch {
 /**
  * The `World` arguments of a development address: `?seed`, `?size`, `?players` (default 2, all but
  * player 1 computer-controlled; `?ai=off` keeps them passive), `?teams=1,1,2,2`, `?start=low|high`,
- * `?levels=easy,hard` (difficulty per player).
+ * `?levels=easy,hard` (difficulty per player), `?mode=economy|coop` (victory mode; `?goods=bread,coal,…`
+ * the economic goods, else drawn from the seed), `?saboteurs=1` (saboteurs allowed, as in a network game).
  */
 export function devWorldArgs(params: URLSearchParams, randomSeed: number): { seed: number; opts: WorldOptions } {
   const seed = params.has('seed') ? Number(params.get('seed')) : randomSeed;
@@ -203,7 +256,22 @@ export function devWorldArgs(params: URLSearchParams, randomSeed: number): { see
   const difficulty = levels?.map((l) => oneOf(l, AI_LEVEL_IDS, 'medium'));
   const v = params.get('start');
   const start: StartLevel = v === 'low' || v === 'high' ? v : 'medium';
-  return { seed, opts: { size, players, ai, teams, difficulty, start } };
+  const mode = oneOf(params.get('mode'), GAME_MODES, 'conquest');
+  const goods = params.get('goods')?.split(',').filter((r): r is Resource => ECONOMY.pool.includes(r as Resource));
+  return {
+    seed,
+    opts: {
+      size,
+      players,
+      ai,
+      teams,
+      difficulty,
+      start,
+      mode: mode === 'conquest' ? undefined : mode,
+      economyGoods: mode === 'economy' ? goods : undefined,
+      saboteurs: params.get('saboteurs') === '1' ? true : undefined,
+    },
+  };
 }
 
 /** Names of the difficulty levels for the screens. */

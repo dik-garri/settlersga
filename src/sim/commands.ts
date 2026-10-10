@@ -40,6 +40,7 @@ import {
   orderSpecialists,
   sendGeologist,
   sendPioneer,
+  sendSaboteur,
   sendThief,
 } from './specialists';
 import { setStopped } from './stop';
@@ -107,6 +108,8 @@ export interface CommandArgs {
   sendPioneer: { x: number; y: number };
   /** An idle thief robs a foreign building. */
   sendThief: { target: number };
+  /** An idle saboteur attacks an enemy building (network games only). */
+  sendSaboteur: { target: number };
   /** Selected specialists act at a point (on a building), or just walk there. */
   orderSpecialists: { ids: number[]; x: number; y: number; target: number | null; walkOnly: boolean };
   /** Selected specialists stop and wait where they stand. */
@@ -153,6 +156,7 @@ export interface CommandResults {
   sendGeologist: boolean;
   sendPioneer: boolean;
   sendThief: boolean;
+  sendSaboteur: boolean;
   orderSpecialists: number;
   holdSpecialists: number;
   dismissUnits: number;
@@ -276,6 +280,7 @@ export const SPECS: { [K in CommandKind]: Spec<K> } = {
   sendGeologist: { fields: { x: isInt, y: isInt }, refused: false, run: (w, c) => sendGeologist(w, c.x, c.y, c.player) },
   sendPioneer: { fields: { x: isInt, y: isInt }, refused: false, run: (w, c) => sendPioneer(w, c.x, c.y, c.player) },
   sendThief: { fields: { target: isInt }, refused: false, run: (w, c) => sendThief(w, c.target, c.player) },
+  sendSaboteur: { fields: { target: isInt }, refused: false, run: (w, c) => sendSaboteur(w, c.target, c.player) },
   orderSpecialists: {
     fields: { ids: isIds, x: isInt, y: isInt, target: isIdOrNull, walkOnly: isBool },
     refused: 0,

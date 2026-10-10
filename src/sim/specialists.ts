@@ -1,4 +1,19 @@
-import { FIELD, GEOLOGIST, GEOLOGIST_SIGN, ORDERABLE, oreOf, PIONEER, PROFESSIONS, TERRAIN, THIEF } from './config';
+import {
+  BUILDINGS,
+  buildersOf,
+  buildingDamage,
+  buildingHp,
+  FIELD,
+  GEOLOGIST,
+  GEOLOGIST_SIGN,
+  ORDERABLE,
+  oreOf,
+  PIONEER,
+  PROFESSIONS,
+  SABOTEUR,
+  TERRAIN,
+  THIEF,
+} from './config';
 import { influenced } from './territory';
 import { postMessage } from './messages';
 import { orderWorkers, recountWorkers, spareCarriers, workerOrder, workersOf } from './economy';
@@ -7,7 +22,7 @@ import { formationSpots } from './field';
 import { freeGoods, goodsOn, liftGoods, reserveGoods, stackTiles } from './ground';
 import { sitePile } from './logistics';
 import { sameRegion } from './regions';
-import { abort, carryBack } from './settlers';
+import { abort, carryBack, siteSpot } from './settlers';
 import { RESOURCES, Terrain, type Building, type PlayerId, type Point, type Resource, type Settler, type SettlerKind, type Task } from './types';
 import type { GameMap } from './map';
 import type { World } from './world';
@@ -42,6 +57,12 @@ import { dist2, hypot, within } from './fmath';
  * carries it to his home point (`Settler.homeAt`) and puts it on the ground there, then goes back
  * while there is loot. On hostile land every specialist may be cut down by that land's swordsmen, the
  * thief once a hostile fighter has unmasked him (`intruders.ts`, `INTRUDERS`).
+ *
+ * Saboteur (`SABOTEUR`, Settlers 4's network-game specialist, `CSaboteurRole`): sent at an enemy
+ * building (`sendSaboteur`, or a right click), he takes one of its builder spots (`siteSpot`, at most
+ * `buildersOf` saboteurs a building) and strikes it (`sabotage` task) until it falls, unmasked as he
+ * does; then he goes for the nearest enemy building within `SABOTEUR.scan` (S4's warrior scan), else
+ * he stays. A saboteur posted somewhere (an order to a spot, or hold) looks for one there too.
  *
  * All keep their errand in `Settler.errand` (saved); without one or a post they idle with the crowd.
  * `dismissSpecialist` turns a free one standing on his owner's land back into a carrier (bringing the
@@ -452,6 +473,170 @@ export function stealTick(w: World, s: Settler, task: Extract<Task, { t: 'steal'
   s.carrying = loot.res;
 }
 
+// ---------------------------------------------------------------- saboteur
+
+/**
+ * Whether a saboteur of `player` may attack `b` (Settlers 4 `CFindEnemyBuildings`): a building of a
+ * player hostile to him — finished or a site —, unless it is immune (`BuildingDef.sabotageImmune`).
+ */
+export function sabotageable(w: World, b: Building, player: PlayerId): boolean {
+  return w.buildings.get(b.id) === b && b.owner !== player && !w.allied(b.owner, player) && !BUILDINGS[b.type].sabotageImmune;
+}
+
+/** Builder spots of `b` other saboteurs of `s`'s owner hold or are heading for (tile indices). */
+function heldSpots(w: World, s: Settler, b: Building): Set<number> {
+  const held = new Set<number>();
+  for (const o of w.settlers) {
+    if (o === s || o.owner !== s.owner || o.kind !== s.kind || w.dying.has(o.id)) continue;
+    const k = o.tasks.findIndex((t) => t.t === 'sabotage' && t.b === b.id);
+    if (k < 0) continue;
+    const go = k > 0 ? o.tasks[k - 1] : undefined;
+    held.add(go?.t === 'goto' ? w.map.idx(go.x, go.y) : w.map.idx(Math.round(o.x), Math.round(o.y)));
+  }
+  return held;
+}
+
+/**
+ * The free builder spot of `b` nearest to the saboteur (`siteSpot` 0 … `buildersOf` − 1: as in
+ * Settlers 4 no more saboteurs on a building than builders), one he can walk to and has not failed
+ * to reach; within `reach` of him if given. Null when none.
+ */
+function sabotageSpot(w: World, s: Settler, b: Building, reach = Infinity): Point | null {
+  const m = w.map;
+  const held = heldSpots(w, s, b);
+  const n = buildersOf(b.type);
+  if (held.size >= n) return null;
+  const at = m.idx(Math.round(s.x), Math.round(s.y));
+  const skip = s.errand?.skip;
+  let best: Point | null = null;
+  let bestD = Infinity;
+  const seen = new Set<number>();
+  for (let k = 0; k < n; k++) {
+    const p = siteSpot(w, b, k);
+    const i = m.idx(p.x, p.y);
+    if (seen.has(i)) continue;
+    seen.add(i);
+    if (held.has(i) || skip?.includes(i) || !sameRegion(m, at, i)) continue;
+    const d = hypot(p.x - s.x, p.y - s.y);
+    if (d <= reach && d < bestD) {
+      best = p;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+/**
+ * The enemy building a saboteur goes for by himself (Settlers 4 `WarriorAttackScanSaboteur`): within
+ * `SABOTEUR.scan` of him, with a free builder spot within `SABOTEUR.spot` — the nearest such spot,
+ * ties to the lower id. O(buildings).
+ */
+function nearbyTarget(w: World, s: Settler): Building | null {
+  let best: Building | null = null;
+  let bestD = Infinity;
+  for (const b of w.buildings.values()) {
+    if (!sabotageable(w, b, s.owner)) continue;
+    const cx = b.x + (b.w - 1) / 2;
+    const cy = b.y + (b.h - 1) / 2;
+    if (!within(cx - s.x, cy - s.y, SABOTEUR.scan)) continue;
+    const spot = sabotageSpot(w, s, b, SABOTEUR.spot);
+    if (!spot) continue;
+    const d = hypot(spot.x - s.x, spot.y - s.y);
+    if (d < bestD) {
+      best = b;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+/** Whether a saboteur of `player` may be sent at `b`: sabotageable, its door explored by `player`. */
+export function canSabotage(w: World, b: Building, player: PlayerId): boolean {
+  return sabotageable(w, b, player) && w.isExplored(b.door.x, b.door.y, player);
+}
+
+/** Player command: send the nearest free saboteur against building `targetId`. */
+export function sendSaboteur(w: World, targetId: number, player: PlayerId): boolean {
+  const b = w.buildings.get(targetId);
+  if (!b || !canSabotage(w, b, player)) return false;
+  const s = idleSpecialist(w, player, 'saboteur', b.door.x, b.door.y);
+  if (!s) return false;
+  clearSpecialist(w, s);
+  s.errand = { x: b.door.x, y: b.door.y, b: b.id };
+  return true;
+}
+
+/**
+ * Idle saboteur (the `saboteur` behaviour): with an errand, to a free builder spot of its building
+ * and strike it; once it is gone (or every spot is held), the nearest enemy building in reach
+ * (`nearbyTarget`); with none the errand is over and he stays. With a post he waits there and looks
+ * for a building in reach every `FIELD.scanEvery` ticks; otherwise he idles with the crowd.
+ */
+export function saboteurIdle(w: World, s: Settler): void {
+  const e = s.errand;
+  if (e) {
+    let b = e.b !== undefined ? w.buildings.get(e.b) : undefined;
+    const open = !!b && sabotageable(w, b, s.owner);
+    let spot = b && open ? sabotageSpot(w, s, b) : null;
+    if (b && open && !spot && !within(b.door.x - s.x, b.door.y - s.y, SABOTEUR.spot)) {
+      // Every spot held (or none reachable from here): walk up to it and look again there.
+      s.tasks = [{ t: 'goto', x: b.door.x, y: b.door.y }];
+      return;
+    }
+    if (!spot) {
+      b = nearbyTarget(w, s) ?? undefined;
+      spot = b ? sabotageSpot(w, s, b, SABOTEUR.spot) : null;
+    }
+    if (b && spot) {
+      e.b = b.id;
+      e.x = b.door.x;
+      e.y = b.door.y;
+      s.tasks = [
+        { t: 'goto', x: spot.x, y: spot.y },
+        { t: 'sabotage', b: b.id, n: SABOTEUR.every },
+      ];
+      return;
+    }
+    return finishErrand(s);
+  }
+  if (s.post && (w.tick + s.id) % FIELD.scanEvery === 0) {
+    const b = nearbyTarget(w, s);
+    if (b) {
+      s.post = null;
+      s.errand = { x: b.door.x, y: b.door.y, b: b.id };
+      return saboteurIdle(w, s);
+    }
+  }
+  if (specialistPostIdle(s)) return;
+  restIdle(w, s);
+}
+
+/**
+ * `sabotage` task: at his builder spot the saboteur strikes the building every `SABOTEUR.every`
+ * ticks for `buildingDamage(SABOTEUR.damage)` (not scaled by fighting strength), and the attack
+ * unmasks him (Settlers 4 manual §10.5); at 0 hit points the building is destroyed — it burns
+ * (`World.removeBuilding`), which also ends every saboteur's task on it. Its owner hears of the attack.
+ */
+export function sabotageTick(w: World, s: Settler, task: Extract<Task, { t: 'sabotage' }>): void {
+  const b = w.buildings.get(task.b);
+  if (!b || !sabotageable(w, b, s.owner)) {
+    s.tasks.shift();
+    return;
+  }
+  s.working = true;
+  s.exposed = true;
+  if (--task.n > 0) return;
+  task.n += SABOTEUR.every;
+  postMessage(w, 'attacked', b.owner, b.door, { b: b.id });
+  const hp = (b.hp ?? buildingHp(b.type)) - buildingDamage(SABOTEUR.damage);
+  if (hp > 0) {
+    b.hp = hp;
+    return;
+  }
+  if (s.errand) s.errand.n = (s.errand.n ?? 0) + 1;
+  w.removeBuilding(b, 'burn');
+}
+
 // ---------------------------------------------------------------- dismissal
 
 /**
@@ -646,7 +831,7 @@ export function prospectTick(w: World, s: Settler, task: Extract<Task, { t: 'pro
  * where that action is possible, else walk there and wait (`Settler.post`, as a fighter's field post).
  * Public player commands (`World.orderSpecialists`, `holdSpecialists`, `dismissUnits`), usable by the AI.
  */
-export const SPECIALIST_KINDS: readonly SettlerKind[] = ['geologist', 'pioneer', 'thief'];
+export const SPECIALIST_KINDS: readonly SettlerKind[] = ['geologist', 'pioneer', 'thief', 'saboteur'];
 
 export const isSpecialist = (s: Settler): boolean => SPECIALIST_KINDS.includes(s.kind);
 
@@ -671,6 +856,15 @@ export const SPECIALIST_ORDERS: Partial<Record<SettlerKind, SpecialistOrder>> = 
     can: (w, x, y, _b, player) => pioneerSpot(w, x, y, player),
     apply: (_w, s, x, y) => {
       s.errand = { x, y };
+      return true;
+    },
+  },
+  saboteur: {
+    // At an explored enemy building only; anywhere else he walks there and waits (and looks round).
+    can: (w, _x, _y, b, player) => !!b && canSabotage(w, b, player),
+    apply: (_w, s, _x, _y, b) => {
+      if (!b) return false;
+      s.errand = { x: b.door.x, y: b.door.y, b: b.id };
       return true;
     },
   },

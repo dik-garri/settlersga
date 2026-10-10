@@ -5,6 +5,8 @@ import { scoreOf } from '../sim/score';
 import { RESOURCES, type BuildingType, type PlayerId, type SettlerKind, type Stock } from '../sim/types';
 import type { World } from '../sim/world';
 import { el, type View } from './dom';
+import { clock, economyTable } from './modeView';
+import { economyEndTick } from '../sim/modes';
 import { t } from './i18n';
 import { buildingName, profName, resName } from './names';
 
@@ -140,6 +142,12 @@ export class StatsView implements View {
       return r;
     };
 
+    // The economic mode: time to the count and how the seven goods stand now (Settlers 4's eco statistics).
+    if (world.rules?.mode === 'economy') {
+      body.append(el('h4', '', t('ecowin.title')));
+      body.append(el('p', 'muted', world.result ? t('ecowin.done') : t('ecowin.left', { time: clock(economyEndTick() - world.tick) })));
+      body.append(economyTable(world, this.me, world.result?.tally));
+    }
     body.append(el('h4', '', t('stats.production', { n: minutes })));
     const grid = el('div', 'stats-grid');
     for (const r of RESOURCES) {

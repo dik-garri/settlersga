@@ -119,6 +119,7 @@ export type SettlerKind =
   | 'digger'
   | 'pioneer'
   | 'thief'
+  | 'saboteur'
   | 'donkeyrancher'
   | 'donkey'
   | 'healer'
@@ -174,6 +175,8 @@ export interface Building {
   wish?: { melee: number; ranged: number };
   /** Military building with a `GarrisonDef.door`: its door's hit points while damaged (absent = whole). */
   doorHp?: number;
+  /** Hit points left while saboteurs have damaged it (`SABOTEUR`, `buildingHp`; absent = whole). */
+  hp?: number;
   /**
    * Barracks: the kind class it last recruited (Settlers 4's `m_uU0`): kinds of equal rank take turns
    * after it. Absent = 2, as S4 starts.
@@ -280,6 +283,8 @@ export type Task =
   | { t: 'claim'; x: number; y: number; n: number }
   /** Thief at the spot he was sent to: after `n` ticks he takes one unit of the stack there (`THIEF`) and carries it home. */
   | { t: 'steal'; x: number; y: number; n: number }
+  /** Saboteur at a builder spot of enemy building `b` strikes it every `SABOTEUR.every` ticks (`n` counts down to the next blow). */
+  | { t: 'sabotage'; b: number; n: number }
   /** Donkey at a marketplace loads `n` units of `res` from its input (reserved in `trade.loading`). */
   | { t: 'load'; b: number; res: Resource; n: number }
   /**

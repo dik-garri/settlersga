@@ -764,3 +764,27 @@ body.title-mode #game {
     font-size: 12px;
   }
 }
+
+/* The economic mode's seven goods (setupForm `goodsPicker`). */
+.eco-goods {
+  padding: 4px 0;
+}
+
+.eco-goods-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 6px;
+  margin: 4px 0;
+}
+
+.eco-good {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.eco-good select {
+  min-width: 0;
+  flex: 1;
+}

@@ -2165,7 +2165,7 @@ export class GameRenderer {
       this.ty = t.y;
       return true;
     }
-    if (t.t === 'build' || t.t === 'dig' || t.t === 'assault') {
+    if (t.t === 'build' || t.t === 'dig' || t.t === 'assault' || t.t === 'sabotage') {
       const b = this.buildingViews.get(t.b);
       if (!b) return false;
       this.tx = b.at.x;

@@ -1,4 +1,4 @@
-import { BUILDINGS, CARRIER_RESERVE, DISTRIBUTION_DEFAULTS, ORDERABLE, PROFESSIONS, START_CONDITIONS, TRANSPORT_PRIORITY, type StartLevel } from './config';
+import { BUILDINGS, CARRIER_RESERVE, DISTRIBUTION_DEFAULTS, NETWORK_ONLY, ORDERABLE, PROFESSIONS, START_CONDITIONS, TRANSPORT_PRIORITY, type StartLevel } from './config';
 import { nearestStorage } from './buildings';
 import { landOf } from './land';
 import { RESOURCES, type Building, type BuildingType, type PlayerId, type Resource, type SettlerKind, type Task } from './types';
@@ -96,6 +96,8 @@ export function recountWorkers(w: World): void {
 
 export function orderWorkers(w: World, player: PlayerId, kind: SettlerKind, count: number): boolean {
   if (!ORDERABLE.includes(kind) || !Number.isFinite(count)) return false;
+  // The saboteur only where the game allows him (Settlers 4: network games).
+  if (NETWORK_ONLY.includes(kind) && !w.rules?.saboteurs) return false;
   economyOf(w, player).orders[kind] = Math.max(0, Math.min(999, Math.round(count)));
   return true;
 }

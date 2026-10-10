@@ -34,6 +34,10 @@ describe('dev showcase (?demo)', () => {
     const thief = w.settlers.find((s) => s.kind === 'thief');
     expect(thief?.errand).toBeTruthy();
     expect(thief?.homeAt).toBeTruthy();
+    // A saboteur (network games) on his errand at a damaged building of the other player's.
+    const sab = w.settlers.find((s) => s.kind === 'saboteur');
+    expect(sab?.errand?.b).toBeDefined();
+    expect(w.buildings.get(sab!.errand!.b!)?.hp).toBeDefined();
     // Trade: a market with a route, donkeys under way with goods, and land cut off from every warehouse.
     expect(all.some((b) => b.type === 'market' && b.trade?.to != null)).toBe(true);
     expect(w.settlers.some((s) => s.kind === 'donkey' && s.tasks.length > 0)).toBe(true);

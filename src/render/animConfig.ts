@@ -124,6 +124,9 @@ const STYLES: Partial<Record<SettlerKind, Partial<SettlerStyle>>> = {
   // Specialists: the pioneer digs border stones in, the thief goes about in a dark hood, hands free.
   pioneer: { tunic: '#a8743a', hat: '#6b4a2a', hatStyle: 'straw', work: 'dig', holds: 'shovel' },
   thief: { tunic: '#2e2a30', hat: '#1e1b20', hatStyle: 'hood', work: 'sow' },
+  // The saboteur (network games): a rust-brown hood and a pickaxe he hacks at enemy walls with. Art to
+  // do: no figure of his own yet — he reuses the stonecutter's `mine` pose and the thief's hood.
+  saboteur: { tunic: '#5a3426', hat: '#2a1a14', hatStyle: 'hood', work: 'mine', holds: 'pick' },
   donkeyrancher: { tunic: '#7a6a4a', hat: '#4a3a26', hatStyle: 'straw' },
   // The infirmary's healer: a long linen robe with a stole, a satchel of herbs, a white coif; he
   // works inside, so he needs no work pose.
@@ -134,7 +137,7 @@ const STYLES: Partial<Record<SettlerKind, Partial<SettlerStyle>>> = {
 };
 
 /** Work done in a task of its own kind, whatever the profession (the geologist knocking the rock). */
-export const TASK_ACTION: Partial<Record<Task['t'], ActionId>> = { prospect: 'knock' };
+export const TASK_ACTION: Partial<Record<Task['t'], ActionId>> = { prospect: 'knock', sabotage: 'mine' };
 
 /** Work done on a planting or gathering task overrides the profession's default `work`. */
 export const PLANT_ACTION: Record<PlantKind, ActionId> = { tree: 'dig', grain: 'sow' };

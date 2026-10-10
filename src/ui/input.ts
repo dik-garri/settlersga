@@ -341,6 +341,13 @@ export class InputController {
       if (ok && !e.shiftKey) this.cb.onSelectBuildType(null);
       return;
     }
+    if (placing === 'saboteur') {
+      const target = this.world.buildingAt(Math.round(tile.x), Math.round(tile.y));
+      const ok = target ? this.world.issue({ kind: 'sendSaboteur', player: this.me, target: target.id }) : false;
+      this.cb.onMessage(ok ? t('input.saboteur.sent') : t('input.saboteur.failed'));
+      if (ok && !e.shiftKey) this.cb.onSelectBuildType(null);
+      return;
+    }
     if (placing === 'geologist') {
       const gx = Math.round(tile.x);
       const gy = Math.round(tile.y);
