@@ -17,6 +17,7 @@
 import { GROUND, TERRAIN } from './config';
 import { RESOURCES, Terrain, type PlayerId, type Point, type Resource } from './types';
 import type { World } from './world';
+import { dist2, within } from './fmath';
 
 /** The good lying on tile `i`, or null. */
 export function goodsOn(w: World, i: number): Resource | null {
@@ -91,8 +92,8 @@ function canHold(w: World, x: number, y: number, k: number): boolean {
 const SPIRAL: readonly [number, number][] = (() => {
   const r = GROUND.searchRadius;
   const out: [number, number][] = [];
-  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (Math.hypot(dx, dy) <= r + 0.5) out.push([dx, dy]);
-  return out.sort((a, b) => Math.hypot(a[0], a[1]) - Math.hypot(b[0], b[1]) || a[1] - b[1] || a[0] - b[0]);
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (within(dx, dy, r + 0.5)) out.push([dx, dy]);
+  return out.sort((a, b) => dist2(a[0], a[1]) - dist2(b[0], b[1]) || a[1] - b[1] || a[0] - b[0]);
 })();
 
 /**

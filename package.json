@@ -12,6 +12,7 @@
     "sim:probe": "tsx tools/probe.ts",
     "sim:bench": "tsx tools/bench.ts",
     "sim:ai": "tsx tools/aivsai.ts",
+    "sim:determinism": "tsx tools/determinism.ts",
     "art:render": "blender -b --factory-startup -P art/blender/build.py --",
     "art:ground": "blender -b --factory-startup -P art/textures/ground.py",
     "art:settlers": "blender -b --factory-startup -P art/blender/build.py -- settlers && python3 art/tools/quantize.py public/art/3d/settlers-*.png",

@@ -35,6 +35,7 @@ import { offered } from './stop';
 import { storageRoom } from './storage';
 import { wantsDonkeys } from './trade';
 import type { World } from './world';
+import { hypot, within } from './fmath';
 
 /** Door sits in front of the lower-left wall, next to the front corner. */
 export function doorOf(x: number, y: number, w: number, h: number): Point {
@@ -167,7 +168,7 @@ export function nearestStorage(
     // A stopped warehouse takes nothing in (Settlers 4 unregisters it as storage).
     if (b.stopped) continue;
     if (res && !rules.refused && !accepts(b, res)) continue;
-    const d = Math.hypot(b.door.x - near.x, b.door.y - near.y);
+    const d = hypot(b.door.x - near.x, b.door.y - near.y);
     if (d >= bestD) continue;
     if (piece !== undefined && landOf(w, b) !== piece) continue;
     if (res && !rules.full && storageRoom(b, res) <= 0) continue;
@@ -258,7 +259,7 @@ export function oreLeft(w: World, b: Building): number {
   let n = 0;
   for (let y = Math.floor(c.y - radius); y <= Math.ceil(c.y + radius); y++) {
     for (let x = Math.floor(c.x - radius); x <= Math.ceil(c.x + radius); x++) {
-      if (!w.map.inBounds(x, y) || Math.hypot(x - c.x, y - c.y) > radius) continue;
+      if (!w.map.inBounds(x, y) || !within(x - c.x, y - c.y, radius)) continue;
       const i = w.map.idx(x, y);
       if (oreOf(w.map.ore[i]) === res) n += w.map.oreAmount[i];
     }
@@ -273,7 +274,7 @@ function mineTiles(w: World, b: Building, def: BuildingDef): number[] {
   const out: number[] = [];
   for (let y = Math.floor(c.y - radius); y <= Math.ceil(c.y + radius); y++) {
     for (let x = Math.floor(c.x - radius); x <= Math.ceil(c.x + radius); x++) {
-      if (w.map.inBounds(x, y) && Math.hypot(x - c.x, y - c.y) <= radius) out.push(w.map.idx(x, y));
+      if (w.map.inBounds(x, y) && within(x - c.x, y - c.y, radius)) out.push(w.map.idx(x, y));
     }
   }
   return out;

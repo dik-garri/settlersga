@@ -5,6 +5,7 @@ import { randInt } from './rng';
 import { move } from './settlers';
 import { Terrain, type Building, type Point, type Settler } from './types';
 import type { World } from './world';
+import { hypot, within } from './fmath';
 
 /**
  * Idle crowds, as in Settlers 4: a free settler (a carrier without a job, a builder or digger
@@ -125,7 +126,7 @@ function chooseAnchor(w: World, s: Settler): number | null {
   for (const b of w.buildings.values()) {
     if (b.owner !== s.owner || !gathers(b)) continue;
     const away = (piece !== 0 && landOf(w, b) !== piece ? 4000 : 0) + (fallback(b) ? 2000 : 0);
-    const d = Math.hypot(s.x - b.door.x, s.y - b.door.y) + away;
+    const d = hypot(s.x - b.door.x, s.y - b.door.y) + away;
     // Cheap test first: a farther building cannot beat the best even with room.
     if (d >= bestScore) continue;
     const score = d + (idleAround(w, s, b) >= IDLE.groupSize ? 1000 : 0);
@@ -172,7 +173,7 @@ function strollTarget(w: World, s: Settler, anchor: Building): Point | null {
         o.inside === null &&
         o.stroll === null &&
         !chatPartner(w, o) &&
-        Math.hypot(o.x - anchor.door.x, o.y - anchor.door.y) <= r + 1,
+        within(o.x - anchor.door.x, o.y - anchor.door.y, r + 1),
     );
     if (partner) {
       const start = randInt(rng, NEIGHBOURS.length);

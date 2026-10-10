@@ -20,12 +20,12 @@ src/render/     рендер на PixiJS: изометрия, чанки, атл
 src/audio/      звук на WebAudio: синтез эффектов, музыка, громкость и панорама
 src/ui/         HTML-интерфейс (левая панель, окна), ввод мышью и клавиатурой, общее состояние; i18n.ts — языки
 src/i18n/       словари интерфейса: ru.ts (основной, задаёт ключи), en.ts, de.ts
-src/dev/        демо-карта ?demo (showcase.ts)
+src/dev/        демо-карта ?demo (showcase.ts), повторы (replayTools.ts), набор проверки детерминизма (determinism.ts, страница determinism.html)
 src/net/        сетевая игра (фаза 6, docs/NETWORK.md): транспорт (PeerJS, петля в памяти), lockstep; проверка — nettest.html
 src/tutorial/   обучение: миссии (данные), условия, якоря, автомат шагов, панель целей (docs/TUTORIAL.md)
 src/main.ts     точка входа: параметры адреса, создание мира, игровой цикл
 tests/          тесты Vitest (*.test.ts)
-tools/          консольные проверки: probe.ts, bench.ts, aivsai.ts (+ общие помощники scenario.ts)
+tools/          консольные проверки: probe.ts, bench.ts, aivsai.ts, determinism.ts (+ общие помощники scenario.ts)
 art/            Blender: модели и рендер (art/blender), фактуры земли (art/textures), ужатие PNG (art/tools)
 public/art/3d/  готовые 3D-спрайты и их описания (*.json); попадают в сборку как есть
 docs/           план (ROADMAP), сверка с S4 (S4-PARITY, S4-AUDIT), тайминги, пропорции, стиль графики, обучение, это руководство
@@ -103,6 +103,19 @@ npx vitest tests/trade.test.ts               # режим наблюдения: 
 | `--cost=1` | выкл. | дополнительно: доля ИИ в цене тика — партия до 20-й минуты, затем 3 минуты с ИИ и без него (лучшее из 3) |
 
 **Когда:** после любого изменения ИИ, экономики или боя — видно, растут ли компьютерные игроки и доводят ли партии до конца. Обычный набор для сравнения «до/после» (см. итоги в ROADMAP): 64×64 на сидах по умолчанию, `--passive=1`, 96×96 на сидах `11,12,8`, 128×128 на сидах `42,7` и с `--players=4`.
+
+### `npm run sim:determinism` — одинаковость на разных движках JavaScript
+
+Сетевая игра (lockstep) требует, чтобы каждый браузер считал партию до бита одинаково. Инструмент (`tools/determinism.ts`, набор — `src/dev/determinism.ts`) играет закреплённые сценарии — генерацию карт 64…512, партию ИИ 64×64 на 30 минут, партию ИИ 128×128 на четверых на 20 минут, повтор партии из журнала команд — и печатает `stateChecksum` в каждой точке и в конце один отпечаток (`fingerprint: …`). Около 10 секунд.
+
+| Запуск | Что делает |
+|---|---|
+| `npm run sim:determinism` | Node (V8) |
+| `bun tools/determinism.ts` | Bun (JavaScriptCore — движок Safari) |
+| `npm run sim:determinism -- --only=map,replay` | только сценарии, в названии которых есть одно из слов |
+| `determinism.html` | то же в браузере (см. раздел 6) |
+
+**Когда:** после изменений, где в симуляции появляется новая математика, и перед сетевыми проверками. Отпечаток меняется с любым изменением симуляции — сравнивать движки надо на одном коммите. Правило: в `src/sim` — только `+ − × ÷`, `Math.sqrt`, точные целые операции и `src/sim/fmath.ts` (`hypot`, `dist2`, `within`, `ipow`, `dsin`, `dcos`); `Math.hypot/sin/cos/pow/exp/log/…` и `**` запрещены тестом `tests/determinism.test.ts`. Подробности, эталонные суммы и итоги сверки — [NETWORK.md](NETWORK.md), раздел 7.
 
 ## 4. Демо-карта `?demo`
 
@@ -214,6 +227,8 @@ world.ai.map((a) => [a.player, a.stats]);
 ```
 
 **Проверка сети** (фаза 6, [NETWORK.md](NETWORK.md)): `npm run dev`, затем http://localhost:5173/nettest.html в двух вкладках — «Host» в одной, код и «Join» в другой; «Send»/«Ping» (время туда-обратно), «Lockstep» у хоста — ходы по 100 мс, хэш хода в обеих вкладках, рассинхронизация пишется в журнал; закрытая вкладка у хоста видна как `leave … closed` и «seat N left». Страница есть только у сервера разработки (сборка берёт один `index.html`); `window.nettest` — транспорт, lockstep и журнал. Соединение идёт через публичный брокер PeerJS, нужен интернет.
+
+**Проверка детерминизма в браузере** (шаг 6.3, [NETWORK.md](NETWORK.md), раздел 7): `npm run dev`, затем http://localhost:5173/determinism.html — страница играет набор `sim:determinism` (≈ 10 с) и показывает таблицу сумм и отпечаток; `?ref=<отпечаток из npm run sim:determinism>` пишет «matches ?ref» или «DIFFERS», `?only=map` — только карты. Каждая строка идёт и в консоль, итог — в `window.determinism`. Открыть один раз в Firefox и Safari на том же коммите, что и инструмент. Firefox без окна: профиль с `user_pref("devtools.console.stdout.content", true);` в `user.js` и `MOZ_HEADLESS=1 /Applications/Firefox.app/Contents/MacOS/firefox -no-remote -profile <папка> http://localhost:5173/determinism.html` — строки страницы печатаются в терминал. Страница есть только у сервера разработки.
 
 **Команды.** Всё, что меняет мир, — команды (`src/sim/commands.ts`): интерфейс вызывает `world.issue({ kind, player, … })`, ИИ и консоль — короткие методы `World` (`world.placeBuilding(…)` строит команду `placeBuilding` и применяет её). Применённые команды копятся в `world.commandLog` (`{ tick, ai?, cmd }`); `world.apply(cmd)` применяет команду сразу, `world.schedule(cmd)` — после тика `cmd.tick`. Неправильная команда (чужой игрок, неизвестный товар, не тот тип поля) отвергается и ничего не меняет:
 

@@ -21,13 +21,14 @@ import { sameRegion } from './regions';
 import { randInt } from './rng';
 import type { Point, Settler } from './types';
 import type { World } from './world';
+import { dist2, within } from './fmath';
 
 /** Offsets within `FLEE.seek`, nearest first (ties in a fixed order). */
 const SPIRAL: readonly [number, number][] = (() => {
   const r = FLEE.seek;
   const out: [number, number][] = [];
-  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (Math.hypot(dx, dy) <= r) out.push([dx, dy]);
-  return out.sort((a, b) => Math.hypot(a[0], a[1]) - Math.hypot(b[0], b[1]) || a[1] - b[1] || a[0] - b[0]);
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (within(dx, dy, r)) out.push([dx, dy]);
+  return out.sort((a, b) => dist2(a[0], a[1]) - dist2(b[0], b[1]) || a[1] - b[1] || a[0] - b[0]);
 })();
 
 /** Whether the settler stands on land of his own or an ally's. */

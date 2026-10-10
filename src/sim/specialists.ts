@@ -11,6 +11,7 @@ import { abort, carryBack } from './settlers';
 import { RESOURCES, Terrain, type Building, type PlayerId, type Point, type Resource, type Settler, type SettlerKind, type Task } from './types';
 import type { GameMap } from './map';
 import type { World } from './world';
+import { dist2, hypot, within } from './fmath';
 
 /**
  * Specialists, as in Settlers 4: made from free carriers on the player's order (`ORDERABLE`, like
@@ -159,7 +160,7 @@ function searchTile(w: World, q: Search): { x: number; y: number } | null {
     const i = m.idx(x, y);
     if (!q.ok(i, x, y) || (q.at >= 0 && !sameRegion(m, q.at, i))) continue;
     hit = win;
-    const score = (x - q.tx) ** 2 + (y - q.ty) ** 2 + 3 * ((x - q.ox) ** 2 + (y - q.oy) ** 2);
+    const score = dist2(x - q.tx, y - q.ty) + 3 * dist2(x - q.ox, y - q.oy);
     if (score < bestScore) {
       bestScore = score;
       best = { x, y };
@@ -241,7 +242,7 @@ function idleSpecialist(w: World, player: PlayerId, kind: SettlerKind, x: number
   let bestD = Infinity;
   for (const s of w.settlers) {
     if (s.owner !== player || s.kind !== kind || s.inside !== null || !isFreeSpecialist(s) || w.dying.has(s.id)) continue;
-    const d = Math.hypot(s.x - x, s.y - y);
+    const d = hypot(s.x - x, s.y - y);
     if (d < bestD) {
       bestD = d;
       best = s;
@@ -515,7 +516,7 @@ export function toolPileNear(w: World, player: PlayerId, x: number, y: number): 
   let best = Infinity;
   for (const b of w.buildings.values()) {
     if (b.owner !== player || !b.done || b.output[tool] - b.outReserved[tool] <= 0) continue;
-    const d = Math.hypot(b.door.x - x, b.door.y - y);
+    const d = hypot(b.door.x - x, b.door.y - y);
     if (d < best) {
       from = { at: b.door, b };
       best = d;
@@ -525,7 +526,7 @@ export function toolPileNear(w: World, player: PlayerId, x: number, y: number): 
   for (const i of stackTiles(w)) {
     if (m.owner[i] !== player || goodsOn(w, i) !== tool || freeGoods(w, i) <= 0) continue;
     const at = { x: i % m.w, y: Math.floor(i / m.w) };
-    const d = Math.hypot(at.x - x, at.y - y);
+    const d = hypot(at.x - x, at.y - y);
     if (d < best) {
       from = { at, tile: i };
       best = d;
@@ -565,7 +566,7 @@ export function sendGeologist(w: World, x: number, y: number, player: PlayerId):
   let best: Settler | undefined;
   for (const s of w.settlers) {
     if (s.owner !== player || s.kind !== 'carrier' || s.tasks.length > 0 || s.strike || w.dying.has(s.id)) continue;
-    if (!best || Math.hypot(s.x - near.x, s.y - near.y) < Math.hypot(best.x - near.x, best.y - near.y)) best = s;
+    if (!best || dist2(s.x - near.x, s.y - near.y) < dist2(best.x - near.x, best.y - near.y)) best = s;
   }
   if (!best) return false;
   best.tasks = [];
@@ -784,7 +785,7 @@ export function dismissUnits(w: World, ids: readonly number[], player: PlayerId)
 export function specialistPostIdle(s: Settler): boolean {
   const p = s.post;
   if (!p || s.errand) return false;
-  if (Math.hypot(s.x - p.x, s.y - p.y) > FIELD.slack) s.tasks = [{ t: 'goto', x: p.x, y: p.y }];
+  if (!within(s.x - p.x, s.y - p.y, FIELD.slack)) s.tasks = [{ t: 'goto', x: p.x, y: p.y }];
   else s.tasks = [{ t: 'wait', n: 10 }];
   return true;
 }

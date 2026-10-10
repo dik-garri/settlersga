@@ -2,6 +2,7 @@ import { BUILDINGS, PROFESSIONS, WORK_AREA } from './config';
 import { centerOf } from './buildings';
 import type { Building, BuildingType, PlayerId, Point } from './types';
 import type { World } from './world';
+import { within } from './fmath';
 
 /**
  * Work areas, as in Settlers 4: a gatherer, planter or hunter works within a radius of its hut's
@@ -51,7 +52,7 @@ export function setWorkArea(w: World, id: number, at: Point | null, player: Play
   const r = workRadius(b.type)!;
   const x = Math.round(at.x);
   const y = Math.round(at.y);
-  if (!w.map.inBounds(x, y) || Math.hypot(x - b.door.x, y - b.door.y) > r * WORK_AREA.maxShift) return false;
+  if (!w.map.inBounds(x, y) || !within(x - b.door.x, y - b.door.y, r * WORK_AREA.maxShift)) return false;
   b.workAt = { x, y };
   return true;
 }

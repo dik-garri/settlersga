@@ -22,6 +22,7 @@ import { workCentre } from './workArea';
 import { randInt } from './rng';
 import { Terrain, type Building, type PlantKind, type PlayerId, type Point, type Resource, type Settler } from './types';
 import type { World } from './world';
+import { hypot } from './fmath';
 
 /** Map area the per-tick nature rates are tuned for; larger maps get proportionally more work. */
 const REFERENCE_AREA = 64 * 64;
@@ -147,7 +148,7 @@ const PLANT_RULES: Record<PlantKind, PlantRule> = {
   grain: field('grain'),
 };
 
-const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
+const dist = (a: Point, b: Point) => hypot(a.x - b.x, a.y - b.y);
 
 export type Target = Point & { path: Point[] };
 

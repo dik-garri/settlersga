@@ -4,6 +4,7 @@ import { outdoorFighters } from './field';
 import type { Building, Point, Settler, Task } from './types';
 import type { World } from './world';
 import { workCentre } from './workArea';
+import { hypot } from './fmath';
 
 /**
  * The infirmary, as Settlers 4's healer's hut (`CSimpleBuildingRole::LogicUpdate`, the
@@ -19,7 +20,7 @@ import { workCentre } from './workArea';
  * Cost: one pass over the outdoor fighters (cached per tick) per infirmary every `scanEvery` ticks.
  */
 
-const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
+const dist = (a: Point, b: Point) => hypot(a.x - b.x, a.y - b.y);
 
 /** The infirmary's healer is at work (inside). */
 function healerIn(w: World, b: Building): boolean {

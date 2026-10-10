@@ -13,6 +13,7 @@ import type { GameMap } from './map';
 import { randInt, type Rng } from './rng';
 import { Terrain } from './types';
 import type { World } from './world';
+import { dist2, hypot } from './fmath';
 
 /**
  * A wild animal: owner-less plain data, wandering in straight legs between resting spells around its
@@ -80,7 +81,7 @@ export function habitable(map: GameMap, def: AnimalDef, x: number, y: number): b
 
 /** Every tile a straight leg crosses is habitable (sampled every half tile). */
 function legClear(map: GameMap, def: AnimalDef, x0: number, y0: number, x1: number, y1: number): boolean {
-  const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0) * 2);
+  const n = Math.ceil(hypot(x1 - x0, y1 - y0) * 2);
   for (let k = 1; k <= n; k++) {
     const t = k / n;
     if (!habitable(map, def, Math.round(x0 + (x1 - x0) * t), Math.round(y0 + (y1 - y0) * t))) return false;
@@ -106,7 +107,7 @@ export function spawnAnimals(w: World, starts: { x: number; y: number }[]): void
         const x = randInt(rng, map.w);
         const y = randInt(rng, map.h);
         if (!habitable(map, def, x, y) || map.owner[map.idx(x, y)] !== 0) continue;
-        if (starts.some((s) => Math.hypot(x - s.x, y - s.y) < ANIMAL_START_CLEARANCE)) continue;
+        if (starts.some((s) => dist2(x - s.x, y - s.y) < ANIMAL_START_CLEARANCE * ANIMAL_START_CLEARANCE)) continue;
         home = { x, y };
       }
       if (!home) continue;
@@ -260,7 +261,7 @@ export function updateAnimals(w: World): void {
     }
     const dx = a.tx - a.x;
     const dy = a.ty - a.y;
-    const d = Math.hypot(dx, dy);
+    const d = hypot(dx, dy);
     if (d > 1e-6) {
       if (d <= def.speed) {
         a.x = a.tx;

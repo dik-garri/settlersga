@@ -4,6 +4,7 @@ import { canGarrison, isArcher, isFighter, isMilitary, keepOf, slotsOf } from '.
 import type { AiState } from './ai';
 import type { Building, PlayerId, Point, Settler } from './types';
 import { startPositions, type World } from './world';
+import { hypot } from './fmath';
 
 /**
  * Computer players' army (`field.ts`, `military.ts`), through the same commands a human uses
@@ -23,7 +24,7 @@ import { startPositions, type World } from './world';
  * one is free or sits in a building the group comes from (`orderMove` then forms the squad round him).
  */
 
-const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
+const dist = (a: Point, b: Point) => hypot(a.x - b.x, a.y - b.y);
 
 function alive(w: World, me: PlayerId, ids: readonly number[]): Settler[] {
   const out: Settler[] = [];

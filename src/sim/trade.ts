@@ -4,6 +4,7 @@ import { dropGoods } from './ground';
 import { landAt } from './land';
 import { type Building, type PlayerId, type Point, type Resource, type Settler, type Task } from './types';
 import type { World } from './world';
+import { hypot } from './fmath';
 
 /**
  * Transport beyond the carriers' land, as in Settlers 4 (manual 17.1): a donkey ranch breeds donkeys
@@ -16,7 +17,7 @@ import type { World } from './world';
  * land (`land.ts`) can be supplied.
  */
 
-const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
+const dist = (a: Point, b: Point) => hypot(a.x - b.x, a.y - b.y);
 
 const isMarket = (b: Building | undefined): b is Building => !!b && !!BUILDINGS[b.type].market;
 const isDonkey = (s: Settler) => PROFESSIONS[s.kind].behavior === 'donkey';

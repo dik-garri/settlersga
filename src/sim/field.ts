@@ -35,8 +35,9 @@ import {
 } from './military';
 import type { Building, FieldPost, PlayerId, Point, Settler, Task } from './types';
 import type { World } from './world';
+import { hypot, within } from './fmath';
 
-const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
+const dist = (a: Point, b: Point) => hypot(a.x - b.x, a.y - b.y);
 
 // ---------------------------------------------------------------- per-tick caches (derived, not saved)
 
@@ -119,7 +120,7 @@ function groupTarget(w: World, x: number, y: number, region: number): Point | nu
   let bestD = Infinity;
   for (let dy = -r; dy <= r; dy++) {
     for (let dx = -r; dx <= r; dx++) {
-      const d = Math.hypot(dx, dy);
+      const d = hypot(dx, dy);
       if (d > r || d >= bestD) continue;
       const tx = cx + dx;
       const ty = cy + dy;
@@ -266,7 +267,7 @@ function nearestWithRoom(w: World, s: Settler, archer: boolean): Building | unde
   let bestD = Infinity;
   for (const b of w.buildings.values()) {
     if (b.owner !== s.owner || !b.done || !isMilitary(b) || slotsFree(w, b, archer) <= 0) continue;
-    const d = Math.hypot(b.door.x - s.x, b.door.y - s.y);
+    const d = hypot(b.door.x - s.x, b.door.y - s.y);
     if (d < bestD || (d === bestD && best && b.id < best.id)) {
       best = b;
       bestD = d;
@@ -445,7 +446,7 @@ export function engageTick(w: World, s: Settler, task: Extract<Task, { t: 'engag
 /** Hostile field units within `range` of a building's door (garrison archers shoot them too). */
 export function fieldUnitsNear(w: World, b: Building, range: number): Settler[] {
   return outdoorFighters(w).filter(
-    (o) => o.post && hostile2(w, o.owner, b.owner) && Math.hypot(o.x - b.door.x, o.y - b.door.y) <= range,
+    (o) => o.post && hostile2(w, o.owner, b.owner) && within(o.x - b.door.x, o.y - b.door.y, range),
   );
 }
 

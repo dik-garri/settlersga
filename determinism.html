@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Determinism (dev)</title>
+    <style>
+      body { font: 14px system-ui, sans-serif; margin: 16px; background: #f4efe4; color: #2b2116; }
+      table { border-collapse: collapse; font: 12px ui-monospace, monospace; background: #fffaf0; }
+      td, th { border: 1px solid #c9b48f; padding: 3px 8px; text-align: left; }
+      #status { font-weight: 600; margin: 8px 0; }
+      .ok { color: #1d6b2a; } .bad { color: #a3241b; }
+    </style>
+  </head>
+  <body>
+    <h3>Cross-engine determinism check (dev only, not in the build)</h3>
+    <p>Plays the fixed scenarios of <code>src/dev/determinism.ts</code> and prints <code>stateChecksum</code> at every checkpoint.
+      Compare the fingerprint with <code>npm run sim:determinism</code> on the same commit (or pass it as <code>?ref=</code>).
+      <code>?only=map,replay</code> plays only scenarios whose name contains one of these.</p>
+    <div id="engine"></div>
+    <div id="status">running…</div>
+    <table><thead><tr><th>scenario</th><th>checkpoint</th><th>checksum</th></tr></thead><tbody id="rows"></tbody></table>
+    <script type="module" src="/src/dev/determinismPage.ts"></script>
+  </body>
+</html>

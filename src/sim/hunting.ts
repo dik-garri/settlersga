@@ -5,6 +5,7 @@ import type { Building, Point, Resource, Settler, Task } from './types';
 import type { World } from './world';
 import { abort } from './settlers';
 import { workCentre } from './workArea';
+import { hypot, within } from './fmath';
 
 /**
  * Hunting (as in Settlers 4): a hunter from his lodge stalks the nearest unclaimed game animal
@@ -31,7 +32,7 @@ export function findGame(w: World, s: Settler, home: Building, radius: number): 
     const def: AnimalDef = ANIMALS[a.kind];
     const game = def.game;
     if (!game || a.hunter != null || home.output[game] >= OUTPUT_CAP) continue;
-    const d = Math.hypot(a.x - c.x, a.y - c.y);
+    const d = hypot(a.x - c.x, a.y - c.y);
     if (d > radius || d >= bestD) continue;
     best = a;
     bestD = d;
@@ -50,7 +51,7 @@ export function huntTick(w: World, s: Settler, task: Extract<Task, { t: 'hunt' }
   if (!a || a.hunter !== s.id) return abort(w, s);
   const def = PROFESSIONS[s.kind].hunt;
   if (!def) return abort(w, s);
-  if (Math.hypot(a.x - s.x, a.y - s.y) > def.range) {
+  if (!within(a.x - s.x, a.y - s.y, def.range)) {
     // The game walked off: close in again, a few times at most.
     if (++task.chase > def.chases) return abort(w, s);
     s.tasks.unshift({ t: 'goto', x: Math.round(a.x), y: Math.round(a.y), adj: true });

@@ -56,6 +56,7 @@ import { sameRegion } from './regions';
 import { abort } from './settlers';
 import type { Building, PlayerId, Point, Resource, Settler, SettlerKind, Stock, Task } from './types';
 import type { WarStats, World } from './world';
+import { dist2, hypot, within } from './fmath';
 
 /** Professions that fight. */
 export const FIGHTERS: readonly SettlerKind[] = (Object.keys(PROFESSIONS) as SettlerKind[]).filter(
@@ -243,7 +244,7 @@ function findFreeFighter(w: World, b: Building, archer: boolean): Settler | unde
   const door = m.idx(b.door.x, b.door.y);
   const candidates = freeFighters(w).filter((s) => s.owner === b.owner && isArcher(s) === archer && isCallable(w, s));
   if (candidates.length === 0) return undefined;
-  const d = (s: Settler) => Math.hypot(s.x - b.door.x, s.y - b.door.y);
+  const d = (s: Settler) => hypot(s.x - b.door.x, s.y - b.door.y);
   for (const ring of GARRISON_ORDERS.rings) {
     let best: Settler | undefined;
     for (const s of candidates) {
@@ -316,7 +317,7 @@ function orderWarriors(w: World, b: Building): void {
 /** A hostile fighter outdoors within `r` tiles of the door (Settlers 4 `FindAnyEnemyFighter`). */
 function enemyNear(w: World, b: Building, r: number): boolean {
   for (const o of outdoorFighters(w)) {
-    if (o.owner !== b.owner && !w.allied(o.owner, b.owner) && Math.hypot(o.x - b.door.x, o.y - b.door.y) <= r) return true;
+    if (o.owner !== b.owner && !w.allied(o.owner, b.owner) && within(o.x - b.door.x, o.y - b.door.y, r)) return true;
   }
   return false;
 }
@@ -351,7 +352,7 @@ function stepOut(w: World, b: Building, s: Settler): void {
 /** Walks a free fighter to a spot near `at` not taken by another free fighter of his (they spread out). */
 function standNear(w: World, s: Settler, at: Point): void {
   const near = outdoorFighters(w).filter(
-    (o) => o !== s && o.owner === s.owner && !o.post && o.home === null && Math.hypot(o.x - at.x, o.y - at.y) <= 4,
+    (o) => o !== s && o.owner === s.owner && !o.post && o.home === null && within(o.x - at.x, o.y - at.y, 4),
   ).length;
   const spots = formationSpots(w, at.x, at.y + 1, near + 2);
   const spot = spots[Math.min(near + 1, spots.length - 1)];
@@ -510,8 +511,8 @@ function recruitStep(w: World, b: Building): void {
     // A carrier on strike (no bed, `beds.ts`) takes no job, this one neither.
     if (s.owner !== b.owner || s.kind !== 'carrier' || s.tasks.length > 0 || s.strike || w.dying.has(s.id)) continue;
     if (landAt(w, s, b.owner) !== piece) continue;
-    const d = Math.hypot(s.x - b.door.x, s.y - b.door.y);
-    if (!carrier || d < Math.hypot(carrier.x - b.door.x, carrier.y - b.door.y)) carrier = s;
+    const d = dist2(s.x - b.door.x, s.y - b.door.y);
+    if (!carrier || d < dist2(carrier.x - b.door.x, carrier.y - b.door.y)) carrier = s;
   }
   if (!carrier || spareCarriers(w, b.owner) <= 0) {
     warn(w, 'noCarrier', b);
@@ -661,7 +662,7 @@ function readyOutdoors(w: World, s: Settler, player: PlayerId): boolean {
  */
 function attackers(w: World, target: Building, player: PlayerId): Settler[] {
   const c = centerOf(target);
-  const d = (p: Point) => Math.hypot(p.x - c.x, p.y - c.y);
+  const d = (p: Point) => hypot(p.x - c.x, p.y - c.y);
   const outdoors = outdoorFighters(w)
     .filter((s) => readyOutdoors(w, s, player) && d(s) <= ATTACK_RANGE)
     .sort((p, q) => d(p) - d(q) || p.id - q.id);
@@ -717,7 +718,7 @@ export function shoot(w: World, archer: Settler, target: Settler, from: Point, t
   const ranged = PROFESSIONS[archer.kind].combat!.ranged!;
   rearm(archer);
   w.shots.push({ x0: from.x, y0: from.y, x1: target.x, y1: target.y, tick: w.tick, owner: archer.owner });
-  const atDoor = tower && Math.hypot(target.x - tower.door.x, target.y - tower.door.y) <= AT_DOOR;
+  const atDoor = tower && within(target.x - tower.door.x, target.y - tower.door.y, AT_DOOR);
   // An intruding specialist shot down counts like one cut down (`intruders.ts`).
   if (strike(w, archer, target, !tower ? 0 : atDoor ? ranged.towerDoor : ranged.tower) && !isFighter(target)) w.stats.intrudersKilled++;
 }
@@ -778,7 +779,7 @@ export function assaultTick(w: World, s: Settler, task: Extract<Task, { t: 'assa
     // Support fire: shoot a defender who is out duelling one of ours.
     const range = PROFESSIONS[s.kind].combat!.ranged!.range;
     const busy = defenders
-      .filter((d) => d.opponent !== null && Math.hypot(d.x - s.x, d.y - s.y) <= range)
+      .filter((d) => d.opponent !== null && within(d.x - s.x, d.y - s.y, range))
       .sort((p, q) => p.hp - q.hp || p.id - q.id)[0];
     if (busy) {
       s.working = true;
@@ -835,7 +836,7 @@ function towerTargets(w: World, b: Building, range: number): Settler[] {
   const out: Settler[] = [];
   for (const o of outdoorFighters(w)) {
     if (o.owner === b.owner || w.allied(o.owner, b.owner) || w.dying.has(o.id)) continue;
-    if (Math.hypot(o.x - b.door.x, o.y - b.door.y) > range) continue;
+    if (!within(o.x - b.door.x, o.y - b.door.y, range)) continue;
     const x = Math.round(o.x);
     const y = Math.round(o.y);
     const land = m.inBounds(x, y) ? m.owner[m.idx(x, y)] : 0;
@@ -843,7 +844,7 @@ function towerTargets(w: World, b: Building, range: number): Settler[] {
     out.push(o);
   }
   return out.sort(
-    (p, q) => Math.hypot(p.x - b.door.x, p.y - b.door.y) - Math.hypot(q.x - b.door.x, q.y - b.door.y) || p.id - q.id,
+    (p, q) => dist2(p.x - b.door.x, p.y - b.door.y) - dist2(q.x - b.door.x, q.y - b.door.y) || p.id - q.id,
   );
 }
 

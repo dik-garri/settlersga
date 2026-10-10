@@ -21,8 +21,9 @@ import { isArcher, isFighter, isMilitary, keepOf, sendOut } from './military';
 import { SPECIALIST_KINDS } from './specialists';
 import type { Building, PlayerId, Point, Settler, SettlerKind, Task } from './types';
 import type { World } from './world';
+import { hypot } from './fmath';
 
-const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
+const dist = (a: Point, b: Point) => hypot(a.x - b.x, a.y - b.y);
 
 /** Owner of the land under a settler (0: nobody's, or off the map). */
 function landOwner(w: World, s: Point): PlayerId {

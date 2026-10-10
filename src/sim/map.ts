@@ -12,6 +12,7 @@ import {
 } from './config';
 import { createRng, randInt, type Rng } from './rng';
 import { Terrain, type Point } from './types';
+import { dist2, hypot, ipow, within } from './fmath';
 
 /** Edge length, in tiles, of the square chunks used to track changes. */
 export const CHUNK = 16;
@@ -300,7 +301,7 @@ function addBiomes(map: GameMap, height: Float32Array, starts: readonly Point[],
     }
   }
   const clear = BIOMES.startClearance;
-  const nearStart = (x: number, y: number) => starts.some((s) => Math.hypot(x - s.x, y - s.y) <= clear);
+  const nearStart = (x: number, y: number) => starts.some((s) => within(x - s.x, y - s.y, clear));
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = map.idx(x, y);
@@ -465,7 +466,7 @@ export function generateMap(seed: number, size: number, starts: readonly Point[]
   const depositAt = (cx0: number, cy0: number, radius: number, chance: number, r: Rng = rng) => {
     for (let y = Math.floor(cy0 - radius); y <= cy0 + radius; y++) {
       for (let x = Math.floor(cx0 - radius); x <= cx0 + radius; x++) {
-        if (!map.inBounds(x, y) || Math.hypot(x - cx0, y - cy0) > radius || r() > chance) continue;
+        if (!map.inBounds(x, y) || !within(x - cx0, y - cy0, radius) || r() > chance) continue;
         const i = map.idx(x, y);
         if (map.terrain[i] !== Terrain.Grass) continue;
         map.tree[i] = 0;
@@ -502,7 +503,7 @@ export function generateMap(seed: number, size: number, starts: readonly Point[]
     for (let y = gy - 3; y <= gy + 3; y++) {
       for (let x = gx - 3; x <= gx + 3; x++) {
         if (!map.inBounds(x, y)) continue;
-        if (Math.hypot(x - gx, y - gy) > grove.r) continue;
+        if (!within(x - gx, y - gy, grove.r)) continue;
         const i = map.idx(x, y);
         map.terrain[i] = Terrain.Grass;
         map.stone[i] = 0;
@@ -521,7 +522,7 @@ export function generateMap(seed: number, size: number, starts: readonly Point[]
     for (const lobe of guaranteedLobes([{ x: cx, y: cy }], size)) {
       for (let y = Math.floor(lobe.y - lobe.r); y <= lobe.y + lobe.r; y++) {
         for (let x = Math.floor(lobe.x - lobe.r); x <= lobe.x + lobe.r; x++) {
-          if (!map.inBounds(x, y) || Math.hypot(x - lobe.x, y - lobe.y) > lobe.r) continue;
+          if (!map.inBounds(x, y) || !within(x - lobe.x, y - lobe.y, lobe.r)) continue;
           const i = map.idx(x, y);
           map.terrain[i] = Terrain.Mountain;
           map.tree[i] = 0;
@@ -540,7 +541,7 @@ export function generateMap(seed: number, size: number, starts: readonly Point[]
     for (let y = py - 3; y <= py + 3; y++) {
       for (let x = px - 3; x <= px + 3; x++) {
         if (!map.inBounds(x, y)) continue;
-        const d = Math.hypot(x - px, y - py);
+        const d = hypot(x - px, y - py);
         const i = map.idx(x, y);
         map.ore[i] = 0;
         map.oreAmount[i] = 0;
@@ -713,7 +714,7 @@ function addRidges(height: Float32Array, size: number, rng: Rng): void {
   const fine = valueNoise(rng, size, size, Math.max(8, size / 10));
   for (let i = 0; i < height.length; i++) {
     const n = broad[i] * 0.7 + fine[i] * 0.3;
-    const ridge = Math.pow(1 - Math.abs(2 * n - 1), 6); // 1 on the ridge line, falling off fast
+    const ridge = ipow(1 - Math.abs(2 * n - 1), 6); // 1 on the ridge line, falling off fast
     // Ranges rise from land, not from the open sea.
     const land = Math.min(1, Math.max(0, (height[i] - 0.33) / 0.15));
     height[i] += weight * land * Math.max(0, ridge - 0.5) * 0.8;
@@ -731,7 +732,7 @@ const RIVER_START_CLEARANCE = 13;
 function carveRivers(map: GameMap, height: Float32Array, starts: readonly Point[], rng: Rng): void {
   const size = map.w;
   const count = Math.max(1, Math.round((RIVERS_PER_64 * size * size) / (64 * 64)));
-  const nearStart = (x: number, y: number) => starts.some((s) => Math.hypot(x - s.x, y - s.y) < RIVER_START_CLEARANCE);
+  const nearStart = (x: number, y: number) => starts.some((s) => dist2(x - s.x, y - s.y) < RIVER_START_CLEARANCE * RIVER_START_CLEARANCE);
   const DIRS = [
     [1, 0],
     [-1, 0],
@@ -797,7 +798,7 @@ function carveRivers(map: GameMap, height: Float32Array, starts: readonly Point[
       const ey = Math.floor(end / size);
       for (let y = ey - 2; y <= ey + 2; y++) {
         for (let x = ex - 2; x <= ex + 2; x++) {
-          if (!map.inBounds(x, y) || Math.hypot(x - ex, y - ey) > 1.8 || nearStart(x, y)) continue;
+          if (!map.inBounds(x, y) || !within(x - ex, y - ey, 1.8) || nearStart(x, y)) continue;
           if (map.terrain[map.idx(x, y)] !== Terrain.Rock) wet(map.idx(x, y));
         }
       }
@@ -904,7 +905,7 @@ function elevate(
     for (let y = Math.floor(summit.y - summit.r); y <= summit.y + summit.r; y++) {
       for (let x = Math.floor(summit.x - summit.r); x <= summit.x + summit.r; x++) {
         if (!map.inBounds(x, y)) continue;
-        const d = Math.hypot(x - summit.x, y - summit.y);
+        const d = hypot(x - summit.x, y - summit.y);
         const i = map.idx(x, y);
         if (d <= summit.r && map.terrain[i] === Terrain.Mountain) tile[i] = Math.max(tile[i], 14 + (summit.r - d) * 16);
       }

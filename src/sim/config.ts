@@ -7,6 +7,7 @@ import {
   type SettlerKind,
   type Stock,
 } from './types';
+import { hypot } from './fmath';
 
 export const TICKS_PER_SECOND = 10;
 
@@ -739,7 +740,7 @@ export interface GrowthDef {
  * 24-px tile at zoom 1), and one of our tiles — 45.25 px long in the uncompressed view, √(32² + 32²) —
  * is `S4_TILES_PER_TILE` of its tiles: 0.0515625 × 45.25 / 3 ≈ 0.78 px (docs/PROPORTIONS.md).
  */
-export const S4_HEIGHT_PX = (0.0515625 * Math.hypot(32, 32)) / S4_TILES_PER_TILE;
+export const S4_HEIGHT_PX = (0.0515625 * hypot(32, 32)) / S4_TILES_PER_TILE;
 
 /**
  * Growth on Settlers 4's deterministic timers, no randomness: a field (`CPlant::LogicUpdate`) spends 30

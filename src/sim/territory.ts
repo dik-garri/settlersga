@@ -2,6 +2,7 @@ import { BUILDINGS, TERRITORY } from './config';
 import { centerOf, claimsTerritory } from './buildings';
 import type { Building, PlayerId, Point } from './types';
 import type { World } from './world';
+import { hypot, within } from './fmath';
 
 /**
  * Who owns the land, as Settlers 4's `CWorldManager::SetOwner` decides it. `map.owner` is real,
@@ -39,7 +40,7 @@ function claimersNear(w: World, cx: number, cy: number, r: number): Claimer[] {
     const rb = BUILDINGS[b.type].territory;
     if (!rb || !claimsTerritory(b)) continue;
     const c = centerOf(b);
-    if (Math.hypot(c.x - cx, c.y - cy) <= r + rb) out.push({ c, r: rb, owner: b.owner });
+    if (within(c.x - cx, c.y - cy, r + rb)) out.push({ c, r: rb, owner: b.owner });
   }
   return out;
 }
@@ -67,10 +68,10 @@ export function settleTerritory(w: World, cx: number, cy: number, r: number): vo
   let changed = false;
   for (let y = Math.max(0, Math.floor(cy - r)); y <= Math.min(m.h - 1, Math.ceil(cy + r)); y++) {
     for (let x = Math.max(0, Math.floor(cx - r)); x <= Math.min(m.w - 1, Math.ceil(cx + r)); x++) {
-      if (Math.hypot(x - cx, y - cy) > r) continue;
+      if (!within(x - cx, y - cy, r)) continue;
       sums.fill(0);
       for (const cl of claimers) {
-        const d = Math.hypot(x - cl.c.x, y - cl.c.y);
+        const d = hypot(x - cl.c.x, y - cl.c.y);
         if (d <= cl.r) sums[cl.owner] = Math.min(TERRITORY.cap, sums[cl.owner] + influence(d));
       }
       let best = 0;
@@ -89,7 +90,7 @@ export function settleTerritory(w: World, cx: number, cy: number, r: number): vo
   for (const b of w.buildings.values()) {
     if (!BUILDINGS[b.type].territory || !claimsTerritory(b)) continue;
     const c = centerOf(b);
-    if (Math.hypot(c.x - cx, c.y - cy) > r + Math.max(b.w, b.h) + 1) continue;
+    if (!within(c.x - cx, c.y - cy, r + Math.max(b.w, b.h) + 1)) continue;
     for (const i of tilesOf(w, b)) {
       if (m.owner[i] === b.owner) continue;
       m.owner[i] = b.owner;

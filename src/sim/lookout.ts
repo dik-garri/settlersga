@@ -4,6 +4,7 @@ import { outdoorFighters } from './field';
 import { postMessage } from './messages';
 import type { Building } from './types';
 import type { World } from './world';
+import { within } from './fmath';
 
 /**
  * The lookout tower's alarm, as Settlers 4's `CLookoutTowerRole::LogicUpdate`: it first orders its
@@ -25,7 +26,7 @@ export function updateLookout(w: World, b: Building): void {
   const c = centerOf(b);
   let enemy = false;
   for (const s of outdoorFighters(w)) {
-    if (s.owner !== b.owner && !w.allied(s.owner, b.owner) && Math.hypot(s.x - c.x, s.y - c.y) <= alarm.radius) {
+    if (s.owner !== b.owner && !w.allied(s.owner, b.owner) && within(s.x - c.x, s.y - c.y, alarm.radius)) {
       enemy = true;
       break;
     }

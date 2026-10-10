@@ -50,6 +50,7 @@ import { hasGatherTargetNear, isGatherTarget } from './nature';
 import { packsOf } from './trade';
 import { RESOURCES, Terrain, type Building, type BuildingType, type PlayerId, type Point, type Resource, type SettlerKind } from './types';
 import { startPositions, type World } from './world';
+import { dcos, dsin, dist2, hypot, within } from './fmath';
 
 /** Per computer player; saved with the world. */
 export interface AiState {
@@ -394,12 +395,12 @@ function frontline(w: World, me: PlayerId, own: Building[]): Building[] {
     const def = BUILDINGS[b.type];
     if (!b.done || !def.garrison) return false;
     const c = centerOf(b);
-    if (enemies.some((e) => Math.hypot(e.x - c.x, e.y - c.y) <= AI.fillRange)) return true;
+    if (enemies.some((e) => within(e.x - c.x, e.y - c.y, AI.fillRange))) return true;
     const r = (def.territory ?? 0) + 2;
     for (let k = 0; k < AI.borderSamples; k++) {
       const a = (k / AI.borderSamples) * Math.PI * 2;
-      const x = Math.round(c.x + Math.cos(a) * r);
-      const y = Math.round(c.y + Math.sin(a) * r);
+      const x = Math.round(c.x + dcos(a) * r);
+      const y = Math.round(c.y + dsin(a) * r);
       if (m.inBounds(x, y) && m.owner[m.idx(x, y)] !== me) return true;
     }
     return false;
@@ -421,7 +422,7 @@ function rallyPoint(w: World, me: PlayerId, own: Building[]): Point {
     if (!b.done || !isMilitary(b) || b.garrison.length === 0) continue;
     const c = centerOf(b);
     for (const g of goals) {
-      const d = Math.hypot(g.x - c.x, g.y - c.y);
+      const d = hypot(g.x - c.x, g.y - c.y);
       if (d < best || (d === best && front && b.id < front.id)) {
         best = d;
         front = b;
@@ -430,7 +431,7 @@ function rallyPoint(w: World, me: PlayerId, own: Building[]): Point {
   }
   if (!front) return { x: home.x, y: home.y + 2 };
   const d = front.door;
-  const len = Math.hypot(home.x - d.x, home.y - d.y);
+  const len = hypot(home.x - d.x, home.y - d.y);
   const k = len > 0 ? Math.min(AI.rallyBack, len) / len : 0;
   return { x: Math.round(d.x + (home.x - d.x) * k), y: Math.round(d.y + (home.y - d.y) * k) };
 }
@@ -444,7 +445,7 @@ function enemyInReach(w: World, me: PlayerId, military: Building[]): boolean {
   return knownEnemies(w, me).some(({ b }) => {
     if (!b.done || !isMilitary(b)) return false;
     const c = centerOf(b);
-    return own.some((o) => Math.hypot(o.x - c.x, o.y - c.y) <= ATTACK_RANGE);
+    return own.some((o) => within(o.x - c.x, o.y - c.y, ATTACK_RANGE));
   });
 }
 
@@ -706,7 +707,7 @@ function prospect(ctx: Context, ai: AiState): void {
     const y = Math.floor(i / w.map.w);
     // Walkable only: a tile under a mine would make the geologist's errand fail every time.
     if (w.map.terrain[i] !== Terrain.Mountain || !w.map.isWalkable(x, y) || w.isProspected(x, y, me)) continue;
-    const d = Math.hypot(x - home.x, y - home.y);
+    const d = hypot(x - home.x, y - home.y);
     if (d < bestD) {
       best = { x, y };
       bestD = d;
@@ -749,7 +750,7 @@ function presumedStart(w: World, points: Point[]): Point | null {
   let best: Point | null = null;
   let bestD = Infinity;
   for (const st of startPositions(w.map.w, w.players.length)) {
-    const d = Math.min(...points.map((t) => Math.hypot(t.x - st.x, t.y - st.y)));
+    const d = Math.min(...points.map((t) => hypot(t.x - st.x, t.y - st.y)));
     if (d < bestD) {
       bestD = d;
       best = st;
@@ -775,8 +776,8 @@ function knownCastles(w: World, me: PlayerId): Map<PlayerId, { b: Building; last
     if (military.length === 0) continue;
     const start = presumedStart(w, theirs.map((e) => centerOf(e.b)))!;
     const heart = military.reduce((a, b) => {
-      const da = Math.hypot(centerOf(a).x - start.x, centerOf(a).y - start.y);
-      const db = Math.hypot(centerOf(b).x - start.x, centerOf(b).y - start.y);
+      const da = hypot(centerOf(a).x - start.x, centerOf(a).y - start.y);
+      const db = hypot(centerOf(b).x - start.x, centerOf(b).y - start.y);
       return db < da || (db === da && b.id < a.id) ? b : a;
     });
     out.set(o, { b: heart, last: military.length === 1 });
@@ -899,21 +900,21 @@ function attackIfStrong(w: World, ai: AiState): boolean {
     if (!ready.some((s) => PROFESSIONS[s.kind].combat?.captures && !PROFESSIONS[s.kind].combat?.fieldOnly)) continue;
     const power = ready.reduce((n, s) => n + duelWorth(s.kind, s.level, field), 0);
     const defense =
-      defenders + guards.filter((g) => g.owner === b.owner && Math.hypot(g.x - b.door.x, g.y - b.door.y) <= AI.guardRadius).length;
+      defenders + guards.filter((g) => g.owner === b.owner && within(g.x - b.door.x, g.y - b.door.y, AI.guardRadius)).length;
     if (ready.length < AI.minAttackers || power < t.attackRatio * defense + 1) continue;
     const c = centerOf(b);
     const goal = goals.get(b.owner);
     let score = power - t.attackRatio * defense;
     const heart = castles.get(b.owner);
     if (heart?.b === b) score += 100;
-    else if (goal) score -= Math.hypot(goal.x - c.x, goal.y - c.y) * AI.depthWeight;
+    else if (goal) score -= hypot(goal.x - c.x, goal.y - c.y) * AI.depthWeight;
     // Neighbours of the same owner it knows of: they will send fighters to retake it.
     const helpers = known.filter(
       (e) =>
         e.b !== b &&
         e.b.owner === b.owner &&
         isMilitary(e.b) &&
-        Math.hypot(centerOf(e.b).x - c.x, centerOf(e.b).y - c.y) <= ATTACK_RANGE,
+        within(centerOf(e.b).x - c.x, centerOf(e.b).y - c.y, ATTACK_RANGE),
     ).length;
     score -= helpers * AI.reinforceWeight;
     if (score > bestScore) {
@@ -980,7 +981,7 @@ function siege(ctx: Context, ai: AiState): boolean {
   const known = siegeGoals(w, me);
   const goals = known.length > 0 ? known : unexploredStarts(w, me).map((st) => ({ ...st, seen: false, owner: 0 as PlayerId }));
   for (const c of goals) {
-    const dist = (b: Building) => Math.hypot(centerOf(b).x - c.x, centerOf(b).y - c.y);
+    const dist = (b: Building) => hypot(centerOf(b).x - c.x, centerOf(b).y - c.y);
     // A castle in sight needs a strike force staged round it; one still unseen needs sight first, so
     // the siege keeps pushing until the castle is explored (buildings see little beyond their land).
     if (c.seen && military.filter((b) => dist(b) <= ATTACK_RANGE).length >= AI.siegeBuildings) continue;
@@ -993,14 +994,18 @@ function siege(ctx: Context, ai: AiState): boolean {
   if (!goal) return false;
   // How close its land already comes to the goal: a new building must bring it closer.
   const m = w.map;
-  const land = Math.min(...ctx.tiles.map((i) => Math.hypot((i % m.w) - goal.x, Math.floor(i / m.w) - goal.y)));
+  // A loop, not Math.min(...tiles): spreading a big territory would overflow the call stack, at a
+  // size that differs between engines.
+  let nearest = Infinity;
+  for (const i of ctx.tiles) nearest = Math.min(nearest, dist2((i % m.w) - goal.x, Math.floor(i / m.w) - goal.y));
+  const land = Math.sqrt(nearest);
   // A castle not yet in sight: a lookout as near it as its land allows sees furthest, cheaply — one
   // per edge: a lookout it already has (or is building) at the edge of its land nearest the goal sees
   // all another one there would, and more of them would only take the spots a tower needs to push on.
   const lookoutAtEdge = ctx.own.some((b) => {
     if (!BUILDINGS[b.type].vision) return false;
     const c = centerOf(b);
-    return Math.hypot(c.x - goal.x, c.y - goal.y) <= land + AI.siegeLookoutSlack;
+    return within(c.x - goal.x, c.y - goal.y, land + AI.siegeLookoutSlack);
   });
   if (!goal.seen && !lookoutAtEdge && (ai.blockedUntil.siegeLookout ?? -Infinity) <= w.tick) {
     const lookout = LOOKOUTS.find((t) => ctx.affordable(t));
@@ -1045,7 +1050,7 @@ function scoutIfStuck(w: World, ai: AiState, own: Building[]): void {
   const home = w.homeOf(me);
   const unseen = siegeGoals(w, me).filter((g) => !g.seen);
   const goals: Point[] = unseen.length > 0 || knownEnemies(w, me).length > 0 ? unseen : unexploredStarts(w, me);
-  const goal = goals.sort((a, b) => Math.hypot(a.x - home.x, a.y - home.y) - Math.hypot(b.x - home.x, b.y - home.y))[0];
+  const goal = goals.sort((a, b) => dist2(a.x - home.x, a.y - home.y) - dist2(b.x - home.x, b.y - home.y))[0];
   if (updateScout(w, ai, !!goal)) return;
   if (!goal || ai.siegeStuck === undefined || w.tick - ai.siegeStuck < AI.scoutAfter || w.tick < (ai.nextScout ?? 0)) return;
   if (!sendScout(w, ai, own, goal)) return;
@@ -1145,7 +1150,7 @@ class Context {
 
   /** Some enemy point (known building, foreign land in sight, or a start it scouts for) within `r` of `p`. */
   nearEnemies(p: Point, r: number): boolean {
-    return this.enemies.some((e) => Math.hypot(e.x - p.x, e.y - p.y) <= r);
+    return this.enemies.some((e) => within(e.x - p.x, e.y - p.y, r));
   }
 
   /** Own tiles within `AI.borderReserve` 4-steps of a tile that is not its own. */
@@ -1351,7 +1356,7 @@ class Context {
     const m = w.map;
     const cx = x + (def.w - 1) / 2;
     const cy = y + (def.h - 1) / 2;
-    const fromCastle = Math.hypot(cx - this.castle.x, cy - this.castle.y);
+    const fromCastle = hypot(cx - this.castle.x, cy - this.castle.y);
     if (def.terrain === 'mountain' && m.terrain[m.idx(x, y)] !== Terrain.Mountain) return null;
 
     if (def.mine) {
@@ -1360,7 +1365,7 @@ class Context {
       const r = def.mine.radius;
       for (let ty = Math.floor(cy - r); ty <= Math.ceil(cy + r); ty++) {
         for (let tx = Math.floor(cx - r); tx <= Math.ceil(cx + r); tx++) {
-          if (!m.inBounds(tx, ty) || Math.hypot(tx - cx, ty - cy) > r || !w.isProspected(tx, ty, this.me)) continue;
+          if (!m.inBounds(tx, ty) || !within(tx - cx, ty - cy, r) || !w.isProspected(tx, ty, this.me)) continue;
           const i = m.idx(tx, ty);
           if (oreOf(m.ore[i]) === def.mine.res) ore += m.oreAmount[i];
         }
@@ -1371,7 +1376,7 @@ class Context {
     // Siege first: a siege lookout too must stand within reach of the goal (at the edge of its land
     // nearest it), never anywhere else it happens to fit.
     if (this.siege && (def.vision || (def.garrison && def.territory))) {
-      const d = Math.hypot(this.siege.x - cx, this.siege.y - cy);
+      const d = hypot(this.siege.x - cx, this.siege.y - cy);
       if (d <= this.siege.reach) return 1000 - d;
       // Out of reach: worth it only if its land brings the border on towards the goal.
       const claims = d - (def.territory ?? 0);
@@ -1382,13 +1387,13 @@ class Context {
       // Lookout: as close to the foreign land it sees as possible — and only where its sight reaches
       // that land: one further back would see nothing new and only use up materials and a site.
       if (this.enemies.length === 0) return null;
-      const d = Math.min(...this.enemies.map((e) => Math.hypot(e.x - cx, e.y - cy)));
+      const d = Math.min(...this.enemies.map((e) => hypot(e.x - cx, e.y - cy)));
       return d <= def.vision ? -d : null;
     }
     if (def.garrison && def.territory) {
       // Towers: push the border outwards, towards enemies and unclaimed resources, apart from each other.
       const nearestOwnMilitary = Math.min(
-        ...this.own.filter((b) => isMilitary(b)).map((b) => Math.hypot(centerOf(b).x - cx, centerOf(b).y - cy)),
+        ...this.own.filter((b) => isMilitary(b)).map((b) => hypot(centerOf(b).x - cx, centerOf(b).y - cy)),
       );
       if (nearestOwnMilitary < def.territory * 0.5) return null;
       const reach = def.territory;
@@ -1396,11 +1401,11 @@ class Context {
         // Enemy not found yet: scout — towers towards unexplored land, leaning towards the map
         // center (starts lie around it, so that is where the others are; the map size is public).
         const unknown = this.unexplored(cx, cy, reach + 3);
-        const toCenter = Math.hypot(cx - m.w / 2, cy - m.h / 2);
+        const toCenter = hypot(cx - m.w / 2, cy - m.h / 2);
         if (this.frontier) return unknown + fromCastle * 0.2 - toCenter * AI.scoutCenter;
         return fromCastle + unknown * 0.1 + this.unclaimedResources(cx, cy, reach) * 0.15 - toCenter * AI.scoutCenter * 0.3;
       }
-      const enemy = Math.min(...this.enemies.map((e) => Math.hypot(e.x - cx, e.y - cy)));
+      const enemy = Math.min(...this.enemies.map((e) => hypot(e.x - cx, e.y - cy)));
       if (this.frontier) return -enemy;
       // Scouting for the other starts, or towards foreign land it sees but whose buildings it does not
       // know yet: a line of towers towards them, not a ring around its home.
@@ -1410,7 +1415,7 @@ class Context {
 
     if (def.infirmary && this.rally) {
       // An infirmary heals free fighters in the open (`infirmary.ts`): next to where they gather.
-      const d = Math.hypot(this.rally.x - cx, this.rally.y - cy);
+      const d = hypot(this.rally.x - cx, this.rally.y - cy);
       return d <= def.infirmary.radius ? -d : -d - fromCastle;
     }
     const worker = def.worker ? PROFESSIONS[def.worker] : undefined;
@@ -1427,7 +1432,7 @@ class Context {
       // Foresters next to woodcutters.
       const cutters = this.own.filter((b) => gatheredBy(b.type)?.res === 'log');
       if (cutters.length === 0) return null;
-      const d = Math.min(...cutters.map((b) => Math.hypot(centerOf(b).x - cx, centerOf(b).y - cy)));
+      const d = Math.min(...cutters.map((b) => hypot(centerOf(b).x - cx, centerOf(b).y - cy)));
       return d <= worker.plant!.radius ? this.freeGrass(cx, cy, worker.plant!.radius) - d * 2 : null;
     }
     // Workshops, houses, storage: keep the base compact, and off the border band (room for towers).
@@ -1444,7 +1449,7 @@ class Context {
     let n = 0;
     for (let y = Math.floor(cy - r); y <= Math.ceil(cy + r); y++) {
       for (let x = Math.floor(cx - r); x <= Math.ceil(cx + r); x++) {
-        if (m.inBounds(x, y) && Math.hypot(x - cx, y - cy) <= r && isGatherTarget(this.w, res, m.idx(x, y), this.me)) n++;
+        if (m.inBounds(x, y) && within(x - cx, y - cy, r) && isGatherTarget(this.w, res, m.idx(x, y), this.me)) n++;
       }
     }
     return n;
@@ -1455,7 +1460,7 @@ class Context {
     let n = 0;
     for (let y = Math.floor(cy - r); y <= Math.ceil(cy + r); y++) {
       for (let x = Math.floor(cx - r); x <= Math.ceil(cx + r); x++) {
-        if (Math.hypot(x - cx, y - cy) > r || !m.isBuildable(x, y) || m.owner[m.idx(x, y)] !== this.me) continue;
+        if (!within(x - cx, y - cy, r) || !m.isBuildable(x, y) || m.owner[m.idx(x, y)] !== this.me) continue;
         n++;
       }
     }
@@ -1476,7 +1481,7 @@ class Context {
     let n = 0;
     for (let y = Math.floor(cy - r); y <= Math.ceil(cy + r); y++) {
       for (let x = Math.floor(cx - r); x <= Math.ceil(cx + r); x++) {
-        if (!m.inBounds(x, y) || Math.hypot(x - cx, y - cy) > r) continue;
+        if (!m.inBounds(x, y) || !within(x - cx, y - cy, r)) continue;
         const i = m.idx(x, y);
         if (m.owner[i] !== 0) continue;
         if (!w.isExplored(x, y, me)) {
@@ -1497,7 +1502,7 @@ class Context {
     let n = 0;
     for (let y = Math.floor(cy - r); y <= Math.ceil(cy + r); y += 2) {
       for (let x = Math.floor(cx - r); x <= Math.ceil(cx + r); x += 2) {
-        if (w.map.inBounds(x, y) && Math.hypot(x - cx, y - cy) <= r && !w.isExplored(x, y, me)) n++;
+        if (w.map.inBounds(x, y) && within(x - cx, y - cy, r) && !w.isExplored(x, y, me)) n++;
       }
     }
     return n;
@@ -1522,7 +1527,7 @@ function prerequisiteMet(w: World, me: PlayerId, own: Building[], after: Buildin
 function unexploredStarts(w: World, me: PlayerId): Point[] {
   const friendly = [...w.buildings.values()].filter((b) => w.allied(b.owner, me)).map((b) => centerOf(b));
   return startPositions(w.map.w, w.players.length).filter((st) => {
-    if (friendly.some((f) => Math.hypot(f.x - st.x, f.y - st.y) < 8)) return false;
+    if (friendly.some((f) => dist2(f.x - st.x, f.y - st.y) < 8 * 8)) return false;
     return !w.isExplored(st.x, st.y, me);
   });
 }
@@ -1559,7 +1564,7 @@ function useSpecialists(w: World, ai: AiState, own: Building[]): void {
     let best = Infinity;
     for (const { b } of knownEnemies(w, me)) {
       if (!BUILDINGS[b.type].storage || !robbable(w, b, me)) continue;
-      const d = Math.hypot(b.door.x - home.x, b.door.y - home.y);
+      const d = hypot(b.door.x - home.x, b.door.y - home.y);
       if (d <= AI.thiefRange && d < best) {
         best = d;
         target = b;
@@ -1593,8 +1598,8 @@ function pioneerSpots(w: World, me: PlayerId, own: Building[]): Point[] {
     const c = centerOf(b);
     const r = (BUILDINGS[b.type].territory ?? 0) + 1;
     for (let a = 0; a < 16; a++) {
-      const x = Math.round(c.x + Math.cos((a / 16) * Math.PI * 2) * r);
-      const y = Math.round(c.y + Math.sin((a / 16) * Math.PI * 2) * r);
+      const x = Math.round(c.x + dcos((a / 16) * Math.PI * 2) * r);
+      const y = Math.round(c.y + dsin((a / 16) * Math.PI * 2) * r);
       if (!m.inBounds(x, y)) continue;
       if (m.owner[m.idx(x, y)] === 0) {
         if (!claimable(w, x, y, me)) continue;
@@ -1602,7 +1607,7 @@ function pioneerSpots(w: World, me: PlayerId, own: Building[]): Point[] {
         // A hostile border stone (S4: a pioneer moves it where no tower protects it). Judged only by
         // what it knows — explored, and no known tower's land; the order is refused if it is wrong.
         if (!w.isExplored(x, y, me) || w.allied(m.owner[m.idx(x, y)], me)) continue;
-        if (towers.some((t) => Math.hypot(t.c.x - x, t.c.y - y) <= t.r)) continue;
+        if (towers.some((t) => within(t.c.x - x, t.c.y - y, t.r))) continue;
       }
       let value = 0;
       for (let dy = -3; dy <= 3; dy++) {
@@ -1615,8 +1620,8 @@ function pioneerSpots(w: World, me: PlayerId, own: Building[]): Point[] {
           else if (m.tree[i] || m.isBuildable(x + dx, y + dy)) value += 1;
         }
       }
-      const toward = targets.length ? -Math.min(...targets.map((t) => Math.hypot(t.x - x, t.y - y))) * 0.5 : 0;
-      spots.push({ x, y, score: value + toward - Math.hypot(x - home.x, y - home.y) * 0.1 });
+      const toward = targets.length ? -Math.min(...targets.map((t) => hypot(t.x - x, t.y - y))) * 0.5 : 0;
+      spots.push({ x, y, score: value + toward - hypot(x - home.x, y - home.y) * 0.1 });
     }
   }
   return spots.sort((a, b) => b.score - a.score || m.idx(a.x, a.y) - m.idx(b.x, b.y));

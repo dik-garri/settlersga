@@ -36,8 +36,9 @@ import { fleeing } from './flee';
 import { findGame, huntTick, releaseHunt } from './hunting';
 import { RESOURCES, Terrain, type Building, type Point, type Resource, type Settler, type Task } from './types';
 import type { World } from './world';
+import { hypot } from './fmath';
 
-const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
+const dist = (a: Point, b: Point) => hypot(a.x - b.x, a.y - b.y);
 
 type GotoTarget = { x: number; y: number; adj?: boolean };
 
@@ -294,7 +295,7 @@ export function move(w: World, s: Settler, task: GotoTarget, onBlocked?: () => v
     const t = s.path[0];
     const dx = t.x - s.x;
     const dy = t.y - s.y;
-    const d = Math.hypot(dx, dy);
+    const d = hypot(dx, dy);
     const ti = w.map.idx(t.x, t.y);
     // Worn paths and roads (`paths.ts`) speed carriers and donkeys up.
     const speed = TERRAIN[w.map.terrain[ti] as Terrain].speed * (prof.roads ? pathSpeed(w.map, ti) : 1);

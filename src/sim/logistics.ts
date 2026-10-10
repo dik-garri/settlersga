@@ -29,8 +29,9 @@ import {
 } from './economy';
 import { RESOURCES, type Building, type PlayerId, type Point, type Resource, type Settler, type SettlerKind } from './types';
 import type { World } from './world';
+import { hypot } from './fmath';
 
-const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
+const dist = (a: Point, b: Point) => hypot(a.x - b.x, a.y - b.y);
 
 /**
  * Where a carrier picks a unit up: a building's pile (at its door) or goods lying on the ground

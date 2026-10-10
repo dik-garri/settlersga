@@ -85,6 +85,7 @@ import { rebuildGrowing, updateNature } from './nature';
 import { staysConnected } from './pathfinding';
 import { createRng, type Rng } from './rng';
 import { mapFromSave, restoreWorld, type SaveData } from './save';
+import { dcos, dsin } from './fmath';
 import { markWalkable } from './regions';
 import { abort, updateSettler } from './settlers';
 import {
@@ -111,7 +112,7 @@ export function startPositions(size: number, players: number): { x: number; y: n
   const r = size * 0.3;
   return Array.from({ length: players }, (_, k) => {
     const a = Math.PI / 4 + (2 * Math.PI * k) / players;
-    return { x: Math.round(c + r * Math.cos(a)), y: Math.round(c + r * Math.sin(a)) };
+    return { x: Math.round(c + r * dcos(a)), y: Math.round(c + r * dsin(a)) };
   });
 }
 
