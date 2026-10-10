@@ -10,7 +10,7 @@ import { settingsPanel } from './settingsPanel';
 /**
  * The main menu, laid out like Settlers 4's (a column of choices over a live scene; every look and
  * word ours): «Обучение» first (the tutorial missions, `src/tutorial`), «Новая игра» (the setup screen), «Загрузить» (save slots), «Сетевая игра» (the same
- * setup screen as a lobby, inactive until phase 7), «Настройки», «Об игре» and «Выход» (back to the
+ * setup screen as a lobby, inactive until phase 6), «Настройки», «Об игре» and «Выход» (back to the
  * intro — a browser page has nothing to quit to). Plain DOM over the title scene; arrow keys move
  * between the choices, Esc goes back.
  */

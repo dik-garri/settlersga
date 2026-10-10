@@ -6,18 +6,18 @@ import { aiLevelName } from './names';
 /**
  * The game setup, as on Settlers 4's free-game screen: map, start goods, fog and one slot per player.
  * Pure data and functions (no DOM), shared by the main menu's «Новая игра» and the network lobby of
- * phase 7: a slot is a player colour with a controller (the local human, the computer, a remote human
+ * phase 6: a slot is a player colour with a controller (the local human, the computer, a remote human
  * over the network, or closed), a team and the computer's difficulty. `worldArgs` turns it into the
  * `World` constructor's arguments; `launchOf` decides from the page address what to start.
  */
 
-/** Who plays a slot. `remote` is a human over the network (phase 7; only the lobby offers it). */
+/** Who plays a slot. `remote` is a human over the network (phase 6; only the lobby offers it). */
 export type SlotKind = 'human' | 'ai' | 'remote' | 'closed';
 export const SLOT_KINDS: readonly SlotKind[] = ['human', 'ai', 'remote', 'closed'];
 /** A slot kind's name for the screens. */
 export const slotKindName = (k: SlotKind): string => t(`slot.${k}`);
 
-/** Races: only the Romans play until phase 6; the others are listed so the menu has their place. */
+/** Races: only the Romans play until phase 7; the others are listed so the menu has their place. */
 export const RACES = [
   { id: 'romans', ready: true },
   { id: 'vikings', ready: false },
@@ -52,7 +52,7 @@ export interface SlotSetup {
 }
 
 export interface GameSetup {
-  /** `network` = the phase-7 lobby: same screen, remote humans allowed, not startable yet. */
+  /** `network` = the phase-6 lobby: same screen, remote humans allowed, not startable yet. */
   mode: 'single' | 'network';
   size: number;
   /** Map seed; null = a random one at the start. */
