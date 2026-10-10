@@ -1,6 +1,7 @@
 import type { ChatTo, NetChatLine, SayResult } from '../net/chat';
 import { applySeatControls, NetCore, type ResumeInfo } from '../net/core';
 import type { DesyncReport, Seat } from '../net/lockstep';
+import { sameName } from '../net/names';
 import { netChecksum, type DesyncFile, type MatchEvent, type NetMatch, type NetSave } from '../net/match';
 import type { LockstepSession } from '../net/session';
 import type { NetStatus } from '../net/status';
@@ -11,6 +12,7 @@ import { saveWorld } from '../sim/save';
 import type { World } from '../sim/world';
 import { t } from './i18n';
 import { seatsOf, type StartInfo } from './lobby';
+import { namesOf, seatName } from './playerNames';
 import { forgetRejoin, keepRejoin } from './rejoinHint';
 import { AUTO_ID, type NetSaveMeta, type SaveSlots } from './saves';
 
@@ -60,6 +62,8 @@ export class NetGame {
   readonly local: Seat;
   readonly isHost: boolean;
   readonly hostSeat: Seat;
+  /** The human players' names by seat, from the setup the host sent at «Start» (interface data only). */
+  readonly names: ReadonlyMap<Seat, string>;
   hooks: NetGameHooks = { toast: () => {}, desync: () => {}, hostLost: () => {}, chat: () => {} };
   private last = performance.now();
   private timer: ReturnType<typeof setInterval>;
@@ -77,6 +81,7 @@ export class NetGame {
   ) {
     // A loaded game: the seats nobody took go to the computer or to nobody, on every machine alike.
     if (info.load && !opts.resume) applySeatControls(world, info.load.control);
+    this.names = namesOf(info.setup);
     this.core = new NetCore({
       world,
       transport,
@@ -86,13 +91,14 @@ export class NetGame {
       humanSeats: [...seatsOf(info.setup).keys()],
       resume: opts.resume,
       chat: opts.chat,
+      names: this.names,
       autosaveEvery: AUTOSAVE_MINUTES * 60 * TICKS_PER_SECOND,
       hooks: {
         event: (e) => this.onEvent(e),
         desync: (r) => this.hooks.desync(r),
         hostLost: () => this.hooks.hostLost(),
         chat: (line) => this.hooks.chat(line),
-        rejoinAsked: (seat) => this.hooks.toast(t('net.rejoinAsk', { id: seat })),
+        rejoinAsked: (seat, name) => this.hooks.toast(rejoinAskText(this.nameOf(seat), name)),
       },
     });
     if (info.load && !opts.resume) this.core.match.speed = info.load.speed;
@@ -115,6 +121,11 @@ export class NetGame {
         });
       }),
     );
+  }
+
+  /** A human seat's player for the screens: his name, else «Игрок N» (also while the computer plays it). */
+  nameOf(seat: Seat): string {
+    return seatName(this.names, seat);
   }
 
   get match(): NetMatch {
@@ -192,6 +203,7 @@ export class NetGame {
       date: new Date().toISOString(),
       setup: this.info.setup,
       seats: [...this.seats],
+      names: [...this.names],
     };
   }
 
@@ -217,7 +229,7 @@ export class NetGame {
       }
       return;
     }
-    const text = eventText(e);
+    const text = eventText(e, (seat) => this.nameOf(seat));
     if (text) this.hooks.toast(text);
   }
 
@@ -225,7 +237,7 @@ export class NetGame {
   private async write(s: NetSave): Promise<void> {
     const name = s.auto ? t('saves.auto') : s.name || t('net.savedName', { min: Math.floor(s.tick / (60 * TICKS_PER_SECOND)) });
     const meta = await this.opts.slots.write(s.data, name, Date.now(), s.auto ? AUTO_ID : undefined, { net: this.netMeta(s) });
-    if (!s.auto) this.hooks.toast(meta ? t('net.savedBy', { id: s.seat }) : t('saves.failed'));
+    if (!s.auto) this.hooks.toast(meta ? t('net.savedBy', { who: this.nameOf(s.seat) }) : t('saves.failed'));
     else if (meta) this.hooks.toast(t('saves.auto'));
     if (s.seat === this.local && !s.auto) for (const f of this.saveWaits.slice()) f(!!meta);
   }
@@ -242,15 +254,23 @@ export class NetGame {
   }
 }
 
-/** A match event in words (none for the quiet ones). */
-function eventText(e: MatchEvent): string | null {
+/**
+ * The host's line for a returning player: «Вася просится обратно» when he gives the seat's name (or
+ * none is known), «Петя просится на место Васи» when the names differ.
+ */
+export function rejoinAskText(seat: string, asker: string | null): string {
+  return !asker || sameName(asker, seat) ? t('net.rejoinAsk', { who: seat }) : t('net.rejoinAskOther', { who: asker, seat });
+}
+
+/** A match event in words (none for the quiet ones); `nameOf` names a seat's player. */
+function eventText(e: MatchEvent, nameOf: (seat: Seat) => string): string | null {
   switch (e.kind) {
     case 'takeover':
-      return t('net.takeover', { id: e.seat });
+      return t('net.takeover', { who: nameOf(e.seat) });
     case 'rejoin':
-      return t('net.rejoined', { id: e.seat });
+      return t('net.rejoined', { who: nameOf(e.seat) });
     case 'pause':
-      return t(e.on ? 'net.paused' : 'net.resumed', { id: e.seat });
+      return t(e.on ? 'net.paused' : 'net.resumed', { who: nameOf(e.seat) });
     case 'speed':
       return t('net.speed', { n: e.speed });
     default:

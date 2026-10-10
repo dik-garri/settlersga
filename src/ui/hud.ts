@@ -14,6 +14,7 @@ import { glyph, type GlyphName } from './icons';
 import { InfoView } from './infoPanel';
 import { MESSAGE_CYCLE_MS, messageText } from './messageText';
 import { resName } from './names';
+import { playerRowLabel } from './playerNames';
 import { OptionsView, SPEEDS, type GameActions } from './optionsView';
 import { SettlerInfoView } from './settlerInfo';
 import { UnitsView } from './unitsView';
@@ -120,7 +121,7 @@ export class Hud {
     this.warned = opts.memo?.warned ?? new WeakSet<object>();
     this.ended = opts.memo?.ended ?? false;
     this.build = new BuildView(world, state, select, (b) => this.focusBuilding(b));
-    this.stats = new StatsView(world, state.localPlayer);
+    this.stats = new StatsView(world, state.localPlayer, state.names);
     if (opts.memo) this.stats.carry(opts.memo.stats);
     this.info = new InfoView(world, state, (text) => this.toast(text), (b) => this.focusBuilding(b));
     this.settlerInfo = new SettlerInfoView(world, state, {
@@ -449,11 +450,11 @@ export class Hud {
       el('h2', outcome === 'won' ? 'won' : 'lost', outcome === 'won' ? t('end.won') : t('end.lost')),
       el('p', '', text),
     );
-    if (eco && world.result) this.endEl.append(el('h4', '', t('ecowin.title')), economyTable(world, this.state.localPlayer, world.result.tally));
+    if (eco && world.result) this.endEl.append(el('h4', '', t('ecowin.title')), economyTable(world, this.state.localPlayer, world.result.tally, this.state.names));
     this.endEl.append(
       rowsTable(rows),
       el('h4', '', t('end.score')),
-      scoreTable(world, this.state.localPlayer),
+      scoreTable(world, this.state.localPlayer, this.state.names),
     );
     const actions = el('div', 'info-actions');
     const again = el('button', 'active', t('menu.new'));
@@ -471,7 +472,7 @@ export class Hud {
  * Every player's final score (`scoreOf`, Settlers 4's formula): the parts and the total, best first.
  * Hovering the header shows the formula.
  */
-function scoreTable(world: World, me: PlayerId): HTMLTableElement {
+function scoreTable(world: World, me: PlayerId, names: ReadonlyMap<PlayerId, string>): HTMLTableElement {
   const table = el('table', 'score-table');
   table.title = t('end.scoreTip');
   const head = el('tr');
@@ -481,7 +482,7 @@ function scoreTable(world: World, me: PlayerId): HTMLTableElement {
   const rows = world.players.map((p) => ({ p, sc: scoreOf(world, p.id) })).sort((a, b) => b.sc.total - a.sc.total || a.p.id - b.p.id);
   for (const { p, sc } of rows) {
     const tr = el('tr', p.id === me ? 'mine' : '');
-    const name = p.id === me ? t('common.you') : `${t('common.player', { id: p.id })}${world.isDefeated(p.id) ? ' †' : ''}`;
+    const name = playerRowLabel(world, names, p.id, me);
     for (const v of [name, sc.kills, sc.settlers, sc.fighters, sc.gold, sc.ore, sc.food, sc.buildings]) tr.append(el('td', '', String(v)));
     tr.append(el('td', '', String(sc.total)));
     table.append(tr);

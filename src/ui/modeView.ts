@@ -6,6 +6,7 @@ import type { World } from '../sim/world';
 import { el } from './dom';
 import { t } from './i18n';
 import { modeName, resName } from './names';
+import { playerLabel } from './playerNames';
 
 /**
  * The victory mode in the interface (`modes.ts`): its name and, in the economic mode, the time left
@@ -28,25 +29,30 @@ export function modeLine(world: World): string | null {
   return `${modeName(mode)} · ${t('ecowin.left', { time: clock(economyEndTick() - world.tick) })}`;
 }
 
-/** Names of a side's players, «you» first. */
-function sideNames(ids: PlayerId[], me: PlayerId): string {
-  return ids.map((id) => (id === me ? t('common.you') : t('common.player', { id }))).join(', ');
+/** Names of a side's players («you» for the own one). */
+function sideNames(world: World, ids: PlayerId[], me: PlayerId, names: ReadonlyMap<PlayerId, string>): string {
+  return ids.map((id) => (id === me ? t('common.you') : playerLabel(world, names, id))).join(', ');
 }
 
 /**
  * The comparison table: per good the stock of alliance 1 and of all the others, the leader marked,
  * then the goods won and the sums. `tally` defaults to the comparison right now.
  */
-export function economyTable(world: World, me: PlayerId, tally: EconomyTally = economyTally(world)): HTMLElement {
+export function economyTable(
+  world: World,
+  me: PlayerId,
+  tally: EconomyTally = economyTally(world),
+  names: ReadonlyMap<PlayerId, string> = new Map(),
+): HTMLElement {
   const box = el('div', 'eco-compare');
   const mineA = tally.sideA.includes(me);
   const table = el('table', 'stats-table eco-table');
   const head = el('tr');
   const others = world.players.filter((p) => !tally.sideA.includes(p.id)).map((p) => p.id);
   const colA = el('th', mineA ? 'mine' : '', t('ecowin.sideA'));
-  colA.title = sideNames(tally.sideA, me);
+  colA.title = sideNames(world, tally.sideA, me, names);
   const colB = el('th', mineA ? '' : 'mine', t('ecowin.sideB'));
-  colB.title = sideNames(others, me);
+  colB.title = sideNames(world, others, me, names);
   head.append(el('th', '', t('ecowin.good')), colA, colB);
   table.append(head);
   for (const r of tally.rows) {
@@ -61,7 +67,7 @@ export function economyTable(world: World, me: PlayerId, tally: EconomyTally = e
   const sums = el('tr', 'eco-sum');
   sums.append(el('td', '', t('ecowin.sum')), el('td', '', String(tally.sumA)), el('td', '', String(tally.sumB)));
   table.append(wins, sums);
-  box.append(table, el('p', 'muted', t('ecowin.sides', { a: sideNames(tally.sideA, me), b: sideNames(others, me) })));
+  box.append(table, el('p', 'muted', t('ecowin.sides', { a: sideNames(world, tally.sideA, me, names), b: sideNames(world, others, me, names) })));
   return box;
 }
 

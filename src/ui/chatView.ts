@@ -17,6 +17,8 @@ const SHOWN = 12;
 
 export interface ChatBoxOptions {
   local: Seat;
+  /** A seat's player name (`NetGame.nameOf`). */
+  nameOf: (seat: Seat) => string;
   /** The lines so far. */
   lines: () => readonly NetChatLine[];
   say: (text: string, to: ChatTo) => SayResult;
@@ -24,9 +26,9 @@ export interface ChatBoxOptions {
   toast: (text: string) => void;
 }
 
-/** A chat line in words: «Игрок 2 (союзникам): …». */
-export function chatLineText(line: NetChatLine): string {
-  const who = t('common.player', { id: line.seat });
+/** A chat line in words: «Вася (союзникам): …». */
+export function chatLineText(line: NetChatLine, nameOf: (seat: Seat) => string): string {
+  const who = nameOf(line.seat);
   return line.to === 'allies' ? t('chat.lineAllies', { who, text: line.text }) : t('chat.line', { who, text: line.text });
 }
 
@@ -100,7 +102,7 @@ export class ChatBox {
     this.log.replaceChildren(
       ...lines.slice(-SHOWN).map((line) => {
         const p = el('p', line.lobby ? 'lobby' : '');
-        const who = el('b', '', `${t('common.player', { id: line.seat })}${line.to === 'allies' ? ` ${t('chat.alliesMark')}` : ''}: `);
+        const who = el('b', '', `${this.o.nameOf(line.seat)}${line.to === 'allies' ? ` ${t('chat.alliesMark')}` : ''}: `);
         who.style.color = PLAYER_COLORS[(line.seat - 1) % PLAYER_COLORS.length];
         p.append(who, document.createTextNode(line.text));
         return p;

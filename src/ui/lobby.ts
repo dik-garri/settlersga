@@ -2,6 +2,7 @@ import { BlobReceiver, sendBlob } from '../net/blob';
 import { cleanChat, type NetChatLine } from '../net/chat';
 import { SNAPSHOT_BLOB, type NetStartBase, type SeatControlKind, type RejoinToClient, type ResumeInfo, type ResumeStart } from '../net/core';
 import { delayFor, MIN_DELAY } from '../net/delay';
+import { cleanName, sameName, uniqueName } from '../net/names';
 import { CHECKSUM_EVERY, NET_SPEEDS, TURN_TICKS } from '../net/match';
 import type { Seat } from '../net/lockstep';
 import { PingMeter } from '../net/status';
@@ -33,13 +34,22 @@ import { activeSlots, MAX_SLOTS, parseSetup, setupProblem, type GameSetup } from
  *   save, `sendBlob`) and stores it as a network save. «Start» sends `StartInfo.load`; every browser
  *   loads the same save and gives the seats without a player to the computer or to nobody.
  * - **A returning player** (6.7): while the game is under way the host's game answers the lobby's
- *   `hello` instead (`NetCore`): the seats free to take (`ingame`); the browser asks for one
- *   (`rejoin`) and, once the host agreed, gets the snapshot (`resume` + the save in pieces).
+ *   `hello` instead (`NetCore`): the seats free to take (`ingame`, with their players' names); the
+ *   browser asks for one (`rejoin`: the seat this tab played, else the one with its player's name)
+ *   and, once the host agreed, gets the snapshot (`resume` + the save in pieces).
+ * - **Names** (docs/NETWORK.md section 15): every browser says its player's name in `hello` and
+ *   again whenever it changes (`name`); the host makes it unique in the room, shows it to everybody
+ *   with the players (`LobbyMember.name`, its own in `state.host`) and writes the names into the
+ *   setup at «Start» (`SlotSetup.name`), so the game shows them and network saves keep them. A loaded
+ *   game seats a newcomer on the seat its saved name matches (moving somebody who took it only by
+ *   order), the host on its own seat if its name matches one; the rest by order, as before.
  */
 
 /** A seated player over the network, as everybody sees it. */
 export interface LobbyMember {
   slot: number;
+  /** The player's name (`cleanName`, unique in the room); empty if none was given. */
+  name: string;
   ready: boolean;
   /** Round trip to the host (ms), null before the first answer. */
   ping: number | null;
@@ -87,20 +97,23 @@ export interface LoadView {
   size: number;
   /** Per slot (index): a seat over the network and who plays it without a player; null elsewhere. */
   seats: (LoadSeat | null)[];
+  /** The slot the host plays: the one its name matches in the save, else slot 0 (the former host's). */
+  host: number;
 }
 
 type ToHost =
-  | { ch: 'lobby'; k: 'hello'; build: string; seat?: Seat }
+  | { ch: 'lobby'; k: 'hello'; build: string; seat?: Seat; name?: string }
+  | { ch: 'lobby'; k: 'name'; name: string }
   | { ch: 'lobby'; k: 'ready'; on: boolean }
   | { ch: 'lobby'; k: 'team'; team: number }
   | { ch: 'lobby'; k: 'chat'; text: string }
   | { ch: 'lobby'; k: 'have'; id: string; ok: boolean }
-  | { ch: 'lobby'; k: 'rejoin'; seat: Seat };
+  | { ch: 'lobby'; k: 'rejoin'; seat: Seat; name?: string };
 
 type ToClient =
   | { ch: 'lobby'; k: 'welcome'; slot: number }
   | { ch: 'lobby'; k: 'refuse'; why: RefuseReason; build: string }
-  | { ch: 'lobby'; k: 'state'; setup: GameSetup; members: LobbyMember[]; load?: LoadView | null }
+  | { ch: 'lobby'; k: 'state'; setup: GameSetup; members: LobbyMember[]; load?: LoadView | null; host?: string }
   | { ch: 'lobby'; k: 'chat'; slot: number; text: string }
   | { ch: 'lobby'; k: 'file'; meta: Omit<SlotMeta, 'id' | 'auto'> }
   | ({ ch: 'lobby'; k: 'start' } & StartInfo)
@@ -216,8 +229,10 @@ export class LobbyHost {
   readonly chat: ChatLine[] = [];
   /** The game has started: nobody else gets in. */
   started: StartInfo | null = null;
-  /** The network save being loaded (null: a new game). */
-  loaded: { meta: SlotMeta & { net: NetSaveMeta }; packed: string; seats: (LoadSeat | null)[] } | null = null;
+  /** The network save being loaded (null: a new game); `host` is the slot the host plays. */
+  loaded: { meta: SlotMeta & { net: NetSaveMeta }; packed: string; seats: (LoadSeat | null)[]; host: number } | null = null;
+  /** The host's own player name (`setName`; empty = none given). */
+  name = '';
   /** Called on every change the screen should show. */
   onChange: () => void = () => {};
   private readonly ping: PingMeter;
@@ -232,8 +247,10 @@ export class LobbyHost {
     private readonly build: string,
     private readonly now: () => number,
     private readonly slots: SaveSlots | null = null,
+    name: string | null = null,
   ) {
-    this.setup = { ...setup, mode: 'network', slots: setup.slots.map((s) => ({ ...s })) };
+    this.setup = { ...setup, mode: 'network', slots: setup.slots.map(({ name: _n, ...s }) => ({ ...s })) };
+    this.name = cleanName(name) ?? '';
     this.ping = new PingMeter(transport, now, 1000);
     this.offs.push(
       transport.on('message', (from, msg) => {
@@ -255,25 +272,75 @@ export class LobbyHost {
     return this.loaded ? this.loaded.seats[k] === 'remote' : this.setup.slots[k]?.kind === 'remote';
   }
 
-  /** The slot a newcomer gets (null: full). */
-  private slotFor(taken: ReadonlySet<number>): number | null {
+  /** The slot the host plays (slot 0, or in a loaded game the one its saved name matches). */
+  hostSlot(): number {
+    return this.loaded?.host ?? 0;
+  }
+
+  /**
+   * The slot a newcomer called `name` gets (null: full). A loaded game: the free seat its saved name
+   * matches, else the first free one.
+   */
+  private slotFor(taken: ReadonlySet<number>, name: string): number | null {
     if (!this.loaded) return freeSlot(this.setup, taken);
-    const k = this.loaded.seats.findIndex((s, i) => s === 'remote' && !taken.has(i));
-    return k > 0 ? k : null;
+    const free = this.loaded.seats.flatMap((s, i) => (s === 'remote' && !taken.has(i) ? [i] : []));
+    return free.find((i) => sameName(this.setup.slots[i].name, name)) ?? free[0] ?? null;
+  }
+
+  /**
+   * A loaded game: the seat whose saved name is the newcomer's, if somebody took it only by order —
+   * that player moves to another free seat (told by a new `welcome`), or, with none left, is let go
+   * («full»), and the newcomer gets his own. Null if there is no such seat.
+   */
+  private reclaim(name: string): number | null {
+    if (!this.loaded || !name) return null;
+    const own = this.loaded.seats.findIndex((s, i) => s === 'remote' && sameName(this.setup.slots[i].name, name));
+    if (own < 0) return null;
+    const occupant = [...this.members].find(([, m]) => m.slot === own);
+    if (!occupant || sameName(this.setup.slots[own].name, occupant[1].name)) return null;
+    const taken = new Set([...this.members.values()].map((m) => m.slot));
+    const elsewhere = this.slotFor(taken, occupant[1].name);
+    if (elsewhere === null) {
+      this.members.delete(occupant[0]);
+      this.send(occupant[0], { ch: 'lobby', k: 'refuse', why: 'full', build: this.build });
+      this.transport.kick(occupant[0]);
+      return own;
+    }
+    occupant[1].slot = elsewhere;
+    this.send(occupant[0], { ch: 'lobby', k: 'welcome', slot: elsewhere });
+    return own;
+  }
+
+  /** Names everybody else in the room has (the host's included), for `uniqueName`. */
+  private namesBut(peer: PeerId | null): string[] {
+    const out = this.name ? [this.name] : [];
+    for (const [p, m] of this.members) if (p !== peer && m.name) out.push(m.name);
+    return out;
+  }
+
+  /** The host's own name changed (the settings or the lobby screen): everybody sees it. */
+  setName(raw: string): void {
+    const name = cleanName(raw) ?? '';
+    const taken: string[] = [];
+    for (const m of this.members.values()) if (m.name) taken.push(m.name);
+    this.name = name ? uniqueName(name, taken) : '';
+    this.changed();
   }
 
   private receive(from: PeerId, m: ToHost): void {
     if (m.k === 'hello') {
       if (this.members.has(from)) return;
       const why: RefuseReason | null = m.build !== this.build ? 'version' : this.started ? 'started' : null;
-      const slot = why ? null : this.slotFor(new Set([...this.members.values()].map((x) => x.slot)));
+      const given = cleanName(m.name);
+      const name = given ? uniqueName(given, this.namesBut(from)) : '';
+      const slot = why ? null : (this.reclaim(name) ?? this.slotFor(new Set([...this.members.values()].map((x) => x.slot)), name));
       if (slot === null) {
         this.send(from, { ch: 'lobby', k: 'refuse', why: why ?? 'full', build: this.build });
         this.transport.kick(from);
         return;
       }
       if (!this.loaded) this.setup.slots[slot].kind = 'remote';
-      this.members.set(from, { slot, ready: false, ping: null, ...(this.loaded ? { has: false } : {}) });
+      this.members.set(from, { slot, name, ready: false, ping: null, ...(this.loaded ? { has: false } : {}) });
       this.send(from, { ch: 'lobby', k: 'welcome', slot });
       this.changed();
       return;
@@ -282,6 +349,10 @@ export class LobbyHost {
     if (!me) return;
     if (m.k === 'ready' && typeof m.on === 'boolean') {
       me.ready = m.on;
+      this.changed();
+    } else if (m.k === 'name') {
+      const given = cleanName(m.name);
+      me.name = given ? uniqueName(given, this.namesBut(from)) : '';
       this.changed();
     } else if (m.k === 'team' && Number.isInteger(m.team) && m.team >= 1 && m.team <= MAX_SLOTS && !this.loaded) {
       this.setup.slots[me.slot].team = m.team;
@@ -313,12 +384,30 @@ export class LobbyHost {
     if (!this.loaded) this.fresh = { ...this.setup, slots: this.setup.slots.map((s) => ({ ...s })) };
     const saved = meta.net.setup;
     Object.assign(this.setup, { ...saved, mode: 'network', slots: saved.slots.map((s) => ({ ...s })) });
-    // The setup's human seats: the first is the host's; the others wait for players over the network.
-    const seats: (LoadSeat | null)[] = this.setup.slots.map((s, k) => (k > 0 && (s.kind === 'remote' || s.kind === 'human') ? 'remote' : null));
-    this.loaded = { meta, packed, seats };
-    for (const m of this.members.values()) {
+    // The setup's human seats: the host plays the one its saved name matches, else the first (the
+    // former host's); the others wait for players over the network.
+    const human = (k: number) => this.setup.slots[k].kind === 'remote' || this.setup.slots[k].kind === 'human';
+    const named = this.setup.slots.findIndex((s, k) => human(k) && sameName(s.name, this.name));
+    const host = named >= 0 ? named : 0;
+    const seats: (LoadSeat | null)[] = this.setup.slots.map((_, k) => (k !== host && human(k) ? 'remote' : null));
+    this.loaded = { meta, packed, seats, host };
+    // Everybody already here is seated again: by name where it matches, the rest by order.
+    const order = [...this.members.values()].sort((a, b) => a.slot - b.slot);
+    const taken = new Set<number>();
+    for (const m of order) m.slot = -1;
+    for (const byName of [true, false]) {
+      for (const m of order) {
+        if (m.slot >= 0) continue;
+        const k = seats.findIndex((s, i) => s === 'remote' && !taken.has(i) && (!byName || sameName(this.setup.slots[i].name, m.name)));
+        if (k < 0) continue;
+        m.slot = k;
+        taken.add(k);
+      }
+    }
+    for (const [peer, m] of this.members) {
       m.ready = false;
       m.has = false;
+      if (m.slot >= 0) this.send(peer, { ch: 'lobby', k: 'welcome', slot: m.slot });
     }
     this.changed();
     return true;
@@ -330,10 +419,18 @@ export class LobbyHost {
     this.loaded = null;
     if (this.fresh) Object.assign(this.setup, this.fresh);
     this.fresh = null;
-    for (const m of this.members.values()) {
+    const taken = new Set<number>();
+    for (const [peer, m] of this.members) {
       m.ready = false;
       delete m.has;
-      // Back in a new game, a player's slot is «over the network» again.
+      // Back in a new game, a player's slot is «over the network» again (slot 0 is the host's).
+      if (m.slot <= 0 || taken.has(m.slot)) {
+        const k = freeSlot(this.setup, taken);
+        if (k === null) continue;
+        m.slot = k;
+        this.send(peer, { ch: 'lobby', k: 'welcome', slot: k });
+      }
+      taken.add(m.slot);
       this.setup.slots[m.slot].kind = 'remote';
     }
     this.changed();
@@ -349,7 +446,7 @@ export class LobbyHost {
   /** The save being loaded, as everybody sees it. */
   loadView(): LoadView | null {
     const l = this.loaded;
-    return l ? { id: l.meta.net.id, sum: l.meta.net.sum, name: l.meta.name, tick: l.meta.tick, size: l.meta.size, seats: l.seats.slice() } : null;
+    return l ? { id: l.meta.net.id, sum: l.meta.net.sum, name: l.meta.name, tick: l.meta.tick, size: l.meta.size, seats: l.seats.slice(), host: l.host } : null;
   }
 
   /** The host edited the setup (in place): seats follow, everybody sees it. */
@@ -358,9 +455,11 @@ export class LobbyHost {
     for (const [peer, m] of this.members) {
       if (this.takesPlayer(m.slot)) continue;
       const taken = new Set([...this.members.values()].filter((x) => x !== m).map((x) => x.slot));
-      const k = this.setup.slots.findIndex((_, i) => i > 0 && this.takesPlayer(i) && !taken.has(i));
-      if (k > 0) m.slot = k;
-      else {
+      const k = this.setup.slots.findIndex((_, i) => i !== this.hostSlot() && this.takesPlayer(i) && !taken.has(i));
+      if (k >= 0) {
+        m.slot = k;
+        this.send(peer, { ch: 'lobby', k: 'welcome', slot: k });
+      } else {
         this.members.delete(peer);
         this.send(peer, { ch: 'lobby', k: 'refuse', why: 'full', build: this.build });
         this.transport.kick(peer);
@@ -373,7 +472,7 @@ export class LobbyHost {
   private broadcastState(): void {
     this.lastState = this.now();
     for (const [peer, m] of this.members) m.ping = this.ping.rtt(peer);
-    this.transport.broadcast({ ch: 'lobby', k: 'state', setup: this.setup, members: this.memberList(), load: this.loadView() } satisfies ToClient);
+    this.transport.broadcast({ ch: 'lobby', k: 'state', setup: this.setup, members: this.memberList(), load: this.loadView(), host: this.name } satisfies ToClient);
   }
 
   /** The members in slot order. */
@@ -390,7 +489,7 @@ export class LobbyHost {
   /** Sends the host's own chat line. */
   sayOwn(text: string): void {
     const s = cleanChat(text);
-    if (s) this.say(0, s);
+    if (s) this.say(this.hostSlot(), s);
   }
 
   private say(slot: number, text: string): void {
@@ -428,21 +527,30 @@ export class LobbyHost {
     if (this.started || this.problem()) return null;
     const seats: [Seat, PeerId][] = [];
     const control: [Seat, SeatControl][] = [];
+    const hostSlot = this.hostSlot();
     for (const [seat, slot] of seatsOf(this.setup)) {
-      const kind = this.loaded && slot !== 0 ? this.loaded.seats[slot] : 'remote';
+      const kind = this.loaded && slot !== hostSlot ? this.loaded.seats[slot] : 'remote';
       if (kind !== 'remote') {
         control.push([seat, kind === 'ai' ? 'ai' : 'none']);
         continue;
       }
-      const peer = slot === 0 ? this.transport.self : this.peerOf(slot);
+      const peer = slot === hostSlot ? this.transport.self : this.peerOf(slot);
       if (!peer) return null;
       seats.push([seat, peer]);
       control.push([seat, 'human']);
     }
     let worst = 0;
     for (const peer of this.members.keys()) worst = Math.max(worst, this.ping.rtt(peer) ?? 0);
+    // The players' names go into the setup the game starts from (and network saves keep): the host's
+    // and every seated player's; a loaded game keeps the saved names of the seats nobody took.
+    const slots = this.setup.slots.map((s, k) => {
+      const { name: saved, ...rest } = s;
+      const peer = this.peerOf(k);
+      const name = k === hostSlot ? this.name : peer ? this.members.get(peer)!.name : this.loaded ? saved : '';
+      return name ? { ...rest, name } : rest;
+    });
     const info: StartInfo = {
-      setup: { ...this.setup, slots: this.setup.slots.map((s) => ({ ...s })) },
+      setup: { ...this.setup, slots },
       seed: this.setup.seed ?? randomSeed,
       seats,
       delay: delayFor(worst),
@@ -481,6 +589,8 @@ export interface LobbyClientOptions {
   seat?: Seat;
   /** Where network saves are looked up and stored. */
   slots?: SaveSlots | null;
+  /** This browser's player name (`cleanName`), said in `hello`. */
+  name?: string;
 }
 
 /** A joined browser's side of the lobby. */
@@ -499,8 +609,10 @@ export class LobbyClient {
   load: LoadView | null = null;
   /** How far the save the host sends has come (0…1), null if none is on its way. */
   fileProgress: number | null = null;
-  /** The game is under way: the seats this browser may ask to take back, and the taken ones. */
-  ingame: { vacant: Seat[]; busy: Seat[] } | null = null;
+  /** The game is under way: the seats this browser may ask to take back, the taken ones, and their players' names. */
+  ingame: { vacant: Seat[]; busy: Seat[]; names: Map<Seat, string> } | null = null;
+  /** The host's player name (empty if none given). */
+  hostName = '';
   /** The seat asked for (waiting for the host's answer and the snapshot). */
   rejoinAsked: Seat | null = null;
   /** How far the snapshot has come (0…1). */
@@ -515,6 +627,7 @@ export class LobbyClient {
   private haveSent: string | null = null;
   private file: Omit<SlotMeta, 'id' | 'auto'> | null = null;
   private pendingResume: Omit<ResumeStart, 'data'> | null = null;
+  private name: string;
 
   constructor(
     readonly transport: Transport,
@@ -523,6 +636,7 @@ export class LobbyClient {
     private readonly opts: LobbyClientOptions = {},
   ) {
     this.slots = opts.slots ?? null;
+    this.name = cleanName(opts.name) ?? '';
     this.ping = new PingMeter(transport, now, 1000);
     this.blobs = new BlobReceiver(
       transport,
@@ -548,7 +662,13 @@ export class LobbyClient {
   }
 
   private hello(): void {
-    this.transport.send(this.transport.host, { ch: 'lobby', k: 'hello', build: this.build, ...(this.opts.seat ? { seat: this.opts.seat } : {}) } satisfies ToHost);
+    this.transport.send(this.transport.host, {
+      ch: 'lobby',
+      k: 'hello',
+      build: this.build,
+      ...(this.opts.seat ? { seat: this.opts.seat } : {}),
+      ...(this.name ? { name: this.name } : {}),
+    } satisfies ToHost);
   }
 
   private receive(m: ToClient): void {
@@ -565,7 +685,14 @@ export class LobbyClient {
         this.setup = { ...setup, mode: 'network' };
         this.members = m.members
           .filter((x) => x && Number.isInteger(x.slot))
-          .map((x) => ({ slot: x.slot, ready: x.ready === true, ping: typeof x.ping === 'number' ? x.ping : null, ...(typeof x.has === 'boolean' ? { has: x.has } : {}) }));
+          .map((x) => ({
+            slot: x.slot,
+            name: cleanName(x.name) ?? '',
+            ready: x.ready === true,
+            ping: typeof x.ping === 'number' ? x.ping : null,
+            ...(typeof x.has === 'boolean' ? { has: x.has } : {}),
+          }));
+        this.hostName = cleanName(m.host) ?? '';
         this.load = parseLoadView(m.load);
         this.checkSave();
         break;
@@ -587,9 +714,17 @@ export class LobbyClient {
         this.started = info;
         break;
       }
-      case 'ingame':
-        this.ingame = { vacant: seatList(m.vacant), busy: seatList(m.busy) };
+      case 'ingame': {
+        const names = new Map<Seat, string>();
+        if (Array.isArray(m.names)) {
+          for (const x of m.names as unknown[]) {
+            const name = Array.isArray(x) && Number.isInteger(x[0]) ? cleanName(x[1]) : null;
+            if (name) names.set((x as [Seat, string])[0], name);
+          }
+        }
+        this.ingame = { vacant: seatList(m.vacant), busy: seatList(m.busy), names };
         break;
+      }
       case 'resume': {
         const start = parseStart(m.start);
         const r = m.resume as ResumeInfo | undefined;
@@ -640,6 +775,17 @@ export class LobbyClient {
     this.transport.send(this.transport.host, { ch: 'lobby', k: 'ready', on } satisfies ToHost);
   }
 
+  /** My player name changed (the lobby screen): the host shows it to everybody. */
+  setName(raw: string): void {
+    this.name = cleanName(raw) ?? '';
+    this.transport.send(this.transport.host, { ch: 'lobby', k: 'name', name: this.name } satisfies ToHost);
+  }
+
+  /** My name as the host made it (unique in the room), else as I gave it. */
+  get myName(): string {
+    return this.members.find((m) => m.slot === this.slot)?.name || this.name;
+  }
+
   setTeam(team: number): void {
     this.transport.send(this.transport.host, { ch: 'lobby', k: 'team', team } satisfies ToHost);
   }
@@ -652,7 +798,7 @@ export class LobbyClient {
   /** The game is under way: asks for a seat back (the host's player confirms). */
   rejoin(seat: Seat): void {
     this.rejoinAsked = seat;
-    this.transport.send(this.transport.host, { ch: 'lobby', k: 'rejoin', seat } satisfies ToHost);
+    this.transport.send(this.transport.host, { ch: 'lobby', k: 'rejoin', seat, ...(this.name ? { name: this.name } : {}) } satisfies ToHost);
     this.onChange();
   }
 
@@ -661,9 +807,14 @@ export class LobbyClient {
     this.hello();
   }
 
-  /** The seat this browser played before a reload, if it said so. */
+  /**
+   * The seat this browser should ask for in a game under way: the one this tab played before a
+   * reload (`sessionStorage`), else the one whose player has this browser's name.
+   */
   get hint(): Seat | null {
-    return this.opts.seat ?? null;
+    if (this.opts.seat) return this.opts.seat;
+    for (const [seat, name] of this.ingame?.names ?? []) if (sameName(name, this.name)) return seat;
+    return null;
   }
 
   /** Pings the host (the round trip shows on the screen; the host measures its own). */
@@ -703,5 +854,6 @@ function parseLoadView(x: unknown): LoadView | null {
     tick: Number.isInteger(l.tick) ? (l.tick as number) : 0,
     size: Number.isInteger(l.size) ? (l.size as number) : 0,
     seats: (l.seats as unknown[]).map((s) => (LOAD_SEATS.includes(s as LoadSeat) ? (s as LoadSeat | null) : null)),
+    host: Number.isInteger(l.host) && (l.host as number) >= 0 && (l.host as number) < MAX_SLOTS ? (l.host as number) : 0,
   };
 }

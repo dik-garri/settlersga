@@ -33,6 +33,8 @@ import { ChatBox, chatLineText } from './ui/chatView';
 import type { StartInfo } from './ui/lobby';
 import type { NetLaunchExtra } from './ui/lobbyView';
 import { NetGame } from './ui/netGame';
+import { ownName } from './ui/playerNames';
+import { NAME_EVENT } from './ui/settingsPanel';
 import { downloadJson, NetPanel, netWindow } from './ui/netView';
 
 /** A network game: the connections the lobby made, what the host decided at «Start», the chat so far. */
@@ -288,6 +290,11 @@ function game(
     ? new NetGame(world, opts.net.transport, opts.net.info, { slots, resume: opts.net.extra.resume?.resume, chat: opts.net.extra.chat })
     : null;
   const state = createState(net?.local);
+  // Player names (interface only): a network game's from the setup the host sent, else the own one.
+  const own = new Map([[state.localPlayer, ownName()]]);
+  state.names = net ? net.names : own;
+  // On one machine a new name (the settings) or language (a default name is the language's) shows at once.
+  if (!net) window.addEventListener(NAME_EVENT, () => own.set(state.localPlayer, ownName()));
   state.fog = opts.fog;
   if (net) state.net = { pause: (on) => net.match.setPaused(on), speed: net.isHost ? (v) => net.match.setSpeed(v) : null };
   const renderer = new GameRenderer(app, world, atlas, state.fog, state.localPlayer);
@@ -379,15 +386,21 @@ function game(
       seats: [...net.seats.keys()].sort((a, b) => a - b),
       local: net.local,
       host: net.hostSeat,
+      nameOf: (seat) => net.nameOf(seat),
       kick: net.isHost ? (seat) => net.kick(seat) : null,
       chat: () => chat.toggle(),
       rejoin: net.isHost
-        ? { asked: () => net.core.askedSeats(), accept: (s) => void net.core.acceptRejoin(s), refuse: (s) => net.core.refuseRejoin(s) }
+        ? {
+            asked: () => net.core.askedSeats(),
+            askerName: (s) => net.core.askerName(s),
+            accept: (s) => void net.core.acceptRejoin(s),
+            refuse: (s) => net.core.refuseRejoin(s),
+          }
         : null,
     });
     // The chat box over the ticker (Enter or the panel's button), rebuilt in another language.
     const makeChat = () =>
-      new ChatBox({ local: net.local, lines: () => net.core.chat.lines, say: (text, to) => net.say(text, to), toast: (text) => hud.toast(text) });
+      new ChatBox({ local: net.local, nameOf: (seat) => net.nameOf(seat), lines: () => net.core.chat.lines, say: (text, to) => net.say(text, to), toast: (text) => hud.toast(text) });
     let chat = makeChat();
     hudEl.append(panel.el, chat.el);
     window.addEventListener(LANG_EVENT, () => {
@@ -414,7 +427,7 @@ function game(
       toast: (text) => hud.toast(text),
       chat: (line) => {
         // New lines go to the ticker while the box is closed.
-        if (!chat.isOpen) hud.toast(chatLineText(line));
+        if (!chat.isOpen) hud.toast(chatLineText(line, (seat) => net.nameOf(seat)));
         chat.refresh();
       },
       desync: (r) =>
@@ -437,6 +450,8 @@ function game(
   // Another language chosen in the settings: the side panel is built again in it (menus, windows,
   // statistics and messages carry over); the pause menu and the minimap redraw themselves.
   window.addEventListener(LANG_EVENT, () => {
+    // A default name is the language's («Поселенец 427» / "Settler 427").
+    if (!net) own.set(state.localPlayer, ownName());
     const previous = hud;
     previous.dispose();
     hud = makeHud(previous);

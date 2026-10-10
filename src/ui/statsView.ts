@@ -9,6 +9,7 @@ import { clock, economyTable } from './modeView';
 import { economyEndTick } from '../sim/modes';
 import { t } from './i18n';
 import { buildingName, profName, resName } from './names';
+import { playerRowLabel } from './playerNames';
 
 /** What each player looks like at a sample (Settlers 4's land and fighters statistics). */
 interface PlayerSample {
@@ -57,6 +58,8 @@ export class StatsView implements View {
     private readonly world: World,
     /** The player this browser plays. */
     private readonly me: PlayerId,
+    /** The human players' names (`GameState.names`). */
+    private readonly names: ReadonlyMap<PlayerId, string> = new Map(),
   ) {
     this.slider.type = 'range';
     this.slider.min = '1';
@@ -146,7 +149,7 @@ export class StatsView implements View {
     if (world.rules?.mode === 'economy') {
       body.append(el('h4', '', t('ecowin.title')));
       body.append(el('p', 'muted', world.result ? t('ecowin.done') : t('ecowin.left', { time: clock(economyEndTick() - world.tick) })));
-      body.append(economyTable(world, this.me, world.result?.tally));
+      body.append(economyTable(world, this.me, world.result?.tally, this.names));
     }
     body.append(el('h4', '', t('stats.production', { n: minutes })));
     const grid = el('div', 'stats-grid');
@@ -187,7 +190,7 @@ export class StatsView implements View {
       const n = now.players[p.id];
       const o = old.players[p.id] ?? n;
       const tr = el('tr', p.id === this.me ? 'mine' : '');
-      const name = p.id === this.me ? t('common.you') : `${t('common.player', { id: p.id })}${world.isDefeated(p.id) ? ' †' : ''}`;
+      const name = playerRowLabel(world, this.names, p.id, this.me);
       tr.append(
         el('td', '', name),
         el('td', '', `${n.land} (${delta(n.land, o.land)})`),

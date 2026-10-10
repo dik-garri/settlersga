@@ -9,9 +9,11 @@ import { TICKS_PER_SECOND } from '../sim/config';
 import { el } from './dom';
 import { dateTime, t, withLang } from './i18n';
 import { LobbyClient, LobbyHost, type ChatLine, type LoadSeat, type LoadView, type LobbyMember, type StartInfo } from './lobby';
+import { ownName } from './playerNames';
 import { rejoinSeat } from './rejoinHint';
 import { browserSlots, gameTime, type SaveSlots } from './saves';
 import { activeSlots, defaultSetup, parseSetup, slotKindName, type GameSetup } from './setup';
+import { nameField } from './settingsPanel';
 import { setupForm } from './setupForm';
 
 /**
@@ -20,7 +22,9 @@ import { setupForm } from './setupForm';
  * the players over the network with their ready flags and pings, a chat, and «Начать» for the host.
  * The host may load a network save instead of a new game (6.6): the save's setup, who plays each seat
  * without a player, and who has the save. A browser coming back to a game under way (6.7) is offered
- * the free seats, asks for its own, and starts where the others are once the host agreed.
+ * the free seats, asks for its own, and starts where the others are once the host agreed. The own
+ * player name can be changed here at any time (docs/NETWORK.md section 15): it is kept in the
+ * preferences, and the host shows it to everybody with the players and in the chat.
  * Drawn into the main menu's panel; the logic is `lobby.ts`.
  */
 
@@ -125,7 +129,7 @@ export class LobbyView {
     try {
       const transport = await this.provider.host();
       if (this.closed) return transport.close();
-      const lobby = new LobbyHost(transport, lastNetworkSetup(), BUILD_ID, () => performance.now(), this.slots);
+      const lobby = new LobbyHost(transport, lastNetworkSetup(), BUILD_ID, () => performance.now(), this.slots, ownName());
       lobby.onChange = () => this.refreshHost(lobby);
       this.phase = { k: 'host', lobby };
       this.render();
@@ -142,7 +146,7 @@ export class LobbyView {
     try {
       const transport = await this.provider.join(code);
       if (this.closed) return transport.close();
-      const lobby = new LobbyClient(transport, BUILD_ID, () => performance.now(), { seat: rejoinSeat(code) ?? undefined, slots: this.slots });
+      const lobby = new LobbyClient(transport, BUILD_ID, () => performance.now(), { seat: rejoinSeat(code) ?? undefined, slots: this.slots, name: ownName() });
       lobby.onChange = () => this.refreshClient(lobby);
       this.phase = { k: 'client', lobby };
       this.render();
@@ -174,7 +178,7 @@ export class LobbyView {
     row.append(back);
     switch (p.k) {
       case 'choose':
-        this.el.append(el('p', 'menu-soon', t('lobby.intro')), this.chooser(p.error));
+        this.el.append(el('p', 'menu-soon', t('lobby.intro')), nameField(), this.chooser(p.error));
         break;
       case 'busy':
         this.el.append(el('p', 'menu-text', p.text));
@@ -184,7 +188,7 @@ export class LobbyView {
         break;
       case 'host': {
         this.chatEl = this.chatBox((text) => p.lobby.sayOwn(text));
-        this.el.append(this.shareBox(p.lobby.transport.code), this.loadBox, this.formBox, this.playersBox, this.chatEl);
+        this.el.append(this.shareBox(p.lobby.transport.code), nameField((name) => p.lobby.setName(name)), this.loadBox, this.formBox, this.playersBox, this.chatEl);
         const start = el('button', 'menu-small active', t('menu.start'));
         start.onclick = this.click(() => {
           const info = p.lobby.start(randomSeed());
@@ -199,7 +203,14 @@ export class LobbyView {
       }
       case 'client': {
         this.chatEl = this.chatBox((text) => p.lobby.say(text));
-        this.el.append(el('p', 'lobby-share', t('lobby.joined', { code: p.lobby.transport.code })), this.loadBox, this.formBox, this.playersBox, this.chatEl);
+        this.el.append(
+          el('p', 'lobby-share', t('lobby.joined', { code: p.lobby.transport.code })),
+          nameField((name) => p.lobby.setName(name)),
+          this.loadBox,
+          this.formBox,
+          this.playersBox,
+          this.chatEl,
+        );
         const ready = el('button', 'menu-small active', t('lobby.readyBtn'));
         ready.onclick = this.click(() => p.lobby.setReady(!p.lobby.ready));
         this.actionBtn = ready;
@@ -296,14 +307,14 @@ export class LobbyView {
     return box;
   }
 
-  private showChat(chat: readonly ChatLine[], setup: GameSetup | null): void {
+  private showChat(chat: readonly ChatLine[], setup: GameSetup | null, names: SlotNames): void {
     // Lines drop off the front of a long chat: redraw then.
     if (chat.length < this.chatSeen) {
       this.chatLog.innerHTML = '';
       this.chatSeen = 0;
     }
     for (const c of chat.slice(this.chatSeen)) {
-      const who = el('b', '', `${seatName(setup, c.slot)}: `);
+      const who = el('b', '', `${slotLabel(setup, c.slot, names)}: `);
       who.style.color = colourOf(setup, c.slot);
       const p = el('p');
       p.append(who, document.createTextNode(c.text));
@@ -314,21 +325,27 @@ export class LobbyView {
   }
 
   /** The players: the host and every slot over the network, ready or not, with the ping. */
-  private showPlayers(setup: GameSetup, members: readonly LobbyMember[], self: number, host: boolean, load: LoadView | null, kick?: (slot: number) => void): void {
+  private showPlayers(setup: GameSetup, members: readonly LobbyMember[], self: number, host: boolean, load: LoadView | null, names: SlotNames, kick?: (slot: number) => void): void {
     const box = this.playersBox;
     box.innerHTML = '';
     box.append(el('h4', '', t('lobby.players')));
     const list = el('div', 'lobby-list');
     setup.slots.forEach((s, k) => {
       const seat = load ? load.seats[k] : s.kind === 'remote' ? 'remote' : null;
-      if (k !== 0 && seat !== 'remote') return;
+      if (k !== names.hostSlot && seat !== 'remote') return;
       const m = members.find((x) => x.slot === k);
       const row = el('div', 'lobby-player');
       const dot = el('span', 'slot-color', String(seatOf(setup, k)));
       dot.style.background = colourOf(setup, k);
-      const name = k === 0 ? (host ? t('lobby.hostYou') : t('lobby.host')) : k === self ? t('common.you') : slotKindName('remote');
-      let state = k === 0 ? '' : !m ? t('lobby.empty') : m.ready ? t('lobby.ready') : t('lobby.notReady');
+      const isHost = k === names.hostSlot;
+      const marks = [isHost ? t('net.hostMark') : '', (isHost && host) || (!isHost && k === self) ? t('net.you') : ''].filter((x) => x);
+      const label = isHost || m ? slotLabel(setup, k, names) : slotKindName('remote');
+      const name = marks.length > 0 ? `${label} (${marks.join(', ')})` : label;
+      let state = isHost ? '' : !m ? t('lobby.empty') : m.ready ? t('lobby.ready') : t('lobby.notReady');
       if (load && m && !m.has) state += ` · ${t('lobby.noSave')}`;
+      // A loaded game: whose seat it was (players are seated by this name).
+      const saved = load ? setup.slots[k].name : undefined;
+      if (saved && saved !== (isHost ? names.host : m?.name)) state += ` · ${t('lobby.load.savedAs', { name: saved })}`;
       row.append(dot, el('span', 'lp-name', name), el('span', `lp-state${m?.ready ? ' ready' : ''}`, state));
       row.append(el('span', 'lp-ping', m && m.ping !== null ? t('lobby.ping', { n: Math.round(m.ping) }) : ''));
       if (kick && m) {
@@ -401,7 +418,9 @@ export class LobbyView {
       }
       sel.value = s;
       sel.onchange = () => lobby.setSeat(k, sel.value as LoadSeat);
-      const name = el('span', 'set-name', `${t('common.player', { id: seatOf(lobby.setup, k) })}${taken.has(k) ? ` · ${t('lobby.load.taken')}` : ''}`);
+      const saved = lobby.setup.slots[k].name;
+      const label = `${t('common.player', { id: seatOf(lobby.setup, k) })}${saved ? ` · ${saved}` : ''}${taken.has(k) ? ` · ${t('lobby.load.taken')}` : ''}`;
+      const name = el('span', 'set-name', label);
       row.append(name, sel);
       box.append(row);
     });
@@ -423,7 +442,8 @@ export class LobbyView {
   private refreshHost(lobby: LobbyHost): void {
     if (this.phase.k !== 'host') return;
     const load = lobby.loadView();
-    const key = JSON.stringify([lobby.memberList().map((m) => [m.slot]), load?.id ?? null]);
+    const names = hostNames(lobby);
+    const key = JSON.stringify([lobby.memberList().map((m) => [m.slot, m.name]), lobby.name, load?.id ?? null, load?.host ?? 0]);
     // The form is redrawn when a player came or went (their slots lock); it edits the setup itself.
     // A loaded game's setup is the save's and cannot be changed.
     if (key !== this.formKey) {
@@ -433,16 +453,16 @@ export class LobbyView {
         load
           ? setupForm({ ...lobby.setup, slots: lobby.setup.slots.map((s) => ({ ...s })) }, () => {}, {
               readOnly: true,
-              who: (k) => (k === 0 ? t('lobby.hostYou') : load.seats[k] ? slotKindName('remote') : null),
+              who: (k) => (k === load.host ? youLabel(slotLabel(lobby.setup, k, names)) : load.seats[k] ? (taken.has(k) ? slotLabel(lobby.setup, k, names) : slotKindName('remote')) : null),
             })
           : setupForm(lobby.setup, () => lobby.changed(), {
-              who: (k) => (k === 0 ? t('lobby.hostYou') : taken.has(k) ? slotKindName('remote') : null),
+              who: (k) => (k === 0 ? youLabel(slotLabel(lobby.setup, k, names)) : taken.has(k) ? slotLabel(lobby.setup, k, names) : null),
             }),
       );
     }
     this.showHostLoad(lobby);
-    this.showPlayers(lobby.setup, lobby.memberList(), 0, true, load, (slot) => lobby.kick(slot));
-    this.showChat(lobby.chat, lobby.setup);
+    this.showPlayers(lobby.setup, lobby.memberList(), -1, true, load, names, (slot) => lobby.kick(slot));
+    this.showChat(lobby.chat, lobby.setup, names);
     const problem = lobby.problem();
     this.statusEl.textContent = problem ?? '';
     if (this.actionBtn) this.actionBtn.disabled = problem !== null;
@@ -472,22 +492,31 @@ export class LobbyView {
       if (this.actionBtn) this.actionBtn.disabled = true;
       return;
     }
-    const key = JSON.stringify([setup, lobby.load?.id ?? null]);
+    const names = clientNames(lobby);
+    const key = JSON.stringify([setup, lobby.load?.id ?? null, lobby.members.map((m) => [m.slot, m.name]), lobby.hostName, lobby.slot]);
     if (key !== this.formKey) {
       this.formKey = key;
       const own = lobby.slot;
+      const seated = (k: number) => lobby.members.some((m) => m.slot === k);
       this.formBox.replaceChildren(
         setupForm({ ...setup, slots: setup.slots.map((s) => ({ ...s })) }, () => {}, {
           readOnly: true,
           ownSlot: lobby.load ? undefined : own,
-          who: (k) => (k === 0 ? t('lobby.host') : k === own ? t('common.you') : slotKindName(setup.slots[k].kind)),
+          who: (k) =>
+            k === names.hostSlot
+              ? `${slotLabel(setup, k, names)} (${t('net.hostMark')})`
+              : k === own
+                ? youLabel(slotLabel(setup, k, names))
+                : seated(k)
+                  ? slotLabel(setup, k, names)
+                  : slotKindName(setup.slots[k].kind),
           onTeam: (team) => lobby.setTeam(team),
         }),
       );
     }
     this.showClientLoad(lobby);
-    this.showPlayers(setup, lobby.members, lobby.slot, false, lobby.load);
-    this.showChat(lobby.chat, setup);
+    this.showPlayers(setup, lobby.members, lobby.slot, false, lobby.load, names);
+    this.showChat(lobby.chat, setup, names);
     const rtt = lobby.rtt();
     const parts = [lobby.ready ? t('lobby.waitHost') : '', rtt !== null ? t('lobby.ping', { n: Math.round(rtt) }) : ''];
     this.statusEl.textContent = parts.filter((p) => p).join(' · ');
@@ -527,7 +556,8 @@ export class LobbyView {
     } else {
       const list = el('div', 'lobby-list');
       for (const seat of g.vacant) {
-        const b = el('button', 'menu-small active', t('lobby.rejoin.take', { id: seat }));
+        const name = g.names.get(seat);
+        const b = el('button', 'menu-small active', `${t('lobby.rejoin.take', { id: seat })}${name ? ` · ${name}` : ''}`);
         b.style.borderLeft = `6px solid ${PLAYER_COLORS[(seat - 1) % PLAYER_COLORS.length]}`;
         b.onclick = this.click(() => lobby.rejoin(seat));
         list.append(b);
@@ -580,9 +610,25 @@ function colourOf(setup: GameSetup | null, slot: number): string {
   return n > 0 ? PLAYER_COLORS[(n - 1) % PLAYER_COLORS.length] : '#888';
 }
 
-function seatName(setup: GameSetup | null, slot: number): string {
-  return slot === 0 ? t('lobby.host') : t('common.player', { id: seatOf(setup, slot) });
+/** Who sits where in the lobby, for names: the host's slot and name, every seated player's name. */
+interface SlotNames {
+  hostSlot: number;
+  host: string;
+  members: readonly LobbyMember[];
 }
+
+const hostNames = (lobby: LobbyHost): SlotNames => ({ hostSlot: lobby.hostSlot(), host: lobby.name, members: lobby.memberList() });
+const clientNames = (lobby: LobbyClient): SlotNames => ({ hostSlot: lobby.load?.host ?? 0, host: lobby.hostName, members: lobby.members });
+
+/** A slot's player in the lobby: his name, else «Хост» or «Игрок N». */
+function slotLabel(setup: GameSetup | null, slot: number, names: SlotNames): string {
+  const name = slot === names.hostSlot ? names.host : names.members.find((m) => m.slot === slot)?.name;
+  if (name) return name;
+  return slot === names.hostSlot ? t('lobby.host') : t('common.player', { id: seatOf(setup, slot) });
+}
+
+/** A label with «(вы)». */
+const youLabel = (label: string): string => t('name.you', { name: label });
 
 const NET_SETUP_KEY = 'settlers.netSetup';
 
