@@ -12,7 +12,7 @@ import {
   type Application,
 } from 'pixi.js';
 import { BUILD_TICKS_PER_UNIT, BUILDINGS, CROP_KINDS, DEPOSIT_STONE, SHOT_TICKS, TERRAIN, TREE_MATURE } from '../sim/config';
-import { RESOURCES, Terrain, type Building, type BuildingType, type Resource, type Settler } from '../sim/types';
+import { RESOURCES, Terrain, type Building, type BuildingType, type PlayerId, type Resource, type Settler } from '../sim/types';
 import { CHUNK } from '../sim/map';
 import { LOCAL_PLAYER, type World } from '../sim/world';
 import type { SettlerTextures, SpriteAtlas } from './atlas';
@@ -376,12 +376,14 @@ export class GameRenderer {
     private readonly atlas: SpriteAtlas,
     /** Draw the fog of war (`?fog=off` disables it for debugging). */
     private readonly fogOn = true,
+    /** The player this browser plays (`LOCAL_PLAYER` in a game on one machine; a network seat otherwise). */
+    private readonly me: PlayerId = LOCAL_PLAYER,
   ) {
     this.workArea = new WorkAreaLayer(sim, (x, y) => this.diamond(x, y), (vx, vy) => this.corner(vx, vy), (x, y) => this.surface(x, y));
-    this.tradeRoutes = new TradeRouteLayer(sim, (x, y) => this.surface(x, y), (p) => this.playerTint[(p - 1) % this.playerTint.length]);
+    this.tradeRoutes = new TradeRouteLayer(sim, me, (x, y) => this.surface(x, y), (p) => this.playerTint[(p - 1) % this.playerTint.length]);
     this.world.addChild(this.ground, this.territory, this.marks, this.workArea.g, this.tradeRoutes.g, this.hints, this.objects, this.settlerMark, this.badges, this.shots, this.fog, this.ghostLayer);
     this.settlerTex = atlas.settlerTextures();
-    this.animals = new AnimalLayer(sim, this.objects, (n) => atlas.get(n), fogOn, this.wareTex);
+    this.animals = new AnimalLayer(sim, this.objects, (n) => atlas.get(n), fogOn, this.wareTex, me);
     this.settler3d = atlas.art3d?.settlers ?? null;
     for (const r of RESOURCES) this.wareTex[r] = atlas.get(`ware:${r}`);
     this.effects = new Effects(atlas, sim, (x, y) => this.surface(x, y), this.sound);
@@ -1082,7 +1084,7 @@ export class GameRenderer {
     const y1 = Math.min(map.h - 1, Math.ceil(Math.max(...corners.map((c) => c.y))) + 2);
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {
-        if (map.owner[map.idx(x, y)] !== LOCAL_PLAYER || !this.sim.canPlace(type, x, y)) continue;
+        if (map.owner[map.idx(x, y)] !== this.me || !this.sim.canPlace(type, x, y, this.me)) continue;
         const cx = x + (def.w - 1) / 2;
         const cy = y + (def.h - 1) / 2;
         const p = this.surface(cx, cy);
@@ -1096,7 +1098,7 @@ export class GameRenderer {
 
   /** Whether the local player has seen the tile (always true with the fog off). */
   private explored(x: number, y: number): boolean {
-    return !this.fogOn || this.sim.isExplored(Math.round(x), Math.round(y), LOCAL_PLAYER);
+    return !this.fogOn || this.sim.isExplored(Math.round(x), Math.round(y), this.me);
   }
 
   private syncFog(timeMs: number): void {
@@ -1136,7 +1138,7 @@ export class GameRenderer {
   }
 
   private fogState(x: number, y: number): number {
-    return !this.sim.isExplored(x, y, LOCAL_PLAYER) ? 0 : this.sim.isVisible(x, y, LOCAL_PLAYER) ? 2 : 1;
+    return !this.sim.isExplored(x, y, this.me) ? 0 : this.sim.isVisible(x, y, this.me) ? 2 : 1;
   }
 
   private drawFogChunk(c: number, x0: number, y0: number, x1: number, y1: number, states: Uint8Array): void {
@@ -1428,12 +1430,12 @@ export class GameRenderer {
     let dim = false;
     for (let y = y0; y < y1; y++) {
       for (let x = x0; x < x1; ) {
-        if (ownerAt(x, y) === LOCAL_PLAYER) {
+        if (ownerAt(x, y) === this.me) {
           x++;
           continue;
         }
         const a = x;
-        while (x < x1 && ownerAt(x, y) !== LOCAL_PLAYER) x++;
+        while (x < x1 && ownerAt(x, y) !== this.me) x++;
         const pts: number[] = [];
         for (let vx = a; vx <= x; vx++) {
           const p = this.corner(vx, y);
@@ -1582,7 +1584,7 @@ export class GameRenderer {
    */
   private syncSign(i: number): void {
     const { map } = this.sim;
-    const ends = map.signBy[i] === LOCAL_PLAYER && map.building[i] === 0 ? signEnds(map, i) : 0;
+    const ends = map.signBy[i] === this.me && map.building[i] === 0 ? signEnds(map, i) : 0;
     const left = ends - this.sim.tick;
     const level = left > 0 ? signLevel(map.oreAmount[i]) : 0;
     const code = level > 0 ? map.ore[i] : 0;
@@ -1776,7 +1778,7 @@ export class GameRenderer {
         v.main.visible = false;
       }
       // Carriers cannot reach it from any warehouse: only donkeys can supply it.
-      const cut = b.owner === LOCAL_PLAYER && isCutOff(this.sim, b);
+      const cut = b.owner === this.me && isCutOff(this.sim, b);
       if (cut && !v.cutoff) {
         v.cutoff = new Sprite(this.atlas.get('cutoff'));
         v.cutoff.anchor.copyFrom(v.cutoff.texture.defaultAnchor!);
@@ -1784,7 +1786,7 @@ export class GameRenderer {
       }
       if (v.cutoff) v.cutoff.visible = cut;
       // Stopped by the player (Settlers 4's switch): a pause badge left of the cut-off one.
-      const stopped = b.owner === LOCAL_PLAYER && !!b.stopped;
+      const stopped = b.owner === this.me && !!b.stopped;
       if (stopped && !v.stopped) {
         v.stopped = new Sprite(this.atlas.get('stopped'));
         v.stopped.anchor.copyFrom(v.stopped.texture.defaultAnchor!);
@@ -2017,7 +2019,7 @@ export class GameRenderer {
       const view = this.view;
       // Other players' settlers show only where the local player has sight.
       const seen =
-        !this.fogOn || s.owner === LOCAL_PLAYER || this.sim.isVisible(Math.round(x), Math.round(y), LOCAL_PLAYER);
+        !this.fogOn || s.owner === this.me || this.sim.isVisible(Math.round(x), Math.round(y), this.me);
       const onScreen =
         seen &&
         s.inside === null &&

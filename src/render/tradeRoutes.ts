@@ -1,8 +1,8 @@
 import { Graphics } from 'pixi.js';
 import { BUILDINGS } from '../sim/config';
 import { routeTarget } from '../sim/trade';
-import type { Building, Point } from '../sim/types';
-import { LOCAL_PLAYER, type World } from '../sim/world';
+import type { Building, PlayerId, Point } from '../sim/types';
+import type { World } from '../sim/world';
 
 /** Tiles per dash and per gap, and between direction marks, along a caravan line. */
 const DASH = 0.7;
@@ -25,6 +25,8 @@ export class TradeRouteLayer {
 
   constructor(
     private readonly sim: World,
+    /** Whose routes are drawn: the player this browser plays. */
+    private readonly me: PlayerId,
     private readonly surface: (x: number, y: number) => Point,
     private readonly color: (player: number) => number,
   ) {}
@@ -32,7 +34,7 @@ export class TradeRouteLayer {
   update(selected: number | null): void {
     const routes: [Building, Building][] = [];
     for (const b of this.sim.buildings.values()) {
-      if (b.owner !== LOCAL_PLAYER || !BUILDINGS[b.type].market || !b.done) continue;
+      if (b.owner !== this.me || !BUILDINGS[b.type].market || !b.done) continue;
       const to = routeTarget(this.sim, b);
       if (to) routes.push([b, to]);
     }
@@ -41,7 +43,7 @@ export class TradeRouteLayer {
     this.key = key;
     const g = this.g;
     g.clear();
-    const color = this.color(LOCAL_PLAYER);
+    const color = this.color(this.me);
     for (const [from, to] of routes) {
       const bright = from.id === selected || to.id === selected;
       this.drawRoute(from.door, to.door, color, bright ? 1 : 0.4, bright ? 3 : 1.5);

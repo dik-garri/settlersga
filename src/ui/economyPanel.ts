@@ -12,8 +12,8 @@ import {
   workersOf,
   type TransportMove,
 } from '../sim/economy';
-import type { Building, Resource } from '../sim/types';
-import { LOCAL_PLAYER, type World } from '../sim/world';
+import type { Building, PlayerId, Resource } from '../sim/types';
+import type { World } from '../sim/world';
 import { storageFill } from '../sim/storage';
 import { button, el, type View } from './dom';
 import { goodsLists } from './goodsLists';
@@ -34,12 +34,16 @@ export class WorkersView implements View {
   readonly el = el('div', 'view workers-view');
   private key = '';
 
-  constructor(private readonly world: World) {}
+  constructor(
+    private readonly world: World,
+    /** The player this browser plays. */
+    private readonly me: PlayerId,
+  ) {}
 
   update(): void {
     const w = this.world;
-    const workers = ORDERABLE.map((k) => [workersOf(w, LOCAL_PLAYER, k), workerOrder(w, LOCAL_PLAYER, k)]);
-    const reserve = carrierReserve(w, LOCAL_PLAYER);
+    const workers = ORDERABLE.map((k) => [workersOf(w, this.me, k), workerOrder(w, this.me, k)]);
+    const reserve = carrierReserve(w, this.me);
     const key = JSON.stringify([workers, reserve]);
     if (key === this.key) return;
     this.key = key;
@@ -49,7 +53,7 @@ export class WorkersView implements View {
     this.el.append(el('p', 'muted', t('eco.reserveNote', { min: CARRIER_RESERVE.min })));
     const keep = tag(el('div', 'eco-row carrier-reserve'), 'settlers.reserve');
     const setReserve = (n: number) => {
-      w.issue({ kind: 'setCarrierReserve', player: LOCAL_PLAYER, count: n });
+      w.issue({ kind: 'setCarrierReserve', player: this.me, count: n });
       this.update();
     };
     keep.append(
@@ -69,7 +73,7 @@ export class WorkersView implements View {
       const row = el('div', 'eco-row');
       row.append(settlerIcon(kind, 28), el('span', 'eco-name', profName(kind)), el('b', '', `${have} / ${ordered}`));
       const set = (n: number) => {
-        w.issue({ kind: 'orderWorkers', player: LOCAL_PLAYER, prof: kind, count: Math.max(0, n) });
+        w.issue({ kind: 'orderWorkers', player: this.me, prof: kind, count: Math.max(0, n) });
         this.update();
       };
       row.append(
@@ -78,7 +82,7 @@ export class WorkersView implements View {
         tag(button('+1', t('eco.orderOne'), () => set(ordered + 1)), `settlers.order.${kind}`, ordered > have),
         button('+5', t('eco.orderFive'), () => set(ordered + 5)),
         button('↩', t('eco.dismissOne'), () => {
-          w.issue({ kind: 'dismissSpecialist', player: LOCAL_PLAYER, prof: kind });
+          w.issue({ kind: 'dismissSpecialist', player: this.me, prof: kind });
           this.update();
         }),
       );
@@ -95,11 +99,15 @@ export class TransportView implements View {
   readonly el = el('div', 'view transport-view');
   private key = '';
 
-  constructor(private readonly world: World) {}
+  constructor(
+    private readonly world: World,
+    /** The player this browser plays. */
+    private readonly me: PlayerId,
+  ) {}
 
   update(): void {
     const w = this.world;
-    const order = transportOrder(w, LOCAL_PLAYER);
+    const order = transportOrder(w, this.me);
     const key = order.join();
     if (key === this.key) return;
     this.key = key;
@@ -108,7 +116,7 @@ export class TransportView implements View {
     this.el.append(el('p', 'muted', t('eco.transportNote')));
     const list = el('div', 'transport-list');
     const move = (res: Resource, how: TransportMove) => {
-      w.issue({ kind: 'moveTransport', player: LOCAL_PLAYER, res, how });
+      w.issue({ kind: 'moveTransport', player: this.me, res, how });
       this.update();
     };
     order.forEach((res, i) => {
@@ -133,11 +141,15 @@ export class DistributionView implements View {
   readonly el = el('div', 'view distribution-view');
   private key = '';
 
-  constructor(private readonly world: World) {}
+  constructor(
+    private readonly world: World,
+    /** The player this browser plays. */
+    private readonly me: PlayerId,
+  ) {}
 
   update(): void {
     const w = this.world;
-    const key = JSON.stringify(economyOf(w, LOCAL_PLAYER).distribution);
+    const key = JSON.stringify(economyOf(w, this.me).distribution);
     if (key === this.key) return;
     this.key = key;
     this.el.innerHTML = '';
@@ -149,9 +161,9 @@ export class DistributionView implements View {
       head.append(wareIcon(res, 18), el('span', 'eco-name', nameOf(res)));
       block.append(head);
       const types = consumersOf(res);
-      const total = types.reduce((n, t) => n + distributionWeight(w, LOCAL_PLAYER, res, t), 0) || 1;
+      const total = types.reduce((n, t) => n + distributionWeight(w, this.me, res, t), 0) || 1;
       for (const type of types) {
-        const weight = distributionWeight(w, LOCAL_PLAYER, res, type);
+        const weight = distributionWeight(w, this.me, res, type);
         const row = el('label', 'eco-row eco-share');
         const slider = el('input');
         slider.type = 'range';
@@ -159,7 +171,7 @@ export class DistributionView implements View {
         slider.max = '100';
         slider.step = '10';
         slider.value = String(weight);
-        slider.oninput = () => w.issue({ kind: 'setDistribution', player: LOCAL_PLAYER, res, type, weight: Number(slider.value) });
+        slider.oninput = () => w.issue({ kind: 'setDistribution', player: this.me, res, type, weight: Number(slider.value) });
         slider.onchange = () => this.update();
         row.append(buildingIcon(type, 22), el('span', 'eco-name', buildingName(type)), slider, el('b', '', `${Math.round((100 * weight) / total)}%`));
         block.append(row);
@@ -225,9 +237,9 @@ export function economyKey(world: World, b: Building): string {
 }
 
 /** The toolsmith's order queue: per tool, +1 / +5 / endless / clear. */
-export function toolOrderControls(world: World, b: Building): HTMLElement | null {
+export function toolOrderControls(world: World, b: Building, me: PlayerId): HTMLElement | null {
   const recipe = BUILDINGS[b.type].recipe;
-  if (!recipe?.orderable || b.owner !== LOCAL_PLAYER) return null;
+  if (!recipe?.orderable || b.owner !== me) return null;
   const orders = economyOf(world, b.owner).toolOrders;
   const box = el('div', 'eco-orders');
   box.append(el('h4', '', t('eco.orders')), el('p', 'muted', t('eco.ordersNote')));
@@ -236,10 +248,10 @@ export function toolOrderControls(world: World, b: Building): HTMLElement | null
     const row = tag(el('div', 'eco-row'), `info.toolOrder.${res}`);
     row.append(wareIcon(res, 18), el('span', 'eco-name', nameOf(res)), el('b', '', n === undefined ? '—' : n === ENDLESS ? '∞' : String(n)));
     row.append(
-      button('+1', t('eco.toolOne'), () => world.issue({ kind: 'orderTool', player: LOCAL_PLAYER, res, count: 1 })),
-      button('+5', t('eco.toolFive'), () => world.issue({ kind: 'orderTool', player: LOCAL_PLAYER, res, count: 5 })),
-      button('∞', t('eco.toolEndless'), () => world.issue({ kind: 'orderTool', player: LOCAL_PLAYER, res, count: ENDLESS })),
-      button('✕', t('eco.cancelOrder'), () => world.issue({ kind: 'orderTool', player: LOCAL_PLAYER, res, count: 0 })),
+      button('+1', t('eco.toolOne'), () => world.issue({ kind: 'orderTool', player: me, res, count: 1 })),
+      button('+5', t('eco.toolFive'), () => world.issue({ kind: 'orderTool', player: me, res, count: 5 })),
+      button('∞', t('eco.toolEndless'), () => world.issue({ kind: 'orderTool', player: me, res, count: ENDLESS })),
+      button('✕', t('eco.cancelOrder'), () => world.issue({ kind: 'orderTool', player: me, res, count: 0 })),
     );
     box.append(row);
   }
@@ -247,8 +259,8 @@ export function toolOrderControls(world: World, b: Building): HTMLElement | null
 }
 
 /** A warehouse's accepted goods, as in Settlers 4: two lists, a click moves a good across. */
-export function warehouseControls(world: World, b: Building): HTMLElement | null {
-  if (!BUILDINGS[b.type].storage || b.owner !== LOCAL_PLAYER || !b.done) return null;
+export function warehouseControls(world: World, b: Building, me: PlayerId): HTMLElement | null {
+  if (!BUILDINGS[b.type].storage || b.owner !== me || !b.done) return null;
   // Counts (`data-res`) are refreshed in place by `refreshStockCounts`.
   const box = el('div', 'eco-orders');
   box.append(
@@ -256,7 +268,7 @@ export function warehouseControls(world: World, b: Building): HTMLElement | null
       inTitle: t('eco.accepts'),
       outTitle: t('eco.refuses'),
       isIn: (res) => !!b.accept?.includes(res),
-      set: (res, on) => world.issue({ kind: 'setAccepts', player: LOCAL_PLAYER, id: b.id, res, on }),
+      set: (res, on) => world.issue({ kind: 'setAccepts', player: me, id: b.id, res, on }),
       tipIn: (name) => t('eco.tipIn', { name }),
       tipOut: (name) => t('eco.tipOut', { name }),
       noneTip: t('eco.noneTip'),

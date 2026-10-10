@@ -1,7 +1,7 @@
 import { settlerIcon } from '../render/atlas';
 import { isReadyWorker } from '../sim/buildings';
 import type { Settler, SettlerKind } from '../sim/types';
-import { LOCAL_PLAYER, type World } from '../sim/world';
+import type { World } from '../sim/world';
 import { nextSettlerOfKind } from './find';
 import { el, type View } from './dom';
 import { WorkersView } from './economyPanel';
@@ -39,7 +39,7 @@ export class SettlersView implements View {
     select: (type: Placeable | null) => void,
     private readonly focus: (s: Settler) => void = () => {},
   ) {
-    this.workers = new WorkersView(world);
+    this.workers = new WorkersView(world, state.localPlayer);
     this.el.append(el('h4', '', t('settlers.settlement')), this.summary, el('h4', '', t('settlers.specialists')));
     const grid = el('div', 'build-grid commands');
     for (const c of COMMANDS) {
@@ -64,7 +64,7 @@ export class SettlersView implements View {
       b.classList.toggle('active', this.state.placing === type);
       b.classList.toggle('locked', !commandOpen(this.state.locks, type as 'geologist'));
       // The tutorial's mark counts as used while one of them is out on an errand.
-      const out = this.world.settlers.some((s) => s.owner === LOCAL_PLAYER && s.kind === type && !!s.errand);
+      const out = this.world.settlers.some((s) => s.owner === this.state.localPlayer && s.kind === type && !!s.errand);
       if (out !== (b.dataset.uiOn === '1')) tag(b, `settlers.cmd.${type as 'geologist'}`, out);
     }
     let people = 0;
@@ -73,7 +73,7 @@ export class SettlersView implements View {
     const kinds = new Map<string, number>();
     const jobless = new Map<string, number>();
     for (const s of this.world.settlers) {
-      if (s.owner !== LOCAL_PLAYER) continue;
+      if (s.owner !== this.state.localPlayer) continue;
       people++;
       if (s.kind === 'carrier') {
         carriers++;
@@ -81,7 +81,7 @@ export class SettlersView implements View {
       } else kinds.set(s.kind, (kinds.get(s.kind) ?? 0) + 1);
       if (isReadyWorker(s) && s.tasks.length === 0) jobless.set(s.kind, (jobless.get(s.kind) ?? 0) + 1);
     }
-    const { beds, striking } = this.world.bedsOf();
+    const { beds, striking } = this.world.bedsOf(this.state.localPlayer);
     const key = `${people}|${carriers}|${busy}|${[...kinds].join()}|${beds}|${striking}|${[...jobless].join()}`;
     if (key !== this.summaryKey) {
       this.summaryKey = key;
@@ -114,7 +114,7 @@ export class SettlersView implements View {
         row.classList.add('find');
         row.title = t('settlers.findTip');
         row.onclick = () => {
-          const next = nextSettlerOfKind(this.world, kind, this.lastFound);
+          const next = nextSettlerOfKind(this.world, this.state.localPlayer, kind, this.lastFound);
           if (!next) return;
           this.lastFound = next.id;
           this.focus(next);

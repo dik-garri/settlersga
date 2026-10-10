@@ -1,4 +1,5 @@
-import type { BuildingType } from '../sim/types';
+import type { BuildingType, PlayerId } from '../sim/types';
+import { LOCAL_PLAYER } from '../sim/world';
 import type { Locks } from './locks';
 
 /** What the cursor is about to place: a building, or a command aimed at a tile. */
@@ -10,6 +11,12 @@ export const isCommand = (p: Placeable | null): p is Exclude<Placeable, Building
 
 /** UI state shared between input handling, HUD and the game loop. */
 export interface GameState {
+  /**
+   * The player this browser plays: every view, window, the fog, the minimap, messages and the
+   * orders the interface gives are this player's. `LOCAL_PLAYER` (1) in a game on one machine; in a
+   * network game the seat the lobby gave this browser.
+   */
+  readonly localPlayer: PlayerId;
   speed: number;
   paused: boolean;
   placing: Placeable | null;
@@ -36,9 +43,37 @@ export interface GameState {
    * game). The interface only: the simulation forbids nothing.
    */
   locks: Locks | null;
+  /**
+   * A network game (`net/match.ts`): pause and speed are orders for every machine, played at a common
+   * turn, so the interface asks for them here instead of setting `paused`/`speed` (which then mirror
+   * the match). `speed` is null on a machine that is not the host. Null in a game on one machine.
+   */
+  net: { pause(on: boolean): void; speed: ((s: number) => void) | null } | null;
 }
 
-export const createState = (): GameState => ({
+/** Pause or resume: at once on one machine, for everybody at a common turn in a network game. */
+export function setPaused(state: GameState, on: boolean): void {
+  if (state.net) state.net.pause(on);
+  else state.paused = on;
+}
+
+/** Whether this machine may change the game speed (in a network game only the host may). */
+export const canChangeSpeed = (state: GameState): boolean => !state.net || state.net.speed !== null;
+
+/** Another game speed (and no pause): on one machine at once; in a network game the host's order. */
+export function chooseSpeed(state: GameState, s: number): void {
+  if (!state.net) {
+    state.speed = s;
+    state.paused = false;
+    return;
+  }
+  if (!state.net.speed) return;
+  state.net.speed(s);
+  if (state.paused) state.net.pause(false);
+}
+
+export const createState = (localPlayer: PlayerId = LOCAL_PLAYER): GameState => ({
+  localPlayer,
   speed: 1,
   paused: false,
   placing: null,
@@ -51,4 +86,5 @@ export const createState = (): GameState => ({
   fog: true,
   menu: false,
   locks: null,
+  net: null,
 });

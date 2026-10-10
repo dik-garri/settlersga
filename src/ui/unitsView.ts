@@ -1,7 +1,7 @@
 import { isFighter, maxHp } from '../sim/military';
 import { isSpecialist } from '../sim/specialists';
 import type { Settler } from '../sim/types';
-import { LOCAL_PLAYER, type World } from '../sim/world';
+import type { World } from '../sim/world';
 import { button, el, rowsTable, type View } from './dom';
 import { t } from './i18n';
 import { profName } from './names';
@@ -26,7 +26,7 @@ export class UnitsView implements View {
   units(): Settler[] {
     const alive = this.state.selectedUnits
       .map((id) => this.world.getSettler(id))
-      .filter((s): s is Settler => !!s && !this.world.dying.has(s.id) && s.owner === LOCAL_PLAYER);
+      .filter((s): s is Settler => !!s && !this.world.dying.has(s.id) && s.owner === this.state.localPlayer);
     if (alive.length !== this.state.selectedUnits.length) this.state.selectedUnits = alive.map((s) => s.id);
     return alive;
   }
@@ -92,20 +92,20 @@ export class UnitsView implements View {
     const actions = el('div', 'info-actions');
     actions.append(
       button(t('units.hold'), t('units.holdTip'), () =>
-        this.toast(t('units.holding', { n: this.world.issue({ kind: 'orderHold', player: LOCAL_PLAYER, ids: fighterIds() }) + this.world.issue({ kind: 'holdSpecialists', player: LOCAL_PLAYER, ids: specialistIds() }) })),
+        this.toast(t('units.holding', { n: this.world.issue({ kind: 'orderHold', player: this.state.localPlayer, ids: fighterIds() }) + this.world.issue({ kind: 'holdSpecialists', player: this.state.localPlayer, ids: specialistIds() }) })),
       ),
     );
     if (fighters.length > 0) {
       actions.append(
         button(t('units.garrison'), t('units.garrisonTip'), () =>
-          this.toast(t('units.returning', { n: this.world.issue({ kind: 'orderGarrison', player: LOCAL_PLAYER, ids: fighterIds(), target: null }) })),
+          this.toast(t('units.returning', { n: this.world.issue({ kind: 'orderGarrison', player: this.state.localPlayer, ids: fighterIds(), target: null }) })),
         ),
       );
     }
     if (specialists.length > 0) {
       actions.append(
         button(t('units.dismiss'), t('units.dismissTip'), () => {
-          const n = this.world.issue({ kind: 'dismissUnits', player: LOCAL_PLAYER, ids: specialistIds() });
+          const n = this.world.issue({ kind: 'dismissUnits', player: this.state.localPlayer, ids: specialistIds() });
           this.toast(n > 0 ? t('units.dismissed', { n }) : t('units.dismissOwnLand'));
         }),
       );

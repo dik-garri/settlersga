@@ -93,7 +93,8 @@ describe('commands: validation', () => {
     expect(COMMAND_KINDS.length).toBeGreaterThanOrEqual(33);
     for (const k of COMMAND_KINDS) {
       expect(typeof SPECS[k].run).toBe('function');
-      expect(Object.keys(SPECS[k].fields).length).toBeGreaterThan(0);
+      // The takeover names nobody but its player.
+      if (k !== 'aiTakeover') expect(Object.keys(SPECS[k].fields).length).toBeGreaterThan(0);
     }
     const w = new World(3);
     const at = spotFor(w, 'woodcutter', 4, 0);
@@ -205,7 +206,8 @@ describe('commands: replay', () => {
     const w = new World(8, { players: 2, ai: [2] });
     run(w, 200);
     const at = spotFor(w, 'woodcutter', 5, -1);
-    const wc = w.issue({ kind: 'placeBuilding', player: 1, type: 'woodcutter', x: at.x, y: at.y })!;
+    expect(w.issue({ kind: 'placeBuilding', player: 1, type: 'woodcutter', x: at.x, y: at.y })).toBe(true);
+    const wc = w.buildingAt(at.x, at.y)!;
     w.issue({ kind: 'setPriority', player: 1, id: wc.id, on: true });
     run(w, 400);
     const st = spotFor(w, 'stonecutter', -5, 3);

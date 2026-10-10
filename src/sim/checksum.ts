@@ -100,6 +100,48 @@ export function hashValue(v: unknown): string {
   return (h.h >>> 0).toString(16).padStart(8, '0');
 }
 
+/** The sections `sectionChecksums` splits the state into, in this order. */
+export const CHECKSUM_SECTIONS = ['rng', 'map', 'settlers', 'buildings', 'players', 'rest'] as const;
+export type ChecksumSection = (typeof CHECKSUM_SECTIONS)[number];
+
+/**
+ * The state's checksum split into sections (network play, docs/NETWORK.md section 5): when two
+ * machines disagree, the section that differs says where to look — the random streams, the map
+ * layers, the settlers, the buildings, the players (economy, AI not included) or the rest (stats,
+ * animals, reservations, queued commands). Covers the same state as `stateChecksum`, at about the
+ * same cost; the sums differ from it.
+ */
+export function sectionChecksums(w: World): Record<ChecksumSection, string> {
+  const hex = (h: StateHash) => (h.h >>> 0).toString(16).padStart(8, '0');
+  const of = (fill: (h: StateHash) => void): string => {
+    const h = new StateHash();
+    fill(h);
+    return hex(h);
+  };
+  return {
+    rng: of((h) => h.value({ tick: w.tick, rng: w.rng.state, animalRng: w.animalRng.state, idleRng: w.idleRng.state, nextId: w.nextId })),
+    map: of((h) => {
+      h.word(w.map.w);
+      h.word(w.map.h);
+      for (const layer of SAVED_LAYERS) h.layer(w.map[layer]);
+    }),
+    settlers: of((h) => h.value(w.settlers)),
+    buildings: of((h) => h.value([...w.buildings.values()])),
+    players: of((h) => h.value({ players: w.players, defeated: w.defeated, territoryVersion: w.territoryVersion })),
+    rest: of((h) =>
+      h.value({
+        stats: w.stats,
+        reservedTargets: [...w.reservedTargets].sort((a, b) => a - b),
+        reservedPlots: [...w.reservedPlots].sort((a, b) => a - b),
+        animals: w.animals,
+        nextAnimalId: w.nextAnimalId,
+        commands: w.pendingCommands,
+        commandSeq: w.nextCommandSeq,
+      }),
+    ),
+  };
+}
+
 /** The simulation state's checksum, eight hex digits: equal worlds give equal sums on every machine. */
 export function stateChecksum(w: World): string {
   const h = new StateHash();

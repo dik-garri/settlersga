@@ -4,7 +4,7 @@ import { isReadyWorker } from '../sim/buildings';
 import { isFighter, maxHp } from '../sim/military';
 import { packsOf } from '../sim/trade';
 import type { Building, Settler, SettlerKind, Task } from '../sim/types';
-import { LOCAL_PLAYER, type World } from '../sim/world';
+import type { World } from '../sim/world';
 import { button, el, rowsTable, type View } from './dom';
 import { lower, t } from './i18n';
 import { glyph } from './icons';
@@ -55,7 +55,7 @@ export class SettlerInfoView implements View {
     const pic = el('div', 'info-pic');
     pic.append(settlerIcon(s.kind, 64));
     const title = el('div', 'info-title');
-    const mine = s.owner === LOCAL_PLAYER;
+    const mine = s.owner === this.state.localPlayer;
     title.append(el('h3', '', profName(s.kind)), el('span', 'muted', mine ? t('settler.yours') : t('settler.foreign')));
     const close = el('button', 'gem small', '');
     close.title = t('common.close');
@@ -70,8 +70,8 @@ export class SettlerInfoView implements View {
 
   private rows(s: Settler): [string, string][] {
     const rows: [string, string][] = [];
-    const ally = s.owner !== LOCAL_PLAYER && this.world.allied(s.owner, LOCAL_PLAYER);
-    rows.push([t('info.owner'), s.owner === LOCAL_PLAYER ? t('settler.ownerYou') : t(ally ? 'info.ownerAlly' : 'info.ownerPlayer', { id: s.owner })]);
+    const ally = s.owner !== this.state.localPlayer && this.world.allied(s.owner, this.state.localPlayer);
+    rows.push([t('info.owner'), s.owner === this.state.localPlayer ? t('settler.ownerYou') : t(ally ? 'info.ownerAlly' : 'info.ownerPlayer', { id: s.owner })]);
     rows.push([t('settler.doing'), this.doing(s)]);
     if (s.carrying) {
       // A pack donkey carries up to two packs; a carrier one unit.
@@ -103,7 +103,7 @@ export class SettlerInfoView implements View {
 
   private commands(s: Settler): HTMLElement {
     const box = el('div', 'info-actions');
-    if (s.owner !== LOCAL_PLAYER) return box;
+    if (s.owner !== this.state.localPlayer) return box;
     const place = SENDABLE[s.kind];
     if (place) {
       box.append(button(t('settler.send'), t('settler.sendTip'), () => this.actions.place(place)));
@@ -111,7 +111,7 @@ export class SettlerInfoView implements View {
     if (SENDABLE[s.kind]) {
       box.append(
         button(t('units.dismiss'), t('settler.dismissTip'), () => {
-          const ok = this.world.issue({ kind: 'dismissSpecialist', player: LOCAL_PLAYER, prof: s.kind });
+          const ok = this.world.issue({ kind: 'dismissSpecialist', player: this.state.localPlayer, prof: s.kind });
           this.actions.toast(ok ? t('settler.dismissed') : t('settler.noFreeSpecialist'));
         }),
       );

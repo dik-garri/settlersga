@@ -1,8 +1,8 @@
 import { wareIcon } from '../render/atlas';
 import { BUILDINGS, RESOURCE_GROUPS, RESOURCE_INFO } from '../sim/config';
 import { groundStock } from '../sim/ground';
-import { RESOURCES, type Resource } from '../sim/types';
-import { LOCAL_PLAYER, type World } from '../sim/world';
+import { RESOURCES, type PlayerId, type Resource } from '../sim/types';
+import type { World } from '../sim/world';
 import { button, el, type View } from './dom';
 import { DistributionView, TransportView } from './economyPanel';
 import { t } from './i18n';
@@ -15,10 +15,10 @@ type Page = 'stock' | 'distribution' | 'transport';
  * Total of `res` in the local player's warehouses and lying on the ground of its land (the start
  * goods, ruins: Settlers 4 has no headquarters).
  */
-export function inStorage(world: World, res: Resource): number {
-  let n = groundStock(world, LOCAL_PLAYER, res);
+export function inStorage(world: World, res: Resource, player: PlayerId): number {
+  let n = groundStock(world, player, res);
   for (const b of world.buildings.values()) {
-    if (b.owner === LOCAL_PLAYER && BUILDINGS[b.type].storage) n += b.output[res];
+    if (b.owner === player && BUILDINGS[b.type].storage) n += b.output[res];
   }
   return n;
 }
@@ -37,9 +37,13 @@ export class GoodsView implements View {
   private page: Page = 'stock';
   private readonly pageButtons: Record<Page, HTMLButtonElement>;
 
-  constructor(private readonly world: World) {
-    this.distribution = new DistributionView(world);
-    this.transport = new TransportView(world);
+  constructor(
+    private readonly world: World,
+    /** The player this browser plays. */
+    private readonly me: PlayerId,
+  ) {
+    this.distribution = new DistributionView(world, me);
+    this.transport = new TransportView(world, me);
     for (const group of RESOURCE_GROUPS) {
       this.stock.append(el('h4', '', groupName(group)));
       const grid = el('div', 'stock-grid');
@@ -84,7 +88,7 @@ export class GoodsView implements View {
       return;
     }
     for (const [r, value] of this.values) {
-      const text = String(inStorage(this.world, r));
+      const text = String(inStorage(this.world, r, this.me));
       if (value.textContent !== text) value.textContent = text;
     }
   }

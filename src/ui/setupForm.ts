@@ -17,13 +17,26 @@ import {
   type SlotKind,
 } from './setup';
 
+/** How the network lobby (`lobbyView.ts`) uses the form. */
+export interface SetupFormOptions {
+  /** A joined player only looks: every control is off but its own slot's team. */
+  readOnly?: boolean;
+  /** This browser's slot in the lobby: its team can be changed even read-only. */
+  ownSlot?: number;
+  /** Instead of the «who plays» choice, a plain label for this slot (a player sits there; the host). */
+  who?: (slot: number) => string | null;
+  /** The own slot's team was changed (a joined player asks the host). */
+  onTeam?: (team: number) => void;
+}
+
 /**
  * The game setup screen's form (`GameSetup`), the same for a single game and the network lobby:
  * map size, seed, start goods and fog on the left, one row per player slot (colour, who plays it,
  * race, team, the computer's difficulty) on the right. Edits `setup` in place and calls `changed`
  * with the reason it cannot start (or null).
  */
-export function setupForm(setup: GameSetup, changed: (problem: string | null) => void): HTMLElement {
+export function setupForm(setup: GameSetup, changed: (problem: string | null) => void, opts: SetupFormOptions = {}): HTMLElement {
+  const ro = !!opts.readOnly;
   const box = el('div', 'setup');
   const select = <T extends string | number>(
     options: [T, string][],
@@ -40,7 +53,7 @@ export function setupForm(setup: GameSetup, changed: (problem: string | null) =>
       s.append(o);
     }
     s.value = String(value);
-    s.disabled = disabled;
+    s.disabled = disabled || ro;
     s.onchange = () => {
       const v = options.find(([o]) => String(o) === s.value)![0];
       set(v);
@@ -68,12 +81,14 @@ export function setupForm(setup: GameSetup, changed: (problem: string | null) =>
     seed.min = '0';
     seed.placeholder = t('setup.seedRandom');
     seed.value = setup.seed === null ? '' : String(setup.seed);
+    seed.disabled = ro;
     seed.oninput = () => {
       const v = Number(seed.value);
       setup.seed = seed.value.trim() === '' || !Number.isInteger(v) || v < 0 ? null : v;
     };
     const dice = el('button', 'menu-small', t('setup.dice'));
     dice.type = 'button';
+    dice.disabled = ro;
     dice.title = t('setup.diceTip');
     dice.onclick = () => {
       setup.seed = Math.floor(Math.random() * 1e9);
@@ -94,6 +109,7 @@ export function setupForm(setup: GameSetup, changed: (problem: string | null) =>
     const fog = el('input');
     fog.type = 'checkbox';
     fog.checked = setup.fog;
+    fog.disabled = ro;
     fog.onchange = () => (setup.fog = fog.checked);
     field(map, t('setup.fog'), fog);
     map.append(el('p', 'muted', t('setup.seedNote')));
@@ -114,14 +130,28 @@ export function setupForm(setup: GameSetup, changed: (problem: string | null) =>
       const kinds: SlotKind[] =
         k === 0 ? ['human'] : setup.mode === 'network' ? ['ai', 'remote', 'closed'] : ['ai', 'closed'];
       const off = slot.kind === 'closed';
+      const label = opts.who?.(k) ?? null;
+      const team = select(
+        Array.from({ length: MAX_SLOTS }, (_, t): [number, string] => [t + 1, `${t + 1}`]),
+        slot.team,
+        (v) => {
+          slot.team = v;
+          if (k === opts.ownSlot) opts.onTeam?.(v);
+        },
+        off,
+      );
+      // A joined player may still choose its own team (the host decides the rest).
+      if (ro && k === opts.ownSlot) team.disabled = false;
       table.append(
         swatch,
-        select(
-          kinds.map((v): [SlotKind, string] => [v, k === 0 ? t('common.you') : slotKindName(v)]),
-          slot.kind,
-          (v) => (slot.kind = v),
-          k === 0,
-        ),
+        label !== null
+          ? el('span', 'slot-who', label)
+          : select(
+              kinds.map((v): [SlotKind, string] => [v, k === 0 ? t('common.you') : slotKindName(v)]),
+              slot.kind,
+              (v) => (slot.kind = v),
+              k === 0,
+            ),
         select(
           RACES.map((r): [string, string] => [r.id, r.ready ? raceName(r.id) : t('setup.raceSoon', { name: raceName(r.id) })]),
           slot.race,
@@ -129,12 +159,7 @@ export function setupForm(setup: GameSetup, changed: (problem: string | null) =>
           off,
           (v) => !RACES.find((r) => r.id === v)?.ready,
         ),
-        select(
-          Array.from({ length: MAX_SLOTS }, (_, t): [number, string] => [t + 1, `${t + 1}`]),
-          slot.team,
-          (v) => (slot.team = v),
-          off,
-        ),
+        team,
         slot.kind === 'ai'
           ? select(
               AI_LEVEL_IDS.map((l): [string, string] => [l, levelName(l)]),

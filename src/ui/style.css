@@ -1201,3 +1201,85 @@ button.wide {
 .tut-debrief .info-actions {
   justify-content: center;
 }
+
+/* ------------------------------------------------------------------ network game (netView.ts) */
+
+/* The network status under the speed strip: seats, pings, who the game waits for. */
+.net-panel {
+  position: absolute;
+  top: 54px;
+  right: 10px;
+  min-width: 170px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--light);
+  pointer-events: auto;
+  background: rgba(40, 24, 10, 0.82);
+  box-shadow: 0 0 0 1px var(--bronze-lo), 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.net-panel:empty {
+  display: none;
+}
+
+.np-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.np-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+}
+
+.np-name {
+  flex: 1;
+}
+
+.np-ping {
+  opacity: 0.75;
+}
+
+.np-note {
+  margin-top: 3px;
+  opacity: 0.85;
+}
+
+.np-wait {
+  margin-top: 4px;
+  font-weight: bold;
+  color: var(--gold);
+  animation: np-blink 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes np-blink {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.55;
+  }
+}
+
+.net-panel .np-kick {
+  margin-top: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--bronze-lo);
+  color: var(--light);
+  background: linear-gradient(#b4442f, #6d1f13);
+}
+
+.net-window {
+  z-index: 5;
+}
+
+.strip .speed-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

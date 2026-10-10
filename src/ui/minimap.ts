@@ -2,8 +2,8 @@ import type { Camera } from '../render/camera';
 import { toScreen, toTile } from '../render/iso';
 import { TERRAIN } from '../sim/config';
 import { isFighter } from '../sim/military';
-import { Terrain } from '../sim/types';
-import { LOCAL_PLAYER, type World } from '../sim/world';
+import { Terrain, type PlayerId } from '../sim/types';
+import type { World } from '../sim/world';
 import { PLAYER_COLORS } from '../render/sprites';
 import { LANG_EVENT, t, type Key } from './i18n';
 
@@ -52,6 +52,8 @@ export class Minimap {
     private readonly fogOn = true,
     /** CSS width of the minimap (it is framed at the top of the side panel). */
     width = 220,
+    /** The player this browser plays: its land, fog and units. */
+    private readonly me: PlayerId,
   ) {
     const { w, h } = world.map;
     this.sx = (width - 2 * this.pad) / (w + h);
@@ -125,13 +127,13 @@ export class Minimap {
       // Higher ground is brighter, so mountains read on the overview too.
       let light = 0.85 + Math.min(1, map.heightAt(i % map.w, Math.floor(i / map.w)) / 100) * 0.45;
       const land = this.layers.land;
-      if (land && map.owner[i] !== LOCAL_PLAYER) light *= 0.6;
+      if (land && map.owner[i] !== this.me) light *= 0.6;
       r = Math.min(255, r * light);
       g = Math.min(255, g * light);
       b = Math.min(255, b * light);
       // Another player's land gets a cast of his colour.
       const o = map.owner[i];
-      if (land && o !== LOCAL_PLAYER && o !== 0) {
+      if (land && o !== this.me && o !== 0) {
         const c = parseInt(PLAYER_COLORS[(o - 1) % PLAYER_COLORS.length].slice(1), 16);
         r = Math.min(255, r * 0.6 + ((c >> 16) & 255) * 0.45);
         g = Math.min(255, g * 0.6 + ((c >> 8) & 255) * 0.45);
@@ -140,8 +142,8 @@ export class Minimap {
       if (this.fogOn) {
         const x = i % map.w;
         const y = (i - x) / map.w;
-        if (!this.world.isExplored(x, y, LOCAL_PLAYER)) [r, g, b] = [8, 10, 14];
-        else if (!this.world.isVisible(x, y, LOCAL_PLAYER)) [r, g, b] = [r * 0.55, g * 0.55, b * 0.55];
+        if (!this.world.isExplored(x, y, this.me)) [r, g, b] = [8, 10, 14];
+        else if (!this.world.isVisible(x, y, this.me)) [r, g, b] = [r * 0.55, g * 0.55, b * 0.55];
       }
       d[i * 4] = r;
       d[i * 4 + 1] = g;
@@ -182,9 +184,9 @@ export class Minimap {
 
     if (this.layers.buildings) {
       for (const b of this.world.buildings.values()) {
-        if (this.fogOn && b.owner !== LOCAL_PLAYER && !this.world.isExplored(b.door.x, b.door.y, LOCAL_PLAYER)) continue;
+        if (this.fogOn && b.owner !== this.me && !this.world.isExplored(b.door.x, b.door.y, this.me)) continue;
         const [x, y] = this.point(b.x + (b.w - 1) / 2, b.y + (b.h - 1) / 2);
-        ctx.fillStyle = b.owner === LOCAL_PLAYER ? '#ffe08a' : '#e05a4a';
+        ctx.fillStyle = b.owner === this.me ? '#ffe08a' : '#e05a4a';
         ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
       }
     }
@@ -194,9 +196,9 @@ export class Minimap {
         if (s.inside !== null) continue;
         const fighter = isFighter(s);
         if (fighter ? !this.layers.fighters : !this.layers.settlers) continue;
-        if (this.fogOn && s.owner !== LOCAL_PLAYER && !this.world.isVisible(Math.round(s.x), Math.round(s.y), LOCAL_PLAYER)) continue;
+        if (this.fogOn && s.owner !== this.me && !this.world.isVisible(Math.round(s.x), Math.round(s.y), this.me)) continue;
         const [x, y] = this.point(s.x, s.y);
-        ctx.fillStyle = fighter ? PLAYER_COLORS[(s.owner - 1) % PLAYER_COLORS.length] : s.owner === LOCAL_PLAYER ? '#f4f0e0' : '#c8b8a8';
+        ctx.fillStyle = fighter ? PLAYER_COLORS[(s.owner - 1) % PLAYER_COLORS.length] : s.owner === this.me ? '#f4f0e0' : '#c8b8a8';
         const r = fighter ? 1.2 : 0.8;
         ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
       }

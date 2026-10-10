@@ -11,6 +11,7 @@
  * player's building) the same way on every machine. The mapped types make the table exhaustive: a
  * new kind without its checks or its handler is a compile error.
  */
+import { createAi } from './ai';
 import { addBuilding, doorOf } from './buildings';
 import { BUILDINGS, OUTPUT_SHARES, PROFESSIONS, SITE } from './config';
 import { levelTarget, needsDigger, needsLevelling } from './digging';
@@ -114,6 +115,11 @@ export interface CommandArgs {
   dismissUnits: { ids: number[] };
   /** Scenario/host command (missions): goods laid on the ground by the player's home. */
   grant: { res: Resource; n: number };
+  /**
+   * Network command (Settlers 4's `SetPlayerControl` + `ActivatePlayerAI`): the computer takes over
+   * the player, whose human left the game. Given by every machine at the turn the host announced.
+   */
+  aiTakeover: Record<never, never>;
 }
 
 /** What each kind returns: success, how many obeyed, or the new site. */
@@ -151,6 +157,7 @@ export interface CommandResults {
   holdSpecialists: number;
   dismissUnits: number;
   grant: boolean;
+  aiTakeover: boolean;
 }
 
 export type CommandKind = keyof CommandArgs;
@@ -206,10 +213,21 @@ interface Spec<K extends CommandKind> {
   /** The result of a refused command. */
   refused: CommandResults[K];
   run: (w: World, c: CommandOf<K>) => CommandResults[K];
+  /**
+   * What the interface is told when the order is sent ahead instead of applied (lockstep network
+   * play: it applies a few ticks later on every machine): a quick check that it may well succeed.
+   * Default: success, or for a count the units named (`ids`, `count`).
+   */
+  ahead?: (w: World, c: CommandOf<K>) => IssueResult<K>;
 }
 
 export const SPECS: { [K in CommandKind]: Spec<K> } = {
-  placeBuilding: { fields: { type: isType, x: isInt, y: isInt }, refused: null, run: (w, c) => placeBuilding(w, c.type, c.x, c.y, c.player) },
+  placeBuilding: {
+    fields: { type: isType, x: isInt, y: isInt },
+    refused: null,
+    run: (w, c) => placeBuilding(w, c.type, c.x, c.y, c.player),
+    ahead: (w, c) => !!BUILDINGS[c.type].playerBuildable && w.canPlace(c.type, c.x, c.y, c.player),
+  },
   demolish: { fields: { id: isInt }, refused: false, run: (w, c) => demolish(w, c.id, c.player) },
   setPriority: { fields: { id: isInt, on: isBool }, refused: false, run: (w, c) => setPriority(w, c.id, c.on, c.player) },
   setStopped: { fields: { id: isInt, on: isBool }, refused: false, run: (w, c) => setStopped(w, c.id, c.on, c.player) },
@@ -266,7 +284,35 @@ export const SPECS: { [K in CommandKind]: Spec<K> } = {
   holdSpecialists: { fields: { ids: isIds }, refused: 0, run: (w, c) => holdSpecialists(w, c.ids, c.player) },
   dismissUnits: { fields: { ids: isIds }, refused: 0, run: (w, c) => dismissUnits(w, c.ids, c.player) },
   grant: { fields: { res: isRes, n: isNum }, refused: false, run: (w, c) => grant(w, c.res, c.n, c.player) },
+  aiTakeover: { fields: {}, refused: false, run: (w, c) => aiTakeover(w, c.player) },
 };
+
+/**
+ * Kinds a player's batch from the network may not carry: the scenario's `grant` and the takeover,
+ * which every machine gives itself at the turn the host announces (`net/match.ts`).
+ */
+export const LOCAL_ONLY: ReadonlySet<CommandKind> = new Set<CommandKind>(['grant', 'aiTakeover']);
+
+/**
+ * What `World.issue` returns to the interface: a count for the kinds that count (units that obeyed),
+ * else whether it worked (`placeBuilding`'s new site is not handed out: sent ahead over the network
+ * it does not exist yet).
+ */
+export type IssueResult<K extends CommandKind> = CommandResults[K] extends number ? number : boolean;
+
+/** An applied command's result as `issue` gives it. */
+export function issueResult<K extends CommandKind>(r: CommandResults[K]): IssueResult<K> {
+  return (typeof r === 'number' ? r : r !== null && r !== false) as IssueResult<K>;
+}
+
+/** What `issue` tells the interface of a valid command sent ahead (`Spec.ahead`). */
+export function aheadResult<K extends CommandKind>(w: World, cmd: CommandOf<K>): IssueResult<K> {
+  const spec = SPECS[cmd.kind] as unknown as Spec<K>;
+  if (spec.ahead) return spec.ahead(w, cmd);
+  if (typeof spec.refused !== 'number') return true as IssueResult<K>;
+  const c = cmd as unknown as { ids?: number[]; count?: number };
+  return (c.ids ? c.ids.length : typeof c.count === 'number' ? c.count : 1) as IssueResult<K>;
+}
 
 export const COMMAND_KINDS = Object.keys(SPECS) as CommandKind[];
 
@@ -404,6 +450,17 @@ function orderTrade(w: World, id: number, res: Resource, count: number, player: 
   } else if (count > 0 && now !== ENDLESS) {
     m.trade.orders[res] = now + count;
   }
+  return true;
+}
+
+/**
+ * Network command: the computer plays the player from now on (a fresh `AiState` of medium level, as
+ * Settlers 4 hands a departed player's seat to its AI). Refused for a computer player already and
+ * for a defeated one (S4 activates the AI only for a player still alive).
+ */
+function aiTakeover(w: World, player: PlayerId): boolean {
+  if (w.ai.some((a) => a.player === player) || w.isDefeated(player)) return false;
+  w.ai.push(createAi(player, 'medium'));
   return true;
 }
 

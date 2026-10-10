@@ -1,8 +1,8 @@
 import { Container, Sprite, type Texture } from 'pixi.js';
 import { ANIMAL_KINDS, type AnimalKind } from '../sim/config';
-import { LOCAL_PLAYER, type World } from '../sim/world';
+import type { World } from '../sim/world';
 import { dirFromTileVelocity, DIRS } from './anim';
-import type { Point, Resource, Settler } from '../sim/types';
+import type { PlayerId, Point, Resource, Settler } from '../sim/types';
 import {
   ANIMAL_CELLS,
   ANIMAL_COLUMNS,
@@ -74,6 +74,8 @@ export class AnimalLayer {
     get: (name: string) => Texture,
     private readonly fogOn: boolean,
     private readonly wareTex: Record<Resource, Texture>,
+    /** The player this browser plays: its own units are always drawn, others only in its sight. */
+    private readonly me: PlayerId,
   ) {
     this.tex = Object.fromEntries(
       ANIMAL_KINDS.map((k) => [k, DIRS.map((_, d) => Array.from({ length: ANIMAL_COLUMNS }, (_, f) => get(`animal:${k}:${d}:${f}`)))]),
@@ -112,7 +114,7 @@ export class AnimalLayer {
     if (step < 1.5) v.walked += step;
     v.lastX = x;
     v.lastY = y;
-    const seen = !this.fogOn || s.owner === LOCAL_PLAYER || this.sim.isVisible(Math.round(x), Math.round(y), LOCAL_PLAYER);
+    const seen = !this.fogOn || s.owner === this.me || this.sim.isVisible(Math.round(x), Math.round(y), this.me);
     const onScreen =
       seen &&
       s.inside === null &&
@@ -212,7 +214,7 @@ export class AnimalLayer {
       if (step < 1.5) v.walked += step;
       v.lastX = x;
       v.lastY = y;
-      const seen = !this.fogOn || this.sim.isVisible(Math.round(x), Math.round(y), LOCAL_PLAYER);
+      const seen = !this.fogOn || this.sim.isVisible(Math.round(x), Math.round(y), this.me);
       const onScreen =
         seen && px > view.x - 40 && px < view.x + view.w + 40 && py > view.y - 20 && py < view.y + view.h + 60;
       if (onScreen !== (v.sprite.parent === this.objects)) {

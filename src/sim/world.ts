@@ -47,9 +47,11 @@ import {
 } from './military';
 import type { GameMessage } from './messages';
 import {
+  aheadResult,
   commandOrder,
   commandValid,
   copyCommand,
+  issueResult,
   refusedResult,
   runCommand,
   type Command,
@@ -57,6 +59,7 @@ import {
   type CommandOf,
   type CommandRecord,
   type CommandResult,
+  type IssueResult,
 } from './commands';
 
 /** A player's war record (`World.stats.war`). */
@@ -271,6 +274,12 @@ export class World {
   readonly pendingCommands: Command[] = [];
   /** Sequence number `schedule` gives the next command without one (saved). */
   nextCommandSeq = 0;
+  /**
+   * Lockstep network play (`net/match.ts`): where `issue` sends the local player's orders instead of
+   * applying them; they come back in a sealed turn and are applied then, on every machine alike.
+   * Null in a game on one machine. Not saved; nothing in the simulation reads it.
+   */
+  sendAhead: ((cmd: Command) => void) | null = null;
   /** Seed and options this world was generated from (null for a loaded one); with `commandLog`, a replay. */
   readonly origin: { seed: number; options: WorldOptions } | null;
   /** The log being replayed (`WorldOptions.replay`) and the next record of it. */
@@ -584,13 +593,17 @@ export class World {
   }
 
   /**
-   * The local player's order (the interface and the tutorial): in a game on one machine it is applied
+   * The local player's order (the interface and the tutorial). In a game on one machine it is applied
    * at once, between two ticks — the same as at the start of the next tick —, so the interface sees
-   * its result. Lockstep network play (roadmap phase 6) is to `schedule` it a few ticks ahead on every
-   * machine instead.
+   * its result. In a network game (`sendAhead` set) a well-formed order is handed to the lockstep,
+   * which plays it a few ticks later on every machine; the interface is told the likely outcome
+   * (`aheadResult`). Either way it gets a count or a success flag (`IssueResult`).
    */
-  issue<K extends CommandKind>(cmd: CommandOf<K>): CommandResult<K> {
-    return this.apply(cmd);
+  issue<K extends CommandKind>(cmd: CommandOf<K>): IssueResult<K> {
+    if (!this.sendAhead) return issueResult<K>(this.apply(cmd));
+    if (!commandValid(this, cmd)) return issueResult<K>(refusedResult(cmd) as CommandResult<K>);
+    this.sendAhead(copyCommand(cmd));
+    return aheadResult<K>(this, cmd as CommandOf<K>);
   }
 
   /**

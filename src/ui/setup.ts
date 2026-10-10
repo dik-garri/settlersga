@@ -1,5 +1,6 @@
 import { AI_LEVEL_IDS, START_CONDITIONS, type AiLevel, type StartLevel } from '../sim/config';
 import type { WorldOptions } from '../sim/world';
+import { normaliseCode } from '../net/transport';
 import { t } from './i18n';
 import { aiLevelName } from './names';
 
@@ -52,7 +53,7 @@ export interface SlotSetup {
 }
 
 export interface GameSetup {
-  /** `network` = the phase-6 lobby: same screen, remote humans allowed, not startable yet. */
+  /** `network` = the network lobby (`lobby.ts`): same screen, players over the network allowed. */
   mode: 'single' | 'network';
   size: number;
   /** Map seed; null = a random one at the start. */
@@ -88,7 +89,6 @@ export function setupProblem(s: GameSetup): string | null {
   if (s.mode === 'single' && active.some((x) => x.kind === 'remote')) return t('setup.problem.remote');
   if (active.some((x) => !RACES.find((r) => r.id === x.race)?.ready)) return t('setup.problem.race');
   if (active.length > 1 && new Set(active.map((x) => x.team)).size === 1) return t('setup.problem.oneTeam');
-  if (s.mode === 'network') return t('setup.problem.network');
   return null;
 }
 
@@ -160,9 +160,15 @@ export type Launch =
   | { kind: 'demo' }
   /** A tutorial mission (`?tutorial=<id>`, optionally `&step=<n>`, 1-based). */
   | { kind: 'tutorial'; id: string; step: number }
+  /** Joining a network game by its link (`?join=<code>`): the lobby screen, connecting at once. */
+  | { kind: 'join'; code: string }
   | { kind: 'dev' };
 
 export function launchOf(params: URLSearchParams): Launch {
+  if (params.has('join')) {
+    const code = normaliseCode(params.get('join') ?? '');
+    if (code) return { kind: 'join', code };
+  }
   if (params.has('menu')) return { kind: 'menu' };
   if (params.has('game')) {
     const setup = parseSetup(params.get('game'));

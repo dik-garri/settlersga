@@ -4,11 +4,11 @@ import { BUILDINGS, GEOLOGIST, PIONEER } from '../sim/config';
 import { isFighter, isMilitary } from '../sim/military';
 import { canProspect, isSpecialist, pioneerSpot, SPECIALIST_ORDERS, toolPileNear } from '../sim/specialists';
 import { toScreen } from '../render/iso';
-import { Terrain, type BuildingType } from '../sim/types';
-import { LOCAL_PLAYER, type World } from '../sim/world';
+import { Terrain, type BuildingType, type PlayerId } from '../sim/types';
+import type { World } from '../sim/world';
 import { t } from './i18n';
 import { orderLabel } from './names';
-import { isCommand, type GameState, type Placeable } from './state';
+import { isCommand, setPaused, type GameState, type Placeable } from './state';
 import { sameTypeAround, SELECT_RADIUS, SELECTION_MAX, toggleInSelection, withoutHealthy } from './selection';
 
 const KEY_PAN_SPEED = 900; // screen px per second
@@ -96,8 +96,8 @@ export class InputController {
   private geologistBlocker(x: number, y: number): string {
     const w = this.world;
     if (!w.map.inBounds(x, y) || w.map.terrain[w.map.idx(x, y)] !== Terrain.Mountain) return t('input.geologist.mountain');
-    if (!canProspect(w, x, y, LOCAL_PLAYER)) return t('input.geologist.done');
-    if (!toolPileNear(w, LOCAL_PLAYER, x, y)) {
+    if (!canProspect(w, x, y, this.me)) return t('input.geologist.done');
+    if (!toolPileNear(w, this.me, x, y)) {
       return t('input.geologist.noHammer');
     }
     return t('input.geologist.noCarrier');
@@ -113,7 +113,7 @@ export class InputController {
     if (!placing || isCommand(placing) || !this.pointer) return null;
     const tile = this.tileAt(this.pointer.x, this.pointer.y);
     const a = this.anchorFor(placing, tile.x, tile.y);
-    return { type: placing, ...a, valid: this.world.canPlace(placing, a.x, a.y) };
+    return { type: placing, ...a, valid: this.world.canPlace(placing, a.x, a.y, this.me) };
   }
 
   /** Tiles a geologist sent to the cursor would examine. */
@@ -125,8 +125,8 @@ export class InputController {
     const y = Math.round(tile.y);
     const m = this.world.map;
     // Where he starts: he searches outwards from here (`reach`) and then on from where he stands.
-    if (placing === 'pioneer') return { x, y, r: PIONEER.reach, valid: pioneerSpot(this.world, x, y, LOCAL_PLAYER) };
-    const valid = m.inBounds(x, y) && m.terrain[m.idx(x, y)] === Terrain.Mountain && canProspect(this.world, x, y, LOCAL_PLAYER);
+    if (placing === 'pioneer') return { x, y, r: PIONEER.reach, valid: pioneerSpot(this.world, x, y, this.me) };
+    const valid = m.inBounds(x, y) && m.terrain[m.idx(x, y)] === Terrain.Mountain && canProspect(this.world, x, y, this.me);
     return { x, y, r: GEOLOGIST.reach, valid };
   }
 
@@ -169,7 +169,7 @@ export class InputController {
     const specialists: number[] = [];
     for (const id of this.state.selectedUnits) {
       const s = this.world.getSettler(id);
-      if (!s || this.world.dying.has(id) || s.owner !== LOCAL_PLAYER) continue;
+      if (!s || this.world.dying.has(id) || s.owner !== this.me) continue;
       if (isFighter(s)) fighters.push(id);
       else if (isSpecialist(s)) specialists.push(id);
     }
@@ -179,15 +179,15 @@ export class InputController {
   /** The building under (tx, ty) if the local player may know it is there. */
   private knownBuildingAt(tx: number, ty: number) {
     const b = this.world.buildingAt(tx, ty);
-    const known = !this.state.fog || (b !== undefined && b.owner === LOCAL_PLAYER) || this.world.isExplored(tx, ty);
+    const known = !this.state.fog || (b !== undefined && b.owner === this.me) || this.world.isExplored(tx, ty, this.me);
     return b && known ? b : undefined;
   }
 
   /** The fighters' part of a right click there: attack, go in, or move. */
   private fighterOrderAt(tx: number, ty: number): 'attack' | 'garrison' | 'move' {
     const b = this.knownBuildingAt(tx, ty);
-    if (b && isMilitary(b) && b.done && b.owner !== LOCAL_PLAYER && !this.world.allied(b.owner, LOCAL_PLAYER)) return 'attack';
-    if (b && isMilitary(b) && b.done && b.owner === LOCAL_PLAYER) return 'garrison';
+    if (b && isMilitary(b) && b.done && b.owner !== this.me && !this.world.allied(b.owner, this.me)) return 'attack';
+    if (b && isMilitary(b) && b.done && b.owner === this.me) return 'garrison';
     return 'move';
   }
 
@@ -218,7 +218,7 @@ export class InputController {
       for (const id of specialists) {
         const s = this.world.getSettler(id)!;
         const order = SPECIALIST_ORDERS[s.kind];
-        labels.add(!alt && order && order.can(this.world, hover.x, hover.y, b, LOCAL_PLAYER) ? orderLabel(s.kind) : t('input.hint.move'));
+        labels.add(!alt && order && order.can(this.world, hover.x, hover.y, b, this.me) ? orderLabel(s.kind) : t('input.hint.move'));
       }
       this.hint.textContent = [...labels].join(' · ');
     }
@@ -274,7 +274,7 @@ export class InputController {
   private ownUnits(ids: number[]): number[] {
     return ids.filter((id) => {
       const s = this.world.getSettler(id);
-      return !!s && s.owner === LOCAL_PLAYER && (isFighter(s) || isSpecialist(s));
+      return !!s && s.owner === this.me && (isFighter(s) || isSpecialist(s));
     });
   }
 
@@ -282,7 +282,7 @@ export class InputController {
   private ownDonkeys(ids: number[]): number[] {
     return ids.filter((id) => {
       const s = this.world.getSettler(id);
-      return !!s && s.owner === LOCAL_PLAYER && LOOK_ONLY.has(s.kind);
+      return !!s && s.owner === this.me && LOOK_ONLY.has(s.kind);
     });
   }
 
@@ -323,20 +323,20 @@ export class InputController {
     const tile = this.tileAt(p.x, p.y);
     const { placing } = this.state;
     if (this.state.movingWorkArea !== null) {
-      const ok = this.world.issue({ kind: 'setWorkArea', player: LOCAL_PLAYER, id: this.state.movingWorkArea, at: { x: Math.round(tile.x), y: Math.round(tile.y) } });
+      const ok = this.world.issue({ kind: 'setWorkArea', player: this.me, id: this.state.movingWorkArea, at: { x: Math.round(tile.x), y: Math.round(tile.y) } });
       this.cb.onMessage(ok ? t('input.workArea.moved') : t('input.workArea.tooFar'));
       if (ok) this.state.movingWorkArea = null;
       return;
     }
     if (placing === 'pioneer') {
-      const ok = this.world.issue({ kind: 'sendPioneer', player: LOCAL_PLAYER, x: Math.round(tile.x), y: Math.round(tile.y) });
+      const ok = this.world.issue({ kind: 'sendPioneer', player: this.me, x: Math.round(tile.x), y: Math.round(tile.y) });
       this.cb.onMessage(ok ? t('input.pioneer.sent') : t('input.pioneer.failed'));
       if (ok && !e.shiftKey) this.cb.onSelectBuildType(null);
       return;
     }
     if (placing === 'thief') {
       const target = this.world.buildingAt(Math.round(tile.x), Math.round(tile.y));
-      const ok = target ? this.world.issue({ kind: 'sendThief', player: LOCAL_PLAYER, target: target.id }) : false;
+      const ok = target ? this.world.issue({ kind: 'sendThief', player: this.me, target: target.id }) : false;
       this.cb.onMessage(ok ? t('input.thief.sent') : t('input.thief.failed'));
       if (ok && !e.shiftKey) this.cb.onSelectBuildType(null);
       return;
@@ -344,19 +344,19 @@ export class InputController {
     if (placing === 'geologist') {
       const gx = Math.round(tile.x);
       const gy = Math.round(tile.y);
-      const ok = this.world.issue({ kind: 'sendGeologist', player: LOCAL_PLAYER, x: gx, y: gy });
+      const ok = this.world.issue({ kind: 'sendGeologist', player: this.me, x: gx, y: gy });
       this.cb.onMessage(ok ? t('input.geologist.sent') : this.geologistBlocker(gx, gy));
       if (ok && !e.shiftKey) this.cb.onSelectBuildType(null);
       return;
     }
     if (placing) {
       const a = this.anchorFor(placing, tile.x, tile.y);
-      if (!this.world.canPlace(placing, a.x, a.y)) {
-        const outside = !this.world.owns(a.x, a.y);
+      if (!this.world.canPlace(placing, a.x, a.y, this.me)) {
+        const outside = !this.world.owns(a.x, a.y, this.me);
         this.cb.onMessage(outside ? t('input.place.outside') : t('input.place.cannot'));
         return;
       }
-      const b = this.world.issue({ kind: 'placeBuilding', player: LOCAL_PLAYER, type: placing, x: a.x, y: a.y });
+      const b = this.world.issue({ kind: 'placeBuilding', player: this.me, type: placing, x: a.x, y: a.y });
       if (!b) {
         this.cb.onMessage(t('input.place.unreachable'));
         return;
@@ -374,9 +374,9 @@ export class InputController {
       const unit = this.world.getSettler(sid)!;
       const kind = unit.kind;
       if (e.altKey) {
-        this.state.selectedUnits = sameTypeAround(this.world, unit, SELECT_RADIUS.sector, LOCAL_PLAYER);
+        this.state.selectedUnits = sameTypeAround(this.world, unit, SELECT_RADIUS.sector, this.me);
       } else if (e.shiftKey) {
-        this.state.selectedUnits = sameTypeAround(this.world, unit, SELECT_RADIUS.vicinity, LOCAL_PLAYER);
+        this.state.selectedUnits = sameTypeAround(this.world, unit, SELECT_RADIUS.vicinity, this.me);
       } else if (e.ctrlKey || e.metaKey) {
         this.state.selectedUnits = toggleInSelection(this.world, this.state.selectedUnits, unit);
       } else if (this.lastClick.id === sid && now - this.lastClick.at < DOUBLE_CLICK_MS) {
@@ -404,7 +404,7 @@ export class InputController {
     const ty = Math.round(tile.y);
     const b = this.world.buildingAt(tx, ty);
     // Under the fog nothing can be picked: the player does not know what stands there.
-    const known = !this.state.fog || (b !== undefined && b.owner === LOCAL_PLAYER) || this.world.isExplored(tx, ty);
+    const known = !this.state.fog || (b !== undefined && b.owner === this.me) || this.world.isExplored(tx, ty, this.me);
     this.state.selected = b && known ? b.id : null;
   }
 
@@ -425,12 +425,12 @@ export class InputController {
     if (fighters.length > 0) {
       const o = walkOnly ? 'move' : this.fighterOrderAt(tx, ty);
       if (o === 'attack') {
-        const n = this.world.issue({ kind: 'orderAttack', player: LOCAL_PLAYER, ids: fighters, target: b!.id });
+        const n = this.world.issue({ kind: 'orderAttack', player: this.me, ids: fighters, target: b!.id });
         said.push(n > 0 ? t('input.order.attack', { n }) : t('input.order.cannotAttack'));
       } else if (o === 'garrison') {
-        const n = this.world.issue({ kind: 'orderGarrison', player: LOCAL_PLAYER, ids: fighters, target: b!.id });
+        const n = this.world.issue({ kind: 'orderGarrison', player: this.me, ids: fighters, target: b!.id });
         said.push(n > 0 ? t('input.order.garrison', { n }) : t('input.order.noRoom'));
-      } else if (this.world.issue({ kind: 'orderMove', player: LOCAL_PLAYER, ids: fighters, x: tx, y: ty }) === 0) {
+      } else if (this.world.issue({ kind: 'orderMove', player: this.me, ids: fighters, x: tx, y: ty }) === 0) {
         said.push(t('input.order.noWay'));
       }
     }
@@ -439,9 +439,9 @@ export class InputController {
         ? 0
         : specialists.filter((id) => {
             const s = this.world.getSettler(id)!;
-            return SPECIALIST_ORDERS[s.kind]?.can(this.world, tx, ty, b, LOCAL_PLAYER) ?? false;
+            return SPECIALIST_ORDERS[s.kind]?.can(this.world, tx, ty, b, this.me) ?? false;
           }).length;
-      const n = this.world.issue({ kind: 'orderSpecialists', player: LOCAL_PLAYER, ids: specialists, x: tx, y: ty, target: b ? b.id : null, walkOnly });
+      const n = this.world.issue({ kind: 'orderSpecialists', player: this.me, ids: specialists, x: tx, y: ty, target: b ? b.id : null, walkOnly });
       if (n === 0) said.push(t('input.order.noWay'));
       else if (acting > 0) said.push(t('input.order.toWork', { n: acting }));
     }
@@ -493,7 +493,7 @@ export class InputController {
       case 'KeyP':
       case 'Pause':
         e.preventDefault();
-        this.state.paused = !this.state.paused;
+        setPaused(this.state, !this.state.paused);
         break;
       case 'Tab':
         e.preventDefault();
@@ -569,13 +569,18 @@ export class InputController {
     return true;
   }
 
+  /** The player this browser plays. */
+  private get me(): PlayerId {
+    return this.state.localPlayer;
+  }
+
   private altHeld(): boolean {
     return this.keys.has('AltLeft') || this.keys.has('AltRight');
   }
 
   private ownLiving(id: number): boolean {
     const s = this.world.getSettler(id);
-    return !!s && !this.world.dying.has(id) && s.owner === LOCAL_PLAYER;
+    return !!s && !this.world.dying.has(id) && s.owner === this.me;
   }
 }
 

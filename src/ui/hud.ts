@@ -3,8 +3,8 @@ import { MESSAGES, TICKS_PER_SECOND } from '../sim/config';
 import { messagesOf } from '../sim/messages';
 import { isFighter } from '../sim/military';
 import { scoreOf } from '../sim/score';
-import type { Building, Resource, Settler } from '../sim/types';
-import { LOCAL_PLAYER, type World } from '../sim/world';
+import type { Building, PlayerId, Resource, Settler } from '../sim/types';
+import type { World } from '../sim/world';
 import { ArmyView } from './armyPanel';
 import { BuildView } from './buildMenu';
 import { button, el, rowsTable, type View } from './dom';
@@ -18,7 +18,7 @@ import { OptionsView, SPEEDS, type GameActions } from './optionsView';
 import { SettlerInfoView } from './settlerInfo';
 import { UnitsView } from './unitsView';
 import { SettlersView } from './settlersView';
-import type { GameState, Placeable } from './state';
+import { canChangeSpeed, chooseSpeed, setPaused, type GameState, type Placeable } from './state';
 import { menuOpen, type MenuId } from './locks';
 import { tag } from './uiTarget';
 import { StatsView } from './statsView';
@@ -117,7 +117,7 @@ export class Hud {
     this.warned = opts.memo?.warned ?? new WeakSet<object>();
     this.ended = opts.memo?.ended ?? false;
     this.build = new BuildView(world, state, select, (b) => this.focusBuilding(b));
-    this.stats = new StatsView(world);
+    this.stats = new StatsView(world, state.localPlayer);
     if (opts.memo) this.stats.carry(opts.memo.stats);
     this.info = new InfoView(world, state, (text) => this.toast(text), (b) => this.focusBuilding(b));
     this.settlerInfo = new SettlerInfoView(world, state, {
@@ -127,10 +127,10 @@ export class Hud {
     this.unitsView = new UnitsView(world, state, (text) => this.toast(text));
     this.views = {
       build: this.build,
-      goods: new GoodsView(world),
+      goods: new GoodsView(world, state.localPlayer),
       settlers: new SettlersView(world, state, select, (s) => this.focusSettler(s)),
       stats: this.stats,
-      army: new ArmyView(world),
+      army: new ArmyView(world, state.localPlayer),
       options: new OptionsView(state, actions, opts.sound),
     };
 
@@ -166,16 +166,14 @@ export class Hud {
     pause.title = t('hud.pauseTip');
     pause.append(glyph('pause', 14));
     pause.onclick = () => {
-      state.paused = !state.paused;
+      setPaused(state, !state.paused);
       pause.blur();
     };
     strip.append(pause);
     this.speedButtons.set('pause', pause);
     for (const s of SPEEDS) {
-      const b = button(`${s}×`, t('options.speedTip', { n: s }), () => {
-        state.speed = s;
-        state.paused = false;
-      }, 'speed-btn');
+      const b = button(`${s}×`, canChangeSpeed(state) ? t('options.speedTip', { n: s }) : t('net.speedHost'), () => chooseSpeed(state, s), 'speed-btn');
+      b.disabled = !canChangeSpeed(state);
       tag(b, `speed.${s}`);
       strip.append(b);
       this.speedButtons.set(s, b);
@@ -281,7 +279,7 @@ export class Hud {
    */
   private showMessages(): void {
     for (const m of this.world.messages) {
-      if (m.player !== LOCAL_PLAYER || this.warned.has(m)) continue;
+      if (m.player !== this.state.localPlayer || this.warned.has(m)) continue;
       this.warned.add(m);
       this.toast(messageText(this.world, m), { at: m, alert: MESSAGES[m.kind].alert });
     }
@@ -292,7 +290,7 @@ export class Hud {
    * before, and so on back through the list.
    */
   jumpToMessage(): boolean {
-    const mine = messagesOf(this.world, LOCAL_PLAYER);
+    const mine = messagesOf(this.world, this.state.localPlayer);
     if (mine.length === 0) return false;
     const now = performance.now();
     const k = now - this.jumped.at < MESSAGE_CYCLE_MS ? (this.jumped.k + 1) % mine.length : 0;
@@ -345,7 +343,7 @@ export class Hud {
     if (nowMs - this.lastUpdate < 150) return;
     this.lastUpdate = nowMs;
     const { world, state } = this;
-    const outcome = world.outcome(LOCAL_PLAYER);
+    const outcome = world.outcome(this.state.localPlayer);
     if (outcome !== 'playing' && !this.ended && !this.noEndScreen) this.showEnd(outcome);
     if (state.locks !== this.locksSeen) {
       this.locksSeen = state.locks;
@@ -378,19 +376,19 @@ export class Hud {
     this.shown?.update(nowMs);
 
     for (const [r, value] of this.readoutValues) {
-      const text = String(inStorage(world, r));
+      const text = String(inStorage(world, r, state.localPlayer));
       if (value.textContent !== text) value.textContent = text;
     }
     let people = 0;
     let fighters = 0;
     for (const s of world.settlers) {
-      if (s.owner !== LOCAL_PLAYER) continue;
+      if (s.owner !== this.state.localPlayer) continue;
       people++;
       if (isFighter(s)) fighters++;
     }
     this.people.textContent = String(people);
     this.soldiers.textContent = String(fighters);
-    this.strength.textContent = `${Math.round(world.strengthOf())}%`;
+    this.strength.textContent = `${Math.round(world.strengthOf(this.state.localPlayer))}%`;
 
     for (const [key, b] of this.speedButtons) {
       const on = key === 'pause' ? state.paused : !state.paused && state.speed === key;
@@ -422,7 +420,7 @@ export class Hud {
     const seconds = Math.floor(world.tick / TICKS_PER_SECOND);
     const time = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
     // Per-player facts only: `stats.produced` counts every player together.
-    const mine = (p: number) => p === LOCAL_PLAYER;
+    const mine = (p: number) => p === this.state.localPlayer;
     const land = world.map.owner.reduce((n, o) => n + (o !== 0 ? 1 : 0), 0);
     const ownLand = world.map.owner.reduce((n, o) => n + (mine(o) ? 1 : 0), 0);
     const soldiersOf = (own: boolean) => world.settlers.filter((s) => isFighter(s) && mine(s.owner) === own).length;
@@ -439,7 +437,7 @@ export class Hud {
       el('p', '', outcome === 'won' ? t('end.wonText') : t('end.lostText')),
       rowsTable(rows),
       el('h4', '', t('end.score')),
-      scoreTable(world),
+      scoreTable(world, this.state.localPlayer),
     );
     const actions = el('div', 'info-actions');
     const again = el('button', 'active', t('menu.new'));
@@ -457,7 +455,7 @@ export class Hud {
  * Every player's final score (`scoreOf`, Settlers 4's formula): the parts and the total, best first.
  * Hovering the header shows the formula.
  */
-function scoreTable(world: World): HTMLTableElement {
+function scoreTable(world: World, me: PlayerId): HTMLTableElement {
   const table = el('table', 'score-table');
   table.title = t('end.scoreTip');
   const head = el('tr');
@@ -466,8 +464,8 @@ function scoreTable(world: World): HTMLTableElement {
   table.append(head);
   const rows = world.players.map((p) => ({ p, sc: scoreOf(world, p.id) })).sort((a, b) => b.sc.total - a.sc.total || a.p.id - b.p.id);
   for (const { p, sc } of rows) {
-    const tr = el('tr', p.id === LOCAL_PLAYER ? 'mine' : '');
-    const name = p.id === LOCAL_PLAYER ? t('common.you') : `${t('common.player', { id: p.id })}${world.isDefeated(p.id) ? ' †' : ''}`;
+    const tr = el('tr', p.id === me ? 'mine' : '');
+    const name = p.id === me ? t('common.you') : `${t('common.player', { id: p.id })}${world.isDefeated(p.id) ? ' †' : ''}`;
     for (const v of [name, sc.kills, sc.settlers, sc.fighters, sc.gold, sc.ore, sc.food, sc.buildings]) tr.append(el('td', '', String(v)));
     tr.append(el('td', '', String(sc.total)));
     table.append(tr);

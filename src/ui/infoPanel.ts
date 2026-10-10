@@ -13,8 +13,8 @@ import { available, chooseOutput, oreLeft, residents } from '../sim/buildings';
 import { diggersWanted } from '../sim/digging';
 import { keepOf, recruitNeeds, FIGHTERS } from '../sim/military';
 import { hasGatherTargetNear } from '../sim/nature';
-import { RESOURCES, type Building, type BuildingType, type Resource, type Settler, type SettlerKind } from '../sim/types';
-import { LOCAL_PLAYER, type World } from '../sim/world';
+import { RESOURCES, type Building, type BuildingType, type PlayerId, type Resource, type Settler, type SettlerKind } from '../sim/types';
+import type { World } from '../sim/world';
 import { barracksRows, garrisonControls, garrisonRows, recruitKey, recruitOrderControls, shareControls, supportRows } from './armyPanel';
 import { nextBuildingOfType } from './find';
 import { el, rowsTable, type View } from './dom';
@@ -74,6 +74,11 @@ export class InfoView implements View {
     private readonly focus: (b: Building) => void = () => {},
   ) {}
 
+  /** The player this browser plays. */
+  private get me(): PlayerId {
+    return this.state.localPlayer;
+  }
+
   update(): void {
     this.renderInfo();
     const b = this.state.selected !== null ? this.world.buildings.get(this.state.selected) : undefined;
@@ -91,19 +96,19 @@ export class InfoView implements View {
     if (this.confirmDemolish !== null && this.confirmDemolish !== b.id) this.confirmDemolish = null;
     const def = BUILDINGS[b.type];
     const rows: [string, string][] = [];
-    const enemy = b.owner !== LOCAL_PLAYER;
-    const canSend = enemy && def.garrison && b.done ? this.world.availableAttackers(b.id) : 0;
+    const enemy = b.owner !== this.me;
+    const canSend = enemy && def.garrison && b.done ? this.world.availableAttackers(b.id, this.me) : 0;
     // Out of sight (fog of war) other players' buildings show only what is known from afar.
-    const sighted = !this.state.fog || this.world.isVisible(b.door.x, b.door.y);
+    const sighted = !this.state.fog || this.world.isVisible(b.door.x, b.door.y, this.me);
     if (enemy) {
-      rows.push([t('info.owner'), t(this.world.allied(b.owner, LOCAL_PLAYER) ? 'info.ownerAlly' : 'info.ownerPlayer', { id: b.owner })]);
+      rows.push([t('info.owner'), t(this.world.allied(b.owner, this.me) ? 'info.ownerAlly' : 'info.ownerPlayer', { id: b.owner })]);
       if (!sighted) rows.push([t('army.sight'), t('info.noSight')]);
       if (def.garrison && b.done) {
         rows.push([t('info.defenders'), sighted ? String(b.garrison.length) : '?']);
         rows.push([t('info.canSend'), String(canSend)]);
         this.attackCount = Math.max(1, Math.min(this.attackCount, canSend));
         rows.push([t('info.send'), String(this.attackCount)]);
-        if (canSend > 0) rows.push([t('info.willGo'), composition(this.world.attackerComposition(b.id, this.attackCount))]);
+        if (canSend > 0) rows.push([t('info.willGo'), composition(this.world.attackerComposition(b.id, this.attackCount, this.me))]);
       }
     } else if (!b.done) {
       rows.push([t('info.site'), `${Math.floor(this.world.buildProgress(b) * 100)}%`]);
@@ -153,8 +158,8 @@ export class InfoView implements View {
       const gather = gatheredBy(b.type);
       const shared = this.sharedChoices(b);
       if (shared) {
-        const total = shared.reduce((n, r) => n + this.world.shareOf(r), 0) || 1;
-        rows.push([t('info.armyMix'), shared.map((r) => `${resLower(r)} ${Math.round((100 * this.world.shareOf(r)) / total)}%`).join(' · ')]);
+        const total = shared.reduce((n, r) => n + this.world.shareOf(r, this.me), 0) || 1;
+        rows.push([t('info.armyMix'), shared.map((r) => `${resLower(r)} ${Math.round((100 * this.world.shareOf(r, this.me)) / total)}%`).join(' · ')]);
       }
       if (def.recipe) {
         for (const r of RESOURCES) {
@@ -186,7 +191,7 @@ export class InfoView implements View {
     if (!enemy && radius !== null && !def.infirmary) {
       rows.push([t('info.workArea'), `${t('common.tiles', { n: radius })}${b.workAt ? t('info.moved') : ''}`]);
     }
-    rows.push(...tradeRows(this.world, b));
+    rows.push(...tradeRows(this.world, b, this.me));
     if (b.priority) rows.push([t('info.priority'), t('info.yes')]);
     if (!enemy && b.stopped) {
       rows.push([t('info.stopped'), b.done ? t('info.stoppedDone') : t('info.stoppedSite')]);
@@ -200,7 +205,7 @@ export class InfoView implements View {
       this.state.movingWorkArea === b.id,
       economyKey(this.world, b),
       tradeKey(this.world, b),
-      def.barracks ? recruitKey(this.world) : '',
+      def.barracks ? recruitKey(this.world, this.state.localPlayer) : '',
       def.garrison ? JSON.stringify(b.wish ?? null) : '',
     ]);
     if (key === this.infoKey) return;
@@ -212,8 +217,8 @@ export class InfoView implements View {
       if (def.garrison && b.done) this.el.append(this.attackControls(b, canSend));
       return;
     }
-    if (def.garrison && b.done) this.el.append(garrisonControls(this.world, b, () => (this.infoKey = '')));
-    if (def.barracks && b.done) this.el.append(recruitOrderControls(this.world, () => (this.infoKey = '')));
+    if (def.garrison && b.done) this.el.append(garrisonControls(this.world, this.state.localPlayer, b, () => (this.infoKey = '')));
+    if (def.barracks && b.done) this.el.append(recruitOrderControls(this.world, this.state.localPlayer, () => (this.infoKey = '')));
     if (movableWorkArea(b.type)) {
       // Settlers 4: the work area can be moved — choose a new centre with a click on the map.
       const area = el('div', 'info-actions');
@@ -229,27 +234,27 @@ export class InfoView implements View {
         const back = el('button', '', t('info.areaBack'));
         back.title = t('info.areaBackTip');
         back.onclick = () => {
-          this.world.issue({ kind: 'setWorkArea', player: LOCAL_PLAYER, id: b.id, at: null });
+          this.world.issue({ kind: 'setWorkArea', player: this.me, id: b.id, at: null });
           back.blur();
         };
         area.append(back);
       }
       this.el.append(area);
     }
-    const warehouse = warehouseControls(this.world, b);
+    const warehouse = warehouseControls(this.world, b, this.state.localPlayer);
     if (warehouse) this.el.append(tag(warehouse, 'info.accept'));
-    const trade = tradeControls(this.world, b);
+    const trade = tradeControls(this.world, b, this.me);
     if (trade) this.el.append(trade);
     if (!def.playerBuildable) return;
-    const orders = b.done ? toolOrderControls(this.world, b) : null;
+    const orders = b.done ? toolOrderControls(this.world, b, this.state.localPlayer) : null;
     if (orders) this.el.append(orders);
     const shared = this.sharedChoices(b);
-    if (shared && shared.length >= 2) this.el.append(shareControls(this.world, shared, () => (this.infoKey = '')));
+    if (shared && shared.length >= 2) this.el.append(shareControls(this.world, this.state.localPlayer, shared, () => (this.infoKey = '')));
     const actions = el('div', 'info-actions');
     if (!b.done || def.recipe || def.residence) {
       const prio = tag(el('button', b.priority ? 'active' : '', b.priority ? t('info.priorityOn') : t('info.priorityBtn')), 'info.priority');
       prio.title = t('info.priorityTip');
-      prio.onclick = () => this.world.issue({ kind: 'setPriority', player: LOCAL_PLAYER, id: b.id, on: !b.priority });
+      prio.onclick = () => this.world.issue({ kind: 'setPriority', player: this.me, id: b.id, on: !b.priority });
       actions.append(prio);
     }
     if (canStop(b)) {
@@ -257,7 +262,7 @@ export class InfoView implements View {
       const stop = tag(el('button', b.stopped ? 'active' : '', b.stopped ? t('info.start') : t('info.stop')), 'info.stop');
       stop.title = b.stopped ? t('info.startTip') : b.done ? t('info.stopTip') : t('info.stopSiteTip');
       stop.onclick = () => {
-        this.world.issue({ kind: 'setStopped', player: LOCAL_PLAYER, id: b.id, on: !b.stopped });
+        this.world.issue({ kind: 'setStopped', player: this.me, id: b.id, on: !b.stopped });
         stop.blur();
       };
       actions.append(stop);
@@ -281,14 +286,14 @@ export class InfoView implements View {
         return;
       }
       this.confirmDemolish = null;
-      if (this.world.issue({ kind: 'demolish', player: LOCAL_PLAYER, id: b.id })) this.state.selected = null;
+      if (this.world.issue({ kind: 'demolish', player: this.me, id: b.id })) this.state.selected = null;
     };
     actions.append(demolish);
     // Settlers 4: the next building (or site) of this type, the camera follows.
     const next = el('button', '', t('info.next'));
     next.title = t('info.nextTip');
     next.onclick = () => {
-      const n = nextBuildingOfType(this.world, b.type, b.id);
+      const n = nextBuildingOfType(this.world, this.me, b.type, b.id);
       if (n && n.id !== b.id) this.focus(n);
       else this.toast(t('info.noOther'));
       next.blur();
@@ -303,7 +308,7 @@ export class InfoView implements View {
     const pic = el('div', 'info-pic');
     pic.append(buildingIcon(b.type, 64));
     const title = el('div', 'info-title');
-    title.append(el('h3', '', buildingName(b.type)), el('span', 'muted', b.owner === LOCAL_PLAYER ? (b.done ? t('info.yours') : t('info.yourSite')) : t('info.foreign')));
+    title.append(el('h3', '', buildingName(b.type)), el('span', 'muted', b.owner === this.me ? (b.done ? t('info.yours') : t('info.yourSite')) : t('info.foreign')));
     const close = el('button', 'gem small', '');
     close.title = t('common.close');
     close.append(glyph('close', 14));
@@ -350,7 +355,7 @@ export class InfoView implements View {
     go.disabled = available === 0;
     go.title = available > 0 ? t('info.attackTip') : t('info.noAttackers');
     go.onclick = () => {
-      const sent = this.world.issue({ kind: 'attack', player: LOCAL_PLAYER, target: b.id, count: this.attackCount });
+      const sent = this.world.issue({ kind: 'attack', player: this.me, target: b.id, count: this.attackCount });
       this.toast(sent > 0 ? t('input.order.attack', { n: sent }) : t('info.nobodyToSend'));
     };
     actions.append(less, more, go);

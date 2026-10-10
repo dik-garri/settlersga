@@ -3,7 +3,7 @@ import { TICKS_PER_SECOND } from '../sim/config';
 import { isFighter } from '../sim/military';
 import { scoreOf } from '../sim/score';
 import { RESOURCES, type BuildingType, type PlayerId, type SettlerKind, type Stock } from '../sim/types';
-import { LOCAL_PLAYER, type World } from '../sim/world';
+import type { World } from '../sim/world';
 import { el, type View } from './dom';
 import { t } from './i18n';
 import { buildingName, profName, resName } from './names';
@@ -51,7 +51,11 @@ export class StatsView implements View {
   private readonly sliderLabel = el('span', 'stats-window');
   private readonly body = el('div', 'stats-body');
 
-  constructor(private readonly world: World) {
+  constructor(
+    private readonly world: World,
+    /** The player this browser plays. */
+    private readonly me: PlayerId,
+  ) {
     this.slider.type = 'range';
     this.slider.min = '1';
     this.slider.value = String(this.minutes);
@@ -105,7 +109,7 @@ export class StatsView implements View {
       if (isFighter(s)) p.fighters++;
       else p.settlers++;
     }
-    const mine = world.stats.war[LOCAL_PLAYER];
+    const mine = world.stats.war[this.me];
     return {
       tick: world.tick,
       produced: { ...world.stats.produced },
@@ -174,8 +178,8 @@ export class StatsView implements View {
     for (const p of world.players) {
       const n = now.players[p.id];
       const o = old.players[p.id] ?? n;
-      const tr = el('tr', p.id === LOCAL_PLAYER ? 'mine' : '');
-      const name = p.id === LOCAL_PLAYER ? t('common.you') : `${t('common.player', { id: p.id })}${world.isDefeated(p.id) ? ' †' : ''}`;
+      const tr = el('tr', p.id === this.me ? 'mine' : '');
+      const name = p.id === this.me ? t('common.you') : `${t('common.player', { id: p.id })}${world.isDefeated(p.id) ? ' †' : ''}`;
       tr.append(
         el('td', '', name),
         el('td', '', `${n.land} (${delta(n.land, o.land)})`),
@@ -193,14 +197,14 @@ export class StatsView implements View {
     body.append(table);
 
     const people = new Map<SettlerKind, number>();
-    for (const s of world.settlers) if (s.owner === LOCAL_PLAYER) people.set(s.kind, (people.get(s.kind) ?? 0) + 1);
+    for (const s of world.settlers) if (s.owner === this.me) people.set(s.kind, (people.get(s.kind) ?? 0) + 1);
     body.append(el('h4', '', t('stats.population')));
     const pop = el('div', 'stats-grid');
     for (const [kind, n] of [...people].sort((a, b) => b[1] - a[1])) pop.append(row(profName(kind), String(n)));
     body.append(pop);
 
     const types = new Map<BuildingType, number>();
-    for (const b of world.buildings.values()) if (b.owner === LOCAL_PLAYER) types.set(b.type, (types.get(b.type) ?? 0) + 1);
+    for (const b of world.buildings.values()) if (b.owner === this.me) types.set(b.type, (types.get(b.type) ?? 0) + 1);
     body.append(el('h4', '', t('stats.buildings')));
     const houses = el('div', 'stats-grid');
     for (const [type, n] of [...types].sort((a, b) => b[1] - a[1])) houses.append(row(buildingName(type), String(n)));

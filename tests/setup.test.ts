@@ -53,7 +53,9 @@ describe('game setup', () => {
     expect(one({ slots: [{ ...s.slots[0], kind: 'ai' }, ...s.slots.slice(1)] })).toMatch(/ваше/);
     expect(one({ slots: [s.slots[0], { ...s.slots[1], kind: 'remote' }, ...s.slots.slice(2)] })).toMatch(/сетевой/);
     expect(one({ slots: [{ ...s.slots[0], race: 'vikings' }, ...s.slots.slice(1)] })).toMatch(/скоро/);
-    expect(one({ mode: 'network' })).toMatch(/скоро/);
+    // The network lobby is a setup like any other (its own checks are `lobbyProblem`, tests/netgame).
+    expect(one({ mode: 'network' })).toBeNull();
+    expect(one({ mode: 'network', slots: [s.slots[0], { ...s.slots[1], kind: 'remote' }, ...s.slots.slice(2)] })).toBeNull();
     // Alone on the map (a sandbox) is fine.
     expect(one({ slots: [s.slots[0], ...s.slots.slice(1).map((x) => ({ ...x, kind: 'closed' as const }))] })).toBeNull();
   });
@@ -81,6 +83,9 @@ describe('game setup', () => {
     expect(p('?load=auto')).toEqual({ kind: 'load', slot: 'auto' });
     expect(p(`?game=${encodeURIComponent(JSON.stringify(defaultSetup()))}`)).toEqual({ kind: 'setup', setup: defaultSetup() });
     expect(p('?game=nonsense')).toEqual({ kind: 'menu' });
+    // A network game's link: the code is normalised, a broken one opens the menu.
+    expect(p('?join=abc-def')).toEqual({ kind: 'join', code: 'ABCDEF' });
+    expect(p('?join=nope')).toEqual({ kind: 'menu' });
   });
 
   it('development parameters keep their meaning', () => {

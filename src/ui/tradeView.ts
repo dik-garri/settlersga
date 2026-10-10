@@ -2,8 +2,8 @@ import { BUILDINGS, PROFESSIONS, TRADE } from '../sim/config';
 import { ENDLESS } from '../sim/economy';
 import { isCutOff } from '../sim/land';
 import { routeTarget } from '../sim/trade';
-import { RESOURCES, type Building, type Resource } from '../sim/types';
-import { LOCAL_PLAYER, type World } from '../sim/world';
+import { RESOURCES, type Building, type PlayerId, type Resource } from '../sim/types';
+import type { World } from '../sim/world';
 import { button, el } from './dom';
 import { goodsLists } from './goodsLists';
 import { t } from './i18n';
@@ -58,10 +58,10 @@ const carried = (b: Building, r: Resource) => b.trade?.orders[r] !== undefined;
 const waitingAt = (b: Building, r: Resource) => b.input[r] - (b.trade?.loading[r] ?? 0);
 
 /** Rows for the building window: route of a market, the herd of a ranch, cut-off land. */
-export function tradeRows(world: World, b: Building): [string, string][] {
+export function tradeRows(world: World, b: Building, me: PlayerId): [string, string][] {
   const def = BUILDINGS[b.type];
   const rows: [string, string][] = [];
-  if (b.owner !== LOCAL_PLAYER) return rows;
+  if (b.owner !== me) return rows;
   if (isCutOff(world, b)) rows.push([t('trade.supply'), t('trade.cutOff')]);
   if (!b.done) return rows;
   if (def.market) {
@@ -93,8 +93,8 @@ export function tradeKey(world: World, b: Building): string {
  * carried and not; a click moves a good across. A click starts an endless order (the AI still places
  * finite ones through `orderTrade`; their remainder shows in the item's corner).
  */
-export function tradeControls(world: World, b: Building): HTMLElement | null {
-  if (!BUILDINGS[b.type].market || b.owner !== LOCAL_PLAYER || !b.done) return null;
+export function tradeControls(world: World, b: Building, me: PlayerId): HTMLElement | null {
+  if (!BUILDINGS[b.type].market || b.owner !== me || !b.done) return null;
   const box = el('div', 'eco-orders trade');
   box.append(el('h4', '', t('trade.where')));
   const markets = otherMarkets(world, b);
@@ -106,13 +106,13 @@ export function tradeControls(world: World, b: Building): HTMLElement | null {
     const go = button(
       m.done ? label : `${label} ${t('trade.site')}`,
       m.done ? t('trade.toMarketTip') : t('trade.toSiteTip'),
-      () => world.issue({ kind: 'setTradeRoute', player: LOCAL_PLAYER, id: b.id, to: m.id }),
+      () => world.issue({ kind: 'setTradeRoute', player: me, id: b.id, to: m.id }),
       m.id === to ? 'active' : '',
     );
     // The tutorial's mark: any destination, until a route is chosen.
     routes.append(tag(go, 'trade.route', to !== null));
   }
-  if (to !== null) routes.append(button('✕', t('trade.clearRoute'), () => world.issue({ kind: 'setTradeRoute', player: LOCAL_PLAYER, id: b.id, to: null })));
+  if (to !== null) routes.append(button('✕', t('trade.clearRoute'), () => world.issue({ kind: 'setTradeRoute', player: me, id: b.id, to: null })));
   box.append(routes);
 
   box.append(el('h4', '', t('trade.what')));
@@ -122,7 +122,7 @@ export function tradeControls(world: World, b: Building): HTMLElement | null {
       inTitle: t('trade.carried'),
       outTitle: t('trade.notCarried'),
       isIn: (r) => carried(b, r),
-      set: (r, on) => world.issue({ kind: 'orderTrade', player: LOCAL_PLAYER, id: b.id, res: r, count: on ? ENDLESS : 0 }),
+      set: (r, on) => world.issue({ kind: 'orderTrade', player: me, id: b.id, res: r, count: on ? ENDLESS : 0 }),
       tipIn: (name) => t('trade.tipIn', { name }),
       tipOut: (name) => t('trade.tipOut', { name }),
       noneTip: t('trade.noneTip'),

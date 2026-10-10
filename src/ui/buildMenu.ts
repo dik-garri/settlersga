@@ -1,7 +1,7 @@
 import { buildingIcon, wareIcon } from '../render/atlas';
 import { BUILDINGS, CATEGORIES, costOf } from '../sim/config';
 import { RESOURCES, type Building, type BuildingType } from '../sim/types';
-import { LOCAL_PLAYER, type World } from '../sim/world';
+import type { World } from '../sim/world';
 import { el, type View } from './dom';
 import { nextBuildingOfType } from './find';
 import { t } from './i18n';
@@ -84,7 +84,7 @@ export class BuildView implements View {
         };
         b.oncontextmenu = (e) => {
           e.preventDefault();
-          const next = nextBuildingOfType(this.world, type, this.lastFound);
+          const next = nextBuildingOfType(this.world, this.state.localPlayer, type, this.lastFound);
           if (!next) return;
           this.lastFound = next.id;
           this.select(null);
@@ -147,7 +147,7 @@ export class BuildView implements View {
     const done = new Map<BuildingType, number>();
     const sites = new Map<BuildingType, number>();
     for (const b of this.world.buildings.values()) {
-      if (b.owner !== LOCAL_PLAYER) continue;
+      if (b.owner !== this.state.localPlayer) continue;
       const m = b.done ? done : sites;
       m.set(b.type, (m.get(b.type) ?? 0) + 1);
     }

@@ -63,7 +63,8 @@ export class PauseMenu {
   open(screen: PauseScreen = 'main'): void {
     if (!this.state.menu) {
       this.wasPaused = this.state.paused;
-      this.state.paused = true;
+      // A network game goes on while one player is in the menu (the pause is everybody's: P).
+      if (!this.state.net) this.state.paused = true;
       this.state.menu = true;
       this.el.hidden = false;
     }
@@ -73,7 +74,7 @@ export class PauseMenu {
   close(): void {
     if (!this.state.menu) return;
     this.state.menu = false;
-    this.state.paused = this.wasPaused;
+    if (!this.state.net) this.state.paused = this.wasPaused;
     this.el.hidden = true;
   }
 

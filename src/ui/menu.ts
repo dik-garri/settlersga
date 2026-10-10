@@ -1,7 +1,10 @@
 import type { AudioEngine } from '../audio/audio';
+import type { Transport } from '../net/transport';
 import { el } from './dom';
 import { LANG_EVENT, t, type Key } from './i18n';
 import { browserSlots, type SlotMeta } from './saves';
+import type { StartInfo } from './lobby';
+import { LobbyView } from './lobbyView';
 import { savesPanel } from './savesPanel';
 import { defaultSetup, parseSetup, type GameSetup } from './setup';
 import { setupForm } from './setupForm';
@@ -9,8 +12,8 @@ import { settingsPanel } from './settingsPanel';
 
 /**
  * The main menu, laid out like Settlers 4's (a column of choices over a live scene; every look and
- * word ours): «Обучение» first (the tutorial missions, `src/tutorial`), «Новая игра» (the setup screen), «Загрузить» (save slots), «Сетевая игра» (the same
- * setup screen as a lobby, inactive until phase 6), «Настройки», «Об игре» and «Выход» (back to the
+ * word ours): «Обучение» first (the tutorial missions, `src/tutorial`), «Новая игра» (the setup screen), «Загрузить» (save slots), «Сетевая игра» (create
+ * or join a game over the network: the lobby, `lobbyView.ts`), «Настройки», «Об игре» and «Выход» (back to the
  * intro — a browser page has nothing to quit to). Plain DOM over the title scene; arrow keys move
  * between the choices, Esc goes back.
  */
@@ -29,6 +32,8 @@ export interface TutorialEntry {
 
 export interface MenuActions {
   start(setup: GameSetup): void;
+  /** A network game starts (the lobby hands over its connections and the host's decisions). */
+  network(transport: Transport, info: StartInfo): void;
   /** The tutorial missions with their completion marks, and starting one. */
   tutorials(): TutorialEntry[];
   tutorial(id: string): void;
@@ -65,6 +70,8 @@ export class MainMenu {
   private readonly mark = el('h1', 'wordmark');
   private readonly foot = el('footer', 'menu-foot');
   private screen: MenuScreen = 'main';
+  /** The network lobby while its screen is shown (closed when the screen changes). */
+  private lobby: LobbyView | null = null;
   private readonly slots = browserSlots();
 
   constructor(
@@ -94,7 +101,14 @@ export class MainMenu {
     this.notice.hidden = !text;
   }
 
-  show(screen: MenuScreen): void {
+  show(screen: MenuScreen, opts: { join?: string } = {}): void {
+    // A language change redraws the screen: the lobby keeps going underneath.
+    if (screen === 'network' && this.screen === 'network' && this.lobby && !opts.join) {
+      this.panel.replaceChildren(el('h2', 'menu-title', t('menu.network')), this.lobby.el);
+      return;
+    }
+    this.lobby?.dispose();
+    this.lobby = null;
     this.screen = screen;
     this.panel.innerHTML = '';
     this.panel.className = `menu-panel screen-${screen}`;
@@ -105,8 +119,9 @@ export class MainMenu {
       case 'tutorial':
         return this.tutorialScreen();
       case 'new':
+        return this.setupScreen();
       case 'network':
-        return this.setupScreen(screen === 'network');
+        return this.networkScreen(opts.join);
       case 'load':
         return this.loadScreen();
       case 'settings':
@@ -147,7 +162,7 @@ export class MainMenu {
       tutorial,
       this.choice(t('menu.new'), t('menu.newNote'), () => this.show('new')),
       this.choice(t('menu.load'), t('menu.loadNote'), () => this.show('load')),
-      this.choice(t('menu.network'), t('menu.networkNote'), () => this.show('network'), true),
+      this.choice(t('menu.network'), t('menu.networkNote'), () => this.show('network')),
       this.choice(t('menu.settings'), t('menu.settingsNote'), () => this.show('settings')),
       this.choice(t('menu.about'), '', () => this.show('about')),
       this.choice(t('menu.exit'), t('menu.exitNote'), () => this.actions.intro()),
@@ -184,19 +199,31 @@ export class MainMenu {
     this.focusFirst();
   }
 
-  private setupScreen(network: boolean): void {
+  /** The network game: create or join, then the lobby (`lobbyView.ts`). */
+  private networkScreen(join?: string): void {
+    this.heading(t('menu.network'));
+    const lobby = new LobbyView(
+      {
+        start: (transport, info) => {
+          this.lobby = null;
+          this.actions.network(transport, info);
+        },
+        back: () => {
+          this.lobby = null;
+          this.show('main');
+        },
+      },
+      this.audio,
+    );
+    this.lobby = lobby;
+    this.panel.append(lobby.el);
+    if (join) lobby.join(join);
+  }
+
+  private setupScreen(): void {
     const setup = lastSetup();
-    setup.mode = network ? 'network' : 'single';
-    this.heading(network ? t('menu.network') : t('menu.new'));
-    if (network) {
-      this.panel.append(
-        el(
-          'p',
-          'menu-soon',
-          t('menu.networkSoon'),
-        ),
-      );
-    }
+    setup.mode = 'single';
+    this.heading(t('menu.new'));
     const start = el('button', 'menu-small active', t('menu.start'));
     const problem = el('span', 'setup-problem');
     this.panel.append(

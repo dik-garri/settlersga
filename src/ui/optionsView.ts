@@ -1,6 +1,6 @@
 import { button, el, type View } from './dom';
 import { t, type Key } from './i18n';
-import type { GameState } from './state';
+import { canChangeSpeed, chooseSpeed, setPaused, type GameState } from './state';
 
 /** Game speeds offered by the strip and the options menu. */
 export const SPEEDS = [1, 2, 4] as const;
@@ -45,14 +45,12 @@ export class OptionsView implements View {
   ) {
     this.el.append(el('h4', '', t('options.speed')));
     const speed = el('div', 'info-actions');
-    const pause = button(t('options.pause'), t('options.pauseTip'), () => (state.paused = !state.paused));
+    const pause = button(t('options.pause'), t('options.pauseTip'), () => setPaused(state, !state.paused));
     this.speedButtons.set('pause', pause);
     speed.append(pause);
     for (const s of SPEEDS) {
-      const b = button(`${s}×`, t('options.speedTip', { n: s }), () => {
-        state.speed = s;
-        state.paused = false;
-      });
+      const b = button(`${s}×`, canChangeSpeed(state) ? t('options.speedTip', { n: s }) : t('net.speedHost'), () => chooseSpeed(state, s));
+      b.disabled = !canChangeSpeed(state);
       this.speedButtons.set(s, b);
       speed.append(b);
     }

@@ -45,14 +45,16 @@ export type LockstepMsg =
   | { k: 'turn'; turn: number; inputs: SeatInput[]; dropped: Seat[] }
   /** Client → host: my state checksum after playing `turn`. */
   | { k: 'sum'; turn: number; sum: string | number }
-  /** Host → clients: the checksums after `turn` differ. */
-  | { k: 'desync'; turn: number; sums: [Seat, string | number][] };
+  /** Host → clients: the checksums after `turn` differ (`agreed`: the last turn everyone agreed on). */
+  | { k: 'desync'; turn: number; sums: [Seat, string | number][]; agreed?: number | null };
 
 export interface DesyncReport {
   /** The first turn whose checksums differ. */
   turn: number;
   /** Every checksum known for that turn, by seat. */
   sums: [Seat, string | number][];
+  /** The last turn whose checksums every active seat handed in and agreed on (null: none yet). */
+  agreed: number | null;
 }
 
 export interface LockstepOptions {
@@ -94,6 +96,8 @@ export class Lockstep {
   /** Host: checksums by turn, then seat. */
   private sums = new Map<number, Map<Seat, string | number>>();
   private desynced: DesyncReport | null = null;
+  /** Host: the last turn every active seat's checksum agreed on. */
+  private agreedNo: number | null = null;
   private opts: LockstepOptions;
 
   constructor(opts: LockstepOptions) {
@@ -120,6 +124,11 @@ export class Lockstep {
   /** The turn the next local batch will be played in. */
   get inputTurn(): number {
     return this.inputNo;
+  }
+
+  /** Host: the last turn every active seat's checksum agreed on (null: none yet). */
+  get agreed(): number | null {
+    return this.agreedNo;
   }
 
   /** The first desync seen, if any. */
@@ -210,7 +219,7 @@ export class Lockstep {
         if (this.isHost) this.storeSum(from, msg.turn, msg.sum);
         return;
       case 'desync':
-        if (!this.isHost && from === this.host) this.report({ turn: msg.turn, sums: msg.sums });
+        if (!this.isHost && from === this.host) this.report({ turn: msg.turn, sums: msg.sums, agreed: msg.agreed ?? null });
         return;
     }
   }
@@ -246,14 +255,17 @@ export class Lockstep {
     m.set(seat, sum);
     const values = new Set(m.values());
     if (values.size > 1) {
-      const report = { turn, sums: [...m.entries()].sort((a, b) => a[0] - b[0]) };
-      this.opts.send('all', { k: 'desync', turn: report.turn, sums: report.sums });
+      const report = { turn, sums: [...m.entries()].sort((a, b) => a[0] - b[0]), agreed: this.agreedNo };
+      this.opts.send('all', { k: 'desync', turn: report.turn, sums: report.sums, agreed: report.agreed });
       this.report(report);
       return;
     }
     // Forget turns everyone has agreed on, and anything too old to wait for.
     const keep = this.opts.keepSums ?? 64;
-    if ([...this.active].every((s) => m!.has(s))) this.sums.delete(turn);
+    if ([...this.active].every((s) => m!.has(s))) {
+      this.sums.delete(turn);
+      if (this.agreedNo === null || turn > this.agreedNo) this.agreedNo = turn;
+    }
     for (const t of this.sums.keys()) if (t < turn - keep) this.sums.delete(t);
   }
 

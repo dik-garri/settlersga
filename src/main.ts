@@ -7,7 +7,7 @@ import { toScreen, toTile } from './render/iso';
 import { GameRenderer } from './render/renderer';
 import { TICKS_PER_SECOND } from './sim/config';
 import { saveWorld } from './sim/save';
-import { LOCAL_PLAYER, World } from './sim/world';
+import { World } from './sim/world';
 import { audioControls } from './ui/audioControls';
 import { el } from './ui/dom';
 import { Hud } from './ui/hud';
@@ -28,6 +28,16 @@ import { missionWorld, TutorialRunner, type MissionProgress } from './tutorial/r
 import type { MissionDef, UiProbe } from './tutorial/types';
 import { TutorialView } from './tutorial/view';
 import { replayTools } from './dev/replayTools';
+import type { Transport } from './net/transport';
+import type { StartInfo } from './ui/lobby';
+import { NetGame } from './ui/netGame';
+import { downloadJson, NetPanel, netWindow } from './ui/netView';
+
+/** A network game: the connections the lobby made and what the host decided at «Start». */
+interface NetStart {
+  transport: Transport;
+  info: StartInfo;
+}
 
 /** A tutorial mission to run in a game: from a step (0-based), or loaded with its progress. */
 type TutorialStart = { def: MissionDef; step: number } | { def: MissionDef; progress: MissionProgress };
@@ -92,6 +102,8 @@ async function main() {
   // Every normal start plays the intro before the menu. Back from a game (?menu, «Выход») the menu opens
   // at once, and ?menu=new opens the setup screen; the parameter is dropped from the address right
   // away, so reloading that page is a normal start again (intro first).
+  // A friend's link (?join=<code>): straight to the network lobby, connecting.
+  if (launch.kind === 'join') return title(app, atlas, audio, { setup: false, intro: false, join: launch.code });
   if (launch.kind === 'menu') {
     const fromGame = params.has('menu');
     const setup = params.get('menu') === 'new';
@@ -153,7 +165,7 @@ async function title(
   app: Application,
   atlas: Promise<SpriteAtlas>,
   audio: AudioEngine,
-  opts: { setup: boolean; intro: boolean; notice?: string },
+  opts: { setup: boolean; intro: boolean; notice?: string; join?: string },
 ) {
   document.body.classList.add('title-mode');
   app.resize();
@@ -163,7 +175,7 @@ async function title(
   const scene = new TitleScene(app, atlas, audio);
   const intro = new Intro(scene, audio);
 
-  const begin = async (make: () => Promise<World | null>, fog: boolean, seed: number, tutorial?: TutorialStart) => {
+  const begin = async (make: () => Promise<World | null>, fog: boolean, seed: number, tutorial?: TutorialStart, net?: NetStart) => {
     menu.el.classList.add('busy');
     menu.say(t('menu.preparing'));
     // Let the notice paint before the map is generated.
@@ -177,6 +189,7 @@ async function title(
     if (!world) {
       menu.el.classList.remove('busy');
       menu.say(t('menu.openFailed'));
+      net?.transport.close();
       return;
     }
     const a = await atlas;
@@ -186,13 +199,18 @@ async function title(
     app.resize();
     // A refresh during the game returns to the menu, not to a stale ?menu=new.
     history.replaceState(null, '', withLang(location.pathname));
-    game(app, a, audio, world, { fog, seed, autosave: true, tutorial });
+    game(app, a, audio, world, { fog, seed, autosave: true, tutorial, net });
   };
   const menu = new MainMenu(
     {
       start: (setup: GameSetup) => {
         const { seed, opts } = worldArgs(setup, randomSeed());
         void begin(async () => new World(seed, opts), setup.fog, seed);
+      },
+      network: (transport, info) => {
+        // Every browser builds the same world from the host's seed and setup.
+        const { seed, opts } = worldArgs(info.setup, info.seed);
+        void begin(async () => new World(seed, opts), info.setup.fog, seed, undefined, { transport, info });
       },
       load: (meta: SlotMeta) => {
         const mission = savedMission(meta.mission);
@@ -234,7 +252,8 @@ async function title(
   };
   root.append(menu.el);
   menu.say(opts.notice ?? '');
-  if (opts.intro && readPrefs().showIntro) await playIntro();
+  if (opts.join) menu.show('network', { join: opts.join });
+  else if (opts.intro && readPrefs().showIntro) await playIntro();
   else menu.show(opts.setup ? 'new' : 'main');
   Object.assign(window, { scene, menu });
 }
@@ -245,13 +264,16 @@ function game(
   atlas: SpriteAtlas,
   audio: AudioEngine,
   world: World,
-  opts: { fog: boolean; seed: number; autosave: boolean; tutorial?: TutorialStart },
+  opts: { fog: boolean; seed: number; autosave: boolean; tutorial?: TutorialStart; net?: NetStart },
 ) {
-  const state = createState();
+  // In a network game this browser plays its own seat; on one machine, player 1.
+  const net = opts.net ? new NetGame(world, opts.net.transport, opts.net.info) : null;
+  const state = createState(net?.local);
   state.fog = opts.fog;
-  const renderer = new GameRenderer(app, world, atlas, state.fog);
+  if (net) state.net = { pause: (on) => net.match.setPaused(on), speed: net.isHost ? (v) => net.match.setSpeed(v) : null };
+  const renderer = new GameRenderer(app, world, atlas, state.fog, state.localPlayer);
   const camera = new Camera(renderer.world, renderer.bounds);
-  const mid = world.homeOf(LOCAL_PLAYER);
+  const mid = world.homeOf(state.localPlayer);
   const home = toScreen(mid.x, mid.y);
   camera.centerOn(home.x, home.y);
   renderer.onSound = (id, x, y) => audio.at(id, x, y);
@@ -262,16 +284,24 @@ function game(
   const missionMeta = () => ({ mission: tutorial?.progress() ?? undefined });
   const save = async (name: string, id?: string) => !!(await slots.write(saveWorld(world), name, Date.now(), id, missionMeta()));
   // Loading or leaving starts the page over: nothing of this game is left behind.
+  // Leaving a network game says goodbye first: the others' computers take this seat over.
+  const leave = () => net?.close();
   const pause = new PauseMenu(world, state, {
     save,
-    load: (meta) => (location.href = withLang(`${location.pathname}?load=${encodeURIComponent(meta.id)}`)),
-    quit: () => (location.href = withLang(`${location.pathname}?menu`)),
+    load: (meta) => {
+      leave();
+      location.href = withLang(`${location.pathname}?load=${encodeURIComponent(meta.id)}`);
+    },
+    quit: () => {
+      leave();
+      location.href = withLang(`${location.pathname}?menu`);
+    },
   }, audio);
 
   // The minimap is framed at the top of the side panel, as wide as the panel's inside (--mm-w).
   const hudEl = document.getElementById('hud')!;
   const mmWidth = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--mm-w')) || 252;
-  const minimap = new Minimap(world, camera, state.fog, mmWidth);
+  const minimap = new Minimap(world, camera, state.fog, mmWidth, state.localPlayer);
   const sound = audioControls(audio);
   const jump = (x: number, y: number) => {
     const p = toScreen(x, y);
@@ -320,6 +350,45 @@ function game(
     });
   }
   hudEl.append(pause.el);
+  if (net) {
+    // The network game's status under the speed strip, its messages on the ticker, its end windows.
+    const panel = new NetPanel({
+      world,
+      match: net.match,
+      status: net.status,
+      seats: [...net.seats.keys()].sort((a, b) => a - b),
+      local: net.local,
+      host: net.hostSeat,
+      kick: net.isHost ? (seat) => net.kick(seat) : null,
+    });
+    hudEl.append(panel.el);
+    app.ticker.add(() => panel.update(performance.now()));
+    const toMenu = () => {
+      net.close();
+      location.href = withLang(`${location.pathname}?menu`);
+    };
+    const show = (box: HTMLElement) => {
+      hudEl.querySelector('.net-window')?.remove();
+      hudEl.append(box);
+    };
+    net.hooks = {
+      toast: (text) => hud.toast(text),
+      desync: (r) =>
+        show(
+          netWindow(t('net.desync.title'), t('net.desync.text', { turn: r.turn }), [
+            [t('net.desync.report'), () => downloadJson(`settlers-desync-p${net.local}-t${r.turn}.json`, net.report()), true],
+            [t('net.toMenu'), toMenu],
+          ]),
+        ),
+      hostLost: () => {
+        const saveIt = async () => {
+          const ok = await save(t('net.savedName', { min: Math.floor(world.tick / (60 * TICKS_PER_SECOND)) }));
+          hud.toast(ok ? t('net.saved') : t('saves.failed'));
+        };
+        show(netWindow(t('net.hostLost.title'), t('net.hostLost.text'), [[t('net.save'), () => void saveIt(), true], [t('net.toMenu'), toMenu]]));
+      },
+    };
+  }
   // Another language chosen in the settings: the side panel is built again in it (menus, windows,
   // statistics and messages carry over); the pause menu and the minimap redraw themselves.
   window.addEventListener(LANG_EVENT, () => {
@@ -356,7 +425,15 @@ function game(
   app.ticker.add((ticker) => {
     const dt = Math.min(ticker.deltaMS, 250);
     input.update(dt);
-    if (!state.paused) {
+    if (net) {
+      // The network game plays the sealed turns as they come (`NetGame.pump`); pause and speed are
+      // everybody's, so the interface shows the match's.
+      net.pump();
+      state.paused = net.match.paused;
+      state.speed = net.match.speed;
+      acc = net.match.alpha * TICK_MS;
+      if (opts.autosave && world.tick >= nextAutosave && world.outcome(state.localPlayer) === 'playing') autosave();
+    } else if (!state.paused) {
       acc += dt * state.speed;
       let n = 0;
       while (acc >= TICK_MS && n < MAX_TICKS_PER_FRAME) {
@@ -367,7 +444,7 @@ function game(
         if (tutorial && world.tick % 5 === 0) tutorial.tick(uiProbe());
       }
       if (n === MAX_TICKS_PER_FRAME) acc = 0;
-      if (opts.autosave && world.tick >= nextAutosave && world.outcome(1) === 'playing') autosave();
+      if (opts.autosave && world.tick >= nextAutosave && world.outcome(state.localPlayer) === 'playing') autosave();
     }
     camera.apply(app.screen.width, app.screen.height);
     const now = performance.now();
@@ -385,7 +462,7 @@ function game(
     minimap.update(now, app.screen.width, app.screen.height);
   });
 
-  Object.assign(window, { world, seed: opts.seed, state, renderer, camera, audio, pause, tutorial, replay: replayTools(world) });
+  Object.assign(window, { world, seed: opts.seed, state, renderer, camera, audio, pause, tutorial, replay: replayTools(world), net });
   if (opts.seed) console.info(`Settlers prototype, seed ${opts.seed} (add ?seed=${opts.seed} to replay this map)`);
   else console.info(`Game at tick ${world.tick}`);
 }

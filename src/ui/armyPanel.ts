@@ -8,8 +8,8 @@ import { settlerIcon } from '../render/atlas';
 import { BUILDINGS, LEVEL_RES, OUTPUT_SHARES, PROFESSIONS } from '../sim/config';
 import { ENDLESS } from '../sim/economy';
 import { FIGHTERS, doorHp, garrisonCounts, isFighter, isFreeFighter, maxHp, recruitNeeds, slotsOf } from '../sim/military';
-import { RESOURCES, type Building, type Resource, type SettlerKind } from '../sim/types';
-import { LOCAL_PLAYER, type World } from '../sim/world';
+import { RESOURCES, type Building, type PlayerId, type Resource, type SettlerKind } from '../sim/types';
+import type { World } from '../sim/world';
 import { button, el, type View } from './dom';
 import { t } from './i18n';
 import { profName, resLower, resName } from './names';
@@ -25,15 +25,15 @@ export type Rows = [string, string][];
  * its percentage and −/+ buttons moving its weight by 10 (0–100). Weights are relative, so the
  * percentages always add up to 100.
  */
-export function shareControls(w: World, choices: readonly Resource[], onChange: () => void): HTMLElement {
+export function shareControls(w: World, me: PlayerId, choices: readonly Resource[], onChange: () => void): HTMLElement {
   const box = el('div', 'shares');
-  const total = choices.reduce((n, r) => n + w.shareOf(r), 0) || 1;
+  const total = choices.reduce((n, r) => n + w.shareOf(r, me), 0) || 1;
   for (const r of choices) {
     const row = el('div', 'share-row');
-    const pct = Math.round((100 * w.shareOf(r)) / total);
+    const pct = Math.round((100 * w.shareOf(r, me)) / total);
     row.append(el('span', 'share-name', `${resName(r)} ${pct}%`));
     const step = (d: number) => () => {
-      w.issue({ kind: 'setShare', player: LOCAL_PLAYER, res: r, weight: Math.max(0, Math.min(100, w.shareOf(r) + d)) });
+      w.issue({ kind: 'setShare', player: me, res: r, weight: Math.max(0, Math.min(100, w.shareOf(r, me) + d)) });
       onChange();
     };
     row.append(button('−', t('army.shareLess', { name: resLower(r) }), step(-10)), button('+', t('army.shareMore', { name: resLower(r) }), step(10)));
@@ -64,7 +64,7 @@ export function garrisonRows(w: World, b: Building): Rows {
  * in; never below one fighter in all), «Заполнить» (every slot) and «Вывести» (back to one; the rest
  * step out and stand free by it).
  */
-export function garrisonControls(w: World, b: Building, onChange: () => void): HTMLElement {
+export function garrisonControls(w: World, me: PlayerId, b: Building, onChange: () => void): HTMLElement {
   const box = el('div', 'eco-orders');
   box.append(el('h4', '', t('army.garrison')));
   box.append(el('p', 'muted', t('army.garrisonNote')));
@@ -78,14 +78,14 @@ export function garrisonControls(w: World, b: Building, onChange: () => void): H
     row.append(
       tag(
         button('−', t('army.wishLess', { name }), () => {
-          w.issue({ kind: 'changeGarrison', player: LOCAL_PLAYER, id: b.id, archer, delta: -1 });
+          w.issue({ kind: 'changeGarrison', player: me, id: b.id, archer, delta: -1 });
           onChange();
         }),
         `garrison.${archer ? 'ranged' : 'melee'}.minus`,
       ),
       tag(
         button('+', t('army.wishMore', { name }), () => {
-          w.issue({ kind: 'changeGarrison', player: LOCAL_PLAYER, id: b.id, archer, delta: 1 });
+          w.issue({ kind: 'changeGarrison', player: me, id: b.id, archer, delta: 1 });
           onChange();
         }),
         `garrison.${archer ? 'ranged' : 'melee'}.plus`,
@@ -98,14 +98,14 @@ export function garrisonControls(w: World, b: Building, onChange: () => void): H
   actions.append(
     tag(
       button(t('army.fill'), t('army.fillTip'), () => {
-        w.issue({ kind: 'fillGarrison', player: LOCAL_PLAYER, id: b.id });
+        w.issue({ kind: 'fillGarrison', player: me, id: b.id });
         onChange();
       }),
       'garrison.fill',
       wish.melee >= slotsOf(b, false) && wish.ranged >= slotsOf(b, true),
     ),
     button(t('army.withdraw'), t('army.withdrawTip'), () => {
-      w.issue({ kind: 'withdrawGarrison', player: LOCAL_PLAYER, id: b.id });
+      w.issue({ kind: 'withdrawGarrison', player: me, id: b.id });
       onChange();
     }),
   );
@@ -141,26 +141,26 @@ export function barracksRows(w: World, b: Building): Rows {
  * level with the order (∞ = no end) and −1 / +1 / +5 / ∞ / ✕. The barracks recruits nobody else;
  * the highest level its pile pays for goes first.
  */
-export function recruitOrderControls(w: World, onChange: () => void): HTMLElement {
+export function recruitOrderControls(w: World, me: PlayerId, onChange: () => void): HTMLElement {
   const box = el('div', 'eco-orders');
   box.append(el('h4', '', t('army.recruits')));
   box.append(el('p', 'muted', t('army.recruitsNote')));
   for (const kind of FIGHTERS) {
     const levels = PROFESSIONS[kind].combat!.levels.length;
     for (let level = 0; level < levels; level++) {
-      const n = w.recruitOrder(kind, level);
+      const n = w.recruitOrder(kind, level, me);
       const name = levels > 1 ? t('units.kindLevel', { name: profName(kind), level: level + 1 }) : profName(kind);
       const row = el('div', 'eco-row');
       row.title = t('army.needs', { list: needText(kind, level) });
       row.append(settlerIcon(kind, 18), el('span', 'eco-name', name), el('b', '', orderText(n)));
       const order = (count: number) => () => {
-        w.issue({ kind: 'orderRecruits', player: LOCAL_PLAYER, prof: kind, level, count });
+        w.issue({ kind: 'orderRecruits', player: me, prof: kind, level, count });
         onChange();
       };
       const mark = `recruit.${kind}.${(level + 1) as 1 | 2 | 3}` as const;
       row.append(
         button('−', t('eco.less1'), () => {
-          w.issue({ kind: 'reduceRecruits', player: LOCAL_PLAYER, prof: kind, level, count: 1 });
+          w.issue({ kind: 'reduceRecruits', player: me, prof: kind, level, count: 1 });
           onChange();
         }),
         // The tutorial's marks count as used once the row holds an order.
@@ -176,8 +176,8 @@ export function recruitOrderControls(w: World, onChange: () => void): HTMLElemen
 }
 
 /** Recruit orders of the local player as a key (re-render when they change). */
-export function recruitKey(w: World): string {
-  return FIGHTERS.map((k) => PROFESSIONS[k].combat!.levels.map((_, l) => w.recruitOrder(k, l)).join(',')).join('|');
+export function recruitKey(w: World, me: PlayerId): string {
+  return FIGHTERS.map((k) => PROFESSIONS[k].combat!.levels.map((_, l) => w.recruitOrder(k, l, me)).join(',')).join('|');
 }
 
 /**
@@ -219,29 +219,33 @@ export class ArmyView implements View {
   readonly el = el('div', 'view army-view');
   private key = '';
 
-  constructor(private readonly world: World) {}
+  constructor(
+    private readonly world: World,
+    /** The player this browser plays. */
+    private readonly me: PlayerId,
+  ) {}
 
   update(): void {
     const w = this.world;
-    const fighters = w.settlers.filter((s) => s.owner === LOCAL_PLAYER && isFighter(s) && !w.dying.has(s.id));
+    const fighters = w.settlers.filter((s) => s.owner === this.me && isFighter(s) && !w.dying.has(s.id));
     const garrisoned = fighters.filter((s) => s.home !== null).length;
     const free = fighters.filter((s) => isFreeFighter(w, s)).length;
     const field = fighters.filter((s) => s.post && s.inside === null).length;
-    const coming = w.settlers.filter((s) => s.owner === LOCAL_PLAYER && s.tasks.some((t) => t.t === 'recruit')).length;
+    const coming = w.settlers.filter((s) => s.owner === this.me && s.tasks.some((t) => t.t === 'recruit')).length;
     const byKey = new Map<string, number>();
     for (const s of fighters) {
       const levels = PROFESSIONS[s.kind].combat!.levels.length;
       const k = levels > 1 ? t('units.kindLevel', { name: profName(s.kind), level: s.level + 1 }) : profName(s.kind);
       byKey.set(k, (byKey.get(k) ?? 0) + 1);
     }
-    const shares = OUTPUT_WEAPONS.map((r) => w.shareOf(r));
-    const key = JSON.stringify([Math.round(w.strengthOf()), fighters.length, garrisoned, free, field, coming, [...byKey], shares, recruitKey(w)]);
+    const shares = OUTPUT_WEAPONS.map((r) => w.shareOf(r, this.me));
+    const key = JSON.stringify([Math.round(w.strengthOf(this.me)), fighters.length, garrisoned, free, field, coming, [...byKey], shares, recruitKey(w, this.me)]);
     if (key === this.key) return;
     this.key = key;
     this.el.innerHTML = '';
     this.el.append(el('h4', '', t('army.strength')));
     const meter = el('div', 'strength');
-    const pct = Math.round(w.strengthOf());
+    const pct = Math.round(w.strengthOf(this.me));
     const bar = el('span', 'strength-bar');
     bar.style.setProperty('--p', `${Math.min(100, (pct / 150) * 100)}%`);
     meter.append(bar, el('b', '', `${pct}%`));
@@ -262,9 +266,9 @@ export class ArmyView implements View {
     if (coming > 0) line(t('army.toBarracks'), String(coming));
     for (const [k, n] of [...byKey].sort()) line(k, String(n));
     this.el.append(grid);
-    this.el.append(recruitOrderControls(w, () => (this.key = '')));
+    this.el.append(recruitOrderControls(w, this.me, () => (this.key = '')));
     this.el.append(el('h4', '', t('army.weapons')));
     const smith = el('p', 'muted', t('army.weaponsNote'));
-    this.el.append(smith, shareControls(w, OUTPUT_WEAPONS, () => (this.key = '')));
+    this.el.append(smith, shareControls(w, this.me, OUTPUT_WEAPONS, () => (this.key = '')));
   }
 }
