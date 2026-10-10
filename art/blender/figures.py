@@ -34,7 +34,7 @@ PAGE = 2048  # atlas page size in pixels (at lib.RESOLUTION)
 # Mirrors src/render/animConfig.ts: tool shapes, hat styles and the work actions with their tool
 # and near-arm angles (turns of π: 0 hanging down, 0.5 forward, 1 straight up) and bow pull.
 TOOLS = ['none', 'axe', 'hammer', 'pick', 'shovel', 'scythe', 'rod', 'bucket', 'sword', 'bow', 'carry', 'spear']
-HAT_STYLES = ['cap', 'straw', 'helmet', 'hood', 'chef', 'bare', 'plume', 'galea1', 'galea2', 'galea3', 'coif']
+HAT_STYLES = ['cap', 'straw', 'helmet', 'hood', 'chef', 'bare', 'plume', 'galea1', 'galea2', 'galea3', 'coif', 'knit']
 
 #: Outfits (src/render/animConfig.ts `Outfit`): what a profession wears over the tunic, rendered as
 #: its own pose groups `hold:<tool>@<outfit>` and `work:<action>@<outfit>`.
@@ -44,9 +44,10 @@ OUTFITS = {
     'leader': (['sword'], ['sword']),  # squad leader: gilded cuirass, round golden shield, cloak
     'healer': (['none'], []),  # infirmary's healer: long linen robe, stole, satchel of herbs
     'watch': (['spear'], []),  # lookout's watchman: short wool cape, horn at the hip (and his spear)
+    'saboteur': (['pick'], ['smash']),  # saboteur: dark jerkin, sash with pouches, leg wraps (and a pick)
 }
 #: Bumped when a look changes, so its cached groups are rendered again.
-LOOK_REV = {'legion': 1, 'archer': 1, 'leader': 2, 'healer': 1, 'watch': 1}
+LOOK_REV = {'legion': 1, 'archer': 1, 'leader': 2, 'healer': 1, 'watch': 1, 'saboteur': 1}
 ACTIONS = {
     'chop': ('axe', [0.95, 0.62, 0.2, 0.1], None),
     'hammer': ('hammer', [0.82, 0.5, 0.16, 0.34], None),
@@ -60,11 +61,15 @@ ACTIONS = {
     'shoot': ('bow', [0.5, 0.5, 0.5, 0.5], [0, 0.5, 1, 0]),
     # The geologist bent over the rock, knocking it with his hammer.
     'knock': ('hammer', [1.0, 0.43, 0.38, 0.41], None),
+    # The saboteur hacking at a wall: the pick from over his head into the wall at chest height.
+    'smash': ('pick', [1.04, 0.78, 0.5, 0.6], None),
 }
 #: Actions done bent over (animConfig.ts `ActionDef.bend`): the torso's forward bend per frame in
-#: degrees; the arm angles above are then the torso's, the free hand rests forward, the feet apart.
+#: degrees; the arm angles above are then the torso's, the free hand rests forward (two-handed tools
+#: keep both hands on the haft), the feet apart.
 BEND = {
     'knock': [30, 42, 50, 46],
+    'smash': [-4, 4, 14, 8],  # leaning back on the swing, into the blow
 }
 #: Where the torso bends (the belt), in figure space.
 WAIST_Z = 0.44
@@ -392,12 +397,48 @@ class Figure:
         horn.append(lib.cylinder((0, 0, 0.47), 0.145, 0.022, L, rot=(-0.5, 0, 0), verts=24))
         horn = on_body(horn)
 
+        # The saboteur: a close-fitting jerkin of dark wool to mid-thigh, laced up the front, a sash in
+        # the player's colour knotted at the hip with its ends hanging, small leather pouches on it, and
+        # dark cloth wraps bound round the shins with leather thongs — dark from the cap to the ankles
+        # but for the sash, the sleeves and the tunic's hem, unlike any other settler. The jerkin's
+        # skirt hangs from the root (like the tunic's skirt), so it stays with the legs in a bent pose.
+        jerk = lib.mat_grain('jerkin', (0.12, 0.11, 0.12), (0.25, 0.22, 0.22), scale=26, stretch=(1, 1, 3), bump=0.45)
+        wrap = lib.mat_grain('wraps', (0.16, 0.14, 0.12), (0.3, 0.27, 0.22), scale=34, stretch=(1, 4, 1), bump=0.55)
+        lean = math.atan(0.11)  # the jerkin's front leans in towards the shoulders
+        doublet = on_body([lib.cylinder((0, 0, 0.54), 0.139, 0.2, jerk, radius2=0.117, verts=22),
+                          lib.cylinder((0, 0, 0.648), 0.104, 0.03, jerk, radius2=0.086, verts=20),
+                          lib.box((0.133, 0, 0.545), (0.012, 0.022, 0.17), L, rot=(0, -lean, 0))] +
+                         [lib.box((0.136 - 0.011 * k, 0, 0.49 + 0.05 * k), (0.01, 0.06, 0.01), L, rot=(0, -lean, 0))
+                          for k in range(3)] +
+                         [lib.sphere((0, side * 0.14, 0.618), 0.062, jerk, scale=(1.05, 0.9, 0.55)) for side in (-1, 1)])
+        doublet += [self.attach(lib.cylinder((0, 0, 0.39), 0.153, 0.12, jerk, radius2=0.139, verts=22), self.root)]
+        sash = on_body([masked(lib.cylinder((0, 0, 0.455), 0.147, 0.055, self.tunic, verts=24)),
+                        masked(lib.sphere((0.025, -0.145, 0.458), 0.032, self.tunic, scale=(1, 0.8, 1))),
+                        masked(lib.box((0.035, -0.152, 0.395), (0.032, 0.012, 0.1), self.tunic, rot=(0.12, 0.18, 0))),
+                        masked(lib.box((0.0, -0.152, 0.4), (0.028, 0.012, 0.085), self.tunic, rot=(0.1, -0.12, 0)))])
+        pouches = []
+        for k, a in enumerate((0.45, 1.15, 2.1)):
+            r = 0.158
+            pouches += [lib.box((math.cos(a) * r, math.sin(a) * r, 0.435), (0.034, 0.05, 0.06), L, rot=(0, 0, a), bevel=0.012),
+                        lib.box((math.cos(a) * (r + 0.006), math.sin(a) * (r + 0.006), 0.452), (0.03, 0.054, 0.022), L,
+                                rot=(0, 0, a), bevel=0.006)]
+        pouches = on_body(pouches)
+        wraps = []
+        for i, side in enumerate((-1, 1)):
+            parts = [lib.cylinder((0, side * 0.062, 0.15), 0.057, 0.18, wrap, radius2=0.051, verts=12)]
+            parts += [lib.cylinder((0, side * 0.062, 0.09 + 0.05 * k), 0.06 - 0.002 * k, 0.012, L,
+                                   rot=((0.18 if k % 2 else -0.18), 0, 0), verts=12) for k in range(3)]
+            for obj in parts:
+                self.attach(obj, self.legs[i])
+            wraps += parts
+
         self.extras = {
             'legion': bands + pauldrons + kilt + belt + scutum,
             'archer': jerkin + quiver + kilt + belt,
             'leader': cuirass + kilt + cloak + round_shield,
             'healer': robe + stole + satchel,
             'watch': cape + horn,
+            'saboteur': doublet + sash + pouches + wraps,
         }
 
     def show(self, shape, outfit=None):
@@ -479,7 +520,9 @@ def work_frames(action):
         else:
             kw = dict(right=a, left=0.04, tilt=WORK_TILT)
         if action in BEND:
-            kw.update(bend=BEND[action][f], leg=12, left=0.3, left_yaw=12)
+            kw.update(bend=BEND[action][f], leg=12)
+            if shape not in TWO_HANDED:
+                kw.update(left=0.3, left_yaw=12)
         frames.append((shape, kw))
     return frames
 
@@ -752,6 +795,10 @@ def build_settlers(out, tmp, only=None, hats=None, add=False):
         meta['groups'][key] = rows
         print('settlers: rendered', key, flush=True)
     if add:
+        # Hat styles the sheet lacks (a new one) go after the new groups.
+        missing = [s for s in HAT_STYLES if s not in meta['hats']]
+        if missing:
+            meta['hats'].update(render_hats(scene, fig, yaws, pack, path, missing))
         meta['pages'] = meta['pages'][:kept] + pack.save(out, 'settlers', first=kept)
         meta['frames'] = pack.frames
         with open(os.path.join(out, 'settlers.json'), 'w') as f:
@@ -796,6 +843,7 @@ def build_hat(style, fig):
     steel.node_tree.nodes['Principled BSDF'].inputs['Metallic'].default_value = 0.92
     gilt = lib.mat_flat('gilt', (0.98, 0.78, 0.3), rough=0.22)
     gilt.node_tree.nodes['Principled BSDF'].inputs['Metallic'].default_value = 0.95
+    knit = lib.mat_grain('knit', (0.8, 0.8, 0.78), (0.98, 0.98, 0.97), scale=34, stretch=(1, 1, 6), bump=0.6)
     red = lib.mat_grain('crest', (0.62, 0.05, 0.04), (0.9, 0.16, 0.1), scale=40, stretch=(1, 6, 1), bump=0.6)
 
     def galea(metal, crest_size=0.0):
@@ -841,6 +889,12 @@ def build_hat(style, fig):
         'chef': lambda: [lib.cylinder((-0.01, 0, z + 0.14), 0.12, 0.2, white, radius2=0.14, verts=18),
                          lib.sphere((-0.01, 0, z + 0.25), 0.15, white, scale=(1, 1, 0.5))],
         'bare': lambda: [],
+        # The saboteur's knitted cap: pulled down to the brows over a rolled, ribbed band, its soft
+        # crown slumping back over the nape.
+        'knit': lambda: [lib.sphere((-0.018, 0, z + 0.062), 0.133, knit, scale=(1.04, 1.05, 0.8)),
+                         lib.cylinder((-0.01, 0, z + 0.04), 0.138, 0.042, knit, radius2=0.135, rot=(0, -0.16, 0), verts=24),
+                         lib.sphere((-0.1, 0, z + 0.1), 0.062, knit, scale=(1.3, 1.0, 0.72)),
+                         lib.sphere((-0.158, 0, z + 0.066), 0.04, knit, scale=(1.0, 0.95, 0.9))],
         # The healer's linen coif: a close cap over the hair, the face left open, a flap at the nape.
         'coif': lambda: [lib.sphere((-0.04, 0, z + 0.06), 0.14, white, scale=(1.05, 1.08, 0.75)),
                          lib.box((-0.115, 0, z - 0.045), (0.05, 0.19, 0.13), white, rot=(0, 0.28, 0), bevel=0.02)],
@@ -857,7 +911,7 @@ def build_hat(style, fig):
     return objs
 
 
-def render_hats(scene, fig, yaws, pack, path):
+def render_hats(scene, fig, yaws, pack, path, styles=HAT_STYLES):
     """Hat layers: per style and direction, standing, with the figure as a holdout so the head
     hides what is behind it. Built in figure space (before the root scale), so they sit on the head."""
     hats = {}
@@ -867,7 +921,7 @@ def render_hats(scene, fig, yaws, pack, path):
     for o in body:
         o.is_holdout = True
     scale = fig.root.scale.copy()
-    for style in HAT_STYLES:
+    for style in styles:
         fig.root.scale = (1, 1, 1)
         fig.root.rotation_euler = (0, 0, 0)
         fig.waist.rotation_euler = (0, 0, 0)

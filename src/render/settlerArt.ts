@@ -310,6 +310,18 @@ export function paintHat(ctx: Ctx, pd: number, style: HatStyle): void {
       ctx.closePath();
       ctx.fill();
       return;
+    case 'knit':
+      // A knitted cap pulled down to the brows, a rolled band, its crown slumping back.
+      ctx.fillStyle = '#c4c4c4';
+      ctx.beginPath();
+      ctx.arc(cx, -21.6, 3.9, Math.PI, 0);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(cx - fr.f[0] * 2.4, -24.4, 2 + Math.abs(fr.f[0]) * 0.8, 1.7, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#9c9c9c';
+      ctx.fillRect(cx - 4.1, -22.2, 8.2, 1.4);
+      return;
     case 'bare':
       ctx.fillStyle = '#6b4423';
       ctx.beginPath();

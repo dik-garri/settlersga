@@ -9,15 +9,16 @@ import type { BuildingType, PlantKind, Resource, SettlerKind, Task } from '../si
 export const TOOLS = ['none', 'axe', 'hammer', 'pick', 'shovel', 'scythe', 'rod', 'bucket', 'sword', 'bow', 'carry', 'spear'] as const;
 export type ToolShape = (typeof TOOLS)[number];
 
-export type HatStyle = 'cap' | 'straw' | 'helmet' | 'hood' | 'chef' | 'bare' | 'plume' | 'galea1' | 'galea2' | 'galea3' | 'coif';
-export const HAT_STYLES: readonly HatStyle[] = ['cap', 'straw', 'helmet', 'hood', 'chef', 'bare', 'plume', 'galea1', 'galea2', 'galea3', 'coif'];
+export type HatStyle = 'cap' | 'straw' | 'helmet' | 'hood' | 'chef' | 'bare' | 'plume' | 'galea1' | 'galea2' | 'galea3' | 'coif' | 'knit';
+export const HAT_STYLES: readonly HatStyle[] = ['cap', 'straw', 'helmet', 'hood', 'chef', 'bare', 'plume', 'galea1', 'galea2', 'galea3', 'coif', 'knit'];
 
 /**
  * 3D outfits (`art/blender/figures.py` `OUTFITS`): what a profession wears over the tunic, rendered
  * as their own pose groups (`hold:<tool>@<outfit>`, `work:<action>@<outfit>`); professions without
- * one use the plain groups. Fighters' armour, and the healer's robe and the watchman's cape.
+ * one use the plain groups. Fighters' armour, the healer's robe, the watchman's cape and the
+ * saboteur's dark jerkin.
  */
-export type Outfit = 'legion' | 'archer' | 'leader' | 'healer' | 'watch';
+export type Outfit = 'legion' | 'archer' | 'leader' | 'healer' | 'watch' | 'saboteur';
 
 /** Synthesised sound effects (see `audio/sounds.ts`). */
 export type SoundId =
@@ -67,6 +68,9 @@ export const ACTIONS = {
   shoot: { tool: 'bow', arm: [0.5, 0.5, 0.5, 0.5], pull: [0, 0.5, 1, 0], loopMs: 800 },
   // The geologist bends over the rock and knocks it with his hammer (Settlers 4), not at chest height.
   knock: { tool: 'hammer', arm: [1.0, 0.43, 0.38, 0.41], bend: [30, 42, 50, 46], loopMs: 700, sound: 'pick', soundFrame: 2 },
+  // The saboteur hacks at a wall: the pick swung from over his head into the wall at chest height,
+  // leaning into the blow, not down to the ground like the stonecutter.
+  smash: { tool: 'pick', arm: [1.04, 0.78, 0.5, 0.6], bend: [-4, 4, 14, 8], loopMs: 760, sound: 'pick', soundFrame: 2 },
 } satisfies Record<string, ActionDef>;
 export type ActionId = keyof typeof ACTIONS;
 export const ACTION_IDS = Object.keys(ACTIONS) as ActionId[];
@@ -124,9 +128,10 @@ const STYLES: Partial<Record<SettlerKind, Partial<SettlerStyle>>> = {
   // Specialists: the pioneer digs border stones in, the thief goes about in a dark hood, hands free.
   pioneer: { tunic: '#a8743a', hat: '#6b4a2a', hatStyle: 'straw', work: 'dig', holds: 'shovel' },
   thief: { tunic: '#2e2a30', hat: '#1e1b20', hatStyle: 'hood', work: 'sow' },
-  // The saboteur (network games): a rust-brown hood and a pickaxe he hacks at enemy walls with. Art to
-  // do: no figure of his own yet — he reuses the stonecutter's `mine` pose and the thief's hood.
-  saboteur: { tunic: '#5a3426', hat: '#2a1a14', hatStyle: 'hood', work: 'mine', holds: 'pick' },
+  // The saboteur (network games): a knitted cap, a dark close-fitting jerkin with a sash of pouches,
+  // dark leg wraps, and the pickaxe he hacks at enemy walls with (`smash`). Unlike the thief (a hood,
+  // hands free) he goes about with his tool.
+  saboteur: { tunic: '#5a3426', hat: '#7a2e22', hatStyle: 'knit', work: 'smash', holds: 'pick', outfit: 'saboteur' },
   donkeyrancher: { tunic: '#7a6a4a', hat: '#4a3a26', hatStyle: 'straw' },
   // The infirmary's healer: a long linen robe with a stole, a satchel of herbs, a white coif; he
   // works inside, so he needs no work pose.
@@ -137,7 +142,7 @@ const STYLES: Partial<Record<SettlerKind, Partial<SettlerStyle>>> = {
 };
 
 /** Work done in a task of its own kind, whatever the profession (the geologist knocking the rock). */
-export const TASK_ACTION: Partial<Record<Task['t'], ActionId>> = { prospect: 'knock', sabotage: 'mine' };
+export const TASK_ACTION: Partial<Record<Task['t'], ActionId>> = { prospect: 'knock', sabotage: 'smash' };
 
 /** Work done on a planting or gathering task overrides the profession's default `work`. */
 export const PLANT_ACTION: Record<PlantKind, ActionId> = { tree: 'dig', grain: 'sow' };
