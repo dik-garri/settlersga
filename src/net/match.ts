@@ -52,7 +52,7 @@ export const SAVE_EVERY_TICKS = 60 * TICKS_PER_SECOND;
 /** Longest save name (characters). */
 export const SAVE_NAME_MAX = 40;
 /** Command records a network save keeps (`NetSave.log`), for looking into a game later. */
-const LOG_TAIL = 200;
+const LOG_TAIL = 100;
 /** The longest input delay the host may set (turns). */
 export const MAX_NET_DELAY = 24;
 

@@ -1,6 +1,6 @@
 import { BlobReceiver, sendBlob } from '../net/blob';
 import { cleanChat, type NetChatLine } from '../net/chat';
-import { SNAPSHOT_BLOB, type NetStartBase, type RejoinToClient, type ResumeInfo, type ResumeStart } from '../net/core';
+import { SNAPSHOT_BLOB, type NetStartBase, type SeatControlKind, type RejoinToClient, type ResumeInfo, type ResumeStart } from '../net/core';
 import { delayFor, MIN_DELAY } from '../net/delay';
 import { CHECKSUM_EVERY, NET_SPEEDS, TURN_TICKS } from '../net/match';
 import type { Seat } from '../net/lockstep';
@@ -57,7 +57,7 @@ export interface ChatLine {
 export type RefuseReason = 'version' | 'full' | 'started' | 'denied';
 
 /** Who plays a seat of a loaded game: a person, the computer, or nobody (the seat stays passive). */
-export type SeatControl = 'human' | 'ai' | 'none';
+export type SeatControl = SeatControlKind;
 
 /** A loaded network game at «Start»: which save, who plays each human seat, at what speed. */
 export interface LoadInfo {

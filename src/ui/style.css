@@ -1322,6 +1322,7 @@ button.wide {
 }
 
 .chat-log p {
+  display: block;
   margin: 0 0 2px;
   overflow-wrap: anywhere;
 }
@@ -1331,6 +1332,7 @@ button.wide {
 }
 
 .chat-log b {
+  display: inline;
   text-shadow: 0 1px 1px #000;
 }
 
