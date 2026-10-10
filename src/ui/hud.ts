@@ -13,7 +13,6 @@ import { t, withLang, type Key } from './i18n';
 import { glyph, type GlyphName } from './icons';
 import { InfoView } from './infoPanel';
 import { MESSAGE_CYCLE_MS, messageText } from './messageText';
-import { resName } from './names';
 import { playerRowLabel } from './playerNames';
 import { OptionsView, SPEEDS, type GameActions } from './optionsView';
 import { SettlerInfoView } from './settlerInfo';
@@ -21,6 +20,8 @@ import { UnitsView } from './unitsView';
 import { SettlersView } from './settlersView';
 import { canChangeSpeed, chooseSpeed, setPaused, type GameState, type Placeable } from './state';
 import { menuOpen, type MenuId } from './locks';
+import { goodsTip, menuTip } from './tips';
+import { hideTip, tip } from './tooltip';
 import { tag } from './uiTarget';
 import { economyTable, economyVerdict, modeLine } from './modeView';
 import { StatsView } from './statsView';
@@ -145,7 +146,8 @@ export class Hud {
     const tabs = el('nav', 'main-tabs');
     for (const m of MENUS) {
       const b = tag(el('button', 'gem'), `menu.${m.id}`);
-      b.title = t(m.title);
+      tip(b, () => menuTip(m.id, !menuOpen(this.state.locks, m.id)));
+      b.setAttribute('aria-label', t(m.title));
       b.append(glyph(m.glyph));
       b.onclick = () => {
         b.blur();
@@ -167,7 +169,8 @@ export class Hud {
 
     const strip = el('div', 'strip');
     const pause = tag(el('button', 'gem small'), 'speed.pause');
-    pause.title = t('hud.pauseTip');
+    tip(pause, t('hud.pauseTip'));
+    pause.setAttribute('aria-label', t('hud.pauseTip'));
     pause.append(glyph('pause', 14));
     pause.onclick = () => {
       setPaused(state, !state.paused);
@@ -202,6 +205,7 @@ export class Hud {
 
   /** Takes the HUD off the page (the minimap and sound controls go with the next one). */
   dispose(): void {
+    hideTip();
     for (const p of this.parts) p.remove();
   }
 
@@ -211,7 +215,7 @@ export class Hud {
     const goods = el('div', 'readout-goods');
     for (const r of PINNED) {
       const s = el('span', 'stat');
-      s.title = resName(r);
+      tip(s, () => goodsTip(r, t('tip.stockGoods')));
       const value = el('b', '', '0');
       s.append(wareIcon(r, 20), value);
       goods.append(s);
@@ -220,7 +224,7 @@ export class Hud {
     const army = el('div', 'readout-army');
     const cell = (icon: HTMLElement, value: HTMLElement, title: string) => {
       const s = el('span', 'stat');
-      s.title = title;
+      tip(s, title);
       s.append(icon, value);
       return s;
     };
@@ -230,7 +234,7 @@ export class Hud {
       cell(el('span', 'strength-ico', '⚔'), this.strength, t('hud.readout.strength')),
     );
     this.modeEl.hidden = true;
-    this.modeEl.title = t('ecowin.modeTip');
+    tip(this.modeEl, t('ecowin.modeTip'));
     box.append(goods, army, this.modeEl);
     return box;
   }
@@ -333,7 +337,7 @@ export class Hud {
     const at = opts.at;
     if (at) {
       m.classList.add('jump');
-      m.title = t('hud.messageTip');
+      tip(m, t('hud.messageTip'));
       m.onclick = () => {
         this.jumps++;
         this.jump(at.x, at.y);
@@ -356,7 +360,6 @@ export class Hud {
       for (const [m, b] of this.menuButtons) {
         const open = menuOpen(state.locks, m);
         b.classList.toggle('locked', !open);
-        b.title = open ? t(MENUS.find((x) => x.id === m)!.title) : `${t(MENUS.find((x) => x.id === m)!.title)} — ${t('tut.ui.locked')}`;
       }
       if (!menuOpen(state.locks, this.menu)) this.menu = 'build';
     }
@@ -474,7 +477,7 @@ export class Hud {
  */
 function scoreTable(world: World, me: PlayerId, names: ReadonlyMap<PlayerId, string>): HTMLTableElement {
   const table = el('table', 'score-table');
-  table.title = t('end.scoreTip');
+  tip(table, t('end.scoreTip'));
   const head = el('tr');
   const cols: Key[] = ['end.col.player', 'stats.col.killed', 'stats.col.settlers', 'stats.col.fighters', 'end.col.gold', 'end.col.ore', 'end.col.food', 'end.col.buildings', 'stats.col.score'];
   for (const h of cols) head.append(el('th', '', t(h)));

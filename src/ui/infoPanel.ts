@@ -27,6 +27,8 @@ import { glyph } from './icons';
 import { buildingName, profName, resLower, resName } from './names';
 import { refreshTradeCounts, tradeControls, tradeKey, tradeRows } from './tradeView';
 import type { GameState } from './state';
+import { buildingTip } from './tips';
+import { tip } from './tooltip';
 import { tag } from './uiTarget';
 
 /**
@@ -226,7 +228,7 @@ export class InfoView implements View {
       // Settlers 4: the work area can be moved — choose a new centre with a click on the map.
       const area = el('div', 'info-actions');
       const move = tag(el('button', this.state.movingWorkArea === b.id ? 'active' : '', t('info.moveArea')), 'info.workArea');
-      move.title = t('info.moveAreaTip');
+      tip(move, t('info.moveAreaTip'));
       move.onclick = () => {
         this.state.movingWorkArea = b.id;
         this.toast(t('info.moveAreaToast'));
@@ -235,7 +237,7 @@ export class InfoView implements View {
       area.append(move);
       if (b.workAt) {
         const back = el('button', '', t('info.areaBack'));
-        back.title = t('info.areaBackTip');
+        tip(back, t('info.areaBackTip'));
         back.onclick = () => {
           this.world.issue({ kind: 'setWorkArea', player: this.me, id: b.id, at: null });
           back.blur();
@@ -256,14 +258,14 @@ export class InfoView implements View {
     const actions = el('div', 'info-actions');
     if (!b.done || def.recipe || def.residence) {
       const prio = tag(el('button', b.priority ? 'active' : '', b.priority ? t('info.priorityOn') : t('info.priorityBtn')), 'info.priority');
-      prio.title = t('info.priorityTip');
+      tip(prio, t('info.priorityTip'));
       prio.onclick = () => this.world.issue({ kind: 'setPriority', player: this.me, id: b.id, on: !b.priority });
       actions.append(prio);
     }
     if (canStop(b)) {
       // Settlers 4's stop switch: no new work, nothing delivered, the goods at it go to others.
       const stop = tag(el('button', b.stopped ? 'active' : '', b.stopped ? t('info.start') : t('info.stop')), 'info.stop');
-      stop.title = b.stopped ? t('info.startTip') : b.done ? t('info.stopTip') : t('info.stopSiteTip');
+      tip(stop, b.stopped ? t('info.startTip') : b.done ? t('info.stopTip') : t('info.stopSiteTip'));
       stop.onclick = () => {
         this.world.issue({ kind: 'setStopped', player: this.me, id: b.id, on: !b.stopped });
         stop.blur();
@@ -281,7 +283,7 @@ export class InfoView implements View {
       confirming ? 'danger' : '',
       confirming ? (last ? t('info.demolishLast') : t('info.demolishSure')) : t('info.demolish'),
     );
-    demolish.title = last ? t('info.demolishLastTip') : t('info.demolishTip');
+    tip(demolish, last ? t('info.demolishLastTip') : t('info.demolishTip'));
     tag(demolish, 'info.demolish');
     demolish.onclick = () => {
       if (!confirming) {
@@ -294,7 +296,7 @@ export class InfoView implements View {
     actions.append(demolish);
     // Settlers 4: the next building (or site) of this type, the camera follows.
     const next = el('button', '', t('info.next'));
-    next.title = t('info.nextTip');
+    tip(next, t('info.nextTip'));
     next.onclick = () => {
       const n = nextBuildingOfType(this.world, this.me, b.type, b.id);
       if (n && n.id !== b.id) this.focus(n);
@@ -310,10 +312,13 @@ export class InfoView implements View {
     const head = el('div', 'info-head');
     const pic = el('div', 'info-pic');
     pic.append(buildingIcon(b.type, 64));
+    // What this kind of building is for, with its numbers (as in the build menu).
+    tip(pic, () => buildingTip(b.type, { noHint: true }));
     const title = el('div', 'info-title');
     title.append(el('h3', '', buildingName(b.type)), el('span', 'muted', b.owner === this.me ? (b.done ? t('info.yours') : t('info.yourSite')) : t('info.foreign')));
     const close = el('button', 'gem small', '');
-    close.title = t('common.close');
+    tip(close, t('common.close'));
+    close.setAttribute('aria-label', t('common.close'));
     close.append(glyph('close', 14));
     close.onclick = () => {
       this.state.selected = null;
@@ -356,7 +361,7 @@ export class InfoView implements View {
     more.onclick = () => (this.attackCount = Math.min(available, this.attackCount + 1));
     const go = el('button', available > 0 ? 'danger' : '', t('info.attack', { n: Math.min(this.attackCount, available) }));
     go.disabled = available === 0;
-    go.title = available > 0 ? t('info.attackTip') : t('info.noAttackers');
+    tip(go, available > 0 ? t('info.attackTip') : t('info.noAttackers'));
     go.onclick = () => {
       const sent = this.world.issue({ kind: 'attack', player: this.me, target: b.id, count: this.attackCount });
       this.toast(sent > 0 ? t('input.order.attack', { n: sent }) : t('info.nobodyToSend'));

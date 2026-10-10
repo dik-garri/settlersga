@@ -7,12 +7,14 @@
 import { settlerIcon } from '../render/atlas';
 import { BUILDINGS, LEVEL_RES, OUTPUT_SHARES, PROFESSIONS } from '../sim/config';
 import { ENDLESS } from '../sim/economy';
-import { FIGHTERS, doorHp, garrisonCounts, isFighter, isFreeFighter, maxHp, recruitNeeds, slotsOf } from '../sim/military';
+import { FIGHTERS, doorHp, garrisonCounts, isFighter, isFreeFighter, maxHp, slotsOf } from '../sim/military';
 import { RESOURCES, type Building, type PlayerId, type Resource, type SettlerKind } from '../sim/types';
 import type { World } from '../sim/world';
 import { button, el, type View } from './dom';
 import { t } from './i18n';
 import { profName, resLower, resName } from './names';
+import { profTip, recruitTip, shareTip } from './tips';
+import { tip } from './tooltip';
 import { tag } from './uiTarget';
 
 /** Weapons whose shares the player sets (share-controlled outputs). */
@@ -30,6 +32,7 @@ export function shareControls(w: World, me: PlayerId, choices: readonly Resource
   const total = choices.reduce((n, r) => n + w.shareOf(r, me), 0) || 1;
   for (const r of choices) {
     const row = el('div', 'share-row');
+    tip(row, () => shareTip(r));
     const pct = Math.round((100 * w.shareOf(r, me)) / total);
     row.append(el('span', 'share-name', `${resName(r)} ${pct}%`));
     const step = (d: number) => () => {
@@ -73,6 +76,7 @@ export function garrisonControls(w: World, me: PlayerId, b: Building, onChange: 
   if (slotsOf(b, true) > 0) kinds.push(['archer', true, wish.ranged]);
   for (const [kind, archer, n] of kinds) {
     const row = el('div', 'eco-row');
+    tip(row, () => profTip(kind));
     const name = archer ? t('army.bowmen') : t('army.swordsmen');
     row.append(settlerIcon(kind, 18), el('span', 'eco-name', name), el('b', '', `${n} / ${slotsOf(b, archer)}`));
     row.append(
@@ -113,13 +117,6 @@ export function garrisonControls(w: World, me: PlayerId, b: Building, onChange: 
   return box;
 }
 
-/** «меч, 2 золота»: what one recruit of `kind` at `level` takes from the barracks pile. */
-function needText(kind: SettlerKind, level: number): string {
-  return (Object.entries(recruitNeeds(kind, level)) as [Resource, number][])
-    .map(([r, n]) => (n > 1 ? `${n} ${resLower(r)}` : resLower(r)))
-    .join(', ');
-}
-
 /** «∞», «3» or «—»: a recruit order as shown. */
 export function orderText(n: number): string {
   return n === ENDLESS ? '∞' : n > 0 ? String(n) : '—';
@@ -151,7 +148,7 @@ export function recruitOrderControls(w: World, me: PlayerId, onChange: () => voi
       const n = w.recruitOrder(kind, level, me);
       const name = levels > 1 ? t('units.kindLevel', { name: profName(kind), level: level + 1 }) : profName(kind);
       const row = el('div', 'eco-row');
-      row.title = t('army.needs', { list: needText(kind, level) });
+      tip(row, () => recruitTip(kind, level));
       row.append(settlerIcon(kind, 18), el('span', 'eco-name', name), el('b', '', orderText(n)));
       const order = (count: number) => () => {
         w.issue({ kind: 'orderRecruits', player: me, prof: kind, level, count });
@@ -249,13 +246,13 @@ export class ArmyView implements View {
     const bar = el('span', 'strength-bar');
     bar.style.setProperty('--p', `${Math.min(100, (pct / 150) * 100)}%`);
     meter.append(bar, el('b', '', `${pct}%`));
-    meter.title = t('army.strengthTip');
+    tip(meter, t('army.strengthTip'));
     this.el.append(meter);
     this.el.append(el('h4', '', t('army.fighters')));
     const grid = el('div', 'stats-grid');
     const line = (label: string, value: string, title = '') => {
       const row = el('span', 'stock-row');
-      if (title) row.title = title;
+      if (title) tip(row, title);
       row.append(el('span', 'stock-name', label), el('b', '', value));
       grid.append(row);
     };

@@ -10,6 +10,8 @@ import { lower, t } from './i18n';
 import { glyph } from './icons';
 import { buildingName, profName, resLower, resName } from './names';
 import type { GameState, Placeable } from './state';
+import { profTip } from './tips';
+import { tip } from './tooltip';
 
 /**
  * The selected settler's window in the side panel, as in Settlers 4: portrait, profession, owner and
@@ -54,11 +56,13 @@ export class SettlerInfoView implements View {
     const head = el('div', 'info-head');
     const pic = el('div', 'info-pic');
     pic.append(settlerIcon(s.kind, 64));
+    tip(pic, () => profTip(s.kind));
     const title = el('div', 'info-title');
     const mine = s.owner === this.state.localPlayer;
     title.append(el('h3', '', profName(s.kind)), el('span', 'muted', mine ? t('settler.yours') : t('settler.foreign')));
     const close = el('button', 'gem small', '');
-    close.title = t('common.close');
+    tip(close, t('common.close'));
+    close.setAttribute('aria-label', t('common.close'));
     close.append(glyph('close', 14));
     close.onclick = () => {
       this.state.selectedSettler = null;

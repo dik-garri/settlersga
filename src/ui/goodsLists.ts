@@ -2,6 +2,8 @@ import { wareIcon } from '../render/atlas';
 import { RESOURCES, type Resource } from '../sim/types';
 import { button, el } from './dom';
 import { t } from './i18n';
+import { goodsTip } from './tips';
+import { tip } from './tooltip';
 import { tag, type UiTarget } from './uiTarget';
 
 /**
@@ -52,7 +54,10 @@ export function goodsLists(spec: GoodsListsSpec): HTMLElement {
     for (const r of RESOURCES) {
       if (spec.isIn(r) !== on) continue; // the other list's
       const name = spec.nameOf(r);
-      const item = button('', on ? spec.tipIn(name) : spec.tipOut(name), () => spec.set(r, !on), 'accept-item');
+      const action = on ? spec.tipIn(name) : spec.tipOut(name);
+      const item = button('', action, () => spec.set(r, !on), 'accept-item');
+      // What the good is, and what a click does with it here.
+      tip(item, () => goodsTip(r, action));
       item.append(wareIcon(r, 34));
       if (!on && spec.tagOut) tag(item, spec.tagOut(r));
       if (on || spec.countBoth) {

@@ -7,6 +7,8 @@ import { button, el, type View } from './dom';
 import { DistributionView, TransportView } from './economyPanel';
 import { t } from './i18n';
 import { groupName, resName } from './names';
+import { goodsTip } from './tips';
+import { tip } from './tooltip';
 import { tag } from './uiTarget';
 
 type Page = 'stock' | 'distribution' | 'transport';
@@ -51,7 +53,7 @@ export class GoodsView implements View {
         if (RESOURCE_INFO[r].group !== group) continue;
         const value = el('b', '', '0');
         const row = el('span', 'stock-row');
-        row.title = resName(r);
+        tip(row, () => goodsTip(r, t('tip.stockGoods')));
         row.append(wareIcon(r, 18), el('span', 'stock-name', resName(r)), value);
         grid.append(row);
         this.values.push([r, value]);

@@ -959,6 +959,79 @@ button.wide {
   padding: 4px;
 }
 
+/* ------------------------------------------------------------------ hover help (tooltip.ts) */
+
+/* A parchment card beside the side panel: title, a few lines with ware icons, a hint at the foot. */
+.hud-tip {
+  position: fixed;
+  z-index: 100;
+  max-width: 300px;
+  min-width: 160px;
+  padding: 7px 11px 8px;
+  pointer-events: none;
+  border-radius: 5px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text);
+  overflow-wrap: break-word;
+  hyphens: auto;
+  background: var(--grain), radial-gradient(ellipse at 50% 25%, #f3e3b8, #dcc08a 85%);
+  box-shadow: 0 0 0 1px var(--bronze-hi), 0 0 0 3px var(--wood), 0 6px 18px rgba(0, 0, 0, 0.55);
+  animation: tip-in 0.12s ease-out;
+}
+
+.hud-tip[hidden] {
+  display: none;
+}
+
+@keyframes tip-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+
+.tip-title {
+  font: 700 13px 'Cinzel', 'Palatino Linotype', Georgia, serif;
+  letter-spacing: 0.04em;
+  color: #4a2c0c;
+}
+
+.tip-sub {
+  margin-top: 1px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.tip-title + .tip-line,
+.tip-sub + .tip-line {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(94, 66, 25, 0.3);
+}
+
+.tip-line {
+  margin-top: 2px;
+}
+
+.tip-line b {
+  color: #5a3712;
+}
+
+.tip-ware {
+  margin: 0 2px 0 1px;
+  vertical-align: -3px;
+}
+
+.tip-hint {
+  margin-top: 5px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(94, 66, 25, 0.3);
+  font-size: 11px;
+  font-style: italic;
+  color: var(--muted);
+}
+
 /* ------------------------------------------------------------------ the tutorial (src/tutorial) */
 
 /* The goals panel: top left of the game view, right of the side panel. */

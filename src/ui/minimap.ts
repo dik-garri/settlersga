@@ -6,6 +6,8 @@ import { Terrain, type PlayerId } from '../sim/types';
 import type { World } from '../sim/world';
 import { PLAYER_COLORS } from '../render/sprites';
 import { LANG_EVENT, t, type Key } from './i18n';
+import { minimapTip } from './tips';
+import { tip } from './tooltip';
 
 /** What the minimap shows (Settlers 4's minimap switches); land is the territory tint of the overview. */
 export type MinimapLayer = 'buildings' | 'fighters' | 'settlers' | 'land';
@@ -96,10 +98,14 @@ export class Minimap {
     this.rasterize(0, world.map.h);
   }
 
-  /** Tooltips in the current language. */
+  /** Hover help and accessible names in the current language (the tips themselves are built when shown). */
   private label(): void {
-    this.el.title = t('minimap.jumpTip');
-    LAYERS.forEach((l, k) => ((this.controls.children[k] as HTMLElement).title = t('minimap.layerTip', { name: t(l.title) })));
+    tip(this.el, () => t('minimap.jumpTip'));
+    LAYERS.forEach((l, k) => {
+      const b = this.controls.children[k] as HTMLElement;
+      tip(b, () => minimapTip(l.id, t(l.title)));
+      b.setAttribute('aria-label', t(l.title));
+    });
   }
 
   /** Turns a layer on or off (the land tint at once: the overview is re-rasterised). */

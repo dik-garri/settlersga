@@ -1,3 +1,5 @@
+import { tip } from './tooltip';
+
 /** Small DOM helpers shared by the HUD modules. */
 
 export function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -7,10 +9,17 @@ export function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, 
   return e;
 }
 
-/** A button that runs `onclick` and drops focus (so keyboard shortcuts keep working). */
-export function button(text: string, title: string, onclick: () => void, cls = ''): HTMLButtonElement {
+/**
+ * A button that runs `onclick` and drops focus (so keyboard shortcuts keep working). `help` is its
+ * hover help (`tooltip.ts`); a button showing only a sign («+1», «∞», «⤒») also gets it as its
+ * accessible name.
+ */
+export function button(text: string, help: string, onclick: () => void, cls = ''): HTMLButtonElement {
   const b = el('button', cls, text);
-  if (title) b.title = title;
+  if (help) {
+    tip(b, help);
+    if (!/\p{L}/u.test(text)) b.setAttribute('aria-label', help);
+  }
   b.onclick = () => {
     onclick();
     b.blur();

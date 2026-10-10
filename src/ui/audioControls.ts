@@ -1,5 +1,6 @@
 import type { AudioEngine } from '../audio/audio';
 import { LANG_EVENT, t } from './i18n';
+import { tip } from './tooltip';
 
 /**
  * Sound controls for the top-right panel: mute, master volume and music on/off. Returns the
@@ -22,9 +23,12 @@ export function audioControls(audio: AudioEngine): HTMLElement {
   const refresh = () => {
     const s = audio.settings;
     mute.textContent = s.muted || s.volume === 0 ? '🔇' : '🔊';
-    mute.title = s.muted ? t('audio.unmute') : t('audio.mute');
-    volume.title = t('settings.volume');
-    music.title = t('settings.music');
+    tip(mute, s.muted ? t('audio.unmute') : t('audio.mute'));
+    mute.setAttribute('aria-label', s.muted ? t('audio.unmute') : t('audio.mute'));
+    tip(volume, t('settings.volume'));
+    volume.setAttribute('aria-label', t('settings.volume'));
+    tip(music, t('settings.music'));
+    music.setAttribute('aria-label', t('settings.music'));
     mute.classList.toggle('active', s.muted);
     volume.value = String(Math.round(s.volume * 100));
     music.classList.toggle('active', s.music);

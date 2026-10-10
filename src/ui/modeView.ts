@@ -7,6 +7,7 @@ import { el } from './dom';
 import { t } from './i18n';
 import { modeName, resName } from './names';
 import { playerLabel } from './playerNames';
+import { tip } from './tooltip';
 
 /**
  * The victory mode in the interface (`modes.ts`): its name and, in the economic mode, the time left
@@ -50,9 +51,9 @@ export function economyTable(
   const head = el('tr');
   const others = world.players.filter((p) => !tally.sideA.includes(p.id)).map((p) => p.id);
   const colA = el('th', mineA ? 'mine' : '', t('ecowin.sideA'));
-  colA.title = sideNames(world, tally.sideA, me, names);
+  tip(colA, sideNames(world, tally.sideA, me, names));
   const colB = el('th', mineA ? '' : 'mine', t('ecowin.sideB'));
-  colB.title = sideNames(world, others, me, names);
+  tip(colB, sideNames(world, others, me, names));
   head.append(el('th', '', t('ecowin.good')), colA, colB);
   table.append(head);
   for (const r of tally.rows) {

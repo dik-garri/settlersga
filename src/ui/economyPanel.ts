@@ -19,6 +19,8 @@ import { button, el, type View } from './dom';
 import { goodsLists } from './goodsLists';
 import { lower, t } from './i18n';
 import { buildingName, profName, resLower, resName } from './names';
+import { distributionTip, goodsTip, reserveTip, workerOrderTip } from './tips';
+import { tip } from './tooltip';
 import { tag } from './uiTarget';
 
 /**
@@ -54,6 +56,7 @@ export class WorkersView implements View {
     this.el.append(el('h4', '', t('eco.reserve')));
     this.el.append(el('p', 'muted', t('eco.reserveNote', { min: CARRIER_RESERVE.min })));
     const keep = tag(el('div', 'eco-row carrier-reserve'), 'settlers.reserve');
+    tip(keep, reserveTip(CARRIER_RESERVE.min));
     const setReserve = (n: number) => {
       w.issue({ kind: 'setCarrierReserve', player: this.me, count: n });
       this.update();
@@ -73,6 +76,7 @@ export class WorkersView implements View {
     kinds.forEach((kind, i) => {
       const [have, ordered] = workers[i];
       const row = el('div', 'eco-row');
+      tip(row, () => workerOrderTip(kind));
       row.append(settlerIcon(kind, 28), el('span', 'eco-name', profName(kind)), el('b', '', `${have} / ${ordered}`));
       const set = (n: number) => {
         w.issue({ kind: 'orderWorkers', player: this.me, prof: kind, count: Math.max(0, n) });
@@ -123,6 +127,7 @@ export class TransportView implements View {
     };
     order.forEach((res, i) => {
       const row = el('div', 'eco-row transport-row');
+      tip(row, () => goodsTip(res, t('tip.transportHint', { n: i + 1 })));
       const first = i === 0;
       const last = i === order.length - 1;
       const up = button('↑', t('eco.up'), () => move(res, 'up'));
@@ -160,6 +165,7 @@ export class DistributionView implements View {
     for (const res of distributableGoods()) {
       const block = tag(el('div', 'eco-dist'), `distribution.${res}`);
       const head = el('div', 'eco-row');
+      tip(head, () => goodsTip(res));
       head.append(wareIcon(res, 18), el('span', 'eco-name', nameOf(res)));
       block.append(head);
       const types = consumersOf(res);
@@ -167,6 +173,7 @@ export class DistributionView implements View {
       for (const type of types) {
         const weight = distributionWeight(w, this.me, res, type);
         const row = el('label', 'eco-row eco-share');
+        tip(row, () => distributionTip(res, type));
         const slider = el('input');
         slider.type = 'range';
         slider.min = '0';
@@ -248,6 +255,7 @@ export function toolOrderControls(world: World, b: Building, me: PlayerId): HTML
   for (const res of recipe.outputChoice ?? []) {
     const n = orders[res];
     const row = tag(el('div', 'eco-row'), `info.toolOrder.${res}`);
+    tip(row, () => goodsTip(res));
     row.append(wareIcon(res, 18), el('span', 'eco-name', nameOf(res)), el('b', '', n === undefined ? '—' : n === ENDLESS ? '∞' : String(n)));
     row.append(
       button('+1', t('eco.toolOne'), () => world.issue({ kind: 'orderTool', player: me, res, count: 1 })),

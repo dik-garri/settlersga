@@ -9,6 +9,8 @@ import { WorkersView } from './economyPanel';
 import { lower, t, type Key } from './i18n';
 import { commandOpen } from './locks';
 import { profName } from './names';
+import { profTip, specialistTip } from './tips';
+import { tip } from './tooltip';
 import { tag } from './uiTarget';
 import type { GameState, Placeable } from './state';
 
@@ -48,7 +50,7 @@ export class SettlersView implements View {
       // The saboteur only in a game that has him (Settlers 4: network games).
       if (NETWORK_ONLY.includes(c.type) && !world.rules?.saboteurs) continue;
       const b = tag(el('button', 'build-btn'), `settlers.cmd.${c.type}`);
-      b.title = `${t(c.what)}: ${t(c.how)}`;
+      tip(b, () => specialistTip(c.type, !commandOpen(this.state.locks, c.type)));
       const pic = el('span', 'build-pic');
       pic.append(settlerIcon(c.type, 52));
       b.append(pic, el('span', 'name', profName(c.type)), el('span', 'cost', t(c.what)));
@@ -99,24 +101,24 @@ export class SettlersView implements View {
       grid.append(line(t('settlers.total'), String(people)), line(t('settlers.carriersBusy'), `${busy} / ${carriers}`));
       // Only carriers need a bed (Settlers 4): the start's beds plus every finished house's.
       const bedRow = tag(line(t('settlers.beds'), `${carriers} / ${beds}`), 'settlers.beds');
-      bedRow.title = t('settlers.bedsTip');
+      tip(bedRow, t('settlers.bedsTip'));
       grid.append(bedRow);
       if (striking > 0) {
         const strike = line(t('settlers.striking'), String(striking));
         strike.classList.add('warn');
-        strike.title = t('settlers.strikingTip');
+        tip(strike, t('settlers.strikingTip'));
         grid.append(strike);
       }
       if (jobless.size > 0) {
         const list = [...jobless].map(([k, n]) => `${lower(profName(k as SettlerKind))} ${n}`).join(', ');
         const row = line(t('settlers.jobless'), String([...jobless.values()].reduce((a, b) => a + b, 0)));
-        row.title = t('settlers.joblessTip', { list });
+        tip(row, t('settlers.joblessTip', { list }));
         grid.append(row);
       }
       // Settlers 4's «find settler»: a click on a profession shows the next one of it on the map.
       const findable = (row: HTMLElement, kind: SettlerKind) => {
         row.classList.add('find');
-        row.title = t('settlers.findTip');
+        tip(row, () => profTip(kind, t('settlers.findTip')));
         row.onclick = () => {
           const next = nextSettlerOfKind(this.world, this.state.localPlayer, kind, this.lastFound);
           if (!next) return;

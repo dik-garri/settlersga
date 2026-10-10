@@ -7,6 +7,8 @@ import { nextBuildingOfType } from './find';
 import { t } from './i18n';
 import { buildingOpen, tabOpen } from './locks';
 import { buildingName, categoryName } from './names';
+import { buildingTip } from './tips';
+import { tip } from './tooltip';
 import { tag } from './uiTarget';
 import type { GameState, Placeable } from './state';
 
@@ -40,8 +42,7 @@ export class BuildView implements View {
   readonly el = el('div', 'view build-view');
   private readonly tabButtons: HTMLButtonElement[] = [];
   private readonly grids: HTMLElement[] = [];
-  private readonly buttons = new Map<BuildingType, { b: HTMLButtonElement; count: HTMLElement; tip: string }>();
-  private readonly tabTips: string[] = [];
+  private readonly buttons = new Map<BuildingType, { b: HTMLButtonElement; count: HTMLElement }>();
   /** The locks last drawn (`GameState.locks`), so greying is redone only when they change. */
   private locksSeen: unknown = undefined;
   private readonly title = el('h4', 'view-sub');
@@ -58,8 +59,11 @@ export class BuildView implements View {
     const tabs = el('div', 'cat-tabs');
     MENU.forEach(({ category, types }, k) => {
       const tab = tag(el('button', 'cat-tab'), `build.tab.${category}`);
-      tab.title = t('build.tabTip', { name: categoryName(category) });
-      this.tabTips.push(tab.title);
+      tab.setAttribute('aria-label', categoryName(category));
+      tip(tab, () => {
+        const help = t('build.tabTip', { name: categoryName(category) });
+        return tabOpen(this.state.locks, category) ? help : `${help} — ${t('tut.ui.locked')}`;
+      });
       if (types[0]) tab.append(buildingIcon(types[0], 28));
       tab.onclick = () => {
         // A tab the tutorial has not opened yet stays shut.
@@ -71,7 +75,8 @@ export class BuildView implements View {
       const grid = el('div', 'build-grid');
       types.forEach((type, i) => {
         const b = tag(el('button', 'build-btn'), `build.item.${type}`);
-        b.title = t('build.buttonTip', { name: buildingName(type), n: i + 1 });
+        // The building's purpose, numbers and cost (`tips.ts`), and what a click does.
+        tip(b, () => buildingTip(type, { key: i + 1, locked: !buildingOpen(this.state.locks, type) }));
         const count = el('span', 'build-count', '0');
         const pic = el('span', 'build-pic');
         pic.append(buildingIcon(type, 58));
@@ -91,7 +96,7 @@ export class BuildView implements View {
           this.focus(next);
         };
         grid.append(b);
-        this.buttons.set(type, { b, count, tip: b.title });
+        this.buttons.set(type, { b, count });
       });
       this.grids.push(grid);
     });
@@ -132,13 +137,8 @@ export class BuildView implements View {
     MENU.forEach(({ category }, k) => {
       const open = tabOpen(locks, category);
       this.tabButtons[k].classList.toggle('locked', !open);
-      this.tabButtons[k].title = open ? this.tabTips[k] : `${this.tabTips[k]} — ${t('tut.ui.locked')}`;
     });
-    for (const [type, { b, tip }] of this.buttons) {
-      const open = buildingOpen(locks, type);
-      b.classList.toggle('locked', !open);
-      b.title = open ? tip : `${tip} — ${t('tut.ui.locked')}`;
-    }
+    for (const [type, { b }] of this.buttons) b.classList.toggle('locked', !buildingOpen(locks, type));
     if (!tabOpen(locks, MENU[this.tab].category)) this.showTab(this.tab);
   }
 

@@ -10,6 +10,7 @@ import { economyEndTick } from '../sim/modes';
 import { t } from './i18n';
 import { buildingName, profName, resName } from './names';
 import { playerRowLabel } from './playerNames';
+import { tip } from './tooltip';
 
 /** What each player looks like at a sample (Settlers 4's land and fighters statistics). */
 interface PlayerSample {
@@ -64,7 +65,7 @@ export class StatsView implements View {
     this.slider.type = 'range';
     this.slider.min = '1';
     this.slider.value = String(this.minutes);
-    this.slider.title = t('stats.windowTip');
+    tip(this.slider, t('stats.windowTip'));
     this.slider.oninput = () => {
       this.minutes = Number(this.slider.value);
       this.lastRender = -Infinity;
@@ -204,7 +205,7 @@ export class StatsView implements View {
       );
       table.append(tr);
     }
-    table.title = t('stats.playersTip');
+    tip(table, t('stats.playersTip'));
     body.append(table);
 
     const people = new Map<SettlerKind, number>();
