@@ -3,7 +3,7 @@
     blender -b --factory-startup -P art/blender/build.py -- [names...]
 
 Names: settlers (every figure, see figures.py), settlers:add (only the pose groups settlers.json
-lacks, appended to its last page), signs (the geologist's signs, see signs.py), woodcutter, sawmill, stonecutter, tower, house_large, tree, deposit, piles (or piles:fish,coal), stacks (or stacks:fish,coal: goods lying on the ground), ruins (ruin1..ruin4), rocks (mountain stones and outcrops, see rocks.py), wares, icons (or icons:axe,saw: the menu icons) (default: all). Every sprite keeps the size and anchor
+lacks, appended to its last page), signs (the geologist's signs, see signs.py), woodcutter, sawmill, stonecutter, tower, house_large, tree, deposit, piles (or piles:fish,coal), stacks (or stacks:fish,coal: goods lying on the ground), tower:front / bigtower:front / fortress:front (only the parts standing before the garrison on the top, `<name>-front.png`; a full render of those buildings writes it too), tower:posts (prints the garrison posts and banner point, renders nothing), ruins (ruin1..ruin4), rocks (mountain stones and outcrops, see rocks.py), wares, icons (or icons:axe,saw: the menu icons) (default: all). Every sprite keeps the size and anchor
 of the procedural sprite it replaces (src/render/sprites.ts, settlerArt.ts), so the game can swap
 them in without other changes.
 """
@@ -367,13 +367,26 @@ def main():
                 # `icons` renders every resource's menu icon, `icons:axe,saw` only those.
                 goods.render_icons(OUT, TMP, n.split(':', 1)[1].split(',') if ':' in n else None)
                 continue
+            # `tower:front` renders only the parts before a garrison's posts (`<name>-front.png`),
+            # `tower:posts` renders nothing and only prints the posts and banner points.
+            n, _, only = n.partition(':')
             build, w, h, ax, ay = SINGLE[n]
+            if only == 'front':
+                scene.cycles.device = 'CPU'  # a few small frames: spare the GPU (and the machine's heat)
+                scene.render.threads_mode = 'FIXED'
+                scene.render.threads = 4
             if n in ruins.SINGLE or n in rocks.ROCKS:
                 scene.cycles.device = 'CPU'  # few and small: spare the GPU (and the machine's heat)
                 scene.render.threads_mode = 'FIXED'
                 scene.render.threads = 4
             lib.setup_camera(scene, w, h, ax, ay)
             build()
+            front = any(o.get('front') for o in scene.objects)
+            if only:
+                lib.show_stage(STAGES)
+                if only == 'front' and front:
+                    render_front(scene, os.path.join(OUT, f'{n}-front.png'))
+                continue
             staged = any('stage' in o for o in scene.objects)
             if staged:
                 for k in range(STAGES):
@@ -381,7 +394,23 @@ def main():
                     lib.render_to(scene, os.path.join(OUT, f'{n}-s{k}.png'))
                 lib.show_stage(STAGES)
             lib.render_to(scene, os.path.join(OUT, f'{n}.png'))
+            if front:
+                render_front(scene, os.path.join(OUT, f'{n}-front.png'))
         print('rendered', name)
+
+
+def render_front(scene, path):
+    """The parts of a military building that stand before its garrison's posts (`buildings.mark_front`),
+    alone: everything else is a holdout (it still shades and shadows them, but leaves a hole) and the
+    ground catches no shadow. The game draws this over the soldiers on the top."""
+    for obj in scene.objects:
+        if obj.type != 'MESH':
+            continue
+        if obj.name == 'ShadowCatcher':
+            obj.hide_render = True
+        elif not obj.get('front'):
+            obj.is_holdout = True
+    lib.render_to(scene, path)
 
 
 main()

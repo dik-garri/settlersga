@@ -42,6 +42,40 @@ def note_banner(name, point):
     print('banner', name, BANNER_AT[name], 'sprite', w, h, cam.type)
 
 
+# Where a military building's garrison stands on its top (Settlers 4 shows the soldiers inside on the
+# platform behind the parapet), screen points from the sprite anchor like BANNER_AT (art3d.ts copies
+# them into ART3D_POSTS); the objects in front of them are tagged `front` (`mark_front`) and rendered
+# again on their own as `<name>-front.png`, which the game draws over the figures.
+POSTS = {}
+
+
+def note_posts(name, points):
+    """Records (and prints) the garrison's posts on the top, in sprite pixels from the anchor."""
+    scene = bpy.context.scene
+    ox, oy = lib.screen_point(scene, (0, 0, 0))
+    out = []
+    for p in points:
+        sx, sy = lib.screen_point(scene, p)
+        out.append((round(sx - ox, 1), round(sy - oy, 1)))
+    POSTS[name] = out
+    print('posts', name, out)
+
+
+def mark_front(test):
+    """Tags `front` the meshes standing in front of the garrison's posts: `test(centre, top)` on each
+    object's world bounding box (its centre and highest z)."""
+    from mathutils import Vector
+
+    bpy.context.view_layer.update()
+    for obj in bpy.context.scene.objects:
+        if obj.type != 'MESH' or obj.name == 'ShadowCatcher':
+            continue
+        corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+        centre = sum(corners, Vector()) / 8
+        if test(centre, max(v.z for v in corners)):
+            obj['front'] = 1
+
+
 def _b():
     import __main__
 
@@ -474,6 +508,13 @@ def rod(a, b, r, mat, verts=10):
     return obj
 
 
+# Garrison posts (model units from the top's centre): only as many as can be seen, the rest of a bigger
+# garrison stays inside; none right behind the banner, whose cloth would hide them.
+TOWER_POSTS = ((-0.12, -0.38), (0.38, 0.12), (0.28, -0.28))
+BIGTOWER_POSTS = ((-0.5, -0.4), (0.45, 0.5), (0.55, -0.5), (0.0, -0.6), (0.6, 0.0))
+FORTRESS_POSTS = ((0.55, 0.05), (-0.1, -0.5), (0.1, 0.6), (-0.6, 0.05), (0.62, 0.55))
+
+
 def build_tower():
     """After the Settlers 4 small tower: a square stone tower a little higher than wide (as tall as the
     S4 one next to a settler, ≈ 3.8 settler heights with its platform),
@@ -555,6 +596,10 @@ def build_tower():
         rod((xa + ix, ya + iy, zt - 0.03), (xb - ix, yb - iy, zb + 0.03), r * 0.75, wood)
     lib.tag(4)
     note_banner('tower', (cx, cy, top + 0.12))
+    # The garrison on the platform: left, right and front of the banner pole, the near rails in front.
+    floor = top + 0.13
+    mark_front(lambda c, z: z > floor + 0.05 and (c.y < cy - ps / 2 + 0.12 or c.x > cx + ps / 2 - 0.12))
+    note_posts('tower', [(cx + dx, cy + dy, floor) for (dx, dy) in TOWER_POSTS])
 
 
 # ------------------------------------------------------------------------------------- large house
@@ -2760,8 +2805,13 @@ def build_fortress():
     for gx in (dx - 0.26, dx + 0.26):
         lib.box((gx, fy, (wh + 0.12) / 2), (0.16, 0.22, wh + 0.12), blocks[rnd.randrange(len(blocks))], bevel=0.02)
     lib.tag(4)
+    # The donjon's top: its front merlons and both front turrets with their cones stand before the posts.
+    turrets = ((x0, y0), (x1, y0))
+    mark_front(lambda c, z: z > DH + 0.01 and (c.y < y0 + 0.1 or c.x > x1 - 0.1
+                                               or any(math.hypot(c.x - tx, c.y - ty) < 0.45 for (tx, ty) in turrets)))
     at = scale_scene(4 / 3, kz=1.45)
     note_banner('fortress', at((dx, dy, DH + 0.2)))
+    note_posts('fortress', [at((dx + px, dy + py, DH)) for (px, py) in FORTRESS_POSTS])
 
 
 def build_bigtower():
@@ -2826,6 +2876,9 @@ def build_bigtower():
              overhang=0.07, size=0.1, shape='scale', ridge_frac=0.0)
     lib.tag(4)
     note_banner('bigtower', (cx + 0.15, cy - 0.12, H + 0.14))
+    floor = H + 0.125
+    mark_front(lambda c, z: z > floor + 0.05 and (c.y < ty0 + 0.12 or c.x > tx1 - 0.12))
+    note_posts('bigtower', [(cx + dx, cy + dy, floor) for (dx, dy) in BIGTOWER_POSTS])
 
 
 def build_lookout():

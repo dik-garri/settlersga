@@ -6,6 +6,7 @@ import type { BuildingType, Resource } from '../sim/types';
 import { CROP_STUBBLE } from '../sim/config';
 import { createRng } from '../sim/rng';
 import { HALF_H, HALF_W } from './iso';
+import type { GarrisonPost } from './art3d';
 
 type Ctx = CanvasRenderingContext2D;
 type V3 = readonly [number, number, number];
@@ -794,6 +795,9 @@ function paintStonecutter(ctx: Ctx): void {
   stoneBlock(ctx, bx - 5, by - 6, 9, 6, 1.05);
 }
 
+/** How far the classic small tower's roof stands above its parapet, on corner posts. */
+const ROOF_LIFT = 40;
+
 function paintTower(ctx: Ctx): void {
   const a = 0.5;
   const H = 66;
@@ -812,13 +816,17 @@ function paintTower(ctx: Ctx): void {
   frontQuad(ctx, a, 0.05, 0.4, 6, 22, '#3d2a1a');
   frontQuad(ctx, a, -0.12, 0.08, 40, 50, '#2c2724');
   sideQuad(ctx, a, -0.1, 0.1, 44, 54, '#221e1b');
-  // Wooden lookout with a pointed roof and the player's banner.
-  box(ctx, 0, 0, a + 0.12, a + 0.12, H, 10, '#8a5a32');
+  // Wooden lookout: a parapet of boards, corner posts carrying a pointed roof high enough for the
+  // garrison to stand under it (`GARRISON_POSTS`), and the player's banner.
+  const p = a + 0.12;
+  for (const [x, y] of [[-p, -p], [p, -p], [-p, p]] as const) line(ctx, [x, y, H + 10], [x, y, H + ROOF_LIFT], '#4a2e18', 2.5);
+  box(ctx, 0, 0, p, p, H, 10, '#8a5a32');
   for (const t of [-0.3, 0, 0.3]) {
-    line(ctx, [t, a + 0.12, H], [t, a + 0.12, H + 10], '#5e3b1f');
-    line(ctx, [a + 0.12, t, H], [a + 0.12, t, H + 10], '#4a2e18');
+    line(ctx, [t, p, H], [t, p, H + 10], '#5e3b1f');
+    line(ctx, [p, t, H], [p, t, H + 10], '#4a2e18');
   }
-  pyramidRoof(ctx, a + 0.2, H + 10, 34, '#9e3328');
+  line(ctx, [p, p, H + 10], [p, p, H + ROOF_LIFT], '#5e3b1f', 2.5);
+  pyramidRoof(ctx, a + 0.2, H + ROOF_LIFT, 34, '#9e3328');
   // The banner on the roof tip is a separate per-owner sprite (`BANNERS`).
 }
 
@@ -1033,9 +1041,35 @@ function paintFortress(ctx: Ctx): void {
  * The renderer places the `flag:<owner>` sprite there, so it follows conquests.
  */
 export const BANNERS: Partial<Record<BuildingType, { x: number; y: number }>> = {
-  tower: { x: 0, y: -110 },
+  tower: { x: 0, y: -140 },
   bigtower: { x: 0, y: -126 },
   fortress: { x: 0, y: -120 },
+};
+
+/**
+ * Where the classic military buildings show their garrison (see `GarrisonPost`; `ART3D_POSTS` for the
+ * 3D art): on the small tower's parapet under its roof, round the big tower's roof inside the merlons,
+ * on the fortress's wall walk before the keep. Each figure is cut off `cut` px above its feet, where
+ * the parapet before it ends.
+ */
+export const GARRISON_POSTS: Partial<Record<BuildingType, readonly GarrisonPost[]>> = {
+  tower: [
+    { x: -14.4, y: -71, dir: 3, cut: 9 },
+    { x: 14.4, y: -71, dir: 1, cut: 9 },
+    { x: 0, y: -59, dir: 2, cut: 9 },
+  ],
+  bigtower: [
+    { x: -21, y: -78, dir: 3, cut: 6 },
+    { x: 21, y: -78, dir: 1, cut: 6 },
+    { x: 0, y: -68, dir: 2, cut: 6 },
+  ],
+  fortress: [
+    { x: 0, y: 2, dir: 2, cut: 7 },
+    { x: -41.6, y: -15, dir: 3, cut: 7 },
+    { x: 41.6, y: -15, dir: 1, cut: 7 },
+    { x: -57.6, y: -23.2, dir: 3, cut: 7 },
+    { x: 67, y: -28, dir: 1, cut: 7 },
+  ],
 };
 
 function paintSite(ctx: Ctx, half: number): void {

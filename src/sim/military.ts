@@ -717,7 +717,7 @@ const AT_DOOR = 1.5;
 export function shoot(w: World, archer: Settler, target: Settler, from: Point, tower?: Building): void {
   const ranged = PROFESSIONS[archer.kind].combat!.ranged!;
   rearm(archer);
-  w.shots.push({ x0: from.x, y0: from.y, x1: target.x, y1: target.y, tick: w.tick, owner: archer.owner });
+  w.shots.push({ x0: from.x, y0: from.y, x1: target.x, y1: target.y, tick: w.tick, owner: archer.owner, by: archer.id, from: tower?.id });
   const atDoor = tower && within(target.x - tower.door.x, target.y - tower.door.y, AT_DOOR);
   // An intruding specialist shot down counts like one cut down (`intruders.ts`).
   if (strike(w, archer, target, !tower ? 0 : atDoor ? ranged.towerDoor : ranged.tower) && !isFighter(target)) w.stats.intrudersKilled++;

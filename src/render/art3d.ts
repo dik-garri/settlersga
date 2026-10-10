@@ -148,6 +148,46 @@ export const ART3D_BANNERS: Record<string, { x: number; y: number }> = {
   bigtower: { x: 4.2, y: -37.2 },
 };
 /**
+ * A place on a military building's top where one of its garrison is drawn (Settlers 4 shows the soldiers
+ * inside standing on the platform behind the parapet): feet in sprite pixels from the footprint centre,
+ * the direction (`DIRS` index) he faces while nothing happens, and — classic art only — how high above
+ * his feet the parapet in front of him reaches (the figure is cut off below that line).
+ */
+export interface GarrisonPost {
+  x: number;
+  y: number;
+  dir: number;
+  cut?: number;
+}
+/**
+ * Garrison posts on the 3D military buildings (printed by buildings.py's `note_posts`; the model
+ * offsets are `TOWER_POSTS` etc. there), in the order they are taken: only as many as can be seen, the
+ * rest of a bigger garrison stays out of sight. The parts of the model before them are drawn again
+ * over the figures (`<type>-front.png`, registered as `front:<type>`). The lookout has no garrison:
+ * its watchman works inside, as in Settlers 4.
+ */
+export const ART3D_POSTS: Record<string, readonly GarrisonPost[]> = {
+  tower: [
+    { x: -12.8, y: -36.2, dir: 3 },
+    { x: 19.2, y: -36.2, dir: 1 },
+    { x: 3.2, y: -31.4, dir: 2 },
+  ],
+  bigtower: [
+    { x: -25.6, y: -42.6, dir: 3 },
+    { x: 33.6, y: -41.8, dir: 1 },
+    { x: 4.8, y: -24.2, dir: 2 },
+    { x: -16.0, y: -31.4, dir: 3 },
+    { x: 22.4, y: -31.4, dir: 1 },
+  ],
+  fortress: [
+    { x: 42.7, y: -76.0, dir: 2 },
+    { x: -8.5, y: -78.1, dir: 3 },
+    { x: 46.9, y: -97.3, dir: 1 },
+    { x: -6.4, y: -100.5, dir: 3 },
+    { x: 67.0, y: -85.2, dir: 1 },
+  ],
+};
+/**
  * Live-effect anchors of 3D buildings, from the sprite anchor (printed by buildings.py's `note_fx`
  * while rendering): chimney mouths for smoke and the mill's sail hub. Under `?art=3d` they replace
  * the procedural painters' `buildingFxAnchors` for these types.
@@ -299,6 +339,16 @@ export async function loadArt3d(): Promise<Art3d> {
       return meta;
     })
     .catch(() => undefined);
+  // The parts of military buildings standing before their garrison (optional: without them the figures
+  // on the top are drawn whole).
+  await Promise.all(
+    Object.keys(ART3D_POSTS).map((t) =>
+      loadImage(`${base}${t}-front.png`).then(
+        (img) => images.set(`${t}-front`, img),
+        () => undefined,
+      ),
+    ),
+  );
   const signs = await fetch(`${base}signs.json`)
     .then((r) => (r.ok ? (r.json() as Promise<SignsMeta>) : undefined))
     .then(async (meta) => {

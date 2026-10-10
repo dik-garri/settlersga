@@ -126,6 +126,35 @@ function openGround(w: World, x: number, y: number): { x: number; y: number } {
   return { x, y };
 }
 
+/**
+ * Enemy fighters (player 2) standing their ground on our land in reach of the archers on our big tower
+ * nearest player 2 — out of reach of our field units and free fighters — so the tower's archers shoot
+ * at them as long as the demo runs (dev aid: their hit points are far beyond any fighter's).
+ */
+function defend(w: World, other: { x: number; y: number }): void {
+  const home = w.buildingAt(other.x, other.y);
+  const towers = [...w.buildings.values()].filter(
+    (b) => b.owner === LOCAL_PLAYER && b.done && b.type === 'bigtower' && b.garrison.some((id) => w.getSettler(id)?.kind === 'archer'),
+  );
+  towers.sort((a, b) => Math.hypot(a.door.x - other.x, a.door.y - other.y) - Math.hypot(b.door.x - other.x, b.door.y - other.y) || a.id - b.id);
+  const tower = towers[0];
+  if (!home || !tower) return;
+  const d = Math.hypot(other.x - tower.door.x, other.y - tower.door.y) || 1;
+  const at = openGround(w, Math.round(tower.door.x + ((other.x - tower.door.x) / d) * 5), Math.round(tower.door.y + ((other.y - tower.door.y) / d) * 5));
+  const spots = formationSpots(w, at.x, at.y, 3);
+  const ids = (['soldier', 'archer', 'soldier'] as const).map((kind, k) => {
+    const s = spawnSettler(w, kind, home);
+    s.inside = null;
+    s.home = null;
+    s.hp = 1_000_000;
+    const p = spots[k] ?? at;
+    s.x = s.px = p.x;
+    s.y = s.py = p.y;
+    return s.id;
+  });
+  w.orderHold(ids, 2);
+}
+
 function run(w: World, ticks: number): void {
   for (let i = 0; i < ticks; i++) w.step();
 }
@@ -196,6 +225,11 @@ export function buildShowcase(): World {
   w.orderRecruits('archer', 2, 1);
   // A site on a slope takes its diggers a while at Settlers 4's walking pace: give stragglers time.
   for (let k = 0; k < 12 && [...w.buildings.values()].some((b) => !b.done && b.owner === LOCAL_PLAYER); k++) run(w, 1000);
+  // The ring's military buildings (the fortress among them) filled too, with fighters brought for them,
+  // so their garrisons stand on their tops (Settlers 4).
+  for (let i = 0; i < 8; i++) spawnSettler(w, i % 2 ? 'archer' : 'soldier', c).inside = null;
+  for (const b of w.buildings.values()) if (b.owner === LOCAL_PLAYER && b.done && BUILDINGS[b.type].garrison) w.fillGarrison(b.id);
+  run(w, 600);
 
   // A row of construction sites frozen at each stage, for every building type.
   let row = 0;
@@ -429,6 +463,9 @@ export function buildShowcase(): World {
     const ruin = w.ruins[w.ruins.length - 1];
     if (ruin) ruin.until = FROZEN;
   });
+  // A tower defending: a few of the other player's fighters, too tough to fall, hold out in reach of
+  // the archers on our big tower nearest them, who go on shooting at them from its top.
+  defend(w, other);
   // A saboteur (network games) set on a hut of the other player's, already damaged (placed last, so
   // he is still at work as the demo opens; the hut falls within a minute or so and burns).
   const hut = placeFor(w, 'woodcutter', 2, other.x - 8, other.y + 6);

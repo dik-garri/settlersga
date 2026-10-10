@@ -239,8 +239,12 @@ export class World {
   readonly worn = new Set<number>();
   /** Settlers killed this tick; dropped from `settlers` at its end (see `killSettler`). */
   readonly dying = new Set<number>();
-  /** Arrows in flight, for drawing only: damage is applied when shot. Derived, not saved. */
-  shots: { x0: number; y0: number; x1: number; y1: number; tick: number; owner: PlayerId }[] = [];
+  /**
+   * Arrows in flight, for drawing only: damage is applied when shot. Derived, not saved. `by` is the
+   * archer, and `from` the building a garrison archer shot from (the renderer turns his figure on the
+   * top to the target and starts the arrow there).
+   */
+  shots: { x0: number; y0: number; x1: number; y1: number; tick: number; owner: PlayerId; by: number; from?: number }[] = [];
   /**
    * Burnt buildings' remains, for drawing only (`RUIN`): they block nothing, nothing in the simulation
    * reads them, so they are not saved (a loaded game shows none). Dropped once `until` has passed.

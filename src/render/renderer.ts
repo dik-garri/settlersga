@@ -59,6 +59,7 @@ import { TradeRouteLayer } from './tradeRoutes';
 import { rockKey, rockLayout, type RockSize, type RockSpot } from './rocks';
 import { GuideLayer, type GuideMark } from './guide';
 import { WorkAreaLayer } from './workArea';
+import { GarrisonLayer } from './garrison';
 import { pathLevel } from '../sim/paths';
 import { chatPartner } from '../sim/idle';
 import { BANNERS, EDGE_DIRS, RUIN_SIZES, siteSprite, GROUND_PRIORITY, groundVariants, PATH_VARIANTS, PLAYER_COLORS, type GroundKind } from './sprites';
@@ -351,6 +352,10 @@ export class GameRenderer {
   private readonly tints = new Map<string, number>();
   /** Live visual effects (smoke, sails, glows, dust, falling trees, water glints, hit flashes). */
   private readonly effects: Effects;
+  /** The fighters standing on military buildings' tops (`garrison.ts`). */
+  private readonly garrison: GarrisonLayer;
+  /** Scratch point of `GarrisonLayer.shooter`. */
+  private readonly bow = { x: 0, y: 0 };
   private nowMs = 0;
   private lastFrameMs = 0;
   /** Newest arrow already heard (`World.shots` tick). */
@@ -385,6 +390,7 @@ export class GameRenderer {
     this.settlerTex = atlas.settlerTextures();
     this.animals = new AnimalLayer(sim, this.objects, (n) => atlas.get(n), fogOn, this.wareTex, me);
     this.settler3d = atlas.art3d?.settlers ?? null;
+    this.garrison = new GarrisonLayer(sim, this.settler3d, this.settlerTex, this.playerTint, me, fogOn);
     for (const r of RESOURCES) this.wareTex[r] = atlas.get(`ware:${r}`);
     this.effects = new Effects(atlas, sim, (x, y) => this.surface(x, y), this.sound);
     // Glints sit right on the ground; smoke and sparks above the objects but under the fog.
@@ -885,6 +891,7 @@ export class GameRenderer {
     this.effects.update(this.lastFrameMs ? timeMs - this.lastFrameMs : 16, timeMs, this.chunkVisible);
     this.lastFrameMs = timeMs;
     this.syncFog(timeMs);
+    this.garrison.sync(timeMs);
     this.drawShots(alpha);
     this.drawMarks(ghost, selected, hover, area);
     this.markSettler(selectedSettler, timeMs);
@@ -1214,11 +1221,17 @@ export class GameRenderer {
     this.lastShotTick = newest;
     for (const shot of this.sim.shots) {
       const p = Math.min(1, Math.max(0, (now - shot.tick) / SHOT_TICKS));
+      // From the shooter's shoulder — a garrison archer's on the building's top, where he is drawn.
       const a = this.surface(shot.x0, shot.y0);
+      a.y -= 18;
+      if (shot.from !== undefined && this.garrison.shooter(shot.by, this.bow)) {
+        a.x = this.bow.x;
+        a.y = this.bow.y;
+      }
       const b = this.surface(shot.x1, shot.y1);
       const at = (k: number) => ({
         x: a.x + (b.x - a.x) * k,
-        y: a.y - 18 + (b.y - 12 - (a.y - 18)) * k - Math.sin(Math.PI * k) * 14,
+        y: a.y + (b.y - 12 - a.y) * k - Math.sin(Math.PI * k) * 14,
       });
       const head = at(p);
       const tail = at(Math.max(0, p - 0.18));
@@ -1738,6 +1751,7 @@ export class GameRenderer {
       this.rocksUnder(v.foot);
       this.buildingViews.delete(id);
       this.effects.detachBuilding(id);
+      this.garrison.detach(id);
     }
     for (const b of this.sim.buildings.values()) {
       let v = this.buildingViews.get(b.id);
@@ -1838,13 +1852,18 @@ export class GameRenderer {
     const site = new Sprite(this.atlas.get(`building:${siteSprite(b.w)}`));
     const main = new Sprite();
     body.addChild(site, main);
-    // The owner's banner over military buildings; a 3D model brings its own pole position.
+    // The garrison on the top (`garrison.ts`), under what stands before it (3D art).
+    const over = this.atlas.has(`front:${b.type}`) ? this.atlas.get(`front:${b.type}`) : null;
+    const crew = this.garrison.attach(b, body, over);
+    // The owner's banner over military buildings; a 3D model brings its own pole position. With a
+    // garrison drawn it stands among the figures, sorted by where its pole stands.
     const at = (this.atlas.art3d && ART3D_BANNERS[b.type]) || BANNERS[b.type];
     const banner = at ? new Sprite(this.atlas.get(`banner:${b.owner}`)) : null;
     if (banner && at) {
       banner.position.set(at.x, at.y);
       banner.visible = b.done;
-      body.addChild(banner);
+      banner.zIndex = at.y;
+      (crew ?? body).addChild(banner);
     }
 
     const front = new Container();
@@ -1995,7 +2014,10 @@ export class GameRenderer {
       }
       this.animals.pruneUnits(this.sim.settlerById, soul);
     }
+    this.garrison.assaulted.clear();
     for (const s of this.sim.settlers) {
+      const head = s.tasks[0];
+      if (head !== undefined && head.t === 'assault') this.garrison.assaulted.set(head.b, s.id);
       // Pack donkeys are drawn as animals.
       const animal = UNIT_ANIMALS[s.kind];
       if (animal) {
