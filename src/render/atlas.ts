@@ -36,6 +36,7 @@ import type { RockSize } from './rocks';
 import {
   ART3D_BUILDINGS,
   ART3D_PILES,
+  ART3D_POSTS,
   ART3D_PROPS,
   ART3D_ROCKS,
   ART3D_SPRITES,
@@ -611,6 +612,12 @@ function addArt3d(a: AtlasBuilder, art: Art3d): void {
   }
   for (const type of ART3D_STAGED) {
     for (let k = 0; k < ART3D_STAGES; k++) one(`stage:${type}:${k}`, `${type}-s${k}`);
+  }
+  // What stands before a military building's garrison on its top, drawn over the figures there.
+  for (const type of Object.keys(ART3D_POSTS)) {
+    const img = art.images.get(`${type}-front`);
+    const c = ART3D_BUILDINGS[type];
+    if (img && c) a.add(`front:${type}`, c.w, c.h, c.ax, c.ay, (ctx) => ctx.drawImage(img, 0, 0, c.w, c.h));
   }
   for (const res of ART3D_PILES) {
     const strip = art.images.get(`piles-${res}`)!;

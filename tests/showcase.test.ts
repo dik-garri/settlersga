@@ -77,5 +77,14 @@ describe('dev showcase (?demo)', () => {
     const squad = w.settlers.filter((s) => s.post?.leader === leader!.id);
     expect(squad.length).toBeGreaterThanOrEqual(4);
     for (const s of squad) expect(Math.hypot(s.x - leader!.x, s.y - leader!.y)).toBeLessThan(4);
+    // Garrisons on the tops (the renderer draws them): the fortress manned by several, and a tower
+    // defending — its archers shoot from it at enemy fighters holding out in their reach.
+    expect(all.some((b) => b.type === 'fortress' && b.done && b.owner === 1 && b.garrison.length >= 3)).toBe(true);
+    let fromTower = 0;
+    for (let i = 0; i < 100; i++) {
+      w.step();
+      fromTower += w.shots.filter((s) => s.tick === w.tick && s.from !== undefined && w.buildings.get(s.from)?.owner === 1).length;
+    }
+    expect(fromTower).toBeGreaterThan(2);
   });
 });
