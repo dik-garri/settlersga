@@ -1279,6 +1279,88 @@ button.wide {
   z-index: 5;
 }
 
+.net-panel .np-kick.active,
+.net-panel .np-chat {
+  background: linear-gradient(#5d8a3a, #2f5418);
+}
+
+.net-panel .np-chat {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  background: linear-gradient(var(--wood-hi), var(--wood));
+}
+
+.np-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+/* The chat box of a network game (chatView.ts): over the message ticker, Enter opens it. */
+.chat-box {
+  position: absolute;
+  left: calc(var(--side-w) + 16px);
+  bottom: 150px;
+  width: min(420px, calc(100vw - var(--side-w) - 32px));
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: var(--light);
+  pointer-events: auto;
+  background: rgba(40, 24, 10, 0.88);
+  box-shadow: 0 0 0 1px var(--bronze-hi), 0 0 0 3px var(--bronze-lo), 0 3px 10px rgba(0, 0, 0, 0.5);
+}
+
+.chat-box[hidden] {
+  display: none;
+}
+
+.chat-log {
+  max-height: 180px;
+  overflow-y: auto;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.chat-log p {
+  margin: 0 0 2px;
+  overflow-wrap: anywhere;
+}
+
+.chat-log p.lobby {
+  opacity: 0.7;
+}
+
+.chat-log b {
+  text-shadow: 0 1px 1px #000;
+}
+
+.chat-row {
+  display: flex;
+  gap: 4px;
+}
+
+.chat-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-row select,
+.chat-row input,
+.chat-row button {
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--bronze-lo);
+  font: inherit;
+  font-size: 13px;
+}
+
+.chat-row button {
+  color: var(--light);
+  background: linear-gradient(var(--wood-hi), var(--wood));
+  cursor: pointer;
+}
+
+
 .strip .speed-btn:disabled {
   opacity: 0.5;
   cursor: default;

@@ -1,24 +1,40 @@
 import type { AudioEngine } from '../audio/audio';
+import type { NetChatLine } from '../net/chat';
+import type { ResumeStart } from '../net/core';
 import { peerProvider } from '../net/peer';
 import { normaliseCode, type Transport, type TransportProvider } from '../net/transport';
 import { BUILD_ID } from '../net/version';
 import { PLAYER_COLORS } from '../render/sprites';
+import { TICKS_PER_SECOND } from '../sim/config';
 import { el } from './dom';
-import { t, withLang } from './i18n';
-import { LobbyClient, LobbyHost, type ChatLine, type LobbyMember, type StartInfo } from './lobby';
+import { dateTime, t, withLang } from './i18n';
+import { LobbyClient, LobbyHost, type ChatLine, type LoadSeat, type LoadView, type LobbyMember, type StartInfo } from './lobby';
+import { rejoinSeat } from './rejoinHint';
+import { browserSlots, gameTime, type SaveSlots } from './saves';
 import { activeSlots, defaultSetup, parseSetup, slotKindName, type GameSetup } from './setup';
 import { setupForm } from './setupForm';
 
 /**
- * The «Сетевая игра» screen (roadmap 6.5): create a game (this browser hosts it and gets a code and
- * a link) or join one by its code; then the lobby — the setup the host edits and everybody sees, the
- * players over the network with their ready flags and pings, a chat, and «Начать» for the host.
+ * The «Сетевая игра» screen (roadmap 6.5–6.7): create a game (this browser hosts it and gets a code
+ * and a link) or join one by its code; then the lobby — the setup the host edits and everybody sees,
+ * the players over the network with their ready flags and pings, a chat, and «Начать» for the host.
+ * The host may load a network save instead of a new game (6.6): the save's setup, who plays each seat
+ * without a player, and who has the save. A browser coming back to a game under way (6.7) is offered
+ * the free seats, asks for its own, and starts where the others are once the host agreed.
  * Drawn into the main menu's panel; the logic is `lobby.ts`.
  */
 
+/** What a network game starts with besides the transport and the host's decisions. */
+export interface NetLaunchExtra {
+  /** The lobby's chat, carried into the game. */
+  chat: NetChatLine[];
+  /** A returning browser: the snapshot it starts from. */
+  resume?: ResumeStart;
+}
+
 export interface LobbyViewActions {
   /** The game starts: the transport and what the host decided go to the game. */
-  start(transport: Transport, info: StartInfo): void;
+  start(transport: Transport, info: StartInfo, extra: NetLaunchExtra): void;
   /** Back to the main menu (the lobby is closed first). */
   back(): void;
 }
@@ -31,6 +47,8 @@ type Phase =
   | { k: 'gone'; text: string };
 
 const randomSeed = () => Math.floor(Math.random() * 1e9);
+/** How often a returning browser asks again while its seat is still taken (ms). */
+const ASK_AGAIN_MS = 2000;
 
 export class LobbyView {
   readonly el = el('div', 'lobby');
@@ -38,13 +56,20 @@ export class LobbyView {
   private timer: ReturnType<typeof setInterval> | null = null;
   /** Parts redrawn on their own, so typing in the chat or a select is not interrupted. */
   private formBox = el('div', 'lobby-form');
+  private loadBox = el('div', 'lobby-load');
   private playersBox = el('div', 'lobby-players');
   private chatLog = el('div', 'lobby-chat-log');
+  private chatEl: HTMLElement | null = null;
   private statusEl = el('span', 'setup-problem');
   private actionBtn: HTMLButtonElement | null = null;
   private formKey = '';
+  private loadKey = '';
   private chatSeen = 0;
   private closed = false;
+  /** The host's list of network saves is open. */
+  private picking = false;
+  private lastAsk = 0;
+  private readonly slots: SaveSlots = browserSlots();
 
   constructor(
     private readonly actions: LobbyViewActions,
@@ -75,7 +100,23 @@ export class LobbyView {
   private tick(): void {
     const p = this.phase;
     if (p.k === 'host' || p.k === 'client') p.lobby.update();
-    if (p.k === 'client') this.refreshClient(p.lobby);
+    if (p.k === 'client') {
+      this.returning(p.lobby);
+      this.refreshClient(p.lobby);
+    }
+  }
+
+  /** A browser coming back to a game under way: asks for its seat as soon as the host has it free. */
+  private returning(lobby: LobbyClient): void {
+    const g = lobby.ingame;
+    if (!g || lobby.rejoinAsked !== null || lobby.refused) return;
+    const hint = lobby.hint;
+    if (hint !== null && g.vacant.includes(hint)) lobby.rejoin(hint);
+    else if (hint !== null && g.busy.includes(hint) && performance.now() - this.lastAsk > ASK_AGAIN_MS) {
+      // Not free yet: the host has not noticed the old connection is gone.
+      this.lastAsk = performance.now();
+      lobby.askAgain();
+    }
   }
 
   private async create(): Promise<void> {
@@ -84,7 +125,7 @@ export class LobbyView {
     try {
       const transport = await this.provider.host();
       if (this.closed) return transport.close();
-      const lobby = new LobbyHost(transport, lastNetworkSetup(), BUILD_ID, () => performance.now());
+      const lobby = new LobbyHost(transport, lastNetworkSetup(), BUILD_ID, () => performance.now(), this.slots);
       lobby.onChange = () => this.refreshHost(lobby);
       this.phase = { k: 'host', lobby };
       this.render();
@@ -101,7 +142,7 @@ export class LobbyView {
     try {
       const transport = await this.provider.join(code);
       if (this.closed) return transport.close();
-      const lobby = new LobbyClient(transport, BUILD_ID, () => performance.now());
+      const lobby = new LobbyClient(transport, BUILD_ID, () => performance.now(), { seat: rejoinSeat(code) ?? undefined, slots: this.slots });
       lobby.onChange = () => this.refreshClient(lobby);
       this.phase = { k: 'client', lobby };
       this.render();
@@ -122,6 +163,7 @@ export class LobbyView {
   private render(): void {
     this.el.innerHTML = '';
     this.formKey = '';
+    this.loadKey = '';
     this.chatSeen = 0;
     this.chatLog.innerHTML = '';
     this.actionBtn = null;
@@ -141,13 +183,14 @@ export class LobbyView {
         this.el.append(el('p', 'menu-soon', p.text));
         break;
       case 'host': {
-        this.el.append(this.shareBox(p.lobby.transport.code), this.formBox, this.playersBox, this.chatBox((text) => p.lobby.sayOwn(text)));
+        this.chatEl = this.chatBox((text) => p.lobby.sayOwn(text));
+        this.el.append(this.shareBox(p.lobby.transport.code), this.loadBox, this.formBox, this.playersBox, this.chatEl);
         const start = el('button', 'menu-small active', t('menu.start'));
         start.onclick = this.click(() => {
           const info = p.lobby.start(randomSeed());
           if (!info) return;
-          keepNetworkSetup(p.lobby.setup);
-          this.launch(p.lobby, info);
+          if (!info.load) keepNetworkSetup(p.lobby.setup);
+          this.launch(p.lobby, info, { chat: p.lobby.chatLines() });
         });
         this.actionBtn = start;
         row.append(this.statusEl, start);
@@ -155,7 +198,8 @@ export class LobbyView {
         break;
       }
       case 'client': {
-        this.el.append(el('p', 'lobby-share', t('lobby.joined', { code: p.lobby.transport.code })), this.formBox, this.playersBox, this.chatBox((text) => p.lobby.say(text)));
+        this.chatEl = this.chatBox((text) => p.lobby.say(text));
+        this.el.append(el('p', 'lobby-share', t('lobby.joined', { code: p.lobby.transport.code })), this.loadBox, this.formBox, this.playersBox, this.chatEl);
         const ready = el('button', 'menu-small active', t('lobby.readyBtn'));
         ready.onclick = this.click(() => p.lobby.setReady(!p.lobby.ready));
         this.actionBtn = ready;
@@ -270,19 +314,21 @@ export class LobbyView {
   }
 
   /** The players: the host and every slot over the network, ready or not, with the ping. */
-  private showPlayers(setup: GameSetup, members: readonly LobbyMember[], self: number, host: boolean, kick?: (slot: number) => void): void {
+  private showPlayers(setup: GameSetup, members: readonly LobbyMember[], self: number, host: boolean, load: LoadView | null, kick?: (slot: number) => void): void {
     const box = this.playersBox;
     box.innerHTML = '';
     box.append(el('h4', '', t('lobby.players')));
     const list = el('div', 'lobby-list');
     setup.slots.forEach((s, k) => {
-      if (k !== 0 && s.kind !== 'remote') return;
+      const seat = load ? load.seats[k] : s.kind === 'remote' ? 'remote' : null;
+      if (k !== 0 && seat !== 'remote') return;
       const m = members.find((x) => x.slot === k);
       const row = el('div', 'lobby-player');
       const dot = el('span', 'slot-color', String(seatOf(setup, k)));
       dot.style.background = colourOf(setup, k);
       const name = k === 0 ? (host ? t('lobby.hostYou') : t('lobby.host')) : k === self ? t('common.you') : slotKindName('remote');
-      const state = k === 0 ? '' : !m ? t('lobby.empty') : m.ready ? t('lobby.ready') : t('lobby.notReady');
+      let state = k === 0 ? '' : !m ? t('lobby.empty') : m.ready ? t('lobby.ready') : t('lobby.notReady');
+      if (load && m && !m.has) state += ` · ${t('lobby.noSave')}`;
       row.append(dot, el('span', 'lp-name', name), el('span', `lp-state${m?.ready ? ' ready' : ''}`, state));
       row.append(el('span', 'lp-ping', m && m.ping !== null ? t('lobby.ping', { n: Math.round(m.ping) }) : ''));
       if (kick && m) {
@@ -295,20 +341,107 @@ export class LobbyView {
     box.append(list);
   }
 
+  /** The host: «Load a network game», the list of network saves, or the save being loaded and its seats. */
+  private showHostLoad(lobby: LobbyHost): void {
+    const l = lobby.loadView();
+    const key = JSON.stringify([l, this.picking, lobby.memberList().map((m) => m.slot)]);
+    if (key === this.loadKey) return;
+    this.loadKey = key;
+    const box = this.loadBox;
+    box.replaceChildren();
+    if (!l) {
+      const saves = this.slots.netSaves();
+      const open = el('button', 'menu-small', this.picking ? t('lobby.load.hide') : t('lobby.load.button'));
+      open.onclick = this.click(() => {
+        this.picking = !this.picking;
+        this.loadKey = '';
+        this.refreshHost(lobby);
+      });
+      open.disabled = saves.length === 0;
+      open.title = saves.length === 0 ? t('lobby.load.none') : t('lobby.load.tip');
+      box.append(open);
+      if (this.picking) {
+        const list = el('div', 'save-list');
+        for (const m of saves) {
+          const row = el('div', 'save-row');
+          const info = el('div', 'save-info');
+          info.append(el('b', '', m.auto ? t('saves.auto') : m.name), el('span', '', saveLine(m.savedAt, m.size, m.players, m.tick)));
+          const pick = el('button', 'menu-small active', t('saves.load'));
+          pick.onclick = this.click(() => {
+            this.picking = false;
+            if (!lobby.loadSave(m)) this.statusEl.textContent = t('menu.saveNotFound');
+          });
+          row.append(info, pick);
+          list.append(row);
+        }
+        box.append(list);
+      }
+      return;
+    }
+    const head = el('div', 'lobby-load-head');
+    head.append(el('b', '', t('lobby.load.title', { name: l.name })), el('span', 'muted', saveLine(0, l.size, 0, l.tick)));
+    const fresh = el('button', 'menu-small', t('lobby.load.fresh'));
+    fresh.onclick = this.click(() => lobby.unload());
+    head.append(fresh);
+    box.append(head, el('p', 'muted', t('lobby.load.note')));
+    // Who plays each seat over the network when nobody joins it.
+    const taken = new Set(lobby.memberList().map((m) => m.slot));
+    l.seats.forEach((s, k) => {
+      if (s === null) return;
+      const row = el('label', 'set-row');
+      const sel = el('select');
+      for (const [v, label] of [
+        ['remote', slotKindName('remote')],
+        ['ai', t('lobby.load.ai')],
+        ['closed', t('lobby.load.nobody')],
+      ] as [LoadSeat, string][]) {
+        const o = el('option', '', label);
+        o.value = v;
+        sel.append(o);
+      }
+      sel.value = s;
+      sel.onchange = () => lobby.setSeat(k, sel.value as LoadSeat);
+      const name = el('span', 'set-name', `${t('common.player', { id: seatOf(lobby.setup, k) })}${taken.has(k) ? ` · ${t('lobby.load.taken')}` : ''}`);
+      row.append(name, sel);
+      box.append(row);
+    });
+  }
+
+  /** A joined player: the save the host is loading, and whether this browser has it. */
+  private showClientLoad(lobby: LobbyClient): void {
+    const l = lobby.load;
+    const me = lobby.members.find((m) => m.slot === lobby.slot);
+    const state = !l ? '' : me?.has ? t('lobby.load.have') : lobby.fileProgress !== null ? t('lobby.load.receiving', { n: Math.round(lobby.fileProgress * 100) }) : t('lobby.load.checking');
+    const key = JSON.stringify([l, state]);
+    if (key === this.loadKey) return;
+    this.loadKey = key;
+    this.loadBox.replaceChildren();
+    if (!l) return;
+    this.loadBox.append(el('b', '', t('lobby.load.title', { name: l.name })), el('span', 'muted', ` ${saveLine(0, l.size, 0, l.tick)} · ${state}`));
+  }
+
   private refreshHost(lobby: LobbyHost): void {
     if (this.phase.k !== 'host') return;
-    const key = JSON.stringify(lobby.memberList().map((m) => [m.slot]));
+    const load = lobby.loadView();
+    const key = JSON.stringify([lobby.memberList().map((m) => [m.slot]), load?.id ?? null]);
     // The form is redrawn when a player came or went (their slots lock); it edits the setup itself.
+    // A loaded game's setup is the save's and cannot be changed.
     if (key !== this.formKey) {
       this.formKey = key;
       const taken = new Set(lobby.memberList().map((m) => m.slot));
       this.formBox.replaceChildren(
-        setupForm(lobby.setup, () => lobby.changed(), {
-          who: (k) => (k === 0 ? t('lobby.hostYou') : taken.has(k) ? slotKindName('remote') : null),
-        }),
+        load
+          ? setupForm({ ...lobby.setup, slots: lobby.setup.slots.map((s) => ({ ...s })) }, () => {}, {
+              readOnly: true,
+              who: (k) => (k === 0 ? t('lobby.hostYou') : load.seats[k] ? slotKindName('remote') : null),
+            })
+          : setupForm(lobby.setup, () => lobby.changed(), {
+              who: (k) => (k === 0 ? t('lobby.hostYou') : taken.has(k) ? slotKindName('remote') : null),
+            }),
       );
     }
-    this.showPlayers(lobby.setup, lobby.memberList(), 0, true, (slot) => lobby.kick(slot));
+    this.showHostLoad(lobby);
+    this.showPlayers(lobby.setup, lobby.memberList(), 0, true, load, (slot) => lobby.kick(slot));
     this.showChat(lobby.chat, lobby.setup);
     const problem = lobby.problem();
     this.statusEl.textContent = problem ?? '';
@@ -319,30 +452,41 @@ export class LobbyView {
     if (this.phase.k !== 'client') return;
     if (lobby.refused) {
       const r = lobby.refused;
-      return this.gone(r.why === 'version' ? t('lobby.refused.version', { host: r.build, mine: BUILD_ID }) : r.why === 'started' ? t('lobby.refused.started') : t('lobby.refused.full'));
+      return this.gone(
+        r.why === 'version'
+          ? t('lobby.refused.version', { host: r.build, mine: BUILD_ID })
+          : r.why === 'started'
+            ? t('lobby.refused.started')
+            : r.why === 'denied'
+              ? t('lobby.refused.denied')
+              : t('lobby.refused.full'),
+      );
     }
-    if (lobby.started) return this.launch(lobby, lobby.started);
+    if (lobby.resumed) return this.launch(lobby, lobby.resumed.start as StartInfo, { chat: lobby.resumed.chat, resume: lobby.resumed });
+    if (lobby.started) return this.launch(lobby, lobby.started, { chat: lobby.chatLines() });
     if (lobby.hostLost) return this.gone(t('lobby.hostLeft'));
+    if (lobby.ingame) return this.showRejoin(lobby);
     const setup = lobby.setup;
     if (!setup || lobby.slot === null) {
       this.statusEl.textContent = t('lobby.connecting');
       if (this.actionBtn) this.actionBtn.disabled = true;
       return;
     }
-    const key = JSON.stringify(setup);
+    const key = JSON.stringify([setup, lobby.load?.id ?? null]);
     if (key !== this.formKey) {
       this.formKey = key;
       const own = lobby.slot;
       this.formBox.replaceChildren(
         setupForm({ ...setup, slots: setup.slots.map((s) => ({ ...s })) }, () => {}, {
           readOnly: true,
-          ownSlot: own,
+          ownSlot: lobby.load ? undefined : own,
           who: (k) => (k === 0 ? t('lobby.host') : k === own ? t('common.you') : slotKindName(setup.slots[k].kind)),
           onTeam: (team) => lobby.setTeam(team),
         }),
       );
     }
-    this.showPlayers(setup, lobby.members, lobby.slot, false);
+    this.showClientLoad(lobby);
+    this.showPlayers(setup, lobby.members, lobby.slot, false, lobby.load);
     this.showChat(lobby.chat, setup);
     const rtt = lobby.rtt();
     const parts = [lobby.ready ? t('lobby.waitHost') : '', rtt !== null ? t('lobby.ping', { n: Math.round(rtt) }) : ''];
@@ -352,6 +496,45 @@ export class LobbyView {
       this.actionBtn.textContent = lobby.ready ? t('lobby.notReadyBtn') : t('lobby.readyBtn');
       this.actionBtn.classList.toggle('active', !lobby.ready);
     }
+  }
+
+  /** The game is under way: the seats this browser may take back, or how far its return has come. */
+  private showRejoin(lobby: LobbyClient): void {
+    const g = lobby.ingame!;
+    const asked = lobby.rejoinAsked;
+    const progress = lobby.snapshotProgress;
+    const key = JSON.stringify(['rejoin', g, asked, progress === null ? null : Math.round(progress * 20)]);
+    if (key === this.formKey) return;
+    this.formKey = key;
+    this.loadBox.replaceChildren();
+    this.playersBox.replaceChildren();
+    if (this.chatEl) this.chatEl.hidden = true;
+    if (this.actionBtn) this.actionBtn.hidden = true;
+    this.statusEl.textContent = '';
+    const box = el('div', 'lobby-rejoin');
+    box.append(el('p', 'menu-text', t('lobby.rejoin.underway')));
+    if (asked !== null) {
+      box.append(
+        el(
+          'p',
+          'menu-text',
+          progress !== null ? t('lobby.rejoin.loading', { n: Math.round(progress * 100) }) : t('lobby.rejoin.asked', { id: asked }),
+        ),
+      );
+    } else if (g.vacant.length === 0) {
+      const hint = lobby.hint;
+      box.append(el('p', 'menu-soon', hint !== null && g.busy.includes(hint) ? t('lobby.rejoin.stillTaken', { id: hint }) : t('lobby.rejoin.none')));
+    } else {
+      const list = el('div', 'lobby-list');
+      for (const seat of g.vacant) {
+        const b = el('button', 'menu-small active', t('lobby.rejoin.take', { id: seat }));
+        b.style.borderLeft = `6px solid ${PLAYER_COLORS[(seat - 1) % PLAYER_COLORS.length]}`;
+        b.onclick = this.click(() => lobby.rejoin(seat));
+        list.append(b);
+      }
+      box.append(el('p', 'muted', t('lobby.rejoin.pick')), list);
+    }
+    this.formBox.replaceChildren(box);
   }
 
   private gone(text: string): void {
@@ -365,19 +548,25 @@ export class LobbyView {
   }
 
   /** The game starts: the lobby lets go of the transport, which the game keeps. */
-  private launch(lobby: LobbyHost | LobbyClient, info: StartInfo): void {
+  private launch(lobby: LobbyHost | LobbyClient, info: StartInfo, extra: NetLaunchExtra): void {
     if (this.closed) return;
     this.closed = true;
     if (this.timer) clearInterval(this.timer);
     lobby.dispose();
-    this.el.replaceChildren(el('p', 'menu-text', t('lobby.starting')));
-    this.actions.start(lobby.transport, info);
+    this.el.replaceChildren(el('p', 'menu-text', t(extra.resume ? 'lobby.rejoin.starting' : 'lobby.starting')));
+    this.actions.start(lobby.transport, info, extra);
   }
 
   private leave(): void {
     this.dispose();
     this.actions.back();
   }
+}
+
+/** A save's line: when, map, players and game time (parts left out when 0). */
+function saveLine(savedAt: number, size: number, players: number, tick: number): string {
+  const parts = [savedAt > 0 ? dateTime(savedAt) : '', size > 0 ? `${size}×${size}` : '', players > 0 ? t('lobby.load.players', { n: players }) : '', gameTime(tick, TICKS_PER_SECOND)];
+  return parts.filter((p) => p).join(' · ');
 }
 
 /** A slot's player number (position among the slots that play), as the game numbers players. */

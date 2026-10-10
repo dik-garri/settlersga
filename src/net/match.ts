@@ -1,7 +1,8 @@
 import { TICKS_PER_SECOND } from '../sim/config';
 import { CHECKSUM_SECTIONS, sectionChecksums } from '../sim/checksum';
-import { LOCAL_ONLY, type Command } from '../sim/commands';
+import { LOCAL_ONLY, type Command, type CommandRecord } from '../sim/commands';
 import { replayOf, type ReplayFile } from '../sim/replay';
+import { saveWorld, type SaveData } from '../sim/save';
 import { World } from '../sim/world';
 import type { DesyncReport, Lockstep, Seat, Turn } from './lockstep';
 
@@ -13,9 +14,10 @@ import type { DesyncReport, Lockstep, Seat, Turn } from './lockstep';
  * - **Turns.** Each turn is `turnTicks` ticks. Before the first tick of a turn the match hands in the
  *   local batch for turn + delay (`Lockstep.submit`, once per turn, possibly empty), takes the sealed
  *   turn (`Lockstep.next`; none → the game waits) and applies it between two ticks: first the seats
- *   that left (the computer takes them over, `aiTakeover`), then every seat's batch in seat order,
- *   each command with its `player` set to the seat that sent it (never what the sender wrote). Every
- *   machine plays the same turns in the same order, so the same commands land between the same ticks.
+ *   that left (the computer takes them over, `aiTakeover`), then the seats whose player came back
+ *   (`seatControl`, the computer lets go), then every seat's batch in seat order, each command with
+ *   its `player` set to the seat that sent it (never what the sender wrote). Every machine plays the
+ *   same turns in the same order, so the same commands land between the same ticks.
  * - **The local player's orders** reach the match through `World.sendAhead` (set by the caller to
  *   `queue`); the computer players think inside `World.step` on every machine and send nothing.
  * - **Pause and speed** are controls inside the batches, so they too take effect at one turn
@@ -27,6 +29,14 @@ import type { DesyncReport, Lockstep, Seat, Turn } from './lockstep';
  *   mismatch stops the match (`onDesync`) and `report()` gives what is needed to find the cause.
  * - **Catching up:** a machine more than `delay` sealed turns behind plays them without waiting for
  *   real time (at most `maxTicks` a call), as the single-player loop does after a long frame.
+ * - **Saving** (roadmap 6.6, Settlers 4's network event 4008): a player's `save` control is honoured
+ *   at its turn on every machine, after the turn's commands, at most once per `saveEvery` ticks (S4's
+ *   `CanSave`: 840 of its ticks, about a minute); every machine then takes the same `saveWorld` (the
+ *   `save` event) — a request inside the minute is refused everywhere alike (`saveRefused`). The
+ *   autosave (`autosaveEvery`) is the same event at a common turn, so it is a network save too.
+ * - **Input delay** (6.7): the host's `delay` control sets `Lockstep.setDelay` at its turn everywhere.
+ * - **A returning player** (6.7): the host asks for a `snapshot` — taken at the next turn boundary,
+ *   before that turn's commands — for the returning browser, whose match starts with `resume`.
  */
 
 /** Ticks per turn (`N` in docs/NETWORK.md): 200 ms at 1×. */
@@ -37,23 +47,91 @@ export const CHECKSUM_EVERY = 5;
 export const NET_SPEEDS: readonly number[] = [1, 2, 4];
 /** How many checksums the match keeps for the desync report. */
 const KEEP_SUMS = 40;
+/** Ticks between two network saves (Settlers 4's `CanSave`: 840 of its ticks, about a minute). */
+export const SAVE_EVERY_TICKS = 60 * TICKS_PER_SECOND;
+/** Longest save name (characters). */
+export const SAVE_NAME_MAX = 40;
+/** Command records a network save keeps (`NetSave.log`), for looking into a game later. */
+const LOG_TAIL = 200;
+/** The longest input delay the host may set (turns). */
+export const MAX_NET_DELAY = 24;
 
 const TICK_MS = 1000 / TICKS_PER_SECOND;
 
-/** A control in a batch: pause or resume (any player), a new speed (the host only). */
-export type Control = { ctl: 'pause'; on: boolean } | { ctl: 'speed'; v: number };
+/**
+ * A control in a batch: pause or resume and save (any player), a new speed or input delay (the host
+ * only).
+ */
+export type Control =
+  | { ctl: 'pause'; on: boolean }
+  | { ctl: 'speed'; v: number }
+  | { ctl: 'save'; name: string }
+  | { ctl: 'delay'; v: number };
 
 const isControl = (x: unknown): x is Control => {
   if (typeof x !== 'object' || x === null) return false;
   const c = x as Record<string, unknown>;
-  return (c.ctl === 'pause' && typeof c.on === 'boolean') || (c.ctl === 'speed' && typeof c.v === 'number');
+  return (
+    (c.ctl === 'pause' && typeof c.on === 'boolean') ||
+    (c.ctl === 'speed' && typeof c.v === 'number') ||
+    (c.ctl === 'save' && typeof c.name === 'string') ||
+    (c.ctl === 'delay' && typeof c.v === 'number')
+  );
 };
 
-/** Something that happened in a turn, for the interface (a toast, the status line). */
+/** A save name as asked for: one line, trimmed, at most `SAVE_NAME_MAX` characters. */
+export function cleanSaveName(name: unknown): string {
+  return typeof name === 'string' ? name.replace(/\s+/g, ' ').trim().slice(0, SAVE_NAME_MAX) : '';
+}
+
+/** Something that happened in a turn, for the interface (a toast, the status line, a save). */
 export type MatchEvent =
   | { kind: 'takeover'; seat: Seat; turn: number }
+  | { kind: 'rejoin'; seat: Seat; turn: number }
   | { kind: 'pause'; seat: Seat; on: boolean; turn: number }
-  | { kind: 'speed'; seat: Seat; speed: number; turn: number };
+  | { kind: 'speed'; seat: Seat; speed: number; turn: number }
+  | { kind: 'delay'; delay: number; turn: number }
+  | { kind: 'save'; save: NetSave }
+  | { kind: 'saveRefused'; seat: Seat; turn: number; wait: number };
+
+/** A network save, the same on every machine: what goes into the save slots. */
+export interface NetSave {
+  /** Who asked (the autosave: the host's seat). */
+  seat: Seat;
+  turn: number;
+  tick: number;
+  name: string;
+  auto: boolean;
+  /** `netChecksum` of the saved world: equal saves have equal sums. */
+  sum: string;
+  speed: number;
+  data: SaveData;
+  /** The last commands applied, for looking into the game later. */
+  log: CommandRecord[];
+}
+
+/** What the match itself holds beyond the world: a returning browser gets it with the snapshot. */
+export interface MatchState {
+  paused: boolean;
+  pausedBy: Seat | null;
+  speed: number;
+  /** The tick of the last network save (null: none yet). */
+  lastSave: number | null;
+  /** The tick of the next autosave (null: none). */
+  nextAutosave: number | null;
+}
+
+/** The game at a turn boundary, for a returning browser (roadmap 6.7). */
+export interface Snapshot {
+  /** The next turn to play: the world is as it was at the start of that turn, before its commands. */
+  turn: number;
+  /** The input delay then. */
+  delay: number;
+  /** The turns from `turn` on that were sealed already. */
+  sealed: Turn[];
+  match: MatchState;
+  data: SaveData;
+}
 
 export interface MatchOptions {
   world: World;
@@ -65,6 +143,12 @@ export interface MatchOptions {
   /** The first desync, seen on the next `advance`: the game stands still from here. */
   onDesync?: (report: DesyncReport) => void;
   onEvent?: (e: MatchEvent) => void;
+  /** Ticks between two network saves (default `SAVE_EVERY_TICKS`). */
+  saveEvery?: number;
+  /** Ticks between two autosaves (none when absent). */
+  autosaveEvery?: number;
+  /** A browser joining a game under way: the match's state from the snapshot (no turn −1 checksum). */
+  resume?: MatchState;
 }
 
 /** One checksum the match handed in. */
@@ -128,6 +212,10 @@ export class NetMatch {
   /** Local orders and controls waiting for the next batch. */
   private outbox: unknown[] = [];
   private desyncSeen = false;
+  private lastSave: number | null = null;
+  private nextAutosave: number | null = null;
+  /** Snapshots asked for, taken at the next turn boundary. */
+  private snapshotsDue: ((s: Snapshot) => void)[] = [];
 
   constructor(opts: MatchOptions) {
     this.opts = opts;
@@ -136,7 +224,18 @@ export class NetMatch {
     this.turnTicks = opts.turnTicks ?? TURN_TICKS;
     this.checksumEvery = opts.checksumEvery ?? CHECKSUM_EVERY;
     this.sumOf = opts.checksum ?? netChecksum;
-    // The world as generated: a different map shows up before the first command.
+    const r = opts.resume;
+    if (r) {
+      this.paused = r.paused;
+      this.pausedBy = r.pausedBy;
+      this.speed = r.speed;
+      this.lastSave = r.lastSave;
+      this.nextAutosave = r.nextAutosave;
+      this.openTurn = opts.lockstep.turn - 1;
+      return;
+    }
+    if (opts.autosaveEvery) this.nextAutosave = this.world.tick + opts.autosaveEvery;
+    // The world as generated (or loaded): a different map shows up before the first command.
     this.handIn(-1);
   }
 
@@ -153,6 +252,29 @@ export class NetMatch {
   /** Host: another speed for everybody (others' requests are ignored by every machine). */
   setSpeed(v: number): void {
     if (this.lockstep.isHost) this.control({ ctl: 'speed', v });
+  }
+
+  /** Asks every machine to save the game at a common turn (refused everywhere inside the minute). */
+  requestSave(name: string): void {
+    this.control({ ctl: 'save', name: cleanSaveName(name) });
+  }
+
+  /** Host: another input delay for everybody, from the turn the control lands in. */
+  setDelay(v: number): void {
+    if (this.lockstep.isHost && Number.isInteger(v) && v >= 1 && v <= MAX_NET_DELAY) this.control({ ctl: 'delay', v });
+  }
+
+  /**
+   * Host: a snapshot of the game for a returning browser, taken at the next turn boundary (before
+   * that turn's commands) and handed to `done`.
+   */
+  snapshot(done: (s: Snapshot) => void): void {
+    if (!this.stopped) this.snapshotsDue.push(done);
+  }
+
+  /** The match's own state (for a snapshot). */
+  state(): MatchState {
+    return { paused: this.paused, pausedBy: this.pausedBy, speed: this.speed, lastSave: this.lastSave, nextAutosave: this.nextAutosave };
   }
 
   private control(c: Control): void {
@@ -212,6 +334,7 @@ export class NetMatch {
   stop(): void {
     this.stopped = true;
     this.outbox = [];
+    this.snapshotsDue = [];
   }
 
   /** The desync the lockstep found, once: the match stops and tells `onDesync`. */
@@ -241,10 +364,15 @@ export class NetMatch {
     };
   }
 
-  /** Hands in the local batch (once a turn) and opens the next sealed turn, if there is one. */
+  /**
+   * Hands in the local batch (once a turn; after the delay grew, empty ones fill the gap) and opens
+   * the next sealed turn, if there is one. Snapshots asked for are taken first: the world stands
+   * between two turns here.
+   */
   private open(): boolean {
     const ls = this.lockstep;
-    if (ls.canSubmit()) ls.submit(this.outbox.splice(0));
+    if (this.snapshotsDue.length > 0) this.takeSnapshots();
+    for (let first = true; ls.canSubmit(); first = false) ls.submit(first ? this.outbox.splice(0) : []);
     const turn = ls.next();
     if (!turn) return false;
     this.play(turn);
@@ -254,16 +382,30 @@ export class NetMatch {
     return true;
   }
 
+  private takeSnapshots(): void {
+    const ls = this.lockstep;
+    const snap: Snapshot = { turn: ls.turn, delay: ls.delay, sealed: ls.sealedFrom(ls.turn), match: this.state(), data: saveWorld(this.world) };
+    for (const done of this.snapshotsDue.splice(0)) done(snap);
+  }
+
   /** Applies a sealed turn between two ticks, in its order. */
   private play(turn: Turn): void {
     const w = this.world;
     for (const seat of turn.dropped) {
       if (w.apply({ kind: 'aiTakeover', player: seat })) this.opts.onEvent?.({ kind: 'takeover', seat, turn: turn.turn });
     }
+    // A returning player plays again: the computer lets the seat go (if it had taken it).
+    for (const seat of turn.rejoined ?? []) {
+      w.apply({ kind: 'seatControl', player: seat, ai: false });
+      this.opts.onEvent?.({ kind: 'rejoin', seat, turn: turn.turn });
+    }
+    const saves: { seat: Seat; name: string }[] = [];
     for (const input of turn.inputs) {
       for (const item of input.cmds) {
-        if (isControl(item)) this.controlFrom(input.seat, item, turn.turn);
-        else if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
+        if (isControl(item)) {
+          if (item.ctl === 'save') saves.push({ seat: input.seat, name: cleanSaveName(item.name) });
+          else this.controlFrom(input.seat, item, turn.turn);
+        } else if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
           const c: Record<string, unknown> = { ...(item as Record<string, unknown>), player: input.seat };
           delete c.tick;
           delete c.seq;
@@ -273,6 +415,40 @@ export class NetMatch {
         }
       }
     }
+    // Saves after the turn's commands, so the orders of this turn are in them.
+    for (const s of saves) this.saveFor(s.seat, s.name, turn.turn);
+    if (this.nextAutosave !== null && w.tick >= this.nextAutosave) {
+      this.nextAutosave = w.tick + (this.opts.autosaveEvery ?? 0);
+      this.emitSave(this.lockstep.host, '', turn.turn, true);
+    }
+  }
+
+  /** A player's save request at a turn: honoured once a minute, the same on every machine. */
+  private saveFor(seat: Seat, name: string, turn: number): void {
+    const every = this.opts.saveEvery ?? SAVE_EVERY_TICKS;
+    const tick = this.world.tick;
+    if (this.lastSave !== null && tick - this.lastSave < every) {
+      this.opts.onEvent?.({ kind: 'saveRefused', seat, turn, wait: every - (tick - this.lastSave) });
+      return;
+    }
+    this.lastSave = tick;
+    this.emitSave(seat, name, turn, false);
+  }
+
+  private emitSave(seat: Seat, name: string, turn: number, auto: boolean): void {
+    const w = this.world;
+    const save: NetSave = {
+      seat,
+      turn,
+      tick: w.tick,
+      name,
+      auto,
+      sum: netChecksum(w),
+      speed: this.speed,
+      data: saveWorld(w),
+      log: w.commandLog.slice(-LOG_TAIL),
+    };
+    this.opts.onEvent?.({ kind: 'save', save });
   }
 
   private controlFrom(seat: Seat, c: Control, turn: number): void {
@@ -281,9 +457,14 @@ export class NetMatch {
       this.paused = c.on;
       this.pausedBy = c.on ? seat : null;
       this.opts.onEvent?.({ kind: 'pause', seat, on: c.on, turn });
-    } else if (seat === this.lockstep.host && NET_SPEEDS.includes(c.v) && c.v !== this.speed) {
+    } else if (c.ctl === 'speed') {
+      if (seat !== this.lockstep.host || !NET_SPEEDS.includes(c.v) || c.v === this.speed) return;
       this.speed = c.v;
       this.opts.onEvent?.({ kind: 'speed', seat, speed: c.v, turn });
+    } else if (c.ctl === 'delay') {
+      if (seat !== this.lockstep.host || !Number.isInteger(c.v) || c.v < 1 || c.v > MAX_NET_DELAY || c.v === this.lockstep.delay) return;
+      this.lockstep.setDelay(c.v);
+      this.opts.onEvent?.({ kind: 'delay', delay: c.v, turn });
     }
   }
 

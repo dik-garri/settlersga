@@ -757,6 +757,32 @@ body.title-mode #game {
   overflow-wrap: anywhere;
 }
 
+/* Loading a network game (the host's list of network saves, the save's seats) and returning to one. */
+.lobby-load:empty {
+  display: none;
+}
+
+.lobby-load {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lobby-load-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.lobby-load-head .menu-small {
+  margin-left: auto;
+}
+
+.lobby-rejoin .lobby-list .menu-small {
+  align-self: flex-start;
+}
+
 @media (max-width: 720px) {
   .lobby-player {
     grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1fr) 50px auto;

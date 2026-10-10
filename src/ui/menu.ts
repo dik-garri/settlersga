@@ -4,7 +4,7 @@ import { el } from './dom';
 import { LANG_EVENT, t, type Key } from './i18n';
 import { browserSlots, type SlotMeta } from './saves';
 import type { StartInfo } from './lobby';
-import { LobbyView } from './lobbyView';
+import { LobbyView, type NetLaunchExtra } from './lobbyView';
 import { savesPanel } from './savesPanel';
 import { defaultSetup, parseSetup, type GameSetup } from './setup';
 import { setupForm } from './setupForm';
@@ -32,8 +32,11 @@ export interface TutorialEntry {
 
 export interface MenuActions {
   start(setup: GameSetup): void;
-  /** A network game starts (the lobby hands over its connections and the host's decisions). */
-  network(transport: Transport, info: StartInfo): void;
+  /**
+   * A network game starts (the lobby hands over its connections and the host's decisions, the chat
+   * so far and, for a returning browser, the snapshot).
+   */
+  network(transport: Transport, info: StartInfo, extra: NetLaunchExtra): void;
   /** The tutorial missions with their completion marks, and starting one. */
   tutorials(): TutorialEntry[];
   tutorial(id: string): void;
@@ -204,9 +207,9 @@ export class MainMenu {
     this.heading(t('menu.network'));
     const lobby = new LobbyView(
       {
-        start: (transport, info) => {
+        start: (transport, info, extra) => {
           this.lobby = null;
-          this.actions.network(transport, info);
+          this.actions.network(transport, info, extra);
         },
         back: () => {
           this.lobby = null;

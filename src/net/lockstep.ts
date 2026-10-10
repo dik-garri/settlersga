@@ -16,6 +16,15 @@
  * theirs to the host, which compares them with its own and with each other and, on the first
  * mismatch, tells everyone (`desync` message, `onDesync`).
  *
+ * Changes on the way (roadmap 6.7): the delay may change at a turn every machine plays (`setDelay`,
+ * from the host's control in a batch): a longer one makes a seat hand in empty batches to fill the
+ * gap, a shorter one makes it skip handing in until play catches up — a batch already on its way is
+ * never dropped. A returning player's seat becomes active again from the next turn the host seals
+ * (`rejoin`, announced as `rejoined`); its browser starts from a snapshot with `resume`. The host
+ * keeps the turns it sealed for a while (`history`) and sends them again to a browser that asks
+ * (`want`): one that was cut off for a moment, or that loaded a snapshot, catches up from there.
+ * Duplicate and late messages are ignored.
+ *
  * The module does no I/O: `send` is a callback (bound to a transport by `session.ts`) and incoming
  * messages are fed to `receive`. Seats are player ids (1-based, as the simulation's `PlayerId`).
  */
@@ -35,6 +44,8 @@ export interface Turn {
   inputs: SeatInput[];
   /** Seats that left the game: from this turn on the computer plays them (sorted). */
   dropped: Seat[];
+  /** Seats whose player came back: from this turn on they play again (sorted). */
+  rejoined: Seat[];
 }
 
 /** The lockstep messages on the wire (namespaced by `session.ts`). */
@@ -42,7 +53,9 @@ export type LockstepMsg =
   /** Client → host: my batch for `turn` (the sender is the seat; the transport says who sent it). */
   | { k: 'in'; turn: number; cmds: unknown[] }
   /** Host → clients: a sealed turn. */
-  | { k: 'turn'; turn: number; inputs: SeatInput[]; dropped: Seat[] }
+  | { k: 'turn'; turn: number; inputs: SeatInput[]; dropped: Seat[]; rejoined?: Seat[] }
+  /** Client → host: send me again every sealed turn from `from` on (I missed some, or I just loaded). */
+  | { k: 'want'; from: number }
   /** Client → host: my state checksum after playing `turn`. */
   | { k: 'sum'; turn: number; sum: string | number }
   /** Host → clients: the checksums after `turn` differ (`agreed`: the last turn everyone agreed on). */
@@ -72,13 +85,29 @@ export interface LockstepOptions {
   onDesync?: (report: DesyncReport) => void;
   /** How many turns of checksums the host keeps waiting for late ones (default 64). */
   keepSums?: number;
+  /** How many sealed turns the host keeps to send again (default `HISTORY`). */
+  history?: number;
+  /**
+   * A browser joining a game under way (a reconnect): `turn` is the next turn to play (its world is
+   * the snapshot taken at the start of that turn), `input` the first turn it hands a batch in for,
+   * `sealed` the turns from `turn` on the host had sealed already.
+   */
+  resume?: { turn: number; input: number; sealed: Turn[] };
 }
+
+/** Sealed turns the host keeps for resending: two minutes at 1×. */
+export const HISTORY = 600;
+/** Most turns one resend carries. */
+const RESEND_MAX = 200;
+
+const seatList = (x: unknown): Seat[] => (Array.isArray(x) ? x.filter((s): s is Seat => Number.isInteger(s)) : []);
 
 export class Lockstep {
   readonly local: Seat;
   readonly host: Seat;
-  readonly delay: number;
   readonly isHost: boolean;
+  /** The input delay now (turns). */
+  private delayNo: number;
   /** The next turn to play. */
   private turnNo = 0;
   /** The turn the next local batch is for. */
@@ -93,6 +122,10 @@ export class Lockstep {
   private sealNo = 0;
   /** Host: seats that left and are announced in the next sealed turn. */
   private leaving: Seat[] = [];
+  /** Host: seats that came back and are announced in the next sealed turn. */
+  private rejoining: Seat[] = [];
+  /** Host: the turns sealed lately, for resending (`want`). */
+  private history = new Map<number, Turn>();
   /** Host: checksums by turn, then seat. */
   private sums = new Map<number, Map<Seat, string | number>>();
   private desynced: DesyncReport | null = null;
@@ -106,14 +139,36 @@ export class Lockstep {
     this.opts = opts;
     this.local = opts.local;
     this.host = opts.host;
-    this.delay = opts.delay;
+    this.delayNo = opts.delay;
     this.isHost = opts.local === opts.host;
-    this.inputNo = opts.delay;
     this.active = new Set(opts.seats);
+    const r = opts.resume;
+    if (r) {
+      this.turnNo = r.turn;
+      this.inputNo = r.input;
+      for (const t of r.sealed) if (t.turn >= r.turn) this.sealed.set(t.turn, t);
+      this.sealNo = r.input;
+      return;
+    }
+    this.inputNo = opts.delay;
     // The first `delay` turns carry nothing from anyone: everybody knows them sealed and empty.
     const seats = [...opts.seats].sort((a, b) => a - b);
-    for (let t = 0; t < opts.delay; t++) this.sealed.set(t, { turn: t, inputs: seats.map((seat) => ({ seat, cmds: [] })), dropped: [] });
+    for (let t = 0; t < opts.delay; t++) this.keep({ turn: t, inputs: seats.map((seat) => ({ seat, cmds: [] })), dropped: [], rejoined: [] });
     this.sealNo = opts.delay;
+  }
+
+  /** The input delay now (turns). */
+  get delay(): number {
+    return this.delayNo;
+  }
+
+  /**
+   * Another input delay, from the turn being played on (every machine calls it at the same turn: the
+   * host's control in a batch). Longer: the next hand-ins fill the gap with empty batches; shorter:
+   * hand-ins wait until play catches up. Batches already handed in stay where they are.
+   */
+  setDelay(v: number): void {
+    if (Number.isInteger(v) && v >= 1) this.delayNo = v;
   }
 
   /** The next turn to play. */
@@ -138,7 +193,7 @@ export class Lockstep {
 
   /** Whether the local seat may hand in its next batch (at most `delay` turns ahead of play). */
   canSubmit(): boolean {
-    return this.inputNo <= this.turnNo + this.delay;
+    return this.inputNo <= this.turnNo + this.delayNo;
   }
 
   /**
@@ -189,9 +244,39 @@ export class Lockstep {
   drop(seat: Seat): void {
     if (!this.isHost || !this.active.has(seat) || seat === this.host) return;
     this.active.delete(seat);
-    this.leaving.push(seat);
+    // Back and gone again before the return was announced: the computer simply keeps the seat.
+    const k = this.rejoining.indexOf(seat);
+    if (k >= 0) this.rejoining.splice(k, 1);
+    else this.leaving.push(seat);
     for (const m of this.inbox.values()) m.delete(seat);
     this.trySeal();
+  }
+
+  /**
+   * Host: a departed seat's player is back (roadmap 6.7). The seat hands in batches again from the
+   * returned turn on — the next turn to seal, announced in it as `rejoined` — so its browser starts
+   * from a snapshot with `resume: { input: <that turn> }`. Null if the seat is playing already.
+   */
+  rejoin(seat: Seat): number | null {
+    if (!this.isHost || this.active.has(seat) || seat === this.host) return null;
+    // Gone and back before the departure was announced: nothing to announce at all.
+    const k = this.leaving.indexOf(seat);
+    if (k >= 0) this.leaving.splice(k, 1);
+    else this.rejoining.push(seat);
+    this.active.add(seat);
+    return this.sealNo;
+  }
+
+  /** The sealed turns not played yet, from `turn` on, in order (a snapshot for a returning player). */
+  sealedFrom(turn: number): Turn[] {
+    const out: Turn[] = [];
+    for (let t = Math.max(turn, this.turnNo); this.sealed.has(t); t++) out.push(this.sealed.get(t)!);
+    return out;
+  }
+
+  /** Client: asks the host for every sealed turn from the next one to play on (a gap, a fresh snapshot). */
+  want(): void {
+    if (!this.isHost) this.opts.send(this.host, { k: 'want', from: this.turnNo });
   }
 
   /** The seats still handing in batches (host's view). */
@@ -212,8 +297,13 @@ export class Lockstep {
         if (this.isHost && Number.isInteger(msg.turn) && Array.isArray(msg.cmds)) this.store(from, msg.turn, msg.cmds);
         return;
       case 'turn':
-        if (!this.isHost && from === this.host && msg.turn >= this.turnNo)
-          this.sealed.set(msg.turn, { turn: msg.turn, inputs: msg.inputs, dropped: msg.dropped });
+        // Late (played already) or twice: ignored.
+        if (this.isHost || from !== this.host || !Number.isInteger(msg.turn) || msg.turn < this.turnNo || this.sealed.has(msg.turn)) return;
+        if (!Array.isArray(msg.inputs)) return;
+        this.sealed.set(msg.turn, { turn: msg.turn, inputs: msg.inputs, dropped: seatList(msg.dropped), rejoined: seatList(msg.rejoined) });
+        return;
+      case 'want':
+        if (this.isHost && Number.isInteger(msg.from)) this.resend(from, msg.from);
         return;
       case 'sum':
         if (this.isHost) this.storeSum(from, msg.turn, msg.sum);
@@ -239,12 +329,30 @@ export class Lockstep {
       const m = this.inbox.get(this.sealNo);
       if ([...this.active].some((s) => !m?.has(s))) return;
       const inputs = [...this.active].sort((a, b) => a - b).map((seat) => ({ seat, cmds: m!.get(seat)! }));
-      const turn: Turn = { turn: this.sealNo, inputs, dropped: this.leaving.sort((a, b) => a - b) };
+      const turn: Turn = { turn: this.sealNo, inputs, dropped: this.leaving.sort((a, b) => a - b), rejoined: this.rejoining.sort((a, b) => a - b) };
       this.leaving = [];
+      this.rejoining = [];
       this.inbox.delete(this.sealNo);
-      this.sealed.set(turn.turn, turn);
+      this.keep(turn);
       this.sealNo++;
-      this.opts.send('all', { k: 'turn', turn: turn.turn, inputs: turn.inputs, dropped: turn.dropped });
+      this.opts.send('all', { k: 'turn', turn: turn.turn, inputs: turn.inputs, dropped: turn.dropped, rejoined: turn.rejoined });
+    }
+  }
+
+  /** A sealed turn: to be played, and (host) kept for resending. */
+  private keep(turn: Turn): void {
+    this.sealed.set(turn.turn, turn);
+    if (!this.isHost) return;
+    this.history.set(turn.turn, turn);
+    const keep = this.opts.history ?? HISTORY;
+    this.history.delete(turn.turn - keep);
+  }
+
+  /** Host: the sealed turns from `from` on that it still keeps, to a browser that asked. */
+  private resend(to: Seat, from: number): void {
+    for (let t = from; t < this.sealNo && t < from + RESEND_MAX; t++) {
+      const turn = this.history.get(t);
+      if (turn) this.opts.send(to, { k: 'turn', turn: t, inputs: turn.inputs, dropped: turn.dropped, rejoined: turn.rejoined });
     }
   }
 

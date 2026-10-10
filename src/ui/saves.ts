@@ -1,6 +1,9 @@
 import { t } from './i18n';
+import type { Seat } from '../net/lockstep';
+import type { CommandRecord } from '../sim/commands';
 import type { SaveData } from '../sim/save';
 import type { MissionProgress } from '../tutorial/runner';
+import type { GameSetup } from './setup';
 
 /**
  * Save slots in browser storage, as in Settlers 4's load screen: any number of named saves plus one
@@ -26,6 +29,29 @@ export interface SlotMeta {
    * simulation state; the progress means nothing without the world it is saved with.
    */
   mission?: MissionProgress;
+  /**
+   * A network save (roadmap 6.6): written by every browser of the game at one turn, so the data is
+   * the same everywhere and `id` + `sum` name it on every machine; the lobby loads it as a network
+   * game. Not part of `SaveData` either.
+   */
+  net?: NetSaveMeta;
+}
+
+/** What a network save knows of its game besides the world. */
+export interface NetSaveMeta {
+  /** The same on every browser of the game: the room code and the tick. */
+  id: string;
+  /** The saved world's `netChecksum`: two browsers hold the same save when id and sum agree. */
+  sum: string;
+  /** The room's setup (seed, size, slots…): the lobby seats players by it. */
+  setup: GameSetup;
+  /** This browser's seat, and the host's, when it was saved. */
+  local: Seat;
+  host: Seat;
+  turn: number;
+  speed: number;
+  /** The last commands applied before the save (for looking into a game later). */
+  log?: CommandRecord[];
 }
 
 /** The part of `Storage` the slots use (a test passes a Map-backed fake). */
@@ -120,25 +146,58 @@ export class SaveSlots {
    * Stores `data` in slot `id` (a new slot when omitted; `AUTO_ID` for the autosave), described as
    * `name`. Returns the slot, or null if storage is unavailable or full.
    */
-  async write(data: SaveData, name: string, now: number, id?: string, extra: Pick<SlotMeta, 'mission'> = {}): Promise<SlotMeta | null> {
+  async write(data: SaveData, name: string, now: number, id?: string, extra: Pick<SlotMeta, 'mission' | 'net'> = {}): Promise<SlotMeta | null> {
     if (!this.store) return null;
+    const packed = await pack(JSON.stringify(data));
+    return this.put(packed, { name, savedAt: now, ...describe(data), ...extra }, id);
+  }
+
+  /**
+   * Stores an already packed save under a new slot (or `id`): a network save the host sent over
+   * (`readPacked` on its side). Null if storage is unavailable or full.
+   */
+  importPacked(packed: string, meta: Omit<SlotMeta, 'id' | 'auto'>, id?: string): SlotMeta | null {
+    return this.put(packed, meta, id);
+  }
+
+  private put(packed: string, info: Omit<SlotMeta, 'id' | 'auto'>, id?: string): SlotMeta | null {
+    if (!this.store) return null;
+    // The index is read after the (asynchronous) packing: another tab may have saved meanwhile.
     const list = this.index();
-    const slotId = id ?? `s${now.toString(36)}${list.length}`;
+    const slotId = id ?? `s${info.savedAt.toString(36)}${list.length}${Math.floor(Math.random() * 1296).toString(36)}`;
     const meta: SlotMeta = {
       id: slotId,
-      name,
-      savedAt: now,
-      ...describe(data),
+      name: info.name,
+      savedAt: info.savedAt,
+      tick: info.tick,
+      size: info.size,
+      players: info.players,
       ...(slotId === AUTO_ID ? { auto: true } : {}),
-      ...(extra.mission ? { mission: extra.mission } : {}),
+      ...(info.mission ? { mission: info.mission } : {}),
+      ...(info.net ? { net: info.net } : {}),
     };
     try {
-      this.store.setItem(PREFIX + slotId, await pack(JSON.stringify(data)));
+      this.store.setItem(PREFIX + slotId, packed);
     } catch {
       return null;
     }
     if (!this.writeIndex([...list.filter((m) => m.id !== slotId), meta])) return null;
     return meta;
+  }
+
+  /** A slot's stored text as it is (packed): what the host sends a player who lacks the save. */
+  readPacked(id: string): string | null {
+    return this.get(id === 'v1' ? LEGACY : PREFIX + id);
+  }
+
+  /** The network saves, newest first. */
+  netSaves(): (SlotMeta & { net: NetSaveMeta })[] {
+    return this.list().filter((m): m is SlotMeta & { net: NetSaveMeta } => !!m.net);
+  }
+
+  /** This browser's copy of a network save, if it has one. */
+  findNet(id: string, sum: string): SlotMeta | null {
+    return this.netSaves().find((m) => m.net.id === id && m.net.sum === sum) ?? null;
   }
 
   async read(id: string): Promise<SaveData | null> {

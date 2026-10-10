@@ -179,7 +179,7 @@ describe('net: lockstep', () => {
     expect(ls.canSubmit()).toBe(false);
     expect(() => ls.submit([])).toThrow();
     // The first `delay` turns are sealed and empty for everyone.
-    expect(ls.next()).toEqual({ turn: 0, inputs: [{ seat: 1, cmds: [] }], dropped: [] });
+    expect(ls.next()).toEqual({ turn: 0, inputs: [{ seat: 1, cmds: [] }], dropped: [], rejoined: [] });
     expect(ls.submit(['x'])).toBe(3);
   });
 
@@ -193,7 +193,7 @@ describe('net: lockstep', () => {
     ls.next();
     expect(ls.waitingFor()).toEqual([1]);
     ls.submit(['h']);
-    expect(ls.next()).toEqual({ turn: 1, inputs: [{ seat: 1, cmds: ['h'] }, { seat: 2, cmds: ['a'] }], dropped: [] });
+    expect(ls.next()).toEqual({ turn: 1, inputs: [{ seat: 1, cmds: ['h'] }, { seat: 2, cmds: ['a'] }], dropped: [], rejoined: [] });
     ls.receive(2, { k: 'in', turn: 1, cmds: ['late'] });
     expect(out.filter((m) => m.k === 'turn')).toHaveLength(1);
   });

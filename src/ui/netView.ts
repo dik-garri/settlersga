@@ -2,6 +2,7 @@ import type { Seat } from '../net/lockstep';
 import type { NetMatch } from '../net/match';
 import type { NetStatus } from '../net/status';
 import { PLAYER_COLORS } from '../render/sprites';
+import { TICKS_PER_SECOND } from '../sim/config';
 import type { World } from '../sim/world';
 import { button, el } from './dom';
 import { t } from './i18n';
@@ -10,8 +11,10 @@ import { t } from './i18n';
  * The network game's own interface (roadmap 6.4): a small status box under the speed strip — every
  * human seat with its round trip, who plays a departed seat now, the pause — and, while the game
  * stands waiting for somebody, «Ожидание: …» (the host can let the computer take a seat that keeps
- * everybody waiting, after `KICK_AFTER_MS`); plus the windows that end a network game: a desync (with
- * the report to download) and the host gone.
+ * everybody waiting, after `KICK_AFTER_MS`); the input delay in force (it adapts, roadmap 6.7); the
+ * chat button (roadmap 6.6); on the host, a returning player's request for his seat with «Пустить» /
+ * «Нет» (6.7); plus the windows that end a network game: a desync (with the report to download) and
+ * the host gone.
  */
 
 /** Waiting shorter than this is not shown (a late packet). */
@@ -29,6 +32,10 @@ export interface NetPanelOptions {
   host: Seat;
   /** Host: disconnect a seat (its player leaves; the computer takes over). */
   kick: ((seat: Seat) => void) | null;
+  /** Opens or closes the chat box. */
+  chat: () => void;
+  /** Host: the seats returning players ask for, and the answers. */
+  rejoin: { asked: () => Seat[]; accept: (seat: Seat) => void; refuse: (seat: Seat) => void } | null;
 }
 
 export class NetPanel {
@@ -49,7 +56,9 @@ export class NetPanel {
       return { seat, ai, ping: ping === null ? null : Math.round(ping / 10) * 10 };
     });
     const canKick = !!this.o.kick && match.waitingMs >= KICK_AFTER_MS;
-    const key = JSON.stringify([rows, waiting, canKick, match.paused, match.pausedBy, match.speed, match.stopped]);
+    const delay = match.lockstep.delay;
+    const asked = this.o.rejoin?.asked() ?? [];
+    const key = JSON.stringify([rows, waiting, canKick, match.paused, match.pausedBy, match.speed, match.stopped, delay, asked]);
     if (key === this.key) return;
     this.key = key;
     this.el.replaceChildren();
@@ -63,6 +72,10 @@ export class NetPanel {
       this.el.append(line);
     }
     if (match.speed !== 1) this.el.append(el('div', 'np-note', t('net.speedNow', { n: match.speed })));
+    const turnMs = (match.turnTicks * 1000) / TICKS_PER_SECOND / match.speed;
+    const lag = el('div', 'np-note', t('net.delay', { n: delay, ms: Math.round(delay * turnMs) }));
+    lag.title = t('net.delayTip');
+    this.el.append(lag);
     if (match.paused && match.pausedBy !== null) this.el.append(el('div', 'np-note', t('net.pausedBy', { id: match.pausedBy })));
     if (waiting.length > 0) {
       const w = el('div', 'np-wait', t('net.waiting', { who: waiting.map((s) => t('common.player', { id: s })).join(', ') }));
@@ -74,6 +87,18 @@ export class NetPanel {
         }
       }
     }
+    for (const s of asked) {
+      const box = el('div', 'np-ask');
+      box.append(el('div', 'np-wait', t('net.rejoinAsk', { id: s })));
+      const row = el('div', 'np-buttons');
+      row.append(
+        button(t('net.rejoinAccept'), t('net.rejoinAcceptTip'), () => this.o.rejoin?.accept(s), 'np-kick active'),
+        button(t('net.rejoinRefuse'), t('net.rejoinRefuseTip'), () => this.o.rejoin?.refuse(s), 'np-kick'),
+      );
+      box.append(row);
+      this.el.append(box);
+    }
+    this.el.append(button(t('chat.open'), t('chat.openTip'), () => this.o.chat(), 'np-kick np-chat'));
   }
 }
 

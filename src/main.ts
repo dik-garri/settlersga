@@ -29,14 +29,17 @@ import type { MissionDef, UiProbe } from './tutorial/types';
 import { TutorialView } from './tutorial/view';
 import { replayTools } from './dev/replayTools';
 import type { Transport } from './net/transport';
+import { ChatBox, chatLineText } from './ui/chatView';
 import type { StartInfo } from './ui/lobby';
+import type { NetLaunchExtra } from './ui/lobbyView';
 import { NetGame } from './ui/netGame';
 import { downloadJson, NetPanel, netWindow } from './ui/netView';
 
-/** A network game: the connections the lobby made and what the host decided at «Start». */
+/** A network game: the connections the lobby made, what the host decided at «Start», the chat so far. */
 interface NetStart {
   transport: Transport;
   info: StartInfo;
+  extra: NetLaunchExtra;
 }
 
 /** A tutorial mission to run in a game: from a step (0-based), or loaded with its progress. */
@@ -197,8 +200,10 @@ async function title(
     root.remove();
     document.body.classList.remove('title-mode');
     app.resize();
-    // A refresh during the game returns to the menu, not to a stale ?menu=new.
-    history.replaceState(null, '', withLang(location.pathname));
+    // A refresh during the game returns to the menu, not to a stale ?menu=new — but a network
+    // client's tab keeps the room's code, so a reload goes back to the game (roadmap 6.7).
+    const back = net && !net.transport.isHost ? `${location.pathname}?join=${net.transport.code}` : location.pathname;
+    history.replaceState(null, '', withLang(back));
     game(app, a, audio, world, { fog, seed, autosave: true, tutorial, net });
   };
   const menu = new MainMenu(
@@ -207,10 +212,21 @@ async function title(
         const { seed, opts } = worldArgs(setup, randomSeed());
         void begin(async () => new World(seed, opts), setup.fog, seed);
       },
-      network: (transport, info) => {
-        // Every browser builds the same world from the host's seed and setup.
-        const { seed, opts } = worldArgs(info.setup, info.seed);
-        void begin(async () => new World(seed, opts), info.setup.fog, seed, undefined, { transport, info });
+      network: (transport, info, extra) => {
+        // Every browser builds the same world: from the host's seed and setup, from the same network
+        // save (each reads its own copy), or — returning to a game under way — from the host's snapshot.
+        const make = async () => {
+          if (extra.resume) return World.load(extra.resume.data);
+          if (info.load) {
+            const slots = browserSlots();
+            const meta = slots.findNet(info.load.id, info.load.sum);
+            const data = meta ? await slots.read(meta.id) : null;
+            return data ? World.load(data) : null;
+          }
+          const { seed, opts } = worldArgs(info.setup, info.seed);
+          return new World(seed, opts);
+        };
+        void begin(make, info.setup.fog, info.seed, undefined, { transport, info, extra });
       },
       load: (meta: SlotMeta) => {
         const mission = savedMission(meta.mission);
@@ -267,7 +283,10 @@ function game(
   opts: { fog: boolean; seed: number; autosave: boolean; tutorial?: TutorialStart; net?: NetStart },
 ) {
   // In a network game this browser plays its own seat; on one machine, player 1.
-  const net = opts.net ? new NetGame(world, opts.net.transport, opts.net.info) : null;
+  const slots = browserSlots();
+  const net = opts.net
+    ? new NetGame(world, opts.net.transport, opts.net.info, { slots, resume: opts.net.extra.resume?.resume, chat: opts.net.extra.chat })
+    : null;
   const state = createState(net?.local);
   state.fog = opts.fog;
   if (net) state.net = { pause: (on) => net.match.setPaused(on), speed: net.isHost ? (v) => net.match.setSpeed(v) : null };
@@ -278,11 +297,12 @@ function game(
   camera.centerOn(home.x, home.y);
   renderer.onSound = (id, x, y) => audio.at(id, x, y);
 
-  const slots = browserSlots();
   // A tutorial mission under way (`src/tutorial`): its progress goes into the save slot's description.
   let tutorial: TutorialView | null = null;
   const missionMeta = () => ({ mission: tutorial?.progress() ?? undefined });
-  const save = async (name: string, id?: string) => !!(await slots.write(saveWorld(world), name, Date.now(), id, missionMeta()));
+  // A network game saves on every machine at a common turn (roadmap 6.6): the request goes to the match.
+  const save = async (name: string, id?: string) =>
+    net ? net.requestSave(name) : !!(await slots.write(saveWorld(world), name, Date.now(), id, missionMeta()));
   // Loading or leaving starts the page over: nothing of this game is left behind.
   // Leaving a network game says goodbye first: the others' computers take this seat over.
   const leave = () => net?.close();
@@ -360,8 +380,27 @@ function game(
       local: net.local,
       host: net.hostSeat,
       kick: net.isHost ? (seat) => net.kick(seat) : null,
+      chat: () => chat.toggle(),
+      rejoin: net.isHost
+        ? { asked: () => net.core.askedSeats(), accept: (s) => void net.core.acceptRejoin(s), refuse: (s) => net.core.refuseRejoin(s) }
+        : null,
     });
-    hudEl.append(panel.el);
+    // The chat box over the ticker (Enter or the panel's button), rebuilt in another language.
+    const makeChat = () =>
+      new ChatBox({ local: net.local, lines: () => net.core.chat.lines, say: (text, to) => net.say(text, to), toast: (text) => hud.toast(text) });
+    let chat = makeChat();
+    hudEl.append(panel.el, chat.el);
+    window.addEventListener(LANG_EVENT, () => {
+      const old = chat;
+      chat = makeChat();
+      old.el.replaceWith(chat.el);
+    });
+    window.addEventListener('keydown', (e) => {
+      const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
+      if (e.key !== 'Enter' || typing || state.menu || chat.isOpen) return;
+      e.preventDefault();
+      chat.open();
+    });
     app.ticker.add(() => panel.update(performance.now()));
     const toMenu = () => {
       net.close();
@@ -373,6 +412,11 @@ function game(
     };
     net.hooks = {
       toast: (text) => hud.toast(text),
+      chat: (line) => {
+        // New lines go to the ticker while the box is closed.
+        if (!chat.isOpen) hud.toast(chatLineText(line));
+        chat.refresh();
+      },
       desync: (r) =>
         show(
           netWindow(t('net.desync.title'), t('net.desync.text', { turn: r.turn }), [
@@ -382,7 +426,8 @@ function game(
         ),
       hostLost: () => {
         const saveIt = async () => {
-          const ok = await save(t('net.savedName', { min: Math.floor(world.tick / (60 * TICKS_PER_SECOND)) }));
+          // A network save of the last turn played: loadable in the lobby with a new host.
+          const ok = await net.saveNow(t('net.savedName', { min: Math.floor(world.tick / (60 * TICKS_PER_SECOND)) }));
           hud.toast(ok ? t('net.saved') : t('saves.failed'));
         };
         show(netWindow(t('net.hostLost.title'), t('net.hostLost.text'), [[t('net.save'), () => void saveIt(), true], [t('net.toMenu'), toMenu]]));
@@ -432,7 +477,7 @@ function game(
       state.paused = net.match.paused;
       state.speed = net.match.speed;
       acc = net.match.alpha * TICK_MS;
-      if (opts.autosave && world.tick >= nextAutosave && world.outcome(state.localPlayer) === 'playing') autosave();
+      // (The network autosave is the match's: a network save at a common turn, `NetGame`.)
     } else if (!state.paused) {
       acc += dt * state.speed;
       let n = 0;

@@ -120,6 +120,13 @@ export interface CommandArgs {
    * the player, whose human left the game. Given by every machine at the turn the host announced.
    */
   aiTakeover: Record<never, never>;
+  /**
+   * Network command, the host's seat control: `ai` true hands the player to the computer (as
+   * `aiTakeover`), false gives a seat the computer played back to its returning human (roadmap 6.7,
+   * a reconnect) or leaves a loaded game's seat without a player passive. Given by every machine at
+   * the turn the host announced, or from the start info of a loaded network game.
+   */
+  seatControl: { ai: boolean };
 }
 
 /** What each kind returns: success, how many obeyed, or the new site. */
@@ -158,6 +165,7 @@ export interface CommandResults {
   dismissUnits: number;
   grant: boolean;
   aiTakeover: boolean;
+  seatControl: boolean;
 }
 
 export type CommandKind = keyof CommandArgs;
@@ -285,13 +293,14 @@ export const SPECS: { [K in CommandKind]: Spec<K> } = {
   dismissUnits: { fields: { ids: isIds }, refused: 0, run: (w, c) => dismissUnits(w, c.ids, c.player) },
   grant: { fields: { res: isRes, n: isNum }, refused: false, run: (w, c) => grant(w, c.res, c.n, c.player) },
   aiTakeover: { fields: {}, refused: false, run: (w, c) => aiTakeover(w, c.player) },
+  seatControl: { fields: { ai: isBool }, refused: false, run: (w, c) => seatControl(w, c.player, c.ai) },
 };
 
 /**
- * Kinds a player's batch from the network may not carry: the scenario's `grant` and the takeover,
+ * Kinds a player's batch from the network may not carry: the scenario's `grant`, the takeover and the seat control,
  * which every machine gives itself at the turn the host announces (`net/match.ts`).
  */
-export const LOCAL_ONLY: ReadonlySet<CommandKind> = new Set<CommandKind>(['grant', 'aiTakeover']);
+export const LOCAL_ONLY: ReadonlySet<CommandKind> = new Set<CommandKind>(['grant', 'aiTakeover', 'seatControl']);
 
 /**
  * What `World.issue` returns to the interface: a count for the kinds that count (units that obeyed),
@@ -461,6 +470,19 @@ function orderTrade(w: World, id: number, res: Resource, count: number, player: 
 function aiTakeover(w: World, player: PlayerId): boolean {
   if (w.ai.some((a) => a.player === player) || w.isDefeated(player)) return false;
   w.ai.push(createAi(player, 'medium'));
+  return true;
+}
+
+/**
+ * Network command: the host's seat control. `ai` true = `aiTakeover`; false = the computer lets the
+ * player go (its `AiState` is dropped; refused when no computer plays it), so a returning human
+ * plays the seat again from this turn on — Settlers 4 has no reconnect, this is ours (NETWORK.md).
+ */
+function seatControl(w: World, player: PlayerId, ai: boolean): boolean {
+  if (ai) return aiTakeover(w, player);
+  const k = w.ai.findIndex((a) => a.player === player);
+  if (k < 0) return false;
+  w.ai.splice(k, 1);
   return true;
 }
 

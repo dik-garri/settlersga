@@ -1,4 +1,4 @@
-import { Lockstep, type DesyncReport, type LockstepMsg, type Seat } from './lockstep';
+import { Lockstep, type DesyncReport, type LockstepMsg, type LockstepOptions, type Seat } from './lockstep';
 import type { PeerId, Transport } from './transport';
 
 /**
@@ -18,10 +18,17 @@ const isEnvelope = (x: unknown): x is LockstepEnvelope =>
   typeof x === 'object' && x !== null && (x as { ch?: unknown }).ch === 'ls' && typeof (x as { m?: unknown }).m === 'object';
 
 export interface SessionOptions {
-  /** Every human seat and the peer that plays it (the host's included). */
+  /**
+   * Every human seat and the peer that plays it (the host's included). Read live: a returning
+   * player's new peer is set here by the owner (`NetCore`) and the session follows.
+   */
   seats: Map<Seat, PeerId>;
   /** Input delay in turns. */
   delay: number;
+  /** A browser joining a game under way: where its lockstep starts (`LockstepOptions.resume`). */
+  resume?: LockstepOptions['resume'];
+  /** The seats handing in batches now, when not every seat in `seats` does (a resumed game). */
+  active?: Seat[];
   onDesync?: (report: DesyncReport) => void;
   /** Client: the host is gone. */
   onHostLost?: () => void;
@@ -36,16 +43,19 @@ export interface LockstepSession {
 }
 
 export function bindLockstep(transport: Transport, opts: SessionOptions): LockstepSession {
-  const seatOf = new Map<PeerId, Seat>();
-  for (const [seat, peer] of opts.seats) seatOf.set(peer, seat);
-  const local = seatOf.get(transport.self);
-  const host = seatOf.get(transport.host);
+  const seatOf = (peer: PeerId): Seat | undefined => {
+    for (const [seat, p] of opts.seats) if (p === peer) return seat;
+    return undefined;
+  };
+  const local = seatOf(transport.self);
+  const host = seatOf(transport.host);
   if (local === undefined || host === undefined) throw new Error('lockstep session: this peer and the host need a seat');
   const lockstep = new Lockstep({
-    seats: [...opts.seats.keys()],
+    seats: opts.active ?? [...opts.seats.keys()],
     local,
     host,
     delay: opts.delay,
+    resume: opts.resume,
     onDesync: opts.onDesync,
     send: (to, m) => {
       const env: LockstepEnvelope = { ch: 'ls', m };
@@ -57,11 +67,11 @@ export function bindLockstep(transport: Transport, opts: SessionOptions): Lockst
     },
   });
   const offMessage = transport.on('message', (from, msg) => {
-    const seat = seatOf.get(from);
+    const seat = seatOf(from);
     if (seat !== undefined && isEnvelope(msg)) lockstep.receive(seat, msg.m);
   });
   const offLeave = transport.on('leave', (peer) => {
-    const seat = seatOf.get(peer);
+    const seat = seatOf(peer);
     if (seat === undefined) return;
     if (transport.isHost) {
       lockstep.drop(seat);

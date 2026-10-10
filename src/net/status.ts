@@ -18,8 +18,12 @@ type PingMsg = { ch: 'ping'; t: number } | { ch: 'pong'; t: number };
 const isPing = (x: unknown): x is PingMsg =>
   typeof x === 'object' && x !== null && ((x as PingMsg).ch === 'ping' || (x as PingMsg).ch === 'pong') && typeof (x as PingMsg).t === 'number';
 
+/** Round trips a meter remembers per peer (`worst`: the jitter shows in the worst of them). */
+const RECENT = 6;
+
 export class PingMeter {
   private readonly rtts = new Map<PeerId, number>();
+  private readonly recent = new Map<PeerId, number[]>();
   private last = -Infinity;
   private readonly off: () => void;
 
@@ -31,7 +35,14 @@ export class PingMeter {
     this.off = transport.on('message', (from, msg) => {
       if (!isPing(msg)) return;
       if (msg.ch === 'ping') transport.send(from, { ch: 'pong', t: msg.t });
-      else this.rtts.set(from, Math.max(0, this.now() - msg.t));
+      else {
+        const rtt = Math.max(0, this.now() - msg.t);
+        this.rtts.set(from, rtt);
+        const list = this.recent.get(from) ?? [];
+        list.push(rtt);
+        if (list.length > RECENT) list.shift();
+        this.recent.set(from, list);
+      }
     });
   }
 
@@ -48,8 +59,18 @@ export class PingMeter {
     return this.rtts.get(peer) ?? null;
   }
 
+  /** The worst of the last few round trips to a peer (ms), or null before the first answer. */
+  worst(peer: PeerId): number | null {
+    const list = this.recent.get(peer);
+    if (!list || list.length === 0) return null;
+    let w = 0;
+    for (const v of list) w = Math.max(w, v);
+    return w;
+  }
+
   forget(peer: PeerId): void {
     this.rtts.delete(peer);
+    this.recent.delete(peer);
   }
 
   dispose(): void {
@@ -70,7 +91,7 @@ const isStatus = (x: unknown): x is StatusMsg =>
 
 export interface NetStatusOptions {
   transport: Transport;
-  /** Every human seat and its peer. */
+  /** Every human seat and its peer (read live: a returning player's new peer is set by the owner). */
   seats: Map<Seat, PeerId>;
   local: Seat;
   host: Seat;
@@ -87,13 +108,11 @@ export class NetStatus {
   private hostWaiting: Seat[] = [];
   private last = -Infinity;
   private readonly off: () => void;
-  private readonly seatOf = new Map<PeerId, Seat>();
 
   constructor(private readonly o: NetStatusOptions) {
     this.meter = new PingMeter(o.transport, o.now, o.every ?? 1000);
-    for (const [seat, peer] of o.seats) this.seatOf.set(peer, seat);
     this.off = o.transport.on('message', (from, msg) => {
-      if (!isStatus(msg) || o.transport.isHost || this.seatOf.get(from) !== o.host) return;
+      if (!isStatus(msg) || o.transport.isHost || from !== o.transport.host) return;
       this.pingsBySeat = new Map(msg.pings.filter(([s, v]) => Number.isInteger(s) && (v === null || typeof v === 'number')));
       this.hostWaiting = msg.waiting.filter((s) => Number.isInteger(s));
     });
@@ -108,7 +127,8 @@ export class NetStatus {
     if (now - this.last < (this.o.every ?? 1000)) return;
     this.last = now;
     const pings: [Seat, number | null][] = [];
-    for (const [seat, peer] of this.o.seats) if (seat !== this.o.local) pings.push([seat, this.meter.rtt(peer)]);
+    const connected = t.peers();
+    for (const [seat, peer] of this.o.seats) if (seat !== this.o.local && connected.includes(peer)) pings.push([seat, this.meter.rtt(peer)]);
     this.pingsBySeat = new Map(pings);
     this.hostWaiting = this.o.waitingFor();
     t.broadcast({ ch: 'st', pings, waiting: this.hostWaiting } satisfies StatusMsg);
@@ -130,6 +150,18 @@ export class NetStatus {
     if (!stalled) return [];
     const others = this.hostWaiting.filter((s) => s !== this.o.local);
     return others.length > 0 ? others : [this.o.host];
+  }
+
+  /** Host: the worst recent round trip to any player still connected (ms), null before any answer. */
+  worstRtt(): number | null {
+    let worst: number | null = null;
+    const connected = this.o.transport.peers();
+    for (const [seat, peer] of this.o.seats) {
+      if (seat === this.o.local || !connected.includes(peer)) continue;
+      const v = this.meter.worst(peer);
+      if (v !== null) worst = Math.max(worst ?? 0, v);
+    }
+    return worst;
   }
 
   dispose(): void {
