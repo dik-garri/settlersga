@@ -300,7 +300,7 @@ export const en: Record<Key, string> = {
   'menu.openFailed': 'Could not open the game',
 
   // Network lobby and game (lobby.ts, lobbyView.ts, netGame.ts, netView.ts)
-  'lobby.intro': 'Network play: one player creates the game and sends friends the link or the code, the others join. Browsers connect directly (WebRTC), so players see each other\'s IP addresses. Everyone needs the same version of the game.',
+  'lobby.intro': 'Network play: one player creates the game and sends friends the link or the code, the others join. Browsers connect through our relay server on Cloudflare: that gets through any router, and players do not see each other\'s IP addresses. Everyone needs the same version of the game.',
   'lobby.create': 'Create game',
   'lobby.createNote': 'you host: you choose the map and the seats',
   'lobby.code': 'Game code',

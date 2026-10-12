@@ -2,9 +2,10 @@
  * The network transport of phase 6 (docs/NETWORK.md): reliable, ordered messages between the
  * browsers of one game, in a star around the host. The host is connected to every other peer; a
  * peer that is not the host is connected only to the host, who relays what the others must see
- * (the lockstep turns, `lockstep.ts`). Two implementations: `PeerTransport` (WebRTC data channels,
- * signalling through the public PeerJS broker, `peer.ts`) and `LoopbackTransport` (in memory, for
- * tests, `loopback.ts`); a WebSocket relay (variant B) would be a third behind the same interface.
+ * (the lockstep turns, `lockstep.ts`). Three implementations: `PeerTransport` (WebRTC data channels,
+ * signalling through the public PeerJS broker, `peer.ts`), `LoopbackTransport` (in memory, for
+ * tests, `loopback.ts`) and `RelayTransport` (a WebSocket to our relay on Cloudflare, variant B,
+ * `relay.ts`; `provider.ts` picks between it and WebRTC).
  *
  * Messages are plain JSON values. A transport never loses or reorders a message on a connection
  * that stays open; a connection that breaks is reported as a `leave` and never comes back by

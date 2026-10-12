@@ -9,3 +9,7 @@ __pycache__/
 
 # Reference screenshots of the original game (copyrighted, never published)
 examples/
+
+# Cloudflare relay: generated runtime types (`npx wrangler types`) and local state
+relay/worker-configuration.d.ts
+relay/.wrangler/

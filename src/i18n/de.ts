@@ -301,7 +301,7 @@ export const de: Record<Key, string> = {
   'menu.openFailed': 'Das Spiel konnte nicht geöffnet werden',
 
   // Network lobby and game (lobby.ts, lobbyView.ts, netGame.ts, netView.ts)
-  'lobby.intro': 'Netzwerkspiel: Einer erstellt das Spiel und schickt Freunden den Link oder den Code, die anderen treten bei. Die Browser verbinden sich direkt (WebRTC), daher sehen die Spieler gegenseitig ihre IP-Adressen. Alle brauchen dieselbe Version des Spiels.',
+  'lobby.intro': 'Netzwerkspiel: Einer erstellt das Spiel und schickt Freunden den Link oder den Code, die anderen treten bei. Die Browser verbinden sich über unseren Vermittlungsserver bei Cloudflare: So kommt das Spiel durch jeden Router, und die Spieler sehen ihre IP-Adressen gegenseitig nicht. Alle brauchen dieselbe Version des Spiels.',
   'lobby.create': 'Spiel erstellen',
   'lobby.createNote': 'Sie sind Gastgeber: Sie wählen Karte und Plätze',
   'lobby.code': 'Spielcode',

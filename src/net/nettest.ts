@@ -1,4 +1,4 @@
-import { peerProvider } from './peer';
+import { gameProvider } from './provider';
 import { bindLockstep, type LockstepSession } from './session';
 import { normaliseCode, type Transport } from './transport';
 
@@ -14,7 +14,7 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 const logBox = $('log');
 const status = $('status');
 const lsBox = $('ls');
-const provider = peerProvider();
+const provider = gameProvider(new URLSearchParams(location.search));
 let transport: Transport | null = null;
 let session: LockstepSession | null = null;
 let loop: ReturnType<typeof setInterval> | null = null;

@@ -1,7 +1,7 @@
 import type { AudioEngine } from '../audio/audio';
 import type { NetChatLine } from '../net/chat';
 import type { ResumeStart } from '../net/core';
-import { peerProvider } from '../net/peer';
+import { gameProvider } from '../net/provider';
 import { normaliseCode, type Transport, type TransportProvider } from '../net/transport';
 import { BUILD_ID } from '../net/version';
 import { PLAYER_COLORS } from '../render/sprites';
@@ -78,7 +78,7 @@ export class LobbyView {
   constructor(
     private readonly actions: LobbyViewActions,
     private readonly audio: AudioEngine,
-    private readonly provider: TransportProvider = peerProvider(),
+    private readonly provider: TransportProvider = gameProvider(new URLSearchParams(location.search)),
   ) {
     this.render();
     this.timer = setInterval(() => this.tick(), 250);

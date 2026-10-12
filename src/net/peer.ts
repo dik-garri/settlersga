@@ -6,7 +6,8 @@ import { Emitter, randomCode, type LeaveReason, type PeerId, type Transport, typ
  * public PeerJS broker (0.peerjs.com — no account, no key) with public STUN servers. The host
  * registers the peer id `<prefix><code>`; a joining browser registers a random id and connects to
  * it. The broker only introduces the peers: once a data channel is open, game traffic goes straight
- * from browser to browser (or through the TURN relay when both sit behind strict NATs).
+ * from browser to browser. Behind strict NATs it fails; the default transport is then our relay
+ * (`relay.ts`, `provider.ts`), with this one as its fallback.
  *
  * `peerjs` is imported lazily, so it is not in the main bundle until someone opens a network game.
  * Channels are reliable and ordered (`reliable: true`), messages JSON. PeerJS's JSON channel
@@ -27,13 +28,13 @@ export interface PeerTransportOptions {
 }
 
 /**
- * Public ICE servers: Google's and Cloudflare's STUN (enough for most home routers), then the PeerJS
- * project's public TURN relay as a last resort behind strict NATs (free, shared, no guarantees).
+ * Public ICE servers: Google's and Cloudflare's STUN, enough for most home routers. There is no TURN:
+ * the PeerJS project's public one is gone (its names no longer resolve, October 2026), and browsers
+ * that cannot reach each other directly play through our relay instead (`relay.ts`, the default).
  */
 export const DEFAULT_ICE: RTCIceServer[] = [
   { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
   { urls: 'stun:stun.cloudflare.com:3478' },
-  { urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'], username: 'peerjs', credential: 'peerjsp' },
 ];
 
 export const DEFAULT_PREFIX = 'settlersga-';

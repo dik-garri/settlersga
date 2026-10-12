@@ -1,0 +1,16 @@
+// The game's WebSocket relay (docs/NETWORK.md, section 10). Deploy from this folder: `npx wrangler deploy`.
+{
+  "name": "settlers-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "Room" }]
+  },
+  // SQLite-backed Durable Objects are the ones on the free plan; the room stores nothing.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
+  "vars": {
+    // The published game and local dev servers (any port).
+    "ALLOWED_ORIGINS": "https://dik-garri.github.io, http://localhost:*, http://127.0.0.1:*"
+  },
+  "observability": { "enabled": true }
+}
