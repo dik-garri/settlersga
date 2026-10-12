@@ -1763,7 +1763,9 @@ export class GameRenderer {
       }
       // As in Settlers 4 a military building flies its banner only while it is held (a garrison).
       if (v.banner) v.banner.visible = this.occupied(b);
-      v.flag.visible = !v.banner && this.occupied(b);
+      // The roof flag marks a workplace whose worker has moved in; houses, warehouses, markets,
+      // the barracks and eyecatchers have no worker and fly none.
+      v.flag.visible = !v.banner && !!BUILDINGS[b.type].worker && this.occupied(b);
       if (v.flag.visible && !v.flagPlaced) {
         const top = this.atlas.topOf(`building:${b.type}`);
         v.flag.position.set(top.x, top.y + 2);
@@ -1832,8 +1834,8 @@ export class GameRenderer {
   }
 
   /**
-   * The door flag goes up once a building is in use: a workplace when its worker has moved in, a
-   * military building while garrisoned (the castle always), anything else once built.
+   * Whether a finished building is in use: a workplace when its worker has moved in, a military
+   * building while garrisoned (the castle always), anything else once built.
    */
   private occupied(b: Building): boolean {
     if (!b.done) return false;
