@@ -1761,7 +1761,8 @@ export class GameRenderer {
         v.flag.texture = this.atlas.get(`flag:${b.owner}`);
         if (v.banner) v.banner.texture = this.atlas.get(`banner:${b.owner}`);
       }
-      if (v.banner) v.banner.visible = b.done;
+      // As in Settlers 4 a military building flies its banner only while it is held (a garrison).
+      if (v.banner) v.banner.visible = this.occupied(b);
       v.flag.visible = !v.banner && this.occupied(b);
       if (v.flag.visible && !v.flagPlaced) {
         const top = this.atlas.topOf(`building:${b.type}`);
