@@ -67,9 +67,11 @@ export interface AudioSettings {
   /** Master volume 0..1. */
   volume: number;
   music: boolean;
+  /** Volume of the other players' voices in a network game (0..1; the radio, not muted with M). */
+  voice: number;
 }
 
-export const DEFAULT_AUDIO: AudioSettings = { muted: false, volume: 0.7, music: true };
+export const DEFAULT_AUDIO: AudioSettings = { muted: false, volume: 0.7, music: true, voice: 0.8 };
 
 /** Parses stored settings, falling back to defaults field by field on anything malformed. */
 export function parseAudioSettings(raw: string | null): AudioSettings {
@@ -80,10 +82,11 @@ export function parseAudioSettings(raw: string | null): AudioSettings {
   } catch {
     // Ignore: defaults below.
   }
-  const volume = typeof o.volume === 'number' && Number.isFinite(o.volume) ? Math.min(1, Math.max(0, o.volume)) : DEFAULT_AUDIO.volume;
+  const level = (v: unknown, def: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : def);
   return {
     muted: typeof o.muted === 'boolean' ? o.muted : DEFAULT_AUDIO.muted,
-    volume,
+    volume: level(o.volume, DEFAULT_AUDIO.volume),
     music: typeof o.music === 'boolean' ? o.music : DEFAULT_AUDIO.music,
+    voice: level(o.voice, DEFAULT_AUDIO.voice),
   };
 }

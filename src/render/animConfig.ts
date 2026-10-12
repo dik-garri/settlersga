@@ -35,7 +35,10 @@ export type SoundId =
   | 'complete'
   | 'click'
   | 'fall'
-  | 'hiss';
+  | 'hiss'
+  // The radio of a network game (ui/voice.ts): switched on, switched off.
+  | 'radioOn'
+  | 'radioOff';
 
 export interface ActionDef {
   tool: ToolShape;

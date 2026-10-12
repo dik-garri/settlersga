@@ -90,6 +90,16 @@ export function settingsPanel(audio: AudioEngine, opts: { onArt?: () => void; on
   volume.oninput = () => audio.setVolume(Number(volume.value) / 100);
   row(t('settings.volume'), volume);
   row(t('settings.music'), check(audio.settings.music, (on) => audio.setMusic(on)));
+  // The other players' voices in a network game (the radio): their own volume, M does not mute them.
+  const voice = el('input');
+  voice.type = 'range';
+  voice.min = '0';
+  voice.max = '100';
+  voice.value = String(Math.round(audio.settings.voice * 100));
+  voice.oninput = () => audio.setVoiceVolume(Number(voice.value) / 100);
+  voice.setAttribute('aria-label', t('settings.voiceTip'));
+  voice.title = t('settings.voiceTip');
+  row(t('settings.voice'), voice);
 
   box.append(el('h4', '', t('settings.graphics')));
   const art = el('select');

@@ -5,6 +5,7 @@ import { DelayTuner, delayFor } from '../src/net/delay';
 import { Lockstep, type LockstepMsg } from '../src/net/lockstep';
 import { LoopbackNetwork, VirtualClock, type LinkConditions, type LoopbackTransport } from '../src/net/loopback';
 import { SAVE_EVERY_TICKS, type MatchEvent, type NetSave } from '../src/net/match';
+import { VOICE_FRAME, type VoiceFrame } from '../src/net/voice';
 import { stateChecksum } from '../src/sim/checksum';
 import type { SaveData } from '../src/sim/save';
 import type { BuildingType, PlayerId } from '../src/sim/types';
@@ -29,6 +30,7 @@ interface Peer {
   world: World;
   events: MatchEvent[];
   chat: NetChatLine[];
+  voice: VoiceFrame[];
   asked: number[];
   hostLost: boolean;
   gone: boolean;
@@ -58,7 +60,7 @@ interface GameOpts {
 }
 
 function makePeer(g: Game, transport: LoopbackTransport, seat: number, world: World, extra: Partial<ConstructorParameters<typeof NetCore>[0]> = {}): Peer {
-  const p = { seat, transport, world, events: [], chat: [], asked: [], hostLost: false, gone: false } as unknown as Peer;
+  const p = { seat, transport, world, events: [], chat: [], voice: [], asked: [], hostLost: false, gone: false } as unknown as Peer;
   p.core = new NetCore({
     world,
     transport,
@@ -70,6 +72,7 @@ function makePeer(g: Game, transport: LoopbackTransport, seat: number, world: Wo
     hooks: {
       event: (e) => p.events.push(e),
       chat: (l) => p.chat.push(l),
+      voice: (f) => p.voice.push(f),
       hostLost: () => (p.hostLost = true),
       rejoinAsked: (s) => p.asked.push(s),
     },
@@ -187,6 +190,34 @@ describe('network chat (6.6)', () => {
     run(g, 3_000);
     expect(a.chat.filter((l) => l.text === 'fake').every((l) => l.seat === 3)).toBe(true);
     // The chat changed nothing in the game.
+    expect(new Set(sums(g)).size).toBe(1);
+  });
+});
+
+describe('voice (the radio)', () => {
+  it('frames go through the host to the allies or to everybody, beside the game and without changing it', () => {
+    const g = coreGame({ humans: 3, seed: 5, world: { size: 64, players: 3, teams: [1, 2, 2] }, conditions: { latency: 40, jitter: 30, drop: 0.03 } });
+    const [a, b, c] = g.peers;
+    run(g, 1_000);
+    expect(a.core.voice.hasAllies()).toBe(false);
+    expect(b.core.voice.hasAllies()).toBe(true);
+    const frame = Float32Array.from({ length: VOICE_FRAME }, (_, i) => 0.4 * Math.sin(i / 9));
+    // Ten frames a second for a second: player 2 to his ally, then the host to everybody.
+    run(g, 1_000, 20, (t) => {
+      if (t % 100 === 0) b.core.voice.send('allies', frame);
+    });
+    run(g, 1_000, 20, (t) => {
+      if (t % 100 === 0) a.core.voice.send('all', frame);
+    });
+    run(g, 500);
+    const from = (p: Peer) => p.voice.map((f) => `${f.seat}:${f.to}`);
+    expect(from(c)).toEqual([...Array(10).fill('2:allies'), ...Array(10).fill('1:all')]);
+    expect(from(b)).toEqual(Array(10).fill('1:all'));
+    // The enemy host routes 2's words to 3 but never hears them himself.
+    expect(from(a)).toEqual([]);
+    expect(c.voice.map((f) => f.seq)).toEqual([...Array(10).keys(), ...Array(10).keys()]);
+    expect(a.core.voice.stats.forwarded).toBe(20 + 10);
+    // Voice is no part of the game: the worlds stay the same.
     expect(new Set(sums(g)).size).toBe(1);
   });
 });

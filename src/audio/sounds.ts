@@ -164,4 +164,16 @@ export const RECIPES: Record<SoundId, Recipe> = {
   },
   // Furnace breath.
   hiss: (ctx, out, t, v) => burst(ctx, out, t, 'bandpass', 900 * v, 0.6, 0.3, 0.8, 600),
+  // The radio goes on the air: a switch click, a short burst of static, a rising chirp.
+  radioOn: (ctx, out, t) => {
+    burst(ctx, out, t, 'highpass', 2500, 0.7, 0.4, 0.012);
+    burst(ctx, out, t + 0.015, 'bandpass', 1800, 1.2, 0.18, 0.07);
+    tone(ctx, out, t + 0.05, 'square', 1250, 0.07, 0.07, 1650, 0.004);
+  },
+  // Off the air: the click, then a falling chirp and a squelch tail.
+  radioOff: (ctx, out, t) => {
+    burst(ctx, out, t, 'highpass', 2500, 0.7, 0.35, 0.012);
+    tone(ctx, out, t + 0.02, 'square', 1500, 0.06, 0.07, 1000, 0.004);
+    burst(ctx, out, t + 0.06, 'bandpass', 2200, 1.4, 0.2, 0.12, 900);
+  },
 };

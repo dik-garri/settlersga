@@ -64,7 +64,10 @@ describe('stored settings', () => {
   });
 
   it('keeps valid fields and clamps the volume', () => {
-    expect(parseAudioSettings('{"muted":true,"volume":3,"music":false}')).toEqual({ muted: true, volume: 1, music: false });
+    expect(parseAudioSettings('{"muted":true,"volume":3,"music":false}')).toEqual({ ...DEFAULT_AUDIO, muted: true, volume: 1, music: false });
+    expect(parseAudioSettings('{"voice":0.3}').voice).toBe(0.3);
+    expect(parseAudioSettings('{"voice":-2}').voice).toBe(0);
+    expect(parseAudioSettings('{"voice":"x"}').voice).toBe(DEFAULT_AUDIO.voice);
     expect(parseAudioSettings('{"volume":0.25}')).toEqual({ ...DEFAULT_AUDIO, volume: 0.25 });
   });
 });

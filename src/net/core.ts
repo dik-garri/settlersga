@@ -9,6 +9,7 @@ import { cleanName } from './names';
 import { bindLockstep, type LockstepSession } from './session';
 import { NetStatus } from './status';
 import type { PeerId, Transport } from './transport';
+import { NetVoice, type VoiceFrame } from './voice';
 
 /**
  * One browser's network game without DOM or timers (roadmap 6.4–6.7): the transport, the lockstep
@@ -82,6 +83,8 @@ export interface NetCoreHooks {
   hostLost?(): void;
   /** A chat line this browser may read. */
   chat?(line: NetChatLine): void;
+  /** A voice frame for this browser to play (the radio, `voice.ts`). */
+  voice?(frame: VoiceFrame): void;
   /**
    * Host: a player who left asks for his seat back — answer with `acceptRejoin`/`refuseRejoin`.
    * `name` is the name he gives now (null: none), to compare with the seat's (`nameOf`).
@@ -129,6 +132,8 @@ export class NetCore {
   readonly match: NetMatch;
   readonly status: NetStatus;
   readonly chat: NetChat;
+  /** The radio: voice frames through the host, outside the lockstep. */
+  readonly voice: NetVoice;
   hooks: NetCoreHooks;
   /** The host is gone (client) or the game was left: nothing more is played. */
   ended = false;
@@ -191,6 +196,15 @@ export class NetCore {
       allied: (a, b) => world.allied(a, b),
       history: o.chat,
       onLine: (line) => this.hooks.chat?.(line),
+    });
+    this.voice = new NetVoice({
+      transport,
+      seats: this.seats,
+      local,
+      now: o.now,
+      allied: (a, b) => world.allied(a, b),
+      present: (seat) => world.aiLevel(seat) === null,
+      onFrame: (frame) => this.hooks.voice?.(frame),
     });
     // Seats nobody plays from the start (a loaded game): free to take for the grace period.
     for (const seat of o.humanSeats ?? []) if (!this.seats.has(seat)) this.leftAt.set(seat, o.now());
@@ -371,6 +385,7 @@ export class NetCore {
     for (const off of this.offs) off();
     this.status.dispose();
     this.chat.dispose();
+    this.voice.dispose();
     this.session.dispose();
     this.o.world.sendAhead = null;
   }

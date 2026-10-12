@@ -36,6 +36,7 @@ import { NetGame } from './ui/netGame';
 import { ownName } from './ui/playerNames';
 import { NAME_EVENT } from './ui/settingsPanel';
 import { downloadJson, NetPanel, netWindow } from './ui/netView';
+import { Radio, VoicePlayer } from './ui/voice';
 
 /** A network game: the connections the lobby made, what the host decided at «Start», the chat so far. */
 interface NetStart {
@@ -312,7 +313,10 @@ function game(
     net ? net.requestSave(name) : !!(await slots.write(saveWorld(world), name, Date.now(), id, missionMeta()));
   // Loading or leaving starts the page over: nothing of this game is left behind.
   // Leaving a network game says goodbye first: the others' computers take this seat over.
-  const leave = () => net?.close();
+  const leave = () => {
+    radio?.stop();
+    net?.close();
+  };
   const pause = new PauseMenu(world, state, {
     save,
     load: (meta) => {
@@ -329,7 +333,7 @@ function game(
   const hudEl = document.getElementById('hud')!;
   const mmWidth = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--mm-w')) || 252;
   const minimap = new Minimap(world, camera, state.fog, mmWidth, state.localPlayer, renderer.memory, renderer.tiles);
-  const sound = audioControls(audio);
+  const sound = audioControls(audio, { voice: !!net });
   const jump = (x: number, y: number) => {
     const p = toScreen(x, y);
     camera.centerOn(p.x, p.y - world.map.heightAt(x, y));
@@ -377,7 +381,16 @@ function game(
     });
   }
   hudEl.append(pause.el);
+  // The radio of a network game (V allies, B everybody; ui/voice.ts), its plaque over the game.
+  let radio: Radio | null = null;
+  let voicePlayer: VoicePlayer | null = null;
   if (net) {
+    // The others' voices go on in a hidden tab; the game's own sounds are silenced there.
+    audio.stayAwake = true;
+    const player = new VoicePlayer(audio);
+    voicePlayer = player;
+    radio = new Radio({ voice: net.core.voice, audio, toast: (text) => hud.toast(text) });
+    const onAir = radio;
     // The network game's status under the speed strip, its messages on the ticker, its end windows.
     const panel = new NetPanel({
       world,
@@ -397,17 +410,33 @@ function game(
             refuse: (s) => net.core.refuseRejoin(s),
           }
         : null,
+      voice: {
+        talking: () => net.talking(),
+        own: () => onAir.on,
+        muted: (seat) => net.muted.has(seat),
+        toggleMute: (seat) => net.toggleMute(seat),
+      },
     });
     // The chat box over the ticker (Enter or the panel's button), rebuilt in another language.
     const makeChat = () =>
       new ChatBox({ local: net.local, nameOf: (seat) => net.nameOf(seat), lines: () => net.core.chat.lines, say: (text, to) => net.say(text, to), toast: (text) => hud.toast(text) });
     let chat = makeChat();
-    hudEl.append(panel.el, chat.el);
+    hudEl.append(panel.el, chat.el, onAir.el);
     window.addEventListener(LANG_EVENT, () => {
       const old = chat;
       chat = makeChat();
       old.el.replaceWith(chat.el);
+      onAir.show();
     });
+    // V / B (by the key's place, any layout): the radio on to the allies / to everybody, the same key off.
+    window.addEventListener('keydown', (e) => {
+      if (e.code !== 'KeyV' && e.code !== 'KeyB') return;
+      const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
+      if (typing || e.repeat || e.ctrlKey || e.metaKey || e.altKey || state.menu || chat.isOpen || net.core.ended) return;
+      e.preventDefault();
+      onAir.press(e.code === 'KeyV' ? 'allies' : 'all');
+    });
+    window.addEventListener('pagehide', () => onAir.stop());
     window.addEventListener('keydown', (e) => {
       const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
       if (e.key !== 'Enter' || typing || state.menu || chat.isOpen) return;
@@ -416,6 +445,7 @@ function game(
     });
     app.ticker.add(() => panel.update(performance.now()));
     const toMenu = () => {
+      onAir.stop();
       net.close();
       location.href = withLang(`${location.pathname}?menu`);
     };
@@ -430,14 +460,18 @@ function game(
         if (!chat.isOpen) hud.toast(chatLineText(line, (seat) => net.nameOf(seat)));
         chat.refresh();
       },
-      desync: (r) =>
+      voice: (frame) => player.play(frame.seat, frame.samples),
+      desync: (r) => {
+        onAir.stop();
         show(
           netWindow(t('net.desync.title'), t('net.desync.text', { turn: r.turn }), [
             [t('net.desync.report'), () => downloadJson(`settlers-desync-p${net.local}-t${r.turn}.json`, net.report()), true],
             [t('net.toMenu'), toMenu],
           ]),
-        ),
+        );
+      },
       hostLost: () => {
+        onAir.stop();
         const saveIt = async () => {
           // A network save of the last turn played: loadable in the lobby with a new host.
           const ok = await net.saveNow(t('net.savedName', { min: Math.floor(world.tick / (60 * TICKS_PER_SECOND)) }));
@@ -524,7 +558,7 @@ function game(
     minimap.update(now, app.screen.width, app.screen.height);
   });
 
-  Object.assign(window, { world, seed: opts.seed, state, renderer, camera, audio, pause, tutorial, replay: replayTools(world), net });
+  Object.assign(window, { world, seed: opts.seed, state, renderer, camera, audio, pause, tutorial, replay: replayTools(world), net, radio, voicePlayer });
   if (opts.seed) console.info(`Settlers prototype, seed ${opts.seed} (add ?seed=${opts.seed} to replay this map)`);
   else console.info(`Game at tick ${world.tick}`);
 }

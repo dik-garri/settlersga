@@ -3,10 +3,11 @@ import { LANG_EVENT, t } from './i18n';
 import { tip } from './tooltip';
 
 /**
- * Sound controls for the top-right panel: mute, master volume and music on/off. Returns the
- * elements to append; they keep themselves in sync with the engine's settings.
+ * Sound controls for the top-right panel: mute, master volume, music on/off and the volume of the
+ * other players' voices (the radio, only in a network game: `opts.voice`). Returns the elements to
+ * append; they keep themselves in sync with the engine's settings.
  */
-export function audioControls(audio: AudioEngine): HTMLElement {
+export function audioControls(audio: AudioEngine, opts: { voice?: boolean } = {}): HTMLElement {
   const box = document.createElement('span');
   box.className = 'audio-controls';
 
@@ -19,6 +20,12 @@ export function audioControls(audio: AudioEngine): HTMLElement {
   volume.className = 'volume';
   const music = document.createElement('button');
   music.textContent = '♫';
+  // The others' voices in a network game (the radio): a volume of their own, M leaves them on.
+  const voice = document.createElement('input');
+  voice.type = 'range';
+  voice.min = '0';
+  voice.max = '100';
+  voice.className = 'volume voice-volume';
 
   const refresh = () => {
     const s = audio.settings;
@@ -32,6 +39,9 @@ export function audioControls(audio: AudioEngine): HTMLElement {
     mute.classList.toggle('active', s.muted);
     volume.value = String(Math.round(s.volume * 100));
     music.classList.toggle('active', s.music);
+    tip(voice, `${t('settings.voice')}: ${t('settings.voiceTip')}`);
+    voice.setAttribute('aria-label', t('settings.voice'));
+    voice.value = String(Math.round(s.voice * 100));
   };
   mute.onclick = () => {
     audio.setMuted(!audio.settings.muted);
@@ -44,6 +54,8 @@ export function audioControls(audio: AudioEngine): HTMLElement {
     refresh();
   };
   volume.onchange = () => volume.blur();
+  voice.oninput = () => audio.setVoiceVolume(Number(voice.value) / 100);
+  voice.onchange = () => voice.blur();
   music.onclick = () => {
     audio.setMusic(!audio.settings.music);
     refresh();
@@ -57,5 +69,6 @@ export function audioControls(audio: AudioEngine): HTMLElement {
   window.addEventListener(LANG_EVENT, refresh);
   refresh();
   box.append(mute, volume, music);
+  if (opts.voice) box.append(voice);
   return box;
 }

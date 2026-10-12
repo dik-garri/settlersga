@@ -7,6 +7,7 @@ import type { LockstepSession } from '../net/session';
 import type { NetStatus } from '../net/status';
 import type { PeerId, Transport } from '../net/transport';
 import { BUILD_ID } from '../net/version';
+import type { VoiceFrame, VoiceTo } from '../net/voice';
 import { TICKS_PER_SECOND } from '../sim/config';
 import { saveWorld } from '../sim/save';
 import type { World } from '../sim/world';
@@ -46,6 +47,8 @@ export interface NetGameHooks {
   hostLost(): void;
   /** A chat line this browser may read. */
   chat(line: NetChatLine): void;
+  /** A voice frame to play (not from a seat muted here). */
+  voice(frame: VoiceFrame): void;
 }
 
 export interface NetGameOptions {
@@ -64,7 +67,9 @@ export class NetGame {
   readonly hostSeat: Seat;
   /** The human players' names by seat, from the setup the host sent at «Start» (interface data only). */
   readonly names: ReadonlyMap<Seat, string>;
-  hooks: NetGameHooks = { toast: () => {}, desync: () => {}, hostLost: () => {}, chat: () => {} };
+  hooks: NetGameHooks = { toast: () => {}, desync: () => {}, hostLost: () => {}, chat: () => {}, voice: () => {} };
+  /** Seats whose voice this browser does not play (the panel's mute buttons; never saved or sent). */
+  readonly muted = new Set<Seat>();
   private last = performance.now();
   private timer: ReturnType<typeof setInterval>;
   private readonly offs: (() => void)[] = [];
@@ -98,6 +103,9 @@ export class NetGame {
         desync: (r) => this.hooks.desync(r),
         hostLost: () => this.hooks.hostLost(),
         chat: (line) => this.hooks.chat(line),
+        voice: (frame) => {
+          if (!this.muted.has(frame.seat)) this.hooks.voice(frame);
+        },
         rejoinAsked: (seat, name) => this.hooks.toast(rejoinAskText(this.nameOf(seat), name)),
       },
     });
@@ -162,6 +170,16 @@ export class NetGame {
   /** Says something in the chat. */
   say(text: string, to: ChatTo): SayResult {
     return this.core.say(text, to);
+  }
+
+  /** Mutes or unmutes a seat's voice here. */
+  toggleMute(seat: Seat): void {
+    if (!this.muted.delete(seat)) this.muted.add(seat);
+  }
+
+  /** Who is talking on the radio now, as this browser hears it, and to whom. */
+  talking(): Map<Seat, VoiceTo> {
+    return this.core.voice.talking();
   }
 
   /**

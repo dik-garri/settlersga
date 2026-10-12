@@ -5,6 +5,10 @@
  *
  * Signal path: effect → panner → sfx bus ┐
  *              music voices → echo → music bus ┴→ master → speakers
+ *              players' voices, radio clicks → voice bus → speakers
+ *
+ * The voice bus (a network game's radio, `ui/voice.ts`) bypasses the master: M and the master volume
+ * silence the game, not the other players; it has its own volume (`AudioSettings.voice`).
  */
 import type { SoundId } from '../render/animConfig';
 import { attenuation, DEFAULT_AUDIO, panOf, parseAudioSettings, RateLimiter, type AudioSettings, type Listener } from './mix';
@@ -67,6 +71,12 @@ export class AudioEngine {
   private sfx: GainNode | null = null;
   private music: GainNode | null = null;
   private echo: DelayNode | null = null;
+  private voiceBus: GainNode | null = null;
+  /**
+   * Keep the context running in a hidden tab (a network game: the others' voices go on while the
+   * player looks at another tab); the game's own sounds are silenced there instead.
+   */
+  stayAwake = false;
   private readonly limiter = new RateLimiter(14, 8, 70);
   private readonly listener: Listener = { x: 0, y: 0, halfW: 1, zoom: 1 };
   private nextChord = 0;
@@ -102,10 +112,13 @@ export class AudioEngine {
       wet.gain.value = 0.4;
       this.echo.connect(feedback).connect(this.echo);
       this.echo.connect(wet).connect(this.music);
+      this.voiceBus = ctx.createGain();
+      this.voiceBus.connect(ctx.destination);
       this.applySettings();
       document.addEventListener('visibilitychange', () => {
-        if (document.hidden) void ctx.suspend();
-        else void ctx.resume();
+        if (document.hidden && !this.stayAwake) void ctx.suspend();
+        else if (!document.hidden) void ctx.resume();
+        this.applySettings();
       });
     } catch {
       this.ctx = null;
@@ -131,6 +144,29 @@ export class AudioEngine {
     this.save();
   }
 
+  /** The other players' voices' volume (0..1). */
+  setVoiceVolume(volume: number): void {
+    this.settings.voice = Math.min(1, Math.max(0, volume));
+    this.save();
+  }
+
+  /** Where the radio plays the others' voices: the context and the voice bus (null before a gesture). */
+  voiceOutput(): { ctx: AudioContext; out: AudioNode } | null {
+    return this.ctx && this.voiceBus ? { ctx: this.ctx, out: this.voiceBus } : null;
+  }
+
+  /** A radio click on the voice bus (heard even with the game muted). */
+  radio(id: SoundId): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.voiceBus) return;
+    if (ctx.state === 'suspended') void ctx.resume();
+    const g = ctx.createGain();
+    g.gain.value = 0.9;
+    g.connect(this.voiceBus);
+    RECIPES[id](ctx, g, ctx.currentTime + 0.005, 1);
+    setTimeout(() => g.disconnect(), 1500);
+  }
+
   private save(): void {
     this.applySettings();
     try {
@@ -143,8 +179,10 @@ export class AudioEngine {
   private applySettings(): void {
     if (!this.ctx || !this.master || !this.music) return;
     const t = this.ctx.currentTime;
-    const v = this.settings.muted ? 0 : this.settings.volume;
+    const v = this.settings.muted || document.hidden ? 0 : this.settings.volume;
     this.master.gain.setTargetAtTime(v * v, t, 0.05);
+    const voice = this.settings.voice;
+    this.voiceBus?.gain.setTargetAtTime(voice * voice * 1.6, t, 0.05);
     this.music.gain.setTargetAtTime(this.settings.music ? MUSIC_LEVEL : 0, t, 0.4);
   }
 

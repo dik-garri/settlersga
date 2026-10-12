@@ -620,6 +620,16 @@ button.wide {
   cursor: pointer;
 }
 
+/* The others' voices (network game): a row of its own under the game's sound. */
+.audio-controls:has(.voice-volume) {
+  flex-wrap: wrap;
+}
+
+.audio-controls .voice-volume {
+  flex-basis: 100%;
+  accent-color: #3f7fbf;
+}
+
 /* ------------------------------------------------------------------ readout (bottom of the panel) */
 
 .readout {
@@ -1367,6 +1377,122 @@ button.wide {
 .np-buttons {
   display: flex;
   gap: 4px;
+}
+
+/* The radio in the network panel: who talks now (and to whom), and the mute button per player. */
+.np-talk {
+  padding: 0 5px;
+  border-radius: 7px;
+  font-size: 11px;
+  color: #fff;
+  background: #3d7a2a;
+  white-space: nowrap;
+  animation: np-blink 0.6s ease-in-out infinite alternate;
+}
+
+.np-talk::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 4px;
+  border-radius: 50%;
+  background: #c8ff9a;
+  vertical-align: 1px;
+}
+
+.np-talk.all {
+  background: #9a3a1e;
+}
+
+.np-talk.all::before {
+  background: #ffd08a;
+}
+
+.np-talk.muted {
+  opacity: 0.45;
+  animation: none;
+}
+
+.net-panel .np-mute {
+  flex: none;
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  border-radius: 4px;
+  border: 1px solid var(--bronze-lo);
+  font-size: 11px;
+  line-height: 18px;
+  background: linear-gradient(var(--wood-hi), var(--wood));
+  cursor: pointer;
+}
+
+.net-panel .np-mute.active {
+  background: linear-gradient(#b4442f, #6d1f13);
+}
+
+.np-keys {
+  font-size: 11px;
+}
+
+/* «В эфире»: the radio's plaque at the top of the game view while the microphone is on. */
+.radio-on {
+  position: absolute;
+  top: 10px;
+  left: calc(var(--side-w) + (100vw - var(--side-w)) / 2);
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px;
+  border-radius: 18px;
+  color: #fff;
+  font-weight: bold;
+  white-space: nowrap;
+  pointer-events: none;
+  background: linear-gradient(#3f8a2c, #23521a);
+  box-shadow: 0 0 0 1px var(--bronze-hi), 0 0 0 3px var(--bronze-lo), 0 3px 10px rgba(0, 0, 0, 0.5);
+  text-shadow: 0 1px 2px #000;
+}
+
+.radio-on.all {
+  background: linear-gradient(#b4442f, #6d1f13);
+}
+
+.radio-on[hidden] {
+  display: none;
+}
+
+.radio-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ff4b3a;
+  box-shadow: 0 0 6px 2px rgba(255, 90, 60, 0.8);
+  animation: np-blink 0.8s ease-in-out infinite alternate;
+}
+
+.radio-meter {
+  width: 64px;
+  height: 7px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+
+.radio-bar {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #9fe36c, #f3d34a 70%, #ff6a3a);
+  transition: width 0.1s linear;
+}
+
+.radio-hint {
+  font-size: 11px;
+  font-weight: normal;
+  opacity: 0.85;
 }
 
 /* The chat box of a network game (chatView.ts): over the message ticker, Enter opens it. */
