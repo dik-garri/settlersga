@@ -87,6 +87,42 @@ export function covers(l: Area, x: number, y: number): boolean {
 /** A footprint and its door. */
 type Area = Pick<BuildingLook, 'x' | 'y' | 'w' | 'h' | 'door'>;
 
+/**
+ * `World.isVisible` / `isExplored` for one player (allies' sight included, `sightMask`) by tile index,
+ * with the mask and the `seenUntil` layers looked up once per `prepare` instead of per tile.
+ */
+export class Sight {
+  /** The player's sight bits (his own and his allies'). */
+  mask = 0;
+  private readonly seen: Uint32Array[] = [];
+
+  constructor(
+    private readonly world: World,
+    private readonly me: PlayerId,
+  ) {}
+
+  /** Call before a batch of tests: the allies or the number of `seenUntil` layers may have changed. */
+  prepare(): void {
+    const f = this.world.fog;
+    this.mask = sightMask(this.world, this.me);
+    this.seen.length = 0;
+    for (let k = 0; k < f.seenUntil.length; k++) if (this.mask & (1 << k)) this.seen.push(f.seenUntil[k]);
+  }
+
+  /** In sight now. */
+  visible(i: number): boolean {
+    if ((this.world.fog.vision[i] ?? 0) & this.mask) return true;
+    const tick = this.world.tick;
+    for (const s of this.seen) if (s[i] >= tick) return true;
+    return false;
+  }
+
+  /** Seen at some time. */
+  explored(i: number): boolean {
+    return (this.world.map.explored[i] & this.mask) !== 0;
+  }
+}
+
 export class BuildingMemory {
   private readonly records = new Map<number, Remembered>();
   /** Records whose building is gone from the world (demolished, burnt) while out of sight. */
@@ -94,9 +130,8 @@ export class BuildingMemory {
   private lastMs = -Infinity;
   /** Bumped whenever a record is added, dropped or changed (for views that redraw on change). */
   version = 0;
-  /** Per update: the player's sight bits and the `seenUntil` layers they cover. */
-  private mask = 0;
-  private seen: Uint32Array[] = [];
+  /** The player's sight, prepared once per update. */
+  private readonly sight: Sight;
 
   constructor(
     private readonly world: World,
@@ -105,6 +140,7 @@ export class BuildingMemory {
     /** False with the fog off: no memory, everything live. */
     readonly on: boolean,
   ) {
+    this.sight = new Sight(world, me);
     // A loaded game (or one fast-forwarded before the view opened) has a past: what stands on
     // explored tiles is taken as seen. A new game starts with nothing remembered.
     if (on && world.tick > 0) this.seed();
@@ -121,7 +157,7 @@ export class BuildingMemory {
   refresh(): void {
     if (!this.on) return;
     const w = this.world;
-    this.prepareSight();
+    this.sight.prepare();
     for (const b of w.buildings.values()) {
       const rec = this.records.get(b.id);
       if (w.allied(b.owner, this.me) || this.areaVisible(b)) this.remember(b, rec);
@@ -242,21 +278,6 @@ export class BuildingMemory {
     }
   }
 
-  private prepareSight(): void {
-    const f = this.world.fog;
-    this.mask = sightMask(this.world, this.me);
-    this.seen.length = 0;
-    for (let k = 0; k < f.seenUntil.length; k++) if (this.mask & (1 << k)) this.seen.push(f.seenUntil[k]);
-  }
-
-  /** `World.isVisible` for tile index i, with the player's sight prepared once per update. */
-  private visible(i: number): boolean {
-    if ((this.world.fog.vision[i] ?? 0) & this.mask) return true;
-    const tick = this.world.tick;
-    for (const s of this.seen) if (s[i] >= tick) return true;
-    return false;
-  }
-
   /** Any footprint tile or the door in sight now. */
   private areaVisible(l: Area): boolean {
     return this.anyTile(l, false);
@@ -264,13 +285,13 @@ export class BuildingMemory {
 
   /** Any footprint tile or the door explored. */
   private areaExplored(l: Area): boolean {
-    this.mask = sightMask(this.world, this.me);
+    this.sight.prepare();
     return this.anyTile(l, true);
   }
 
   private anyTile(l: Area, explored: boolean): boolean {
     const m = this.world.map;
-    const test = (i: number) => (explored ? (m.explored[i] & this.mask) !== 0 : this.visible(i));
+    const test = (i: number) => (explored ? this.sight.explored(i) : this.sight.visible(i));
     if (m.inBounds(l.door.x, l.door.y) && test(m.idx(l.door.x, l.door.y))) return true;
     for (let y = Math.max(0, l.y); y < Math.min(m.h, l.y + l.h); y++) {
       for (let x = Math.max(0, l.x); x < Math.min(m.w, l.x + l.w); x++) if (test(y * m.w + x)) return true;

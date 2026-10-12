@@ -47,8 +47,11 @@ function hash(i: number): number {
   return h >>> 0;
 }
 
+/** The map layers a rock layout reads (the renderer passes trees, deposits and goods as the player knows them). */
+export type RockMap = Pick<GameMap, 'terrain' | 'building' | 'door' | 'tree' | 'stone' | 'goods' | 'idx'>;
+
 /** True where nothing stands that a rock would overlap. */
-function freeTile(map: GameMap, i: number): boolean {
+function freeTile(map: RockMap, i: number): boolean {
   return map.tree[i] === 0 && map.stone[i] === 0 && map.building[i] === 0 && map.door[i] === 0 && map.goods[i] === 0;
 }
 
@@ -63,7 +66,7 @@ function scaleOf(size: RockSize, h: number): number {
  * row order.
  */
 export function rockLayout(
-  map: GameMap,
+  map: RockMap,
   x0: number,
   y0: number,
   x1: number,

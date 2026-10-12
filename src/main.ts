@@ -328,7 +328,7 @@ function game(
   // The minimap is framed at the top of the side panel, as wide as the panel's inside (--mm-w).
   const hudEl = document.getElementById('hud')!;
   const mmWidth = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--mm-w')) || 252;
-  const minimap = new Minimap(world, camera, state.fog, mmWidth, state.localPlayer, renderer.memory);
+  const minimap = new Minimap(world, camera, state.fog, mmWidth, state.localPlayer, renderer.memory, renderer.tiles);
   const sound = audioControls(audio);
   const jump = (x: number, y: number) => {
     const p = toScreen(x, y);

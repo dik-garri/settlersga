@@ -56,11 +56,12 @@ const YARD_RX = 30;
 const YARD_RY = 15;
 import { needsLevelling } from '../sim/digging';
 import { TradeRouteLayer } from './tradeRoutes';
-import { rockKey, rockLayout, type RockSize, type RockSpot } from './rocks';
+import { rockKey, rockLayout, type RockMap, type RockSize, type RockSpot } from './rocks';
 import { GuideLayer, type GuideMark } from './guide';
 import { WorkAreaLayer } from './workArea';
 import { GarrisonLayer } from './garrison';
 import { BuildingMemory, lookOf, type BuildingLook } from './memory';
+import { TileMemory } from './tileMemory';
 import { pathLevel } from '../sim/paths';
 import { chatPartner } from '../sim/idle';
 import { BANNERS, EDGE_DIRS, RUIN_SIZES, siteSprite, GROUND_PRIORITY, groundVariants, PATH_VARIANTS, PLAYER_COLORS, type GroundKind } from './sprites';
@@ -265,13 +266,19 @@ export class GameRenderer {
   private readonly chunkObjects: Set<Container>[] = [];
   private readonly chunkVisible: Uint8Array;
   private readonly chunkBounds: Float32Array;
-  /** Last `map.chunkVersion` seen per chunk; trees and deposits are re-synced only for changed chunks. */
+  /** Last `map.chunkVersion` seen per chunk: the local player's signs are re-synced only for changed chunks. */
   private readonly chunkSeen: Int32Array;
+  /**
+   * Last `tiles.chunkVersion` seen per chunk: trees, deposits, fields, paths and goods (as the local
+   * player knows them, `tileMemory.ts`) are re-synced only for changed chunks.
+   */
+  private readonly tileSeen: Int32Array;
   private view: ViewRect = { x: 0, y: 0, w: 0, h: 0 };
   private readonly territory = new Container();
   private readonly territoryChunks: Graphics[] = [];
   /** Owner per tile as last drawn; 255 forces the first draw. */
   private readonly ownerSeen: Uint8Array;
+  /** Last `tiles.ownerVersion` drawn. */
   private territoryVersion = -1;
   private readonly marks = new Graphics();
   private readonly objects = new Container({ sortableChildren: true });
@@ -348,6 +355,12 @@ export class GameRenderer {
    * drawn live only while in sight, else as last seen; the minimap and the input read it too.
    */
   readonly memory: BuildingMemory;
+  /**
+   * What the local player knows of the tiles under the fog (`tileMemory.ts`): land owners, trees,
+   * deposits, fields, goods on the ground and paths as last seen; with the fog off, the map itself.
+   * Everything drawn of them (and the minimap) reads it, never `map.*`.
+   */
+  readonly tiles: TileMemory;
   /** Scratch look of a live building, filled every frame (`lookOf`). */
   private readonly liveLook = { id: 0, door: { x: 0, y: 0 } } as BuildingLook;
   private readonly settlerViews = new Map<number, SettlerView>();
@@ -401,6 +414,7 @@ export class GameRenderer {
     this.animals = new AnimalLayer(sim, this.objects, (n) => atlas.get(n), fogOn, this.wareTex, me);
     this.settler3d = atlas.art3d?.settlers ?? null;
     this.memory = new BuildingMemory(sim, me, fogOn);
+    this.tiles = new TileMemory(sim, me, fogOn);
     this.garrison = new GarrisonLayer(sim, this.settler3d, this.settlerTex, this.playerTint, (b) => this.memory.live(b));
     for (const r of RESOURCES) this.wareTex[r] = atlas.get(`ware:${r}`);
     this.effects = new Effects(atlas, sim, (x, y) => this.surface(x, y), this.sound);
@@ -447,6 +461,7 @@ export class GameRenderer {
     }
     this.chunkVisible = new Uint8Array(chunks);
     this.chunkSeen = new Int32Array(chunks).fill(-1);
+    this.tileSeen = new Int32Array(chunks).fill(-1);
     this.heightSeen = new Uint32Array(chunks);
     this.chunkReady = new Uint8Array(chunks);
     this.territoryPending = new Uint8Array(chunks);
@@ -554,7 +569,7 @@ export class GameRenderer {
     const { map } = this.sim;
     const x0 = (c % map.chunksX) * CHUNK;
     const y0 = Math.floor(c / map.chunksX) * CHUNK;
-    const spots = rockLayout(map, x0, y0, Math.min(map.w, x0 + CHUNK), Math.min(map.h, y0 + CHUNK), this.atlas.rocks ?? CLASSIC_ROCKS);
+    const spots = rockLayout(this.rockMap, x0, y0, Math.min(map.w, x0 + CHUNK), Math.min(map.h, y0 + CHUNK), this.atlas.rocks ?? CLASSIC_ROCKS);
     this.rockKeys[c] = rockKey(spots);
     for (const r of spots) {
       const rock = this.takeSprite(this.rockTexture(r));
@@ -573,13 +588,21 @@ export class GameRenderer {
     return (list[r.variant] ??= this.atlas.get(`rock:${r.size}:${r.variant}`));
   }
 
+  /** What rocks keep clear of: the map's terrain and buildings; trees, deposits and goods as the player knows them. */
+  private get rockMap(): RockMap {
+    const { map } = this.sim;
+    const t = this.tiles;
+    return (this.rockMapCache ??= { terrain: map.terrain, building: map.building, door: map.door, tree: t.tree, stone: t.stone, goods: t.goods, idx: (x, y) => map.idx(x, y) });
+  }
+  private rockMapCache: RockMap | null = null;
+
   /** Lays a built chunk's rocks out again if what stands on its tiles moved them. */
   private refreshRocks(c: number): void {
     if (!this.chunkReady[c]) return; // laid out from the current map when it is built
     const { map } = this.sim;
     const x0 = (c % map.chunksX) * CHUNK;
     const y0 = Math.floor(c / map.chunksX) * CHUNK;
-    const spots = rockLayout(map, x0, y0, Math.min(map.w, x0 + CHUNK), Math.min(map.h, y0 + CHUNK), this.atlas.rocks ?? CLASSIC_ROCKS);
+    const spots = rockLayout(this.rockMap, x0, y0, Math.min(map.w, x0 + CHUNK), Math.min(map.h, y0 + CHUNK), this.atlas.rocks ?? CLASSIC_ROCKS);
     if (rockKey(spots) === this.rockKeys[c]) return;
     for (const rock of this.boulders[c]) this.recycleStatic(rock, c);
     this.boulders[c] = [];
@@ -692,7 +715,8 @@ export class GameRenderer {
         const i = map.idx(x, y);
         const h = hash(i * 31 + 17);
         if (h % PROP_EVERY !== 0 || map.terrain[i] !== Terrain.Grass) continue;
-        if (map.tree[i] || map.stone[i] || map.building[i] || map.door[i] || map.crop[i]) continue;
+        const t = this.tiles;
+        if (t.tree[i] || t.stone[i] || map.building[i] || map.door[i] || t.crop[i]) continue;
         const s = new Sprite(this.atlas.get(`prop:${(h >>> 8) % n}`));
         const ox = (((h >>> 12) % 100) / 100 - 0.5) * 0.6;
         const oy = (((h >>> 19) % 100) / 100 - 0.5) * 0.6;
@@ -888,6 +912,8 @@ export class GameRenderer {
     this.view = view;
     this.nowMs = timeMs;
     this.syncHeights(timeMs);
+    // What the local player sees of the tiles now, before anything is drawn from them.
+    this.tiles.update(timeMs);
     this.syncTerritory();
     this.syncVisibleChunks();
     this.unloadHiddenChunks(timeMs);
@@ -1312,6 +1338,7 @@ export class GameRenderer {
     }
     // Tiles re-sync on the next view; territory is redrawn by `ensureChunk`.
     this.chunkSeen[c] = -1;
+    this.tileSeen[c] = -1;
     // A cleared Graphics keeps its GPU geometry: replace it with a fresh one.
     const old = this.territoryChunks[c];
     const fresh = new Graphics();
@@ -1357,21 +1384,28 @@ export class GameRenderer {
 
   private syncChangedTiles(): void {
     const { map } = this.sim;
+    const tiles = this.tiles;
     for (let c = 0; c < this.chunkSeen.length; c++) {
       // Chunks out of view keep a stale version and catch up once they are shown.
-      if (!this.chunkVisible[c] || map.chunkVersion[c] === this.chunkSeen[c]) continue;
+      if (!this.chunkVisible[c]) continue;
+      // The local player's signs follow the map; what lies on the tiles, what he knows of them.
+      const signs = map.chunkVersion[c] !== this.chunkSeen[c];
+      const things = tiles.chunkVersion[c] !== this.tileSeen[c];
+      if (!signs && !things) continue;
       this.chunkSeen[c] = map.chunkVersion[c];
-      this.rocksDirty.add(c);
+      this.tileSeen[c] = tiles.chunkVersion[c];
+      if (things) this.rocksDirty.add(c);
       const x0 = (c % map.chunksX) * CHUNK;
       const y0 = Math.floor(c / map.chunksX) * CHUNK;
       for (let y = y0; y < Math.min(map.h, y0 + CHUNK); y++) {
         for (let x = x0; x < Math.min(map.w, x0 + CHUNK); x++) {
           const i = map.idx(x, y);
+          if (signs) this.syncSign(i);
+          if (!things) continue;
           this.syncTree(i);
           this.syncDeposit(i);
           this.syncCrop(i);
           this.syncPath(i);
-          this.syncSign(i);
           this.syncGoods(i);
         }
       }
@@ -1380,9 +1414,10 @@ export class GameRenderer {
 
   private syncTree(i: number): void {
     const { map } = this.sim;
-    const stage = map.tree[i];
+    const stage = this.tiles.tree[i];
     if (stage === this.treeState[i]) return;
-    const felled = this.treeState[i] === TREE_MATURE && stage === 0;
+    // Felled before the player's eyes; one felled out of sight is simply gone when he looks again.
+    const felled = this.treeState[i] === TREE_MATURE && stage === 0 && !this.tiles.silent(i);
     this.treeState[i] = stage;
     let s = this.treeSprites[i];
     const x = i % map.w;
@@ -1417,17 +1452,20 @@ export class GameRenderer {
   }
 
   /**
-   * Dims land outside the local player's territory and outlines the border. On a territory change
-   * only chunks whose ownership changed (plus their neighbours, whose border edges may move) are redrawn.
+   * Dims land outside the local player's territory and outlines the border, as he knows the land
+   * (`tiles.owner`: under the fog as last seen). On a change only chunks whose ownership changed (plus
+   * their neighbours, whose border edges may move) are redrawn.
    */
   private syncTerritory(): void {
-    if (this.sim.territoryVersion === this.territoryVersion) return;
-    this.territoryVersion = this.sim.territoryVersion;
+    const tiles = this.tiles;
+    if (tiles.ownerVersion === this.territoryVersion) return;
+    this.territoryVersion = tiles.ownerVersion;
     const { map } = this.sim;
+    const owner = tiles.owner;
     const dirty = new Set<number>();
-    for (let i = 0; i < map.owner.length; i++) {
-      if (map.owner[i] === this.ownerSeen[i]) continue;
-      this.ownerSeen[i] = map.owner[i];
+    for (let i = 0; i < owner.length; i++) {
+      if (owner[i] === this.ownerSeen[i]) continue;
+      this.ownerSeen[i] = owner[i];
       const x = i % map.w;
       const y = Math.floor(i / map.w);
       for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
@@ -1448,7 +1486,8 @@ export class GameRenderer {
     const y0 = Math.floor(c / map.chunksX) * CHUNK;
     const x1 = Math.min(map.w, x0 + CHUNK);
     const y1 = Math.min(map.h, y0 + CHUNK);
-    const ownerAt = (x: number, y: number) => (map.inBounds(x, y) ? map.owner[map.idx(x, y)] : 0);
+    const owner = this.tiles.owner;
+    const ownerAt = (x: number, y: number) => (map.inBounds(x, y) ? owner[map.idx(x, y)] : 0);
     // Dimming in strips: one polygon per run of foreign tiles along a row (following the corner
     // heights), not one per tile — far fewer drawing instructions on big maps.
     let dim = false;
@@ -1542,9 +1581,10 @@ export class GameRenderer {
   /** Fields are flat, so they live in the ground layer of their chunk rather than among sorted objects. */
   private syncCrop(i: number): void {
     const { map } = this.sim;
-    const stage = map.crop[i];
+    const { crop, cropKind } = this.tiles;
+    const stage = crop[i];
     // Kind and stage together, so a field replaced by another kind is redrawn.
-    const state = stage === 0 ? 0 : map.cropKind[i] * 8 + stage;
+    const state = stage === 0 ? 0 : cropKind[i] * 8 + stage;
     if (state === this.cropState[i]) return;
     this.cropState[i] = state;
     let s = this.cropSprites[i];
@@ -1562,14 +1602,14 @@ export class GameRenderer {
       this.groundChunks[map.chunkOf(x, y)].addChild(s);
       this.cropSprites[i] = s;
     }
-    s.texture = this.atlas.get(`field:${CROP_KINDS[map.cropKind[i]]}:${stage}`);
+    s.texture = this.atlas.get(`field:${CROP_KINDS[cropKind[i]]}:${stage}`);
     s.anchor.copyFrom(s.texture.defaultAnchor!);
   }
 
   /** Worn paths: a ground decal per level (dusty path, road), under fields and everything standing. */
   private syncPath(i: number): void {
     const { map } = this.sim;
-    const level = pathLevel(map.wear[i]);
+    const level = pathLevel(this.tiles.wear[i]);
     if (level === this.pathState[i]) return;
     this.pathState[i] = level;
     let s = this.pathSprites[i];
@@ -1651,8 +1691,9 @@ export class GameRenderer {
    */
   private syncGoods(i: number): void {
     const { map } = this.sim;
-    const n = map.goodsAmount[i];
-    const state = map.goods[i] === 0 || n === 0 ? 0 : map.goods[i] * 16 + n;
+    const { goods, goodsAmount } = this.tiles;
+    const n = goodsAmount[i];
+    const state = goods[i] === 0 || n === 0 ? 0 : goods[i] * 16 + n;
     if (state === this.goodsState[i]) return;
     this.goodsState[i] = state;
     const x = i % map.w;
@@ -1661,7 +1702,7 @@ export class GameRenderer {
     if (old) this.removeStatic(old, x, y);
     this.goodsSprites[i] = null;
     if (state === 0) return;
-    const res = RESOURCES[map.goods[i] - 1];
+    const res = RESOURCES[goods[i] - 1];
     const pile = new Container();
     const shown = Math.min(n, PILE_MAX);
     const key = this.atlas.has(`stack:${res}:${shown}`) ? `stack:${res}:${shown}` : `pile:${res}:${shown}`;
@@ -1683,7 +1724,7 @@ export class GameRenderer {
 
   private syncDeposit(i: number): void {
     const { map } = this.sim;
-    const left = map.stone[i];
+    const left = this.tiles.stone[i];
     // Three looks by what is left, relative to a fresh deposit's smallest amount.
     const lo = DEPOSIT_STONE[0];
     const state = left === 0 ? 0 : left >= lo * 1.5 ? 3 : left >= lo * 0.75 ? 2 : 1;
