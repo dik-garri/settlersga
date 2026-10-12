@@ -8,9 +8,9 @@ World X is tile x, world Y is minus tile y; a 2×2 footprint spans ±1 around th
 tile is at (0.5, −1.5), a 3×3 one spans ±1.5 with the door at (1, −2), a 4×4 one ±2 with the door at
 (1.5, −2.5). The camera sees the −Y and +X walls, so doors go on the −Y wall.
 
-Heights follow Settlers 4 measured in settler heights (docs/PROPORTIONS.md): the small tower about as
-tall as a small house, the big tower a house plus 10–20 %, the lookout lower than the small tower, the
-castle about two houses.
+Heights follow Settlers 4 measured in settler heights (docs/PROPORTIONS.md): the small tower a little
+taller than a small house, the big tower about 15 % over the small one, the lookout lower than the small
+tower, the castle about two houses.
 
 The shared helpers (log walls, board roofs, stakes, timber frames, materials) live in build.py, the
 script Blender runs; they are reached through `__main__` at call time.
@@ -181,10 +181,10 @@ def torus(loc, major, minor, mat, rot=(0, 0, 0)):
     return obj
 
 
-def stone_course(x0, x1, y0, y1, z0, z1, mats, rnd, block=0.16, depth=0.05):
-    """Rugged blocks proud of a wall's two visible faces (−Y and +X), between heights z0 and z1: the
-    lumpy masonry of Settlers 4 stone buildings. Every block gets its own tone, size, depth and
-    tilt, with dark gaps between them."""
+def stone_course(x0, x1, y0, y1, z0, z1, mats, rnd, block=0.16, depth=0.05, faces=('y', 'x')):
+    """Rugged blocks proud of a wall's two visible faces (−Y and +X, or those of them in `faces`),
+    between heights z0 and z1: the lumpy masonry of Settlers 4 stone buildings. Every block gets its
+    own tone, size, depth and tilt, with dark gaps between them."""
     if not isinstance(mats, list):
         mats = [mats]
     rows = max(1, round((z1 - z0) / (block * 0.7)))
@@ -197,7 +197,7 @@ def stone_course(x0, x1, y0, y1, z0, z1, mats, rnd, block=0.16, depth=0.05):
         z = z0 + (r + 0.5) * h
         shift = (r % 2) * block / 2
         x = x0 - shift
-        while x < x1:
+        while 'y' in faces and x < x1:
             w = min(block * rnd.uniform(0.65, 1.35), x1 - x)
             if w > 0.04:
                 d = depth * rnd.uniform(0.6, 1.4)
@@ -205,7 +205,7 @@ def stone_course(x0, x1, y0, y1, z0, z1, mats, rnd, block=0.16, depth=0.05):
                     (rnd.uniform(-0.06, 0.06), rnd.uniform(-0.08, 0.08), rnd.uniform(-0.05, 0.05)))
             x += w
         y = y0 - shift
-        while y < y1:
+        while 'x' in faces and y < y1:
             w = min(block * rnd.uniform(0.65, 1.35), y1 - y)
             if w > 0.04:
                 d = depth * rnd.uniform(0.6, 1.4)
@@ -549,19 +549,87 @@ def rod(a, b, r, mat, verts=10):
     return obj
 
 
+def frustum(cx, cy, z0, z1, x0, x1, y0, y1, t0, t1, mat, sides=(1, 1, 1, 1)):
+    """A block whose sides lean in: the rectangle x0..x1 × y0..y1 at z0, each side (x0, x1, y0, y1 flags
+    in `sides`) moved in by t0 at z0 and by t1 at z1 (a battered wall core). Its origin is its centre,
+    so stage splits by height work."""
+    zc = (z0 + z1) / 2
+    verts = []
+    for (z, t) in ((z0, t0), (z1, t1)):
+        ax, bx, ay, by = (x0 + t * sides[0], x1 - t * sides[1], y0 + t * sides[2], y1 - t * sides[3])
+        for (x, y) in ((ax, ay), (bx, ay), (bx, by), (ax, by)):
+            verts.append((x - cx, y - cy, z - zc))
+    faces = [(0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)]
+    mesh = bpy.data.meshes.new('frustum')
+    mesh.from_pydata(verts, [], faces)
+    obj = bpy.data.objects.new('frustum', mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.location = (cx, cy, zc)
+    obj.data.materials.append(mat)
+    return obj
+
+
+def battered_courses(x0, x1, y0, y1, z0, z1, lean, walls, blocks, rnd, courses, block=0.28, depth=0.1, sides=None,
+                     faces=('y', 'x')):
+    """Masonry whose faces lean back as it rises (Settlers 4's battered tower walls): `lean(z)` is how
+    far a face has moved in at height z; each course is a slice of the core with rugged blocks and
+    quoins on its visible faces, as wide as the core at the course's middle. `sides` (x0, x1, y0, y1
+    flags) says which faces lean; the others stay plumb. `faces` are the visible faces dressed in blocks
+    (`stone_course`)."""
+    sides = sides or (1, 1, 1, 1)
+    for c in range(courses):
+        za, zb = z0 + (z1 - z0) * c / courses, z0 + (z1 - z0) * (c + 1) / courses
+        lm = lean((za + zb) / 2)
+        xa, xb, ya, yb = x0 + lm * sides[0], x1 - lm * sides[1], y0 + lm * sides[2], y1 - lm * sides[3]
+        frustum((x0 + x1) / 2, (y0 + y1) / 2, za, zb, x0, x1, y0, y1, lean(za), lean(zb), walls, sides)
+        stone_course(xa, xb, ya, yb, za, zb, blocks, rnd, block=block, depth=depth, faces=faces)
+        quoins(xa, xb, ya, yb, za, zb, blocks, rnd, block=block * 0.95, row=zb - za)
+
+
+def leaning(obj_list, angle, axis):
+    """Tilts objects about their own centres so they lie on a battered face: a −Y face (axis 'x')
+    or a +X face (axis 'y') leaning back by `angle`."""
+    for o in obj_list:
+        if axis == 'x':
+            o.rotation_euler.x -= angle
+        else:
+            o.rotation_euler.y -= angle
+
+
+def plank_door(x, y, z0, w, h, door, dark, iron, lintel, angle=0.0):
+    """A strapped plank door in a −Y wall (its face at y at the door's mid height), under a stone
+    lintel, leaning back with the wall by `angle`."""
+    zc = z0 + h / 2
+    parts = [lib.box((x, y + 0.03, zc), (w + 0.04, 0.04, h + 0.02), dark)]
+    for k in range(4):
+        parts.append(lib.box((x - w / 2 + (k + 0.5) * w / 4, y, zc), (w / 4 * 0.92, 0.035, h), door, bevel=0.006))
+    for z in (z0 + 0.1, z0 + h * 0.58):
+        parts.append(lib.box((x, y - 0.025, z), (w + 0.02, 0.012, 0.035), iron, bevel=0.004))
+    for o in parts:
+        # Lean about the door's middle: points above it move back into the wall.
+        dz = o.location.z - zc
+        o.location.y += dz * math.tan(angle)
+    leaning(parts, angle, 'x')
+    top = lib.box((x, y - 0.03 + h / 2 * math.tan(angle), z0 + h + 0.06), (w + 0.16, 0.1, 0.12), lintel, bevel=0.025)
+    for sx in (-1, 1):
+        lib.box((x + sx * (w / 2 + 0.05), y - 0.02, zc), (0.09, 0.1, h + 0.04), lintel, rot=(-angle, 0, 0), bevel=0.02)
+    return top
+
+
 # Archers' posts on the top (model units from the top's centre), one per archer slot of the garrison;
 # none right behind the banner, whose cloth would hide them. The swordsmen's are the windows.
-TOWER_POSTS = ((-0.12, -0.38), (0.38, 0.12))
+TOWER_POSTS = ((-0.12, -0.36), (0.36, 0.12))
 BIGTOWER_POSTS = ((-0.15, -0.55), (0.55, 0.15), (0.42, -0.42))
 FORTRESS_POSTS = ((0.55, 0.05), (-0.1, -0.5), (0.1, 0.6), (-0.6, 0.05), (0.62, 0.55))
 
 
 def build_tower():
-    """After the Settlers 4 small tower: a square stone tower a little higher than wide (as tall as the
-    S4 one next to a settler, ≈ 3.8 settler heights with its platform),
-    big rugged blocks with staggered quoins, a strapped plank door, a dark lookout opening high on
-    the right face; on top an overhanging timber platform with a box railing of thick round beams,
-    X-braced on every side. The owner's banner is drawn by the game at ART3D_BANNERS['tower']."""
+    """After the Settlers 4 small tower: a square stone shaft clearly higher than wide that narrows
+    towards the top (battered walls: about two thirds as wide under the platform as at its foot; ≈ 4.4
+    settler heights with its platform), standing on a stepped plinth, big rugged blocks with staggered
+    quoins, a strapped plank door, a dark lookout opening high on the right face; on top an overhanging
+    timber platform on corner struts with a box railing of thick round beams, X-braced on every side.
+    The owner's banner is drawn by the game at ART3D_BANNERS['tower']."""
     rnd = random.Random(21)
     walls = stone_walls()
     blocks = block_mats()
@@ -574,47 +642,53 @@ def build_tower():
     earth_pad((0.12, -0.18, 0), 0.82, 0.92, seed=21)
     lib.tag(0)
 
-    cx, cy, s0, s1, H = 0.05, 0.05, 1.04, 0.88, 0.9  # base width at the foot and the top, height
-    corner_stakes(cx - s0 / 2, cx + s0 / 2, cy - s0 / 2, cy + s0 / 2)
+    # Foot and top width of the shaft, where it starts (on the plinth) and where the platform sits.
+    cx, cy, s0, s1, Z0, H = 0.05, 0.05, 0.96, 0.62, 0.14, 1.3
+    corner_stakes(cx - s0 / 2 - 0.05, cx + s0 / 2 + 0.05, cy - s0 / 2 - 0.05, cy + s0 / 2 + 0.05)
     lib.tag(0, until=0)
 
-    lib.box((cx, cy, 0.06), (s0 + 0.1, s0 + 0.1, 0.12), blocks[1], bevel=0.02)
-    for x in (cx - s0 / 2 - 0.1, cx + s0 / 2 + 0.1):
-        for y in (cy - s0 / 2 - 0.1, cy + s0 / 2 + 0.1):
-            lib.cylinder((x, y, 0.65), 0.025, 1.3, beam, verts=8)
+    def width(z):
+        return s0 + (s1 - s0) * (z - Z0) / (H - Z0)
+
+    def face(z):  # how far a face has moved in from the foot's
+        return (s0 - width(z)) / 2
+
+    batter = math.atan((s0 - s1) / 2 / (H - Z0))
+    # A stepped plinth, wider than the shaft's foot.
+    lib.box((cx, cy, 0.04), (s0 + 0.2, s0 + 0.2, 0.08), blocks[1], bevel=0.02)
+    lib.box((cx, cy, 0.11), (s0 + 0.1, s0 + 0.1, 0.07), blocks[3], bevel=0.02)
+    for x in (cx - s0 / 2 - 0.14, cx + s0 / 2 + 0.14):
+        for y in (cy - s0 / 2 - 0.14, cy + s0 / 2 + 0.14):
+            lib.cylinder((x, y, 0.85), 0.025, 1.7, beam, verts=8)
     lib.tag(1, until=3)
 
-    # The shaft in courses narrowing a little upwards, dressed in big blocks with quoins.
-    courses = 6
-    for c in range(courses):
-        t0, t1 = c / courses, (c + 1) / courses
-        z0, z1 = 0.12 + (H - 0.12) * t0, 0.12 + (H - 0.12) * t1
-        s = s0 + (s1 - s0) * (t0 + t1) / 2
-        x0, x1, y0, y1 = cx - s / 2, cx + s / 2, cy - s / 2, cy + s / 2
-        lib.box((cx, cy, (z0 + z1) / 2), (s, s, z1 - z0), walls)
-        stone_course(x0, x1, y0, y1, z0, z1, blocks, rnd, block=0.3, depth=0.11)
-        quoins(x0, x1, y0, y1, z0, z1, blocks, rnd)
+    # The shaft: courses of rugged blocks with quoins over a core that leans in on every side.
+    x0, x1, y0, y1 = cx - s0 / 2, cx + s0 / 2, cy - s0 / 2, cy + s0 / 2
+    battered_courses(x0, x1, y0, y1, Z0, H - 0.12, face, walls, blocks, rnd, courses=7, block=0.28, depth=0.1)
     lib.tag(None, split=lambda o: 2 if o.location.z < H * 0.45 else 3)
-    # Plank door with iron straps on the front-left face, under a stone lintel.
-    fy = cy - s0 / 2 - 0.13
-    dxc, dw, dh = cx - 0.04, 0.36, 0.5
-    lib.box((dxc, fy - 0.03, 0.12 + dh / 2), (dw + 0.04, 0.04, dh + 0.02), dark)
-    for k in range(4):
-        lib.box((dxc - dw / 2 + (k + 0.5) * dw / 4, fy - 0.06, 0.12 + dh / 2), (dw / 4 * 0.92, 0.035, dh), door,
-                bevel=0.006)
-    for z in (0.22, 0.4):
-        lib.box((dxc, fy - 0.085, z), (dw + 0.02, 0.012, 0.035), iron, bevel=0.004)
-    lib.box((dxc, fy - 0.09, 0.12 + dh + 0.06), (dw + 0.16, 0.1, 0.12), blocks[2], bevel=0.025)
+    # Plank door with iron straps on the front-left face, leaning back with the wall.
+    dh = 0.48
+    zc = Z0 + dh / 2
+    plank_door(cx - 0.04, y0 + face(zc) - 0.12, Z0, 0.34, dh, door, dark, iron, blocks[2], batter)
     # The swordsman's window high on the right face (Settlers 4: he looks out of the stone, the archers
     # stand on the platform).
-    wz = H - 0.4
-    face = cx + (s0 + (s1 - s0) * (wz - 0.12) / (H - 0.12)) / 2
-    window_at = garrison_window('x', cy - 0.05, face, wz, 0.32, 0.4, dark, blocks, out=0.16)
+    wz = H - 0.47
+    window_at = garrison_window('x', cy - 0.04, x1 - face(wz), wz, 0.3, 0.38, dark, blocks, out=0.14)
     lib.tag(3)
 
-    # Overhanging timber platform: joists poking out, a plank floor, a box railing of round beams.
+    # Corbelled top: the last course of the shaft steps out under the platform.
+    cs = s1 + 0.16
+    lib.box((cx, cy, H - 0.06), (cs - 0.04, cs - 0.04, 0.12), walls)
+    stone_course(cx - cs / 2, cx + cs / 2, cy - cs / 2, cy + cs / 2, H - 0.12, H, blocks, rnd, block=0.2, depth=0.06)
+    lib.tag(3)
+
+    # Overhanging timber platform on two layers of joists poking out on every side, a plank floor, a
+    # box railing of round beams.
     top = H
-    ps = s1 + 0.18
+    ps = 1.0
+    for k in range(4):
+        t = -cs / 2 + 0.07 + k * (cs - 0.14) / 3
+        lib.box((cx, cy + t, top - 0.04), (ps + 0.16, 0.08, 0.08), beam, bevel=0.01)
     for k in range(5):
         t = -ps / 2 + 0.06 + k * (ps - 0.12) / 4
         lib.box((cx + t, cy, top + 0.04), (0.08, ps + 0.14, 0.08), beam, bevel=0.01)
@@ -2859,12 +2933,48 @@ def build_fortress():
     note_posts('fortress', [(dx + px, dy + py, DH) for (px, py) in FORTRESS_POSTS], windows, at)
 
 
+def gate_arch(x0, x1, y, zs, face, mats, rnd, ring=0.13, depth=0.2, top=None, filler=None):
+    """A round stone arch spanning x0..x1 in a wall plane at y, springing at zs: voussoirs round the
+    opening with a proud keystone, facing −Y (`face` −1, its front at y) or +Y (`face` 1), and — with
+    `top` — rugged spandrel stones filling the corners up to that height (`filler` their core)."""
+    r = (x1 - x0) / 2
+    ax = (x0 + x1) / 2
+    yc = y - face * depth / 2
+    n = 11
+    for k in range(n):
+        a = math.pi * (k + 0.5) / n
+        key = k == n // 2
+        rm = r + ring / 2 + (0.02 if key else 0)
+        lib.box((ax + math.cos(a) * rm, yc + (-face * 0.025 if key else 0), zs + math.sin(a) * rm),
+                (ring + (0.05 if key else 0), depth + (0.05 if key else 0), math.pi * rm / n * (1.15 if key else 0.9)),
+                mats[rnd.randrange(len(mats))], rot=(0, -a, 0), bevel=0.015)
+    # Imposts: a projecting stone under each springing.
+    for sx in (-1, 1):
+        lib.box((ax + sx * (r + 0.02), yc - face * 0.015, zs - 0.035), (0.16, depth + 0.03, 0.07), mats[2 % len(mats)],
+                bevel=0.012)
+    if top is None:
+        return
+    R = r + ring
+    cols = 9
+    for k in range(cols):
+        xa, xb = x0 + (x1 - x0) * k / cols, x0 + (x1 - x0) * (k + 1) / cols
+        dx = max(abs(xa - ax), abs(xb - ax))
+        z0 = zs + math.sqrt(max(R * R - dx * dx, 0)) - 0.05
+        if z0 < top - 0.01:
+            lib.box(((xa + xb) / 2, yc + face * 0.02, (z0 + top) / 2), (xb - xa, depth - 0.04, top - z0), filler)
+            lib.box(((xa + xb) / 2, yc - face * 0.01, (z0 + top) / 2 + 0.01), (xb - xa - 0.02, depth - 0.02, top - z0 - 0.02),
+                    mats[rnd.randrange(len(mats))], rot=(0, rnd.uniform(-0.05, 0.05), 0), bevel=0.012)
+
+
 def build_bigtower():
-    """The big tower after Settlers 4's: two stone piers — a broad one with the door and a narrow one —
-    with a passage between them through which the ground shows, under one wide timber fighting
-    platform laid across both, railed on corner and middle posts with X-braces. The archers stand on the
-    platform, the swordsmen look out of windows in the piers; the owner's banner stands in its middle.
-    A small house plus 10–20 % (≈ 4.5 settler heights) and broader than the small tower."""
+    """The big tower after Settlers 4's: two stone piers — a broad one with the door and a narrow one,
+    their outer faces leaning in a little as they rise — with a passage right through between them,
+    under one wide timber fighting platform laid across both, railed on corner and middle posts with
+    X-braces. The passage reads from the camera: a round stone arch with a keystone at its mouth, a
+    paved floor running in from an apron before it, the narrow pier's inner wall receding into the
+    shade under the platform's joists. The archers stand on the platform, the swordsmen look out of
+    windows in the piers; the owner's banner stands in its middle. A small house plus 20–30 % (≈ 5
+    settler heights, ≈ 15 % over the small tower) and broader than the small tower."""
     rnd = random.Random(31)
     walls, blocks = stone_walls(), block_mats()
     door, iron = door_mat(), lib.mat_flat('iron', (0.36, 0.37, 0.4), rough=0.35)
@@ -2872,55 +2982,76 @@ def build_bigtower():
     beam = beam_mat()
     wood = lib.mat_grain('brail', (0.5, 0.32, 0.12), (0.8, 0.58, 0.28), scale=5, stretch=(1, 1, 8), bump=0.6)
     plank = lib.mat_grain('bplank', (0.42, 0.26, 0.1), (0.66, 0.46, 0.2), scale=4, stretch=(1, 9, 1), bump=0.7)
+    flags = [lib.mat_grain(f'flag{k}', a, b, scale=6, stretch=(1, 1, 1), bump=0.8) for k, (a, b) in enumerate((
+        ((0.55, 0.52, 0.46), (0.82, 0.79, 0.7)),
+        ((0.48, 0.46, 0.42), (0.72, 0.7, 0.64)),
+        ((0.6, 0.56, 0.48), (0.86, 0.82, 0.72)),
+    ))]
     earth_pad((0.1, -0.2, 0), 1.05, 1.12, seed=31)
     lib.tag(0)
     corner_stakes(-0.9, 0.9, -0.9, 0.9)
     lib.tag(0, until=0)
 
-    H = 0.9
-    y0, y1 = -0.78, 0.84
-    piers = ((-0.86, -0.4), (0.1, 0.9))  # the narrow one, the passage, the broad one with the door
-    for (a, b) in piers:
+    Z0, H = 0.12, 1.2
+    y0, y1 = -0.8, 0.82
+    (na, nb), (ba, bb) = (-0.9, -0.36), (0.3, 0.92)  # the narrow pier, the passage between, the broad one
+
+    def lean(z):  # how far a pier's outer faces have moved in at height z
+        return 0.07 * (z - Z0) / (H - Z0)
+
+    batter = math.atan(0.07 / (H - Z0))
+    for (a, b) in ((na, nb), (ba, bb)):
         lib.box(((a + b) / 2, (y0 + y1) / 2, 0.06), (b - a + 0.1, y1 - y0 + 0.1, 0.12), blocks[1], bevel=0.02)
+    # The passage's paved floor, running out into an apron before its mouth.
+    fx0, fx1, fy0, fy1 = nb + 0.02, ba - 0.02, y0 - 0.34, y1 + 0.04
+    rows, cols = 13, 4
+    for i in range(rows):
+        for j in range(cols):
+            w, d = (fx1 - fx0) / cols, (fy1 - fy0) / rows
+            off = (i % 2) * w / 2
+            x = fx0 + off + (j + 0.5) * w
+            if x + w / 2 > fx1 + 0.01:
+                x -= w / 2
+                ww = w / 2
+            else:
+                ww = w
+            lib.box((x, fy0 + (i + 0.5) * d, 0.015), (ww - 0.02, d - 0.02, 0.03 + rnd.uniform(0, 0.012)),
+                    flags[rnd.randrange(len(flags))], rot=(0, 0, rnd.uniform(-0.04, 0.04)), bevel=0.008)
     lib.tag(1)
-    scaffold(-0.95, 1.0, y0 - 0.1, y1 + 0.1, 1.45, beam)
+    scaffold(-0.95, 1.0, y0 - 0.1, y1 + 0.1, 1.7, beam)
     lib.tag(1, until=3)
-    courses = 6
-    for (a, b) in piers:
-        for c in range(courses):
-            t0, t1 = c / courses, (c + 1) / courses
-            z0, z1 = 0.12 + (H - 0.12) * t0, 0.12 + (H - 0.12) * t1
-            i = 0.05 * (t0 + t1) / 2  # a little narrower upwards
-            xa, xb, ya, yb = a + i, b - i, y0 + i, y1 - i
-            lib.box(((xa + xb) / 2, (ya + yb) / 2, (z0 + z1) / 2), (xb - xa, yb - ya, z1 - z0), walls)
-            stone_course(xa, xb, ya, yb, z0, z1, blocks, rnd, block=0.26, depth=0.09)
-            quoins(xa, xb, ya, yb, z0, z1, blocks, rnd)
+    # The piers: their outer faces lean in, the faces on the passage stay plumb under the arch.
+    battered_courses(na, nb, y0, y1, Z0, H, lean, walls, blocks, rnd, courses=6, block=0.26, depth=0.09,
+                     sides=(1, 0, 1, 1), faces=('y',))
+    # Inside the passage the narrow pier's wall is in the platform's shade: dark, rough stone behind the
+    # quoins of its jamb, so the opening reads as an opening and not as more of the front.
+    shade = lib.mat_stones('passage', (0.2, 0.2, 0.2), (0.11, 0.11, 0.12), (0.03, 0.03, 0.03), scale=9, bump=0.9)
+    lib.box((nb + 0.01, (y0 + 0.16 + y1) / 2, (Z0 + H) / 2), (0.02, y1 - y0 - 0.16, H - Z0), shade)
+    battered_courses(ba, bb, y0, y1, Z0, H, lean, walls, blocks, rnd, courses=6, block=0.26, depth=0.09,
+                     sides=(0, 1, 1, 1))
     lib.tag(None, split=lambda o: 2 if o.location.z < H * 0.45 else 3)
-    # Strapped plank door in the broad pier's front, under a stone lintel.
-    fy = y0 - 0.12
-    dxc, dw, dh = 0.68, 0.34, 0.5
-    lib.box((dxc, fy + 0.02, 0.12 + dh / 2), (dw + 0.04, 0.04, dh + 0.02), dark)
-    for k in range(4):
-        lib.box((dxc - dw / 2 + (k + 0.5) * dw / 4, fy - 0.01, 0.12 + dh / 2), (dw / 4 * 0.92, 0.035, dh), door, bevel=0.006)
-    for z in (0.24, 0.46):
-        lib.box((dxc, fy - 0.035, z), (dw + 0.02, 0.012, 0.035), iron, bevel=0.004)
-    lib.box((dxc, fy - 0.04, 0.12 + dh + 0.06), (dw + 0.18, 0.1, 0.12), blocks[2], bevel=0.025)
-    # Windows for the swordsmen: the narrow pier's front, the broad pier's front beside the door, its side.
-    wz, ww, wh = 0.56, 0.3, 0.4
-    i = 0.05 * 0.55
+    # Round arches at both mouths of the passage, carrying the platform between the piers.
+    zs = 0.54
+    gate_arch(nb, ba, y0 + 0.02, zs, -1, blocks, rnd, depth=0.28, top=H, filler=walls)
+    gate_arch(nb, ba, y1 - 0.02, zs, 1, blocks, rnd, depth=0.28, top=H, filler=walls)
+    # Strapped plank door in the broad pier's front, leaning back with the wall.
+    dh = 0.46
+    dx = 0.61
+    plank_door(dx, y0 + lean(Z0 + dh / 2) - 0.11, Z0, 0.3, dh, door, dark, iron, blocks[2], batter)
+    # Windows for the swordsmen: the narrow pier's front, above the door, the broad pier's side.
     windows = [
-        garrison_window('y', -0.63, y0 + i, wz, ww, wh, dark, blocks),
-        garrison_window('y', 0.31, y0 + i, wz, ww, wh, dark, blocks),
-        garrison_window('x', 0.12, piers[1][1] - i, wz, ww, wh, dark, blocks),
+        garrison_window('y', (na + nb) / 2 - 0.02, y0 + lean(0.88), 0.88, 0.28, 0.36, dark, blocks, out=0.12),
+        garrison_window('y', dx, y0 + lean(0.98), 0.98, 0.26, 0.32, dark, blocks, out=0.12),
+        garrison_window('x', 0.1, bb - lean(0.88), 0.88, 0.28, 0.36, dark, blocks, out=0.12),
     ]
-    # Heavy beams over the passage's mouths carry the platform.
-    for (y, dy) in ((y0 - 0.06, -0.02), (y1 + 0.02, 0.02)):
-        lib.box(((piers[0][1] + piers[1][0]) / 2, y + dy, H - 0.08), (piers[1][0] - piers[0][1] + 0.2, 0.13, 0.14), beam,
-                bevel=0.012)
     lib.tag(3)
 
-    # The platform: joists across both piers, poking out, a plank floor, a railing on posts.
-    px0, px1, py0, py1 = -0.95, 1.01, y0 - 0.13, y1 + 0.1
+    # The platform: cross beams over both piers and the passage, joists across them poking out, a plank
+    # floor, a railing on posts.
+    px0, px1, py0, py1 = -0.98, 1.02, y0 - 0.15, y1 + 0.1
+    for k in range(5):
+        y = y0 + 0.08 + k * (y1 - y0 - 0.16) / 4
+        lib.box(((px0 + px1) / 2, y, H - 0.04), (px1 - px0 + 0.14, 0.09, 0.08), beam, bevel=0.01)
     for k in range(7):
         x = px0 + 0.06 + k * (px1 - px0 - 0.12) / 6
         lib.box((x, (py0 + py1) / 2, H + 0.04), (0.08, py1 - py0 + 0.14, 0.08), beam, bevel=0.01)
