@@ -143,9 +143,9 @@ export const ART3D_STAGED = Object.keys(ART3D_BUILDINGS);
  * by buildings.py's `note_banner` when it renders); replaces `BANNERS` in `sprites.ts` under `?art=3d`.
  */
 export const ART3D_BANNERS: Record<string, { x: number; y: number }> = {
-  tower: { x: 3.2, y: -40.0 },
+  tower: { x: 3.2, y: -55.7 },
   fortress: { x: 17.1, y: -98.0 },
-  bigtower: { x: 4.6, y: -41.7 },
+  bigtower: { x: 3.4, y: -53.2 },
 };
 /**
  * A place where one of a military building's garrison is drawn: feet in sprite pixels from the
@@ -181,21 +181,21 @@ export interface GarrisonPosts {
 export const ART3D_POSTS: Record<string, GarrisonPosts> = {
   tower: {
     ranged: [
-      { x: -12.8, y: -36.2, dir: 3 },
-      { x: 19.2, y: -36.2, dir: 1 },
+      { x: -12.2, y: -52.2, dir: 3 },
+      { x: 18.6, y: -52.2, dir: 1 },
     ],
-    melee: [{ x: 18.9, y: 13.4, dir: 1, window: true, cut: 15.7 }],
+    melee: [{ x: 15.3, y: -1.3, dir: 1, window: true, cut: 16.4 }],
   },
   bigtower: {
     ranged: [
-      { x: -21.0, y: -33.7, dir: 3 },
-      { x: 23.8, y: -33.7, dir: 1 },
-      { x: 1.4, y: -26.7, dir: 2 },
+      { x: -22.2, y: -45.2, dir: 3 },
+      { x: 22.6, y: -45.2, dir: 1 },
+      { x: 0.2, y: -38.1, dir: 2 },
     ],
     melee: [
-      { x: -45.2, y: 4.0, dir: 3, window: true, cut: 15.7 },
-      { x: -15.1, y: 19.0, dir: 3, window: true, cut: 15.6 },
-      { x: 32.7, y: 14.1, dir: 1, window: true, cut: 15.7 },
+      { x: -45.5, y: -8.3, dir: 3, window: true, cut: 17.2 },
+      { x: -4.9, y: 8.7, dir: 3, window: true, cut: 18.8 },
+      { x: 31.7, y: 2.5, dir: 1, window: true, cut: 17.3 },
     ],
   },
   fortress: {
