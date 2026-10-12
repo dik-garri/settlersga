@@ -1,5 +1,6 @@
 import type { Camera } from '../render/camera';
 import { toScreen, toTile } from '../render/iso';
+import type { BuildingLook, BuildingMemory } from '../render/memory';
 import { TERRAIN } from '../sim/config';
 import { isFighter } from '../sim/military';
 import { Terrain, type PlayerId } from '../sim/types';
@@ -56,6 +57,11 @@ export class Minimap {
     width = 220,
     /** The player this browser plays: its land, fog and units. */
     private readonly me: PlayerId,
+    /**
+     * What the player knows of the buildings (the renderer's, `memory.ts`): others' are shown where
+     * and as last seen. Without it every building on an explored tile is shown.
+     */
+    private readonly memory: BuildingMemory | null = null,
   ) {
     const { w, h } = world.map;
     this.sx = (width - 2 * this.pad) / (w + h);
@@ -168,6 +174,13 @@ export class Minimap {
     this.marks = marks;
   }
 
+  /** A building's dot: the player's own in gold, everyone else's in red. */
+  private readonly drawBuilding = (b: Pick<BuildingLook, 'x' | 'y' | 'w' | 'h' | 'owner'>): void => {
+    const [x, y] = this.point(b.x + (b.w - 1) / 2, b.y + (b.h - 1) / 2);
+    this.ctx.fillStyle = b.owner === this.me ? '#ffe08a' : '#e05a4a';
+    this.ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+  };
+
   update(nowMs: number, viewW: number, viewH: number): void {
     // About one full refresh per BASE_EVERY at 60 fps, whatever the map size.
     const { h } = this.world.map;
@@ -189,11 +202,12 @@ export class Minimap {
     ctx.restore();
 
     if (this.layers.buildings) {
-      for (const b of this.world.buildings.values()) {
-        if (this.fogOn && b.owner !== this.me && !this.world.isExplored(b.door.x, b.door.y, this.me)) continue;
-        const [x, y] = this.point(b.x + (b.w - 1) / 2, b.y + (b.h - 1) / 2);
-        ctx.fillStyle = b.owner === this.me ? '#ffe08a' : '#e05a4a';
-        ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+      if (this.memory) this.memory.forEachShown(this.drawBuilding);
+      else {
+        for (const b of this.world.buildings.values()) {
+          if (this.fogOn && b.owner !== this.me && !this.world.isExplored(b.door.x, b.door.y, this.me)) continue;
+          this.drawBuilding(b);
+        }
       }
     }
     if (this.layers.fighters || this.layers.settlers) {

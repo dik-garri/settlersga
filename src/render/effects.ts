@@ -54,6 +54,8 @@ interface BuildingFxView {
   ambient: SoundId | null;
   soundMs: number;
   wasDone: boolean;
+  /** Drawn as the local player remembers it (out of sight, `memory.ts`): no live effects. */
+  frozen: boolean;
 }
 
 interface Falling {
@@ -266,6 +268,7 @@ export class Effects {
       ambient: fx?.sound ?? null,
       soundMs: Math.random() * AMBIENT_EVERY_MS,
       wasDone: b.done,
+      frozen: false,
     };
     if (fx?.glow) {
       for (const [gx, gy] of anchors.glow) {
@@ -297,6 +300,15 @@ export class Effects {
     this.buildings.set(b.id, v);
   }
 
+  /**
+   * A building the local player sees only as remembered (out of sight) shows no live effect: no
+   * smoke, glow, dust or sound, sails standing still; what it does meanwhile is not noticed.
+   */
+  setFrozen(id: number, frozen: boolean): void {
+    const v = this.buildings.get(id);
+    if (v) v.frozen = frozen;
+  }
+
   /** Called when the renderer drops a building view (its sprites die with the body). */
   detachBuilding(id: number): void {
     this.buildings.delete(id);
@@ -305,6 +317,15 @@ export class Effects {
   private updateBuildings(dtMs: number, timeMs: number): void {
     for (const v of this.buildings.values()) {
       const { b, body } = v;
+      if (v.frozen) {
+        // Out of sight: what changes is taken in silently, so nothing bursts when it comes back.
+        v.lastTimer = b.timer;
+        v.lastProgress = b.progress;
+        v.wasDone = b.done;
+        v.activeUntil = 0;
+        for (const g of v.glows) g.visible = false;
+        continue;
+      }
       // A workshop's recipe timer only moves while it works.
       if (b.timer !== v.lastTimer) {
         v.lastTimer = b.timer;

@@ -15,7 +15,7 @@
  */
 import { Container, Rectangle, Sprite, Texture } from 'pixi.js';
 import { PROFESSIONS } from '../sim/config';
-import type { Building, BuildingType, PlayerId, Settler } from '../sim/types';
+import type { Building, BuildingType, Settler } from '../sim/types';
 import type { World } from '../sim/world';
 import type { SettlerTextures } from './atlas';
 import { dirTowards, FACES_AWAY, idleDir, MIRRORED, PAINTED_DIR, WALK_FRAMES, workFrame } from './anim';
@@ -88,8 +88,11 @@ export class GarrisonLayer {
     private readonly s3d: Settler3d | null,
     private readonly tex: SettlerTextures,
     private readonly playerTint: readonly number[],
-    private readonly me: PlayerId,
-    private readonly fogOn: boolean,
+    /**
+     * Whether the local player sees this building live now (own, allied, in sight, no fog — the
+     * renderer's `BuildingMemory.live`); a building drawn as remembered shows no crew.
+     */
+    private readonly live: (b: Building) => boolean,
   ) {}
 
   /** Where a building type's garrison stands in the current art (null: none shown). */
@@ -102,7 +105,7 @@ export class GarrisonLayer {
    * the overlay of what stands before the posts. Returns the layer — the banner goes in it, so figures
    * behind the pole stand behind its cloth — or null for a building without posts.
    */
-  attach(b: Building, body: Container, front: Texture | null): Container | null {
+  attach(b: Pick<Building, 'id' | 'type' | 'done'>, body: Container, front: Texture | null): Container | null {
     const posts = this.postsOf(b.type);
     if (!posts) return null;
     const layer = new Container();
@@ -142,15 +145,14 @@ export class GarrisonLayer {
     this.noteShots(timeMs);
     for (const [id, crew] of this.crews) {
       const b = this.sim.buildings.get(id);
-      if (!b) continue;
+      // Gone, or drawn as remembered (out of sight, `memory.ts`): no crew, the front as it was.
+      if (!b || !this.live(b)) {
+        while (crew.figures.length > 0) this.release(crew.figures.pop()!);
+        continue;
+      }
       if (crew.front) crew.front.visible = b.done;
-      // Only for buildings on screen (their body in the scene and explored), and someone else's only
-      // while in sight.
-      const show =
-        b.done &&
-        crew.body.parent !== null &&
-        crew.body.visible &&
-        (b.owner === this.me || !this.fogOn || this.sim.isVisible(b.door.x, b.door.y, this.me));
+      // Only for buildings on screen (their body in the scene and explored).
+      const show = b.done && crew.body.parent !== null && crew.body.visible;
       const n = show ? this.collect(b, crew.posts) : 0;
       while (crew.figures.length > n) this.release(crew.figures.pop()!);
       while (crew.figures.length < n) {

@@ -60,6 +60,7 @@ import { rockKey, rockLayout, type RockSize, type RockSpot } from './rocks';
 import { GuideLayer, type GuideMark } from './guide';
 import { WorkAreaLayer } from './workArea';
 import { GarrisonLayer } from './garrison';
+import { BuildingMemory, lookOf, type BuildingLook } from './memory';
 import { pathLevel } from '../sim/paths';
 import { chatPartner } from '../sim/idle';
 import { BANNERS, EDGE_DIRS, RUIN_SIZES, siteSprite, GROUND_PRIORITY, groundVariants, PATH_VARIANTS, PLAYER_COLORS, type GroundKind } from './sprites';
@@ -147,6 +148,8 @@ interface BuildingView {
   cutoff: Sprite | null;
   /** Marker over a local building or site its owner stopped (`stop.ts`), made when first needed. */
   stopped: Sprite | null;
+  /** Drawn as the local player remembers it (out of sight, or gone: `memory.ts`), not as it is. */
+  frozen: boolean;
 }
 
 /**
@@ -340,6 +343,13 @@ export class GameRenderer {
   /** Rendered deposit size per tile: 0 = none, otherwise size class + 1. */
   private readonly depositState: Uint8Array;
   private readonly buildingViews = new Map<number, BuildingView>();
+  /**
+   * What the local player knows of other players' buildings under the fog (`memory.ts`): they are
+   * drawn live only while in sight, else as last seen; the minimap and the input read it too.
+   */
+  readonly memory: BuildingMemory;
+  /** Scratch look of a live building, filled every frame (`lookOf`). */
+  private readonly liveLook = { id: 0, door: { x: 0, y: 0 } } as BuildingLook;
   private readonly settlerViews = new Map<number, SettlerView>();
 
   private readonly settlerTex: SettlerTextures;
@@ -390,7 +400,8 @@ export class GameRenderer {
     this.settlerTex = atlas.settlerTextures();
     this.animals = new AnimalLayer(sim, this.objects, (n) => atlas.get(n), fogOn, this.wareTex, me);
     this.settler3d = atlas.art3d?.settlers ?? null;
-    this.garrison = new GarrisonLayer(sim, this.settler3d, this.settlerTex, this.playerTint, me, fogOn);
+    this.memory = new BuildingMemory(sim, me, fogOn);
+    this.garrison = new GarrisonLayer(sim, this.settler3d, this.settlerTex, this.playerTint, (b) => this.memory.live(b));
     for (const r of RESOURCES) this.wareTex[r] = atlas.get(`ware:${r}`);
     this.effects = new Effects(atlas, sim, (x, y) => this.surface(x, y), this.sound);
     // Glints sit right on the ground; smoke and sparks above the objects but under the fog.
@@ -1705,6 +1716,13 @@ export class GameRenderer {
    * while it smoulders and fading out over the last `RUIN_FADE` of its time. A building placed on the
    * footprint before it is gone takes its place at once.
    */
+  /** Whether the local player sees a burnt building's remains: his own or an ally's, or in sight now. */
+  private ruinSeen(r: { x: number; y: number; w: number; h: number; owner: PlayerId }): boolean {
+    if (!this.fogOn || this.sim.allied(r.owner, this.me)) return true;
+    for (let dy = 0; dy < r.h; dy++) for (let dx = 0; dx < r.w; dx++) if (this.sim.isVisible(r.x + dx, r.y + dy, this.me)) return true;
+    return false;
+  }
+
   private syncRuins(): void {
     const { map, ruins, tick } = this.sim;
     const live = new Set<string>();
@@ -1712,11 +1730,19 @@ export class GameRenderer {
       const key = `${r.x},${r.y},${r.tick}`;
       const cx = r.x + (r.w - 1) / 2;
       const cy = r.y + (r.h - 1) / 2;
+      // Only a building the local player knows of (one with a view) covers the remains.
       let built = false;
-      for (let dy = 0; dy < r.h && !built; dy++) for (let dx = 0; dx < r.w; dx++) if (map.building[map.idx(r.x + dx, r.y + dy)] !== 0) built = true;
+      for (let dy = 0; dy < r.h && !built; dy++) {
+        for (let dx = 0; dx < r.w; dx++) {
+          const id = map.building[map.idx(r.x + dx, r.y + dy)];
+          if (id !== 0 && this.buildingViews.has(id)) built = true;
+        }
+      }
       if (built) continue;
-      live.add(key);
       let v = this.ruinViews.get(key);
+      // A fire out of the local player's sight goes unseen: its remains show once the place is seen.
+      if (!v && !this.ruinSeen(r)) continue;
+      live.add(key);
       if (!v) {
         const side = Math.max(1, Math.min(RUIN_SIZES, Math.max(r.w, r.h)));
         const body = new Container();
@@ -1743,9 +1769,12 @@ export class GameRenderer {
   }
 
   private syncBuildings(): void {
+    const mem = this.memory;
+    mem.update(this.nowMs);
     for (const [id, v] of this.buildingViews) {
-      if (this.sim.buildings.has(id)) continue;
-      // Demolished.
+      const b = this.sim.buildings.get(id);
+      // Kept while live or remembered (a ghost of a building gone out of sight); else dropped.
+      if (b ? mem.shows(b) : mem.get(id) !== undefined) continue;
       this.removeStatic(v.body, v.at.x, v.at.y);
       this.removeStatic(v.front, v.doorAt.x, v.doorAt.y);
       this.rocksUnder(v.foot);
@@ -1754,70 +1783,101 @@ export class GameRenderer {
       this.garrison.detach(id);
     }
     for (const b of this.sim.buildings.values()) {
-      let v = this.buildingViews.get(b.id);
-      if (!v) v = this.createBuildingView(b);
-      if (v.owner !== b.owner) {
-        v.owner = b.owner;
-        v.flag.texture = this.atlas.get(`flag:${b.owner}`);
-        if (v.banner) v.banner.texture = this.atlas.get(`banner:${b.owner}`);
+      if (mem.live(b)) {
+        const v = this.buildingViews.get(b.id) ?? this.createBuildingView(b, b);
+        if (v.frozen) {
+          v.frozen = false;
+          this.effects.setFrozen(b.id, false);
+        }
+        this.drawLook(v, lookOf(this.sim, b, this.liveLook), b);
+        continue;
       }
-      // As in Settlers 4 a military building flies its banner only while it is held (a garrison).
-      if (v.banner) v.banner.visible = this.occupied(b);
-      // The roof flag marks a workplace whose worker has moved in; houses, warehouses, markets,
-      // the barracks and eyecatchers have no worker and fly none.
-      v.flag.visible = !v.banner && !!BUILDINGS[b.type].worker && this.occupied(b);
-      if (v.flag.visible && !v.flagPlaced) {
-        const top = this.atlas.topOf(`building:${b.type}`);
-        v.flag.position.set(top.x, top.y + 2);
-        v.flagPlaced = true;
-      }
-      const progress = this.sim.buildProgress(b);
-      const staged = this.atlas.has(`stage:${b.type}:0`);
-      v.site.visible = !b.done && !staged;
-      let stageKey: string | null = null;
-      if (!b.done && staged) {
-        // Pre-rendered construction stages: stakes while the diggers clear the site, then the timber
-        // frame, the lower walls and the walls with half the roof as the builders work.
-        const stage = !b.levelled ? 0 : Math.min(ART3D_STAGES - 1, 1 + Math.floor(progress * (ART3D_STAGES - 1)));
-        stageKey = `stage:${b.type}:${stage}`;
-        v.main.texture = this.atlas.get(stageKey);
-        v.main.anchor.copyFrom(v.main.texture.defaultAnchor!);
-        v.main.visible = true;
-      } else if (b.done) {
-        v.main.texture = this.atlas.get(`building:${b.type}`);
-        v.main.anchor.copyFrom(v.main.texture.defaultAnchor!);
-        v.main.visible = true;
-      } else if (progress > 0) {
-        v.main.texture = this.atlas.bottomPart(`building:${b.type}`, progress);
-        v.main.anchor.copyFrom(v.main.texture.defaultAnchor!);
-        v.main.visible = true;
-      } else {
-        v.main.visible = false;
-      }
-      // Carriers cannot reach it from any warehouse: only donkeys can supply it.
-      const cut = b.owner === this.me && isCutOff(this.sim, b);
-      if (cut && !v.cutoff) {
-        v.cutoff = new Sprite(this.atlas.get('cutoff'));
-        v.cutoff.anchor.copyFrom(v.cutoff.texture.defaultAnchor!);
-        v.body.addChild(v.cutoff);
-      }
-      if (v.cutoff) v.cutoff.visible = cut;
-      // Stopped by the player (Settlers 4's switch): a pause badge left of the cut-off one.
-      const stopped = b.owner === this.me && !!b.stopped;
-      if (stopped && !v.stopped) {
-        v.stopped = new Sprite(this.atlas.get('stopped'));
-        v.stopped.anchor.copyFrom(v.stopped.texture.defaultAnchor!);
-        v.body.addChild(v.stopped);
-      }
-      if (v.stopped) v.stopped.visible = stopped;
-      if (cut || stopped) {
-        // Over what is drawn now: a site's markers sit on its current stage, not on the finished roof.
-        const top = this.badgeTop(b, stageKey, progress);
-        v.cutoff?.position.set(top.x + 10, top.y - 2);
-        v.stopped?.position.set(top.x - 10, top.y - 2);
-      }
-      this.syncPile(b, v);
+      // Someone else's building out of sight: as the player last saw it, or not at all.
+      const rec = mem.get(b.id);
+      if (rec) this.freeze(this.buildingViews.get(b.id) ?? this.createBuildingView(rec, b), rec);
     }
+    // Remembered buildings that are gone from the world: ghosts until the place is seen again.
+    for (const id of mem.ghostIds()) {
+      const rec = mem.get(id)!;
+      this.freeze(this.buildingViews.get(id) ?? this.createBuildingView(rec, null), rec);
+    }
+  }
+
+  /** Shows a building view as remembered, once: no live effects, crew or piles from then on. */
+  private freeze(v: BuildingView, rec: BuildingLook): void {
+    if (v.frozen) return;
+    v.frozen = true;
+    this.effects.setFrozen(rec.id, true);
+    this.drawLook(v, rec, null);
+  }
+
+  /**
+   * Brings a building view in line with a look: owner colours, flag and banner, the stage or the
+   * finished building; with the live building (`b`), the local player's markers and the door pile.
+   */
+  private drawLook(v: BuildingView, look: BuildingLook, b: Building | null): void {
+    if (v.owner !== look.owner) {
+      v.owner = look.owner;
+      v.flag.texture = this.atlas.get(`flag:${look.owner}`);
+      if (v.banner) v.banner.texture = this.atlas.get(`banner:${look.owner}`);
+    }
+    // As in Settlers 4 a military building flies its banner only while it is held (a garrison).
+    if (v.banner) v.banner.visible = look.occupied;
+    // The roof flag marks a workplace whose worker has moved in; houses, warehouses, markets,
+    // the barracks and eyecatchers have no worker and fly none.
+    v.flag.visible = !v.banner && !!BUILDINGS[look.type].worker && look.occupied;
+    if (v.flag.visible && !v.flagPlaced) {
+      const top = this.atlas.topOf(`building:${look.type}`);
+      v.flag.position.set(top.x, top.y + 2);
+      v.flagPlaced = true;
+    }
+    const progress = look.progress;
+    const staged = this.atlas.has(`stage:${look.type}:0`);
+    v.site.visible = !look.done && !staged;
+    let stageKey: string | null = null;
+    if (!look.done && staged) {
+      // Pre-rendered construction stages: stakes while the diggers clear the site, then the timber
+      // frame, the lower walls and the walls with half the roof as the builders work.
+      const stage = !look.levelled ? 0 : Math.min(ART3D_STAGES - 1, 1 + Math.floor(progress * (ART3D_STAGES - 1)));
+      stageKey = `stage:${look.type}:${stage}`;
+      v.main.texture = this.atlas.get(stageKey);
+      v.main.anchor.copyFrom(v.main.texture.defaultAnchor!);
+      v.main.visible = true;
+    } else if (look.done) {
+      v.main.texture = this.atlas.get(`building:${look.type}`);
+      v.main.anchor.copyFrom(v.main.texture.defaultAnchor!);
+      v.main.visible = true;
+    } else if (progress > 0) {
+      v.main.texture = this.atlas.bottomPart(`building:${look.type}`, progress);
+      v.main.anchor.copyFrom(v.main.texture.defaultAnchor!);
+      v.main.visible = true;
+    } else {
+      v.main.visible = false;
+    }
+    if (!b) return;
+    // Carriers cannot reach it from any warehouse: only donkeys can supply it.
+    const cut = b.owner === this.me && isCutOff(this.sim, b);
+    if (cut && !v.cutoff) {
+      v.cutoff = new Sprite(this.atlas.get('cutoff'));
+      v.cutoff.anchor.copyFrom(v.cutoff.texture.defaultAnchor!);
+      v.body.addChild(v.cutoff);
+    }
+    if (v.cutoff) v.cutoff.visible = cut;
+    // Stopped by the player (Settlers 4's switch): a pause badge left of the cut-off one.
+    const stopped = b.owner === this.me && !!b.stopped;
+    if (stopped && !v.stopped) {
+      v.stopped = new Sprite(this.atlas.get('stopped'));
+      v.stopped.anchor.copyFrom(v.stopped.texture.defaultAnchor!);
+      v.body.addChild(v.stopped);
+    }
+    if (v.stopped) v.stopped.visible = stopped;
+    if (cut || stopped) {
+      // Over what is drawn now: a site's markers sit on its current stage, not on the finished roof.
+      const top = this.badgeTop(look, stageKey, progress);
+      v.cutoff?.position.set(top.x + 10, top.y - 2);
+      v.stopped?.position.set(top.x - 10, top.y - 2);
+    }
+    this.syncPile(b, v);
   }
 
   /**
@@ -1825,7 +1885,7 @@ export class GameRenderer {
    * building, a site's current pre-rendered stage, or (classic art) the part of the building cropped
    * by progress, but never below the site's own sprite.
    */
-  private badgeTop(b: Building, stageKey: string | null, progress: number): { x: number; y: number } {
+  private badgeTop(b: BuildingLook, stageKey: string | null, progress: number): { x: number; y: number } {
     if (b.done) return this.atlas.topOf(`building:${b.type}`);
     if (stageKey) return this.atlas.topOf(stageKey);
     const top = this.atlas.topOf(`building:${b.type}`);
@@ -1834,18 +1894,10 @@ export class GameRenderer {
   }
 
   /**
-   * Whether a finished building is in use: a workplace when its worker has moved in, a military
-   * building while garrisoned (the castle always), anything else once built.
+   * A new building view for `b`'s look; `live` is the building itself (null for a remembered one that
+   * is gone), whose live effects the view gets.
    */
-  private occupied(b: Building): boolean {
-    if (!b.done) return false;
-    const def = BUILDINGS[b.type];
-    if (def.worker) return b.workerId !== null;
-    if (def.garrison) return b.garrison.length > 0 || !!def.garrison.claimsWhenEmpty;
-    return true;
-  }
-
-  private createBuildingView(b: Building): BuildingView {
+  private createBuildingView(b: BuildingLook | Building, live: Building | null): BuildingView {
     const cx = b.x + (b.w - 1) / 2;
     const cy = b.y + (b.h - 1) / 2;
     const p = this.surface(cx, cy);
@@ -1878,7 +1930,7 @@ export class GameRenderer {
     const flag = new Sprite(this.atlas.get(`flag:${b.owner}`));
     flag.visible = false;
     body.addChild(flag);
-    this.effects.attachBuilding(b, body);
+    if (live) this.effects.attachBuilding(live, body);
 
     this.addStatic(body, cx, cy);
     this.addStatic(front, b.door.x, b.door.y);
@@ -1904,6 +1956,7 @@ export class GameRenderer {
       pileKey: '',
       cutoff: null,
       stopped: null,
+      frozen: false,
     };
     this.buildingViews.set(b.id, v);
     return v;

@@ -328,7 +328,7 @@ function game(
   // The minimap is framed at the top of the side panel, as wide as the panel's inside (--mm-w).
   const hudEl = document.getElementById('hud')!;
   const mmWidth = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--mm-w')) || 252;
-  const minimap = new Minimap(world, camera, state.fog, mmWidth, state.localPlayer);
+  const minimap = new Minimap(world, camera, state.fog, mmWidth, state.localPlayer, renderer.memory);
   const sound = audioControls(audio);
   const jump = (x: number, y: number) => {
     const p = toScreen(x, y);
@@ -512,6 +512,8 @@ function game(
     audio.listen(camera.x, camera.y, view.w / 2, camera.zoom);
     audio.update();
     const placing = state.placing && !isCommand(state.placing) ? state.placing : null;
+    // A building out of sight is drawn as remembered: its window (live data) closes.
+    if (state.selected !== null && !renderer.memory.liveId(state.selected)) state.selected = null;
     renderer.sync(acc / TICK_MS, now, view, input.ghost(), state.selected, state.hover, input.area(), placing, state.selectedSettler, state.selectedUnits, state.groups);
     hud.update(now);
     // Once a frame as well: interface steps («Next», camera, menus) go on while the game is paused.

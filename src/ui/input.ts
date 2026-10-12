@@ -1,7 +1,7 @@
 import type { Camera } from '../render/camera';
 import type { Area, GameRenderer, Ghost } from '../render/renderer';
 import { BUILDINGS, GEOLOGIST, PIONEER } from '../sim/config';
-import { isFighter, isMilitary } from '../sim/military';
+import { isFighter } from '../sim/military';
 import { canProspect, isSpecialist, pioneerSpot, SPECIALIST_ORDERS, toolPileNear } from '../sim/specialists';
 import { toScreen } from '../render/iso';
 import { Terrain, type BuildingType, type PlayerId } from '../sim/types';
@@ -176,19 +176,25 @@ export class InputController {
     return { fighters, specialists };
   }
 
-  /** The building under (tx, ty) if the local player may know it is there. */
+  /**
+   * The building under (tx, ty) as far as the local player knows it (the renderer's `BuildingMemory`):
+   * the live building when he sees it or remembers it standing there, undefined for one he never saw
+   * or a remembered one that is gone.
+   */
   private knownBuildingAt(tx: number, ty: number) {
-    const b = this.world.buildingAt(tx, ty);
-    const known = !this.state.fog || (b !== undefined && b.owner === this.me) || this.world.isExplored(tx, ty, this.me);
-    return b && known ? b : undefined;
+    return this.renderer.memory.at(tx, ty)?.building;
   }
 
-  /** The fighters' part of a right click there: attack, go in, or move. */
-  private fighterOrderAt(tx: number, ty: number): 'attack' | 'garrison' | 'move' {
-    const b = this.knownBuildingAt(tx, ty);
-    if (b && isMilitary(b) && b.done && b.owner !== this.me && !this.world.allied(b.owner, this.me)) return 'attack';
-    if (b && isMilitary(b) && b.done && b.owner === this.me) return 'garrison';
-    return 'move';
+  /**
+   * The fighters' part of a right click there: attack, go in, or move — decided by what the player
+   * knows of the building (a remembered one as last seen), so the hint tells nothing new.
+   */
+  private fighterOrderAt(tx: number, ty: number): { order: 'attack' | 'garrison' | 'move'; target: number } {
+    const look = this.renderer.memory.at(tx, ty)?.look;
+    const military = look !== undefined && !!BUILDINGS[look.type].garrison && look.done;
+    if (military && look.owner !== this.me && !this.world.allied(look.owner, this.me)) return { order: 'attack', target: look.id };
+    if (military && look.owner === this.me) return { order: 'garrison', target: look.id };
+    return { order: 'move', target: 0 };
   }
 
   /**
@@ -211,7 +217,7 @@ export class InputController {
       const { fighters, specialists } = this.selection();
       const labels = new Set<string>();
       if (fighters.length > 0) {
-        const o = alt ? 'move' : this.fighterOrderAt(hover.x, hover.y);
+        const o = alt ? 'move' : this.fighterOrderAt(hover.x, hover.y).order;
         labels.add(o === 'attack' ? t('input.hint.attack') : o === 'garrison' ? t('input.hint.garrison') : t('input.hint.move'));
       }
       const b = this.knownBuildingAt(hover.x, hover.y);
@@ -335,14 +341,14 @@ export class InputController {
       return;
     }
     if (placing === 'thief') {
-      const target = this.world.buildingAt(Math.round(tile.x), Math.round(tile.y));
+      const target = this.knownBuildingAt(Math.round(tile.x), Math.round(tile.y));
       const ok = target ? this.world.issue({ kind: 'sendThief', player: this.me, target: target.id }) : false;
       this.cb.onMessage(ok ? t('input.thief.sent') : t('input.thief.failed'));
       if (ok && !e.shiftKey) this.cb.onSelectBuildType(null);
       return;
     }
     if (placing === 'saboteur') {
-      const target = this.world.buildingAt(Math.round(tile.x), Math.round(tile.y));
+      const target = this.knownBuildingAt(Math.round(tile.x), Math.round(tile.y));
       const ok = target ? this.world.issue({ kind: 'sendSaboteur', player: this.me, target: target.id }) : false;
       this.cb.onMessage(ok ? t('input.saboteur.sent') : t('input.saboteur.failed'));
       if (ok && !e.shiftKey) this.cb.onSelectBuildType(null);
@@ -409,10 +415,10 @@ export class InputController {
     this.state.selectedUnits = [];
     const tx = Math.round(tile.x);
     const ty = Math.round(tile.y);
-    const b = this.world.buildingAt(tx, ty);
-    // Under the fog nothing can be picked: the player does not know what stands there.
-    const known = !this.state.fog || (b !== undefined && b.owner === this.me) || this.world.isExplored(tx, ty, this.me);
-    this.state.selected = b && known ? b.id : null;
+    // Only a building the player sees now can be picked: one under the fog is unknown or only
+    // remembered, and its window would tell what goes on there.
+    const known = this.renderer.memory.at(tx, ty);
+    this.state.selected = known?.live ? known.look.id : null;
   }
 
   /**
@@ -430,12 +436,12 @@ export class InputController {
     const b = this.knownBuildingAt(tx, ty);
     const said: string[] = [];
     if (fighters.length > 0) {
-      const o = walkOnly ? 'move' : this.fighterOrderAt(tx, ty);
+      const { order: o, target } = walkOnly ? { order: 'move', target: 0 } : this.fighterOrderAt(tx, ty);
       if (o === 'attack') {
-        const n = this.world.issue({ kind: 'orderAttack', player: this.me, ids: fighters, target: b!.id });
+        const n = this.world.issue({ kind: 'orderAttack', player: this.me, ids: fighters, target });
         said.push(n > 0 ? t('input.order.attack', { n }) : t('input.order.cannotAttack'));
       } else if (o === 'garrison') {
-        const n = this.world.issue({ kind: 'orderGarrison', player: this.me, ids: fighters, target: b!.id });
+        const n = this.world.issue({ kind: 'orderGarrison', player: this.me, ids: fighters, target });
         said.push(n > 0 ? t('input.order.garrison', { n }) : t('input.order.noRoom'));
       } else if (this.world.issue({ kind: 'orderMove', player: this.me, ids: fighters, x: tx, y: ty }) === 0) {
         said.push(t('input.order.noWay'));
