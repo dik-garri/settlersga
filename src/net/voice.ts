@@ -5,29 +5,37 @@ import type { PeerId, Transport } from './transport';
 /**
  * The voice of a network game, «рация» (docs/NETWORK.md section 16): a player holds V (allies) or B
  * (everybody) on, his microphone is sampled down to 16 kHz, coded as 8-bit μ-law (G.711) in frames of
- * 100 ms, and every frame goes as base64 text over the game's own transport, on its own channel
- * (`ch: 'voice'`) — no WebRTC media, no TURN. Like the chat it travels through the host, which knows
- * the seats and the teams: a client sends its frames to the host, the host passes each on to the seats
- * that may hear it (the allies of the speaker, `World.allied`, or everybody else) and plays the ones
- * meant for itself; it drops frames that come too fast or are malformed (everything from the network
- * is untrusted JSON). Voice is never part of the game: no lockstep turn, no save, no checksum.
+ * 40 ms, and every frame goes as base64 text over the game's own transport, on its own channel
+ * (`ch: 'voice'`) — no WebRTC media, no TURN. The speaker's browser picks who hears it (the allies of
+ * the speaker, `World.allied`, or everybody else) and, on our relay, sends it **straight to them**
+ * (`Transport.relayTo`: one hop, the relay names the sender); where the transport cannot (WebRTC's
+ * star, an older relay) it goes through the host as the chat does: the host checks the sender's seat
+ * and passes it on. Receivers drop frames that come too fast, are malformed (everything from the
+ * network is untrusted JSON) or were not meant for them. Every frame carries the time it was sent on
+ * the host's clock (`t`; a client knows its clock's offset from the pings), so a listener knows how
+ * long it travelled. Voice is never part of the game: no lockstep turn, no save, no checksum.
  *
- * This module is DOM-free (tested in Vitest): the codec, the down-sampler, the routing and who is
- * talking now. Capture and playback (getUserMedia, AudioWorklet, AudioBuffer) are in `ui/voice.ts`.
+ * This module is DOM-free (tested in Vitest): the codec, the down-sampler, the routing, who is talking
+ * now, and the playout schedule (`playout`). Capture and playback (getUserMedia, AudioWorklet,
+ * AudioBuffer) are in `ui/voice.ts`.
  */
 
-/** The voice's sample rate (Hz) and samples per frame (100 ms). */
+/** The voice's sample rate (Hz) and samples per frame (40 ms). */
 export const VOICE_RATE = 16_000;
-export const VOICE_FRAME = 1600;
-/** The longest frame accepted (base64 characters: 1600 bytes take 2136). */
-export const VOICE_MAX_DATA = 4096;
-/** Frames a seat may send at once, and how fast the allowance comes back: 15 a second at most. */
-export const VOICE_BURST = 15;
-export const VOICE_REFILL_MS = 1000 / 15;
+export const VOICE_FRAME = 640;
+/** One frame's length (ms). */
+export const VOICE_FRAME_MS = (VOICE_FRAME * 1000) / VOICE_RATE;
+/** The longest frame accepted (base64 characters: 640 bytes take 856). */
+export const VOICE_MAX_DATA = 1024;
+/** Frames a seat may send at once, and how fast the allowance comes back: 30 a second (25 are sent). */
+export const VOICE_BURST = 30;
+export const VOICE_REFILL_MS = 1000 / 30;
 /** A speaker counts as talking this long after his last frame (ms). */
 export const TALK_HOLD_MS = 500;
 /** A frame numbered at or below the last one is late unless the speaker was silent this long (ms). */
 const SEQ_RESET_MS = 2000;
+/** How often the host checks whether its seat → peer map changed (ms). */
+const SEATS_CHECK_MS = 500;
 
 /** Who hears a frame: the speaker's allies or everybody. */
 export type VoiceTo = ChatTo;
@@ -158,9 +166,12 @@ export class Downsampler {
 
 // ---------------------------------------------------------------- routing
 
-type VoiceMsg = { ch: 'voice'; to: VoiceTo; seq: number; data: string; from?: Seat };
+/** A voice frame on the wire: `from` only when the host passes one on, `t` = sent, on the host's clock (ms). */
+type VoiceMsg = { ch: 'voice'; to: VoiceTo; seq: number; data: string; from?: Seat; t?: number };
+/** The host's map of who plays which seat from which peer, for the speakers' direct frames. */
+type SeatsMsg = { ch: 'voice'; k: 'seats'; seats: [Seat, PeerId][] };
 
-const isVoice = (x: unknown): x is VoiceMsg => typeof x === 'object' && x !== null && (x as VoiceMsg).ch === 'voice';
+const isVoiceCh = (x: unknown): x is { ch: 'voice'; k?: unknown } => typeof x === 'object' && x !== null && (x as VoiceMsg).ch === 'voice';
 
 /** A frame this browser should play. */
 export interface VoiceFrame {
@@ -168,14 +179,18 @@ export interface VoiceFrame {
   to: VoiceTo;
   seq: number;
   samples: Float32Array;
+  /** How long it travelled, sender to here (ms; null while a clock offset is unknown). */
+  transit: number | null;
 }
 
 export interface NetVoiceOptions {
   transport: Transport;
-  /** Every human seat and its peer (read live, as the chat's). */
+  /** Every human seat and its peer (read live on the host; a client follows the host's announcements). */
   seats: Map<Seat, PeerId>;
   local: Seat;
   now: () => number;
+  /** The host's clock as this browser reckons it (`now` + the offset from the pings); null: not known yet. */
+  hostNow?: () => number | null;
   /** Whether two players are on one team (`World.allied`). */
   allied: (a: Seat, b: Seat) => boolean;
   /** Whether a seat's player is still at his machine (not left and played by the computer); default yes. */
@@ -188,41 +203,74 @@ export interface NetVoiceOptions {
 export interface VoiceStats {
   /** Frames this browser sent (as speaker). */
   sent: number;
+  /** …of them straight to the listeners through the relay (`relayTo`), not through the host. */
+  direct: number;
   /** Frames handed to `onFrame`. */
   received: number;
-  /** Host: frames passed on to other seats' browsers. */
+  /** Host: frames passed on to other seats' browsers (the way through the host). */
   forwarded: number;
-  /** Frames dropped: malformed, too fast, late, or from nobody seated. */
+  /** Frames dropped: malformed, too fast, late, not meant for us, or from nobody seated. */
   dropped: number;
 }
 
 export class NetVoice {
-  readonly stats: VoiceStats = { sent: 0, received: 0, forwarded: 0, dropped: 0 };
+  readonly stats: VoiceStats = { sent: 0, direct: 0, received: 0, forwarded: 0, dropped: 0 };
+  /** Per speaker, how long his frames travel to this browser (ms, smoothed; from `t` and the clock offset). */
+  readonly transit = new Map<Seat, number>();
   private seq = 0;
   /** Per speaker: the last frame number, when it came and to whom. */
   private readonly heard = new Map<Seat, { seq: number; at: number; to: VoiceTo }>();
-  /** Host: per seat, how fast it may send; also this browser's own allowance. */
+  /** Per seat, how fast it may send (host: frames to pass on; anyone: frames heard); also this browser's own allowance. */
   private readonly limit = new RateLimit(VOICE_BURST, VOICE_REFILL_MS);
-  private readonly off: () => void;
+  /** A client's copy of the seat → peer map, kept up to date by the host (who uses `seats` itself). */
+  private readonly peerOf: Map<Seat, PeerId>;
+  private seatsSent: string;
+  private seatsChecked = -Infinity;
+  private readonly offs: (() => void)[];
 
   constructor(private readonly o: NetVoiceOptions) {
-    this.off = o.transport.on('message', (from, msg) => {
-      if (isVoice(msg)) this.receive(from, msg);
-    });
+    this.peerOf = o.transport.isHost ? o.seats : new Map(o.seats);
+    this.seatsSent = JSON.stringify([...o.seats].sort((a, b) => a[0] - b[0]));
+    this.offs = [
+      o.transport.on('message', (from, msg) => {
+        if (isVoiceCh(msg)) this.receive(from, msg);
+      }),
+      o.transport.on('relayed', (from, msg) => {
+        if (isVoiceCh(msg)) this.direct(from, msg as VoiceMsg & { k?: unknown });
+      }),
+    ];
+  }
+
+  /** Host: tells the clients when a seat's peer changed (a returning player), so their frames find him. */
+  update(): void {
+    const t = this.o.transport;
+    const now = this.o.now();
+    if (!t.isHost || now - this.seatsChecked < SEATS_CHECK_MS) return;
+    this.seatsChecked = now;
+    const seats = [...this.o.seats].sort((a, b) => a[0] - b[0]);
+    const key = JSON.stringify(seats);
+    if (key === this.seatsSent) return;
+    this.seatsSent = key;
+    t.broadcast({ ch: 'voice', k: 'seats', seats } satisfies SeatsMsg);
   }
 
   /** Whether another person plays on this player's team (nobody to talk to with «allies» otherwise). */
   hasAllies(): boolean {
     const present = this.o.present ?? (() => true);
-    for (const seat of this.o.seats.keys()) if (seat !== this.o.local && this.o.allied(seat, this.o.local) && present(seat)) return true;
+    for (const seat of this.peerOf.keys()) if (seat !== this.o.local && this.o.allied(seat, this.o.local) && present(seat)) return true;
     return false;
   }
 
   /** The seats that hear a frame of `from` meant for `to` (never the speaker himself). */
   recipients(from: Seat, to: VoiceTo): Seat[] {
     const out: Seat[] = [];
-    for (const seat of this.o.seats.keys()) if (seat !== from && (to === 'all' || this.o.allied(seat, from))) out.push(seat);
+    for (const seat of this.peerOf.keys()) if (seat !== from && (to === 'all' || this.o.allied(seat, from))) out.push(seat);
     return out.sort((a, b) => a - b);
+  }
+
+  /** The peer playing a seat as this browser knows it. */
+  peerOfSeat(seat: Seat): PeerId | undefined {
+    return this.peerOf.get(seat);
   }
 
   /** Sends one frame of this browser's microphone; false if refused (too fast). */
@@ -230,10 +278,28 @@ export class NetVoice {
     if (!this.limit.take(this.o.local, this.o.now())) return false;
     const data = encodeFrame(samples);
     const seq = this.seq++;
-    this.stats.sent++;
+    const hostNow = this.o.hostNow?.() ?? null;
+    const msg: VoiceMsg = { ch: 'voice', to, seq, data };
+    if (hostNow !== null) msg.t = Math.round(hostNow);
     const t = this.o.transport;
-    if (t.isHost) this.deliver(this.o.local, to, seq, data);
-    else t.send(t.host, { ch: 'voice', to, seq, data } satisfies VoiceMsg);
+    // Straight to the listeners where the relay can: one hop, nothing for the host to pass on.
+    if (t.relayTo) {
+      const present = this.o.present ?? (() => true);
+      const peers: PeerId[] = [];
+      for (const seat of this.recipients(this.o.local, to)) {
+        const peer = this.peerOf.get(seat);
+        if (peer !== undefined && peer !== t.self && present(seat)) peers.push(peer);
+      }
+      if (peers.length === 0) return true;
+      if (t.relayTo(peers, msg)) {
+        this.stats.sent++;
+        this.stats.direct++;
+        return true;
+      }
+    }
+    this.stats.sent++;
+    if (t.isHost) this.deliver(this.o.local, to, seq, data, msg.t);
+    else t.send(t.host, msg);
     return true;
   }
 
@@ -245,48 +311,87 @@ export class NetVoice {
   }
 
   private seatOf(peer: PeerId): Seat | undefined {
-    for (const [seat, p] of this.o.seats) if (p === peer) return seat;
+    for (const [seat, p] of this.peerOf) if (p === peer) return seat;
     return undefined;
   }
 
-  private receive(from: PeerId, m: VoiceMsg): void {
+  private static valid(m: VoiceMsg): boolean {
+    return (m.to === 'all' || m.to === 'allies') && Number.isSafeInteger(m.seq) && m.seq >= 0 && typeof m.data === 'string' && m.data.length <= VOICE_MAX_DATA;
+  }
+
+  /** A message on the voice channel through the host's star: a frame to pass on or to play, or the seat map. */
+  private receive(from: PeerId, m: { ch: 'voice'; k?: unknown }): void {
     const t = this.o.transport;
-    const valid = (m.to === 'all' || m.to === 'allies') && Number.isSafeInteger(m.seq) && m.seq >= 0 && typeof m.data === 'string' && m.data.length <= VOICE_MAX_DATA;
+    if (m.k !== undefined) {
+      if (m.k === 'seats' && !t.isHost && from === t.host) this.takeSeats((m as SeatsMsg).seats);
+      return;
+    }
+    const v = m as VoiceMsg;
+    const valid = NetVoice.valid(v);
     if (t.isHost) {
       const seat = this.seatOf(from);
       // Only seated players speak, only as themselves, and not too fast.
-      if (!valid || seat === undefined || seat === this.o.local || decodeFrame(m.data) === null || !this.limit.take(seat, this.o.now())) {
+      if (!valid || seat === undefined || seat === this.o.local || decodeFrame(v.data) === null || !this.limit.take(seat, this.o.now())) {
         this.stats.dropped++;
         return;
       }
-      this.deliver(seat, m.to, m.seq, m.data);
+      this.deliver(seat, v.to, v.seq, v.data, v.t);
     } else {
-      const seat = m.from;
-      if (!valid || from !== t.host || !Number.isInteger(seat) || seat === this.o.local || !this.o.seats.has(seat!)) {
+      const seat = v.from;
+      if (!valid || from !== t.host || !Number.isInteger(seat) || seat === this.o.local || !this.peerOf.has(seat!)) {
         this.stats.dropped++;
         return;
       }
-      this.hear(seat!, m.to, m.seq, m.data);
+      this.hear(seat!, v.to, v.seq, v.data, v.t);
     }
   }
 
+  /** A direct frame from the relay: the sender is the peer the relay names; is it for us at all? */
+  private direct(from: PeerId, m: VoiceMsg & { k?: unknown }): void {
+    if (m.k !== undefined) return;
+    const seat = this.seatOf(from);
+    if (
+      !NetVoice.valid(m) ||
+      seat === undefined ||
+      seat === this.o.local ||
+      (m.to === 'allies' && !this.o.allied(seat, this.o.local)) ||
+      !this.limit.take(seat, this.o.now())
+    ) {
+      this.stats.dropped++;
+      return;
+    }
+    this.hear(seat, m.to, m.seq, m.data, m.t);
+  }
+
+  /** A client: the host's seat map (only entries that make sense, and only one that seats us). */
+  private takeSeats(seats: unknown): void {
+    if (!Array.isArray(seats)) return;
+    const next = new Map<Seat, PeerId>();
+    for (const e of seats) if (Array.isArray(e) && Number.isInteger(e[0]) && typeof e[1] === 'string') next.set(e[0] as Seat, e[1] as PeerId);
+    if (next.get(this.o.local) !== this.o.transport.self) return;
+    this.peerOf.clear();
+    for (const [s, p] of next) this.peerOf.set(s, p);
+  }
+
   /** Host: a frame goes to every seat that may hear it; the host plays it if it is one of them. */
-  private deliver(seat: Seat, to: VoiceTo, seq: number, data: string): void {
+  private deliver(seat: Seat, to: VoiceTo, seq: number, data: string, sent: number | undefined): void {
     const t = this.o.transport;
     const connected = t.peers();
     for (const s of this.recipients(seat, to)) {
-      if (s === this.o.local) this.hear(seat, to, seq, data);
+      if (s === this.o.local) this.hear(seat, to, seq, data, sent);
       else {
         const peer = this.o.seats.get(s);
         if (peer === undefined || !connected.includes(peer)) continue;
-        t.send(peer, { ch: 'voice', from: seat, to, seq, data } satisfies VoiceMsg);
+        const msg: VoiceMsg = { ch: 'voice', from: seat, to, seq, data };
+        if (typeof sent === 'number' && Number.isFinite(sent)) msg.t = sent;
+        t.send(peer, msg);
         this.stats.forwarded++;
       }
     }
   }
 
   /** A frame for this browser: late or repeated ones are skipped, the rest played. */
-  private hear(seat: Seat, to: VoiceTo, seq: number, data: string): void {
+  private hear(seat: Seat, to: VoiceTo, seq: number, data: string, sent: unknown): void {
     const now = this.o.now();
     const h = this.heard.get(seat);
     if (h && seq <= h.seq && now - h.at < SEQ_RESET_MS) {
@@ -300,12 +405,55 @@ export class NetVoice {
     }
     this.heard.set(seat, { seq, at: now, to });
     this.stats.received++;
-    this.o.onFrame?.({ seat, to, seq, samples });
+    let transit: number | null = null;
+    const hostNow = this.o.hostNow?.() ?? null;
+    if (hostNow !== null && typeof sent === 'number' && Number.isFinite(sent)) {
+      // The offsets are estimates: a few ms below zero is a measuring error, not time travel.
+      transit = Math.max(0, hostNow - sent);
+      const old = this.transit.get(seat);
+      this.transit.set(seat, old === undefined || !h || now - h.at > SEQ_RESET_MS ? transit : old + 0.2 * (transit - old));
+    }
+    this.o.onFrame?.({ seat, to, seq, samples, transit });
   }
 
   dispose(): void {
-    this.off();
+    for (const off of this.offs) off();
   }
+}
+
+// ---------------------------------------------------------------- playout
+
+/**
+ * The playout schedule (`ui/voice.ts` `VoicePlayer`, per speaker; seconds of the audio clock): a
+ * frame goes right after the one before; when the queue ran dry (the first frame, a pause, a late
+ * frame) it starts `target` ahead — the jitter buffer. Frames that arrive in a bunch (the relay's
+ * TCP holds them up, then lets them go together) would push the voice further and further behind;
+ * so once more than `high` is queued, frames are dropped until no more than `target` is, and while
+ * more than `target` + a frame is queued, quiet frames (the gaps between words, below `quiet` RMS)
+ * are dropped too — that catches up without a word going missing.
+ */
+export const PLAYOUT = { target: 0.12, high: 0.3, quiet: 0.01 } as const;
+
+export interface Playout {
+  /** When the queued voice ends (audio clock, s). */
+  next: number;
+  /** Dropping frames until the queue is back at `target`. */
+  catching: boolean;
+}
+
+/** Where a frame of `dur` s and loudness `level` arriving at `now` is played (its start, s), or null: dropped. */
+export function playout(p: Playout, now: number, dur: number, level: number): number | null {
+  if (p.next < now + 0.005) {
+    p.next = now + PLAYOUT.target;
+    p.catching = false;
+  }
+  const ahead = p.next - now;
+  if (ahead > PLAYOUT.high) p.catching = true;
+  else if (ahead <= PLAYOUT.target) p.catching = false;
+  if (p.catching || (ahead > PLAYOUT.target + dur && level < PLAYOUT.quiet)) return null;
+  const at = p.next;
+  p.next += dur;
+  return at;
 }
 
 // ---------------------------------------------------------------- the keys

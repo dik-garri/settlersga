@@ -27,6 +27,12 @@ export interface TransportEvents {
   leave: (peer: PeerId, reason: LeaveReason) => void;
   /** Something went wrong that is not a leave (signalling lost, a message too big…). */
   error: (err: Error) => void;
+  /**
+   * A direct message (`relayTo`): from any member of the room, its sender named by the relay. Kept
+   * apart from `message` so that nothing which trusts the host's word (turns, lobby, status) ever
+   * takes one for the host's: only the voice listens here.
+   */
+  relayed: (from: PeerId, msg: unknown) => void;
 }
 
 export interface Transport {
@@ -45,6 +51,13 @@ export interface Transport {
   broadcast(msg: unknown): void;
   /** Host only: drops a peer (it gets a `leave` with reason `kicked` on its side). */
   kick(peer: PeerId): void;
+  /**
+   * Sends a small message straight to these members of the room — clients or the host — past the
+   * host's browser (the relay's direct frames, docs/NETWORK.md section 10); they get it as `relayed`.
+   * False when this transport cannot (no such method: WebRTC's star; an older relay; too long): the
+   * caller then goes through the host. Unreliable on purpose: no pieces, no resends beyond the socket's.
+   */
+  relayTo?(peers: PeerId[], msg: unknown): boolean;
   /** Subscribes to an event; returns the unsubscribe function. */
   on<K extends keyof TransportEvents>(event: K, fn: TransportEvents[K]): () => void;
   /** Closes every connection; no events are emitted afterwards. */
@@ -85,6 +98,7 @@ export class Emitter {
     join: new Set(),
     leave: new Set(),
     error: new Set(),
+    relayed: new Set(),
   };
   private muted = false;
 

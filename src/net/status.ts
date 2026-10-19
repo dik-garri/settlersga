@@ -8,12 +8,14 @@ import type { PeerId, Transport } from './transport';
  *
  * - `PingMeter`: every peer pings the peers it is connected to every `every` ms (channel `ping`) and
  *   answers their pings; a round trip is the time from a ping to its answer. On the host that is
- *   every client, on a client the host.
+ *   every client, on a client the host. The answer also carries the answerer's clock (`h`), so a
+ *   peer knows how far the other's clock is from its own (`offset`: half a round trip is assumed
+ *   each way, the quickest recent round trip trusted most) — the voice's delay is measured with it.
  * - `NetStatus`: in a game the host also tells everybody once a second whose batch the game is
  *   waiting for and every seat's round trip to it (channel `st`), since a client knows neither.
  */
 
-type PingMsg = { ch: 'ping'; t: number } | { ch: 'pong'; t: number };
+type PingMsg = { ch: 'ping'; t: number } | { ch: 'pong'; t: number; h?: number };
 
 const isPing = (x: unknown): x is PingMsg =>
   typeof x === 'object' && x !== null && ((x as PingMsg).ch === 'ping' || (x as PingMsg).ch === 'pong') && typeof (x as PingMsg).t === 'number';
@@ -24,6 +26,8 @@ const RECENT = 6;
 export class PingMeter {
   private readonly rtts = new Map<PeerId, number>();
   private readonly recent = new Map<PeerId, number[]>();
+  /** Per peer, recent clock offsets with the round trip each was measured over. */
+  private readonly offsets = new Map<PeerId, { rtt: number; off: number }[]>();
   private last = -Infinity;
   private readonly off: () => void;
 
@@ -34,9 +38,15 @@ export class PingMeter {
   ) {
     this.off = transport.on('message', (from, msg) => {
       if (!isPing(msg)) return;
-      if (msg.ch === 'ping') transport.send(from, { ch: 'pong', t: msg.t });
+      if (msg.ch === 'ping') transport.send(from, { ch: 'pong', t: msg.t, h: this.now() });
       else {
         const rtt = Math.max(0, this.now() - msg.t);
+        if (typeof msg.h === 'number' && Number.isFinite(msg.h)) {
+          const offs = this.offsets.get(from) ?? [];
+          offs.push({ rtt, off: msg.h - (msg.t + rtt / 2) });
+          if (offs.length > RECENT) offs.shift();
+          this.offsets.set(from, offs);
+        }
         this.rtts.set(from, rtt);
         const list = this.recent.get(from) ?? [];
         list.push(rtt);
@@ -68,9 +78,23 @@ export class PingMeter {
     return w;
   }
 
+  /**
+   * How far a peer's clock (its `now`) is ahead of ours (ms), from the recent ping with the quickest
+   * round trip — its error is at most half that round trip, and much less on an even path; null
+   * before the first answer.
+   */
+  offset(peer: PeerId): number | null {
+    const offs = this.offsets.get(peer);
+    if (!offs || offs.length === 0) return null;
+    let best = offs[0];
+    for (const o of offs) if (o.rtt < best.rtt) best = o;
+    return best.off;
+  }
+
   forget(peer: PeerId): void {
     this.rtts.delete(peer);
     this.recent.delete(peer);
+    this.offsets.delete(peer);
   }
 
   dispose(): void {

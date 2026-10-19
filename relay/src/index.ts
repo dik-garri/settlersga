@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import { CLOSE, HOST, closed, message, opened, refusal, type Role, type RoomSockets } from './room';
+import { CLOSE, DirectLimit, HOST, closed, message, opened, refusal, type Role, type RoomSockets } from './room';
 
 /**
  * The game's WebSocket relay on Cloudflare (variant B of docs/NETWORK.md, section 10): a Worker that
@@ -66,6 +66,7 @@ export class Room extends DurableObject<Env> {
         const at = (s.deserializeAttachment() as Attachment | null)?.at ?? 0;
         return Math.max(pinged, at);
       },
+      limit: new DirectLimit(),
     };
   }
 

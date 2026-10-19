@@ -389,7 +389,14 @@ function game(
     audio.stayAwake = true;
     const player = new VoicePlayer(audio);
     voicePlayer = player;
-    radio = new Radio({ voice: net.core.voice, audio, toast: (text) => hud.toast(text) });
+    radio = new Radio({
+      voice: net.core.voice,
+      audio,
+      toast: (text) => hud.toast(text),
+      talking: () => net.talking(),
+      nameOf: (seat) => net.nameOf(seat),
+      muted: (seat) => net.muted.has(seat),
+    });
     const onAir = radio;
     // The network game's status under the speed strip, its messages on the ticker, its end windows.
     const panel = new NetPanel({
@@ -415,6 +422,7 @@ function game(
         own: () => onAir.on,
         muted: (seat) => net.muted.has(seat),
         toggleMute: (seat) => net.toggleMute(seat),
+        lag: (seat) => player.lag(seat),
       },
     });
     // The chat box over the ticker (Enter or the panel's button), rebuilt in another language.
@@ -443,7 +451,11 @@ function game(
       e.preventDefault();
       chat.open();
     });
-    app.ticker.add(() => panel.update(performance.now()));
+    app.ticker.add(() => {
+      const now = performance.now();
+      panel.update(now);
+      onAir.update(now);
+    });
     const toMenu = () => {
       onAir.stop();
       net.close();
@@ -460,7 +472,7 @@ function game(
         if (!chat.isOpen) hud.toast(chatLineText(line, (seat) => net.nameOf(seat)));
         chat.refresh();
       },
-      voice: (frame) => player.play(frame.seat, frame.samples),
+      voice: (frame) => player.play(frame.seat, frame.samples, frame.transit),
       desync: (r) => {
         onAir.stop();
         show(

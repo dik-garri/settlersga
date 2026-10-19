@@ -132,7 +132,7 @@ export class NetCore {
   readonly match: NetMatch;
   readonly status: NetStatus;
   readonly chat: NetChat;
-  /** The radio: voice frames through the host, outside the lockstep. */
+  /** The radio: voice frames straight through the relay (or through the host), outside the lockstep. */
   readonly voice: NetVoice;
   hooks: NetCoreHooks;
   /** The host is gone (client) or the game was left: nothing more is played. */
@@ -202,6 +202,11 @@ export class NetCore {
       seats: this.seats,
       local,
       now: o.now,
+      hostNow: () => {
+        if (transport.isHost) return o.now();
+        const off = this.status.meter.offset(transport.host);
+        return off === null ? null : o.now() + off;
+      },
       allied: (a, b) => world.allied(a, b),
       present: (seat) => world.aiLevel(seat) === null,
       onFrame: (frame) => this.hooks.voice?.(frame),
@@ -224,6 +229,7 @@ export class NetCore {
   /** Plays `dtMs` of real time (at most `maxTicks` ticks); the status, the delay and resends too. */
   pump(dtMs: number, maxTicks = 20): number {
     this.status.update();
+    this.voice.update();
     if (this.ended) return 0;
     const now = this.o.now();
     const ls = this.session.lockstep;

@@ -9,11 +9,17 @@
  * - host → relay: `{ to: <peer> | '*', …payload }`, `{ kick: <peer> }`, `{ bye: <reason> }`, `{ chk: 1 }`
  *   (sweep: clients silent for `SILENT_MS` are dropped as lost);
  * - client → relay: `{ …payload }` (for the host), `{ bye: <reason> }`;
- * - relay → host: `{ t: 'ready' }`, `{ t: 'join', p }`, `{ t: 'leave', p, r }`, `{ f: <peer>, …payload }`;
- * - relay → client: `{ t: 'welcome', p }`, `{ …payload }`, `{ t: 'leave', r }`;
+ * - anyone → relay (protocol 2): `{ to: [<peer>, …], d }` — a **direct frame** (the voice), passed
+ *   straight to those members of the room (`'host'` included), never through the host's browser;
+ * - relay → host: `{ t: 'ready', v }`, `{ t: 'join', p }`, `{ t: 'leave', p, r }`, `{ f: <peer>, …payload }`;
+ * - relay → client: `{ t: 'welcome', p, v }`, `{ …payload }`, `{ t: 'leave', r }`;
+ * - relay → the addressees of a direct frame: `{ f: <sender>, r: 1, d }` — `f` is the sender's tag as
+ *   the relay knows it, so nobody can speak for another;
  * - refusals before closing: `{ t: 'taken' }` (a host is there already), `{ t: 'nohost' }`, `{ t: 'full' }`.
  * A payload is whatever the transport puts in it (`{ d }` or a chunk `{ c, i, n, s }`); the relay
- * passes it on untouched apart from the routing field.
+ * passes it on untouched apart from the routing fields. `v` (`PROTOCOL`) tells a browser what the relay
+ * can do: a relay without it (protocol 1) has no direct frames, and the game sends its voice through
+ * the host as before; a browser of before protocol 2 ignores `v` and never sends a direct frame.
  */
 
 export type Role = 'host' | 'join';
@@ -28,6 +34,36 @@ export const MAX_FRAME = 1_000_000;
 /** WebSocket close codes the relay uses (4000–4999 are free for applications). */
 export const CLOSE = { normal: 1000, refused: 4001, kicked: 4002, lost: 4003 } as const;
 
+/** What the relay can do, announced in `ready`/`welcome`: 2 = direct frames. */
+export const PROTOCOL = 2;
+/** The longest direct frame (characters: a 40 ms voice frame is under 1 000). */
+export const DIRECT_MAX = 4096;
+/** Direct frames a socket may send at once, and how many a second after that (the voice sends 25). */
+export const DIRECT_BURST = 50;
+export const DIRECT_PER_S = 40;
+
+/**
+ * The direct frames' allowance per socket (a token bucket by tag). In memory only: after the room
+ * hibernates it starts full again, which costs nothing and allows nothing a socket could not do anyway.
+ */
+export class DirectLimit {
+  private readonly buckets = new Map<string, { tokens: number; at: number }>();
+
+  take(tag: string, now: number): boolean {
+    const b = this.buckets.get(tag) ?? { tokens: DIRECT_BURST, at: now };
+    b.tokens = Math.min(DIRECT_BURST, b.tokens + ((now - b.at) * DIRECT_PER_S) / 1000);
+    b.at = now;
+    this.buckets.set(tag, b);
+    if (b.tokens < 1) return false;
+    b.tokens -= 1;
+    return true;
+  }
+
+  forget(tag: string): void {
+    this.buckets.delete(tag);
+  }
+}
+
 /** The host's tag; a client's tag is its peer id. */
 export const HOST = 'host';
 
@@ -41,6 +77,8 @@ export interface RoomSockets<S> {
   close(s: S, code: number, reason: string): void;
   /** When the socket last pinged (or opened), ms since the epoch. */
   lastSeen(s: S): number;
+  /** The room's allowance for direct frames (one per room, kept while it is awake). */
+  limit: DirectLimit;
 }
 
 const LEAVES: readonly string[] = ['closed', 'lost', 'kicked'];
@@ -66,10 +104,10 @@ export function refusal<S>(r: RoomSockets<S>, role: Role): 'taken' | 'nohost' | 
 export function opened<S>(r: RoomSockets<S>, s: S): void {
   const tag = r.tagOf(s);
   if (tag === HOST) {
-    r.send(s, JSON.stringify({ t: 'ready' }));
+    r.send(s, JSON.stringify({ t: 'ready', v: PROTOCOL }));
     return;
   }
-  r.send(s, JSON.stringify({ t: 'welcome', p: tag }));
+  r.send(s, JSON.stringify({ t: 'welcome', p: tag, v: PROTOCOL }));
   const host = hostOf(r, s);
   if (host) r.send(host, JSON.stringify({ t: 'join', p: tag }));
 }
@@ -86,8 +124,24 @@ export function message<S>(r: RoomSockets<S>, from: S, text: string, now: number
     return;
   }
   const tag = r.tagOf(from);
-  if (tag === HOST) fromHost(r, from, f, now);
+  if (Array.isArray(f.to)) direct(r, tag, f, text.length, now);
+  else if (tag === HOST) fromHost(r, from, f, now);
   else fromClient(r, from, tag, f);
+}
+
+/**
+ * A direct frame (protocol 2): to the members of the room it names, stamped with the sender's tag.
+ * Only small whole messages (`d`, no pieces), only to members other than the sender, at most
+ * `DIRECT_BURST` at once and `DIRECT_PER_S` a second per socket; anything else is dropped silently.
+ */
+function direct<S>(r: RoomSockets<S>, tag: string, f: Record<string, unknown>, length: number, now: number): void {
+  const to = f.to as unknown[];
+  if (length > DIRECT_MAX || to.length === 0 || to.length > MAX_PEERS + 1 || !('d' in f) || 'c' in f) return;
+  const want = new Set<string>();
+  for (const p of to) if (typeof p === 'string' && p !== tag) want.add(p);
+  if (want.size === 0 || !r.limit.take(tag, now)) return;
+  const text = JSON.stringify({ d: f.d, f: tag, r: 1 });
+  for (const s of r.all()) if (want.has(r.tagOf(s))) r.send(s, text);
 }
 
 function fromHost<S>(r: RoomSockets<S>, host: S, f: Record<string, unknown>, now: number): void {
@@ -122,11 +176,14 @@ function fromClient<S>(r: RoomSockets<S>, from: S, tag: string, f: Record<string
   }
   const host = hostOf(r);
   if (!host) return;
+  // The relay names the sender; a client cannot pass its frame off as a direct one either.
+  delete f.r;
   r.send(host, JSON.stringify({ ...f, f: tag }));
 }
 
 /** Closes a client and tells the host (once: `closed` on the same socket finds it gone). */
 function dropClient<S>(r: RoomSockets<S>, s: S, reason: LeaveReason, code: number): void {
+  r.limit.forget(r.tagOf(s));
   const host = hostOf(r);
   if (host) r.send(host, JSON.stringify({ t: 'leave', p: r.tagOf(s), r: reason }));
   r.close(s, code, reason);

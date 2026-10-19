@@ -7,6 +7,9 @@ import { Emitter, randomCode, type LeaveReason, type PeerId, type Transport, typ
  * the network worse on purpose: one-way latency, jitter, and losses that the reliable channel hides
  * as a resend after `resend` ms (head-of-line blocking: later messages wait for the resent one, as
  * on a real SCTP/TCP stream). Time comes from a `Scheduler`, so tests run on a `VirtualClock`.
+ * With `direct` it also plays our relay's direct frames (`relayTo`, docs/NETWORK.md section 10):
+ * one hop from any member of a room to others, past the host; without it `relayTo` refuses, as
+ * WebRTC's star or an older relay would.
  */
 
 /** Where delayed deliveries are scheduled. */
@@ -101,9 +104,12 @@ export class LoopbackNetwork implements TransportProvider {
   private nextPeer = 1;
   /** Directed links, keyed `from>to`. */
   private links = new Map<string, Link>();
+  /** Whether `relayTo` works (a relay with direct frames). */
+  readonly direct: boolean;
 
-  constructor(opts: { scheduler?: Scheduler; seed?: number; conditions?: Partial<LinkConditions> } = {}) {
+  constructor(opts: { scheduler?: Scheduler; seed?: number; conditions?: Partial<LinkConditions>; direct?: boolean } = {}) {
     this.scheduler = opts.scheduler ?? realScheduler;
+    this.direct = opts.direct ?? false;
     this.conditions = { ...PERFECT, ...opts.conditions };
     this.rand = mulberry32(opts.seed ?? 1);
   }
@@ -213,6 +219,28 @@ export class LoopbackNetwork implements TransportProvider {
     });
   }
 
+  /** @internal A direct frame: one hop to every named member of the sender's room still in it. */
+  relay(from: LoopbackTransport, peers: PeerId[], msg: unknown): void {
+    const host = this.rooms.get(from.code);
+    if (!host || host.isClosed) return;
+    const inRoom = (t: LoopbackTransport) => t === host || host.has(t.self);
+    if (!inRoom(from)) return;
+    for (const peer of new Set(peers)) {
+      const to = peer === host.self ? host : host.peer(peer);
+      if (!to || to === from) continue;
+      const key = `${from.self}>>${to.self}`;
+      let link = this.links.get(key);
+      if (!link) this.links.set(key, (link = { open: true, lastAt: 0 }));
+      const copy = JSON.parse(JSON.stringify(msg ?? null)) as unknown;
+      const now = this.scheduler.now();
+      const at = Math.max(now + this.delay(from.self, to.self), link.lastAt);
+      link.lastAt = at;
+      this.scheduler.after(at - now, () => {
+        if (inRoom(from) && inRoom(to)) to.receiveDirect(from.self, copy);
+      });
+    }
+  }
+
   /** @internal A goodbye: delivered after the messages already on the way, then the link closes. */
   goodbye(from: LoopbackTransport, to: LoopbackTransport, reason: LeaveReason): void {
     const link = this.links.get(`${from.self}>${to.self}`);
@@ -280,6 +308,12 @@ export class LoopbackTransport extends Emitter implements Transport {
     for (const p of this.conns.keys()) this.send(p, msg);
   }
 
+  relayTo(peers: PeerId[], msg: unknown): boolean {
+    if (!this.net.direct || this.closedFlag) return false;
+    this.net.relay(this, peers, msg);
+    return true;
+  }
+
   kick(peer: PeerId): void {
     const t = this.conns.get(peer);
     if (!this.isHost || !t) return;
@@ -304,6 +338,11 @@ export class LoopbackTransport extends Emitter implements Transport {
   detach(peer: PeerId, reason: LeaveReason | null): void {
     if (!this.conns.delete(peer)) return;
     if (reason) this.emit('leave', peer, reason);
+  }
+
+  /** @internal */
+  receiveDirect(from: PeerId, msg: unknown): void {
+    if (!this.closedFlag) this.emit('relayed', from, msg);
   }
 
   /** @internal */

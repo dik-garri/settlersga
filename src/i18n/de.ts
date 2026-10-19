@@ -424,7 +424,13 @@ export const de: Record<Key, string> = {
   'voice.mute': 'Stimme von {who} stummschalten (nur bei Ihnen)',
   'voice.unmute': 'Stimme von {who} wieder hören',
   'voice.keys': 'Funk: V Verbündete, B alle',
-  'voice.keysTip': 'V spricht zu den Verbündeten, B zu allen; dieselbe Taste schaltet das Mikrofon aus, die andere wechselt. Stimmen laufen über den Host; ihre Lautstärke steht in den Toneinstellungen',
+  'voice.keysTip': 'V spricht zu den Verbündeten, B zu allen; dieselbe Taste schaltet das Mikrofon aus, die andere wechselt. Mehrere können gleichzeitig sprechen — die Stimmen mischen sich, oben steht, wer spricht. Am besten mit Kopfhörern; die Lautstärke steht in den Toneinstellungen',
+  'voice.headphones': 'Funk: am besten mit Kopfhörern — aus Lautsprechern gelangen die Stimmen zurück ins Mikrofon, und die anderen hören ein Echo',
+  'voice.talking': 'Es sprechen:',
+  'voice.talker': '{who} → {to}',
+  'voice.talkerMuted': '{text} (stumm)',
+  'voice.lag': '{n} s',
+  'voice.lagTip': 'Verzögerung der Stimme: von ihrem Mikrofon bis zu Ihrem Ohr, ungefähr',
   'menu.saveNotFound': 'Spielstand nicht gefunden',
 
   // In-game menu (pauseMenu.ts)

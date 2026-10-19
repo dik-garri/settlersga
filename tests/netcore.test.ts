@@ -57,6 +57,8 @@ interface GameOpts {
   chat?: NetChatLine[];
   tuneDelay?: boolean;
   code?: string;
+  /** The relay's direct frames (`relayTo`) work. */
+  direct?: boolean;
 }
 
 function makePeer(g: Game, transport: LoopbackTransport, seat: number, world: World, extra: Partial<ConstructorParameters<typeof NetCore>[0]> = {}): Peer {
@@ -82,7 +84,7 @@ function makePeer(g: Game, transport: LoopbackTransport, seat: number, world: Wo
 
 function coreGame(o: GameOpts): Game {
   const clock = new VirtualClock();
-  const net = new LoopbackNetwork({ scheduler: clock, seed: 7, conditions: o.conditions });
+  const net = new LoopbackNetwork({ scheduler: clock, seed: 7, conditions: o.conditions, direct: o.direct });
   const code = o.code ?? 'CORE22';
   const host = net.openHost(code);
   const transports = [host, ...Array.from({ length: o.humans - 1 }, (_, k) => net.connect(code, `p${k + 2}`))];
@@ -218,6 +220,29 @@ describe('voice (the radio)', () => {
     expect(c.voice.map((f) => f.seq)).toEqual([...Array(10).keys(), ...Array(10).keys()]);
     expect(a.core.voice.stats.forwarded).toBe(20 + 10);
     // Voice is no part of the game: the worlds stay the same.
+    expect(new Set(sums(g)).size).toBe(1);
+  });
+
+  it('on a relay with direct frames the voice skips the host, and the listener knows its delay', () => {
+    const g = coreGame({ humans: 3, seed: 5, world: { size: 64, players: 3, teams: [1, 2, 2] }, conditions: { latency: 40, jitter: 0 }, direct: true });
+    const [a, b, c] = g.peers;
+    run(g, 3_000); // the pings give the clients their clocks' offsets
+    const frame = Float32Array.from({ length: VOICE_FRAME }, (_, i) => 0.4 * Math.sin(i / 9));
+    run(g, 1_000, 20, (t) => {
+      if (t % 40 === 0) {
+        b.core.voice.send('allies', frame);
+        a.core.voice.send('all', frame);
+      }
+    });
+    run(g, 500);
+    expect(c.voice.filter((f) => f.seat === 2).length).toBe(25);
+    expect(c.voice.filter((f) => f.seat === 1).length).toBe(25);
+    expect(b.voice.map((f) => f.seat)).toEqual(Array(25).fill(1));
+    expect(a.voice).toEqual([]);
+    expect(a.core.voice.stats.forwarded).toBe(0);
+    expect(b.core.voice.stats.direct).toBe(25);
+    // One hop of 40 ms, client to client, measured across the clocks.
+    for (const f of c.voice) expect(Math.abs(f.transit! - 40)).toBeLessThanOrEqual(1);
     expect(new Set(sums(g)).size).toBe(1);
   });
 });

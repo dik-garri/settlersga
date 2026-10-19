@@ -42,7 +42,14 @@ export interface NetPanelOptions {
   /** Host: the seats returning players ask for, and the answers. */
   rejoin: { asked: () => Seat[]; askerName: (seat: Seat) => string | null; accept: (seat: Seat) => void; refuse: (seat: Seat) => void } | null;
   /** The radio: who talks now (as heard here) and to whom, this browser's own air, muting here. */
-  voice: { talking: () => Map<Seat, VoiceTo>; own: () => VoiceTo | null; muted: (seat: Seat) => boolean; toggleMute: (seat: Seat) => void };
+  voice: {
+    talking: () => Map<Seat, VoiceTo>;
+    own: () => VoiceTo | null;
+    muted: (seat: Seat) => boolean;
+    toggleMute: (seat: Seat) => void;
+    /** A speaker's voice delay mouth to ear as heard here (ms; null: not measured). */
+    lag: (seat: Seat) => number | null;
+  };
 }
 
 export class NetPanel {
@@ -63,7 +70,10 @@ export class NetPanel {
       const ai = world.aiLevel(seat) !== null;
       const ping = ai ? null : status.ping(seat);
       const talk = seat === local ? own : (talking.get(seat) ?? null);
-      return { seat, name: nameOf(seat), ai, ping: ping === null ? null : Math.round(ping / 10) * 10, talk, muted: this.o.voice.muted(seat) };
+      const lagMs = talk && seat !== local ? this.o.voice.lag(seat) : null;
+      // In tenths of a second: the panel redraws only when the shown number changes.
+      const lag = lagMs === null ? null : Math.max(1, Math.round(lagMs / 100)) / 10;
+      return { seat, name: nameOf(seat), ai, ping: ping === null ? null : Math.round(ping / 10) * 10, talk, lag, muted: this.o.voice.muted(seat) };
     });
     const canKick = !!this.o.kick && match.waitingMs >= KICK_AFTER_MS;
     const delay = match.lockstep.delay;
@@ -84,6 +94,11 @@ export class NetPanel {
         const talk = el('span', `np-talk${r.talk === 'all' ? ' all' : ''}${r.muted ? ' muted' : ''}`, t(r.talk === 'all' ? 'voice.toAll' : 'voice.toAllies'));
         tip(talk, t(r.muted ? 'voice.talkMutedTip' : 'voice.talkTip', { who: r.name, to: t(r.talk === 'all' ? 'voice.toAll' : 'voice.toAllies') }));
         line.append(talk);
+        if (r.lag !== null) {
+          const lag = el('span', 'np-lag', t('voice.lag', { n: r.lag }));
+          tip(lag, t('voice.lagTip'));
+          line.append(lag);
+        }
       }
       if (r.ping !== null) line.append(el('span', 'np-ping', t('lobby.ping', { n: r.ping })));
       if (r.seat !== local && !r.ai) {

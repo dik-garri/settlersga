@@ -1,42 +1,50 @@
 import type { AudioEngine } from '../audio/audio';
 import type { Seat } from '../net/lockstep';
-import { Downsampler, frameLevel, radioPress, VOICE_RATE, type NetVoice, type VoiceTo } from '../net/voice';
+import { Downsampler, frameLevel, playout, radioPress, VOICE_RATE, type NetVoice, type Playout, type VoiceTo } from '../net/voice';
 import { el } from './dom';
 import { t } from './i18n';
 
 /**
- * The radio's browser side (docs/NETWORK.md section 16; the routing and the codec are DOM-free in
- * `net/voice.ts`): `VoiceCapture` takes the microphone only while the radio is on the air, sampled
- * down to 16 kHz frames of 100 ms in an AudioWorklet (a ScriptProcessor where there is none);
- * `VoicePlayer` plays every speaker's frames one after another through the game's audio context, on
- * the voice bus (`AudioEngine.voiceOutput`: its own volume, not muted with M); `Radio` is the V/B
- * switch with its clicks and the «В эфире» plaque over the game.
+ * The radio's browser side (docs/NETWORK.md section 16; the routing, the codec and the playout
+ * schedule are DOM-free in `net/voice.ts`): `VoiceCapture` takes the microphone only while the radio
+ * is on the air, sampled down to 16 kHz frames of 40 ms in an AudioWorklet (a ScriptProcessor where
+ * there is none); `VoicePlayer` plays every speaker's frames one after another through the game's
+ * audio context, on the voice bus (`AudioEngine.voiceOutput`: its own volume, not muted with M),
+ * catching up when they come in a bunch (`playout`); `Radio` is the V/B switch with its clicks, the
+ * «В эфире» plaque over the game and the line of who is talking now.
  */
 
-/** How far ahead a speaker's first frame (and one after a gap) is scheduled: the jitter buffer (s). */
-const JITTER_S = 0.15;
-/** A speaker more than this far ahead of the clock is skipped until he catches up (s). */
-const MAX_AHEAD_S = 1;
+/** A smoothed mouth-to-ear delay per speaker (ms) moves this share of the way to each new frame's. */
+const LAG_SMOOTH = 0.2;
 
 /** Plays the voices: per speaker, his frames back to back. */
 export class VoicePlayer {
-  /** Frames scheduled and frames skipped (too far behind), for checks from DevTools. */
+  /** Frames scheduled and frames dropped to catch up, for checks from DevTools. */
   scheduled = 0;
   skipped = 0;
-  private readonly next = new Map<Seat, number>();
+  /** The most any speaker's voice was queued ahead of the clock (s), for checks from DevTools. */
+  maxAhead = 0;
+  /**
+   * Per speaker, the delay from his mouth to our ear (ms, smoothed): the frame's travel (`transit`,
+   * on the host's clock), its time queued here, its own length (its last sample was spoken when it
+   * was sent) and the output's latency. Not counted: the microphone's own input latency and up to one
+   * worklet block (≈ 11 ms) before the frame is complete.
+   */
+  readonly lags = new Map<Seat, number>();
+  private readonly queues = new Map<Seat, Playout>();
 
   constructor(private readonly audio: AudioEngine) {}
 
-  play(seat: Seat, samples: Float32Array): void {
+  play(seat: Seat, samples: Float32Array, transit: number | null = null): void {
     const o = this.audio.voiceOutput();
     if (!o || o.ctx.state !== 'running') return;
     const { ctx, out } = o;
     const buffer = toBuffer(ctx, samples);
     const now = ctx.currentTime;
-    let at = this.next.get(seat) ?? 0;
-    // Run dry (the first frame, a gap, a late packet): start again a jitter buffer ahead.
-    if (at < now + 0.01) at = now + JITTER_S;
-    if (at > now + MAX_AHEAD_S) {
+    let q = this.queues.get(seat);
+    if (!q) this.queues.set(seat, (q = { next: 0, catching: false }));
+    const at = playout(q, now, buffer.duration, frameLevel(samples));
+    if (at === null) {
       this.skipped++;
       return;
     }
@@ -45,14 +53,31 @@ export class VoicePlayer {
     src.connect(out);
     src.onended = () => src.disconnect();
     src.start(at);
-    this.next.set(seat, at + buffer.duration);
     this.scheduled++;
+    this.maxAhead = Math.max(this.maxAhead, q.next - now);
+    if (transit !== null) {
+      const output = ctx.outputLatency || ctx.baseLatency || 0;
+      const lag = transit + (at - now + buffer.duration + output) * 1000;
+      const old = this.lags.get(seat);
+      this.lags.set(seat, old === undefined ? lag : old + LAG_SMOOTH * (lag - old));
+    }
   }
 
   /** Whether a speaker's voice is still playing (scheduled past now). */
   playing(seat: Seat): boolean {
     const o = this.audio.voiceOutput();
-    return !!o && (this.next.get(seat) ?? 0) > o.ctx.currentTime;
+    return !!o && (this.queues.get(seat)?.next ?? 0) > o.ctx.currentTime;
+  }
+
+  /** How far a speaker's voice is queued ahead of the clock now (s). */
+  ahead(seat: Seat): number {
+    const o = this.audio.voiceOutput();
+    return o ? Math.max(0, (this.queues.get(seat)?.next ?? 0) - o.ctx.currentTime) : 0;
+  }
+
+  /** A speaker's mouth-to-ear delay (ms), null before his first frame with a known travel time. */
+  lag(seat: Seat): number | null {
+    return this.lags.get(seat) ?? null;
   }
 }
 
@@ -78,15 +103,15 @@ function toBuffer(ctx: AudioContext, samples: Float32Array): AudioBuffer {
   }
 }
 
-/** The audio worklet that hands the microphone's samples to the page in blocks of 1024. */
+/** The audio worklet that hands the microphone's samples to the page in blocks of 512 (≈ 11 ms at 48 kHz). */
 const TAP_WORKLET = `
 class SettlersVoiceTap extends AudioWorkletProcessor {
-  constructor() { super(); this.buf = new Float32Array(1024); this.n = 0; }
+  constructor() { super(); this.buf = new Float32Array(512); this.n = 0; }
   process(inputs) {
     const ch = inputs[0] && inputs[0][0];
     if (ch) for (let i = 0; i < ch.length; i++) {
       this.buf[this.n++] = ch[i];
-      if (this.n === this.buf.length) { this.port.postMessage(this.buf); this.buf = new Float32Array(1024); this.n = 0; }
+      if (this.n === this.buf.length) { this.port.postMessage(this.buf); this.buf = new Float32Array(512); this.n = 0; }
     }
     return true;
   }
@@ -106,7 +131,7 @@ export class MicError extends Error {
   }
 }
 
-/** The microphone while the radio is on: 16 kHz frames of 100 ms to `onFrame`. */
+/** The microphone while the radio is on: 16 kHz frames of 40 ms to `onFrame`. */
 export class VoiceCapture {
   private stream: MediaStream | null = null;
   private ctx: AudioContext | null = null;
@@ -151,7 +176,7 @@ export class VoiceCapture {
       tap = node;
     } catch {
       // No audio worklets (an old browser, an insecure page): the deprecated script processor.
-      const node = ctx.createScriptProcessor(4096, 1, 1);
+      const node = ctx.createScriptProcessor(2048, 1, 1);
       node.onaudioprocess = (e) => feed(e.inputBuffer.getChannelData(0).slice());
       tap = node;
     }
@@ -173,29 +198,68 @@ export class VoiceCapture {
 export interface RadioOptions {
   voice: NetVoice;
   audio: AudioEngine;
-  /** A line for the message ticker (no allies, no microphone). */
+  /** A line for the message ticker (no allies, no microphone, the headphones hint). */
   toast: (text: string) => void;
+  /** Who is talking now as heard here, and to whom (`NetVoice.talking`). */
+  talking: () => Map<Seat, VoiceTo>;
+  /** A seat's player name. */
+  nameOf: (seat: Seat) => string;
+  /** Whether this browser muted a seat's voice. */
+  muted: (seat: Seat) => boolean;
 }
 
-/** The V/B radio: one air, switched on, over and off; the plaque shows it. */
+/** How often the line of who is talking is redrawn (ms). */
+const TALKERS_EVERY_MS = 150;
+
+/**
+ * The V/B radio: one air, switched on, over and off; the plaque shows it. Under the plaque, the line
+ * of everybody talking now as heard here («Говорят: Вася → союзникам, Петя → всем») — voices mix,
+ * as in a conference call, and this says whose they are.
+ */
 export class Radio {
   /** On the air to whom (null: off). */
   on: VoiceTo | null = null;
-  /** The plaque over the game while on the air. */
-  readonly el = el('div', 'radio-on');
+  /** The plaque and the talkers' line over the game. */
+  readonly el = el('div', 'radio');
+  private readonly plaque = el('div', 'radio-on');
+  private readonly talkers = el('div', 'radio-talkers');
   private capture: VoiceCapture | null = null;
   private level = 0;
+  /** The headphones hint was shown in this game. */
+  private hinted = false;
+  private talkersKey = '';
+  private lastTalkers = -Infinity;
   private readonly label = el('span', 'radio-label');
   private readonly meter = el('span', 'radio-meter');
   private readonly bar = el('span', 'radio-bar');
   private readonly hint = el('span', 'radio-hint');
 
   constructor(private readonly o: RadioOptions) {
-    this.el.hidden = true;
-    this.el.setAttribute('role', 'status');
-    this.el.setAttribute('aria-live', 'polite');
+    this.plaque.hidden = true;
+    this.plaque.setAttribute('role', 'status');
+    this.plaque.setAttribute('aria-live', 'polite');
     this.meter.append(this.bar);
-    this.el.append(el('span', 'radio-dot'), this.label, this.meter, this.hint);
+    this.plaque.append(el('span', 'radio-dot'), this.label, this.meter, this.hint);
+    this.talkers.hidden = true;
+    this.el.append(this.plaque, this.talkers);
+  }
+
+  /** Redraws the line of who is talking (from the frame loop; throttled). */
+  update(nowMs: number): void {
+    if (nowMs - this.lastTalkers < TALKERS_EVERY_MS) return;
+    this.lastTalkers = nowMs;
+    const list = [...this.o.talking()].sort((a, b) => a[0] - b[0]).map(([seat, to]) => ({ seat, to, muted: this.o.muted(seat) }));
+    const key = JSON.stringify(list);
+    if (key === this.talkersKey) return;
+    this.talkersKey = key;
+    this.talkers.hidden = list.length === 0;
+    this.talkers.replaceChildren();
+    if (list.length === 0) return;
+    this.talkers.append(el('span', 'radio-talkers-head', t('voice.talking')));
+    for (const { seat, to, muted } of list) {
+      const text = t('voice.talker', { who: this.o.nameOf(seat), to: t(to === 'all' ? 'voice.toAll' : 'voice.toAllies') });
+      this.talkers.append(el('span', `radio-talker${to === 'all' ? ' all' : ''}${muted ? ' muted' : ''}`, muted ? t('voice.talkerMuted', { text }) : text));
+    }
   }
 
   /** V (`allies`) or B (`all`) pressed. */
@@ -208,6 +272,11 @@ export class Radio {
     this.o.audio.radio('radioOn');
     this.show();
     if (starting) this.open();
+    // Voices from loudspeakers go back into the microphone: say it once a game.
+    if (!this.hinted) {
+      this.hinted = true;
+      this.o.toast(t('voice.headphones'));
+    }
   }
 
   /** Off the air (also when the game ends). */
@@ -228,7 +297,7 @@ export class Radio {
     capture
       .start((frame) => {
         if (this.capture !== capture || this.on === null) return;
-        this.level = Math.max(frameLevel(frame), this.level * 0.6);
+        this.level = Math.max(frameLevel(frame), this.level * 0.8);
         this.o.voice.send(this.on, frame);
         this.bar.style.width = `${Math.min(100, Math.round(Math.sqrt(this.level) * 140))}%`;
       })
@@ -243,14 +312,16 @@ export class Radio {
       });
   }
 
-  /** Redraws the plaque (also after a change of language). */
+  /** Redraws the plaque, and the talkers' line on the next update (also after a change of language). */
   show(): void {
-    this.el.hidden = this.on === null;
+    this.talkersKey = '';
+    this.lastTalkers = -Infinity;
+    this.plaque.hidden = this.on === null;
     if (this.on === null) {
       this.bar.style.width = '0';
       return;
     }
-    this.el.classList.toggle('all', this.on === 'all');
+    this.plaque.classList.toggle('all', this.on === 'all');
     this.label.textContent = t(this.on === 'all' ? 'voice.onAll' : 'voice.onAllies');
     this.hint.textContent = t('voice.offHint', { key: this.on === 'all' ? 'B' : 'V' });
   }

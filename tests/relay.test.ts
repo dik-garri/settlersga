@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { HOST, MAX_PEERS, SILENT_MS, closed, message, opened, refusal, type Role, type RoomSockets } from '../relay/src/room';
+import { DIRECT_BURST, DIRECT_MAX, DirectLimit, HOST, MAX_PEERS, SILENT_MS, closed, message, opened, refusal, type Role, type RoomSockets } from '../relay/src/room';
 import { fallbackProvider } from '../src/net/provider';
 import { RelayTransport, type RelayTransportOptions, type SocketLike } from '../src/net/relay';
 import type { LeaveReason, Transport, TransportProvider } from '../src/net/transport';
@@ -58,7 +58,10 @@ class FakeSocket implements SocketLike {
 /** The platform: rooms of accepted sockets, and the `index.ts` accept/refuse step. */
 class FakeRelay {
   private rooms = new Map<string, Server[]>();
+  private limits = new Map<string, DirectLimit>();
   private n = 0;
+  /** Plays a relay of before protocol 2: its greetings say nothing of direct frames. */
+  constructor(private readonly old = false) {}
   open(room: string): Server[] {
     return this.rooms.get(room) ?? [];
   }
@@ -69,7 +72,7 @@ class FakeRelay {
     return {
       all: () => [...this.open(room)],
       tagOf: (s) => s.tag,
-      send: (s, text) => s.client.deliver(text),
+      send: (s, text) => s.client.deliver(this.old && /^\{"t":"(ready|welcome)"/.test(text) ? text.replace(/,"v":\d+/, '') : text),
       close: (s) => {
         if (!this.open(room).includes(s)) return;
         this.remove(room, s);
@@ -79,6 +82,7 @@ class FakeRelay {
         });
       },
       lastSeen: (s) => Math.max(s.at, s.pinged),
+      limit: this.limits.get(room) ?? this.limits.set(room, new DirectLimit()).get(room)!,
     };
   }
   socket = (url: string): SocketLike => {
@@ -108,8 +112,8 @@ const flush = async (): Promise<void> => {
   for (let k = 0; k < 20; k++) await Promise.resolve();
 };
 
-function setup() {
-  const relay = new FakeRelay();
+function setup(old = false) {
+  const relay = new FakeRelay(old);
   const opts: RelayTransportOptions = { url: 'wss://relay.test', socket: relay.socket, heartbeat: 1000, timeout: 30_000 };
   return { relay, opts };
 }
@@ -121,8 +125,13 @@ function record(t: Transport) {
   t.on('message', (from, msg) => got.push({ from, msg }));
   t.on('join', (p) => joins.push(p));
   t.on('leave', (p, r) => leaves.push([p, r]));
-  return { got, joins, leaves };
+  const direct: { from: string; msg: unknown }[] = [];
+  t.on('relayed', (from, msg) => direct.push({ from, msg }));
+  return { got, joins, leaves, direct };
 }
+
+/** A transport's raw socket, to send frames a modified browser could. */
+const rawOf = (t: Transport) => (text: string) => (t as unknown as { ws: SocketLike }).ws.send(text);
 
 describe('relay transport (variant B)', () => {
   afterEach(() => {
@@ -263,6 +272,95 @@ describe('relay transport (variant B)', () => {
     await flush();
     expect(rb.leaves).toEqual([[b.host, 'lost']]);
     host.close();
+  });
+});
+
+describe('direct frames (protocol 2: the voice past the host)', () => {
+  it('go straight to the members named, stamped with the sender; never as the host\'s messages', async () => {
+    const { opts } = setup();
+    const host = await RelayTransport.host('DIRECT', opts);
+    const a = await RelayTransport.join('DIRECT', opts);
+    const b = await RelayTransport.join('DIRECT', opts);
+    const c = await RelayTransport.join('DIRECT', opts);
+    await flush();
+    expect([host, a, b, c].map((t) => t.direct)).toEqual([true, true, true, true]);
+    const [h, ra, rb, rc] = [host, a, b, c].map(record);
+    expect(a.relayTo([b.self, host.self], { ch: 'voice', n: 1 })).toBe(true);
+    expect(host.relayTo([a.self, c.self], { ch: 'voice', n: 2 })).toBe(true);
+    await flush();
+    expect(rb.direct).toEqual([{ from: a.self, msg: { ch: 'voice', n: 1 } }]);
+    expect(h.direct).toEqual([{ from: a.self, msg: { ch: 'voice', n: 1 } }]);
+    expect(ra.direct).toEqual([{ from: host.self, msg: { ch: 'voice', n: 2 } }]);
+    expect(rc.direct).toEqual([{ from: host.self, msg: { ch: 'voice', n: 2 } }]);
+    // Nothing of it reached the ordinary messages, which trust the host's word.
+    for (const r of [h, ra, rb, rc]) expect(r.got).toEqual([]);
+    for (const t of [a, b, c, host]) t.close();
+  });
+
+  it('cannot be passed off as another sender, and addressees outside the room are skipped', async () => {
+    const { opts } = setup();
+    const host = await RelayTransport.host('SPOOFS', opts);
+    const a = await RelayTransport.join('SPOOFS', opts);
+    const b = await RelayTransport.join('SPOOFS', opts);
+    await flush();
+    const [h, rb] = [host, b].map(record);
+    const raw = rawOf(a);
+    // A modified browser names someone else as the sender: the relay stamps its own tag over it.
+    raw(JSON.stringify({ to: [b.self], d: 'x', f: HOST, r: 1 }));
+    raw(JSON.stringify({ to: [b.self], f: HOST, r: 1, d: 'y' }));
+    // A plain frame for the host dressed up as a direct one stays a plain message from a.
+    raw(JSON.stringify({ d: 'plain', r: 1, f: b.self }));
+    // Addressees that are not there, the sender itself, nobody, rubbish: nothing goes anywhere.
+    raw(JSON.stringify({ to: ['p999', 'nobody', a.self], d: 'lost' }));
+    raw(JSON.stringify({ to: [], d: 'none' }));
+    raw(JSON.stringify({ to: [42, null, { x: 1 }], d: 'junk' }));
+    await flush();
+    expect(rb.direct).toEqual([
+      { from: a.self, msg: 'x' },
+      { from: a.self, msg: 'y' },
+    ]);
+    expect(h.got).toEqual([{ from: a.self, msg: 'plain' }]);
+    expect(h.direct).toEqual([]);
+    for (const t of [a, b, host]) t.close();
+  });
+
+  it('are small, whole and limited per socket', async () => {
+    const { opts } = setup();
+    const host = await RelayTransport.host('LIMITS', opts);
+    const a = await RelayTransport.join('LIMITS', opts);
+    const b = await RelayTransport.join('LIMITS', opts);
+    await flush();
+    const rb = record(b);
+    const raw = rawOf(a);
+    // Too long (the transport itself refuses it, so the caller goes through the host), or in pieces.
+    expect(a.relayTo([b.self], 'z'.repeat(DIRECT_MAX))).toBe(false);
+    raw(JSON.stringify({ to: [b.self], d: 'z'.repeat(DIRECT_MAX) }));
+    raw(JSON.stringify({ to: [b.self], c: 1, i: 0, n: 1, s: '"piece"' }));
+    await flush();
+    expect(rb.direct).toEqual([]);
+    // A flood: the relay passes a burst's worth.
+    for (let k = 0; k < 3 * DIRECT_BURST; k++) a.relayTo([b.self], k);
+    await flush();
+    expect(rb.direct.length).toBe(DIRECT_BURST);
+    expect(rb.direct.map((x) => x.msg)).toEqual([...Array(DIRECT_BURST).keys()]);
+    for (const t of [a, b, host]) t.close();
+  });
+
+  it('an older relay (no protocol 2 in its greeting): relayTo refuses, the old frames still work', async () => {
+    const { opts } = setup(true);
+    const host = await RelayTransport.host('OLDREL', opts);
+    const a = await RelayTransport.join('OLDREL', opts);
+    await flush();
+    expect([host.direct, a.direct]).toEqual([false, false]);
+    expect(a.relayTo([host.self], 'v')).toBe(false);
+    expect(host.relayTo([a.self], 'v')).toBe(false);
+    const [h, ra] = [host, a].map(record);
+    a.send(a.host, 'hello');
+    host.send(a.self, 'back');
+    await flush();
+    expect(h.got).toEqual([{ from: a.self, msg: 'hello' }]);
+    expect(ra.got).toEqual([{ from: host.self, msg: 'back' }]);
+    for (const t of [a, host]) t.close();
   });
 });
 

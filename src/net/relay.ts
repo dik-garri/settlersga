@@ -10,7 +10,9 @@ import { Emitter, randomCode, type LeaveReason, type PeerId, type Transport, typ
  * Messages are JSON; ones longer than `CHUNK` characters go in pieces (the platform's frame limit is
  * 1 MiB). Every `heartbeat` ms the socket sends `ping`, which the relay answers with `pong` without
  * waking up; the host also asks the relay to sweep out clients that went silent. A socket that hears
- * nothing for `timeout` ms counts as broken.
+ * nothing for `timeout` ms counts as broken. A relay of protocol 2 (`v` in its greeting) also passes
+ * direct frames (`relayTo`: small messages straight to other members, for the voice); they arrive
+ * as `relayed`, never as `message`, so nothing that trusts the host's word can be fooled by a peer.
  */
 
 /** The relay deployed for the published game (`relay/wrangler.jsonc`); `?relay=` overrides it. */
@@ -19,6 +21,9 @@ export const DEFAULT_RELAY_URL = 'wss://settlers-relay.dik-garry-994.workers.dev
 /** The host's peer id on the relay (`room.ts` HOST). */
 const HOST_ID = 'host';
 const CHUNK = 200_000; // characters: ≤ 800 kB of UTF-8, under the 1 MiB frame limit
+/** The relay protocol with direct frames (`room.ts` PROTOCOL), and their longest text (`DIRECT_MAX`). */
+const DIRECT_PROTOCOL = 2;
+const DIRECT_MAX = 4096;
 const DEFAULTS = { connectTimeout: 8_000, heartbeat: 5_000, timeout: 20_000 };
 
 /** The part of a WebSocket the transport uses (the browser's, or a fake in tests). */
@@ -46,11 +51,15 @@ export interface RelayTransportOptions {
 type Payload = { d: unknown } | { c: number; i: number; n: number; s: string };
 /** Frames from the relay (`room.ts`). */
 type Incoming =
-  | { t: 'ready' | 'taken' | 'nohost' | 'full' }
-  | { t: 'welcome'; p: string }
+  | { t: 'ready'; v?: number }
+  | { t: 'taken' | 'nohost' | 'full' }
+  | { t: 'welcome'; p: string; v?: number }
   | { t: 'join'; p: string }
   | { t: 'leave'; p?: string; r?: LeaveReason }
-  | (Payload & { f?: string });
+  | (Payload & { f?: string; r?: 1 });
+
+/** Whether the relay's greeting says it passes direct frames (an older relay says nothing). */
+const directOf = (first: Incoming): boolean => 'v' in first && typeof first.v === 'number' && first.v >= DIRECT_PROTOCOL;
 
 /** The relay provider: `host()` / `join(code)`. */
 export function relayProvider(opts: RelayTransportOptions = {}): TransportProvider {
@@ -123,6 +132,8 @@ export class RelayTransport extends Emitter implements Transport {
     readonly host: PeerId,
     readonly code: string,
     opts: RelayTransportOptions,
+    /** The relay passes direct frames (protocol 2): `relayTo` works. */
+    readonly direct = false,
   ) {
     super();
     this.isHost = self === host;
@@ -145,7 +156,7 @@ export class RelayTransport extends Emitter implements Transport {
     for (let attempt = 0; attempt < 5; attempt++) {
       const c = attempt === 0 && code ? code : randomCode();
       const { ws, first } = await connect(roomUrl(base, c, 'host'), opts);
-      if ('t' in first && first.t === 'ready') return new RelayTransport(ws, HOST_ID, HOST_ID, c, opts);
+      if ('t' in first && first.t === 'ready') return new RelayTransport(ws, HOST_ID, HOST_ID, c, opts, directOf(first));
       ws.close();
       if (!('t' in first) || first.t !== 'taken') throw new Error(`the relay refused: ${JSON.stringify(first)}`);
     }
@@ -156,7 +167,7 @@ export class RelayTransport extends Emitter implements Transport {
   static async join(code: string, opts: RelayTransportOptions = {}): Promise<RelayTransport> {
     const base = opts.url ?? DEFAULT_RELAY_URL;
     const { ws, first } = await connect(roomUrl(base, code, 'join'), opts);
-    if ('t' in first && first.t === 'welcome') return new RelayTransport(ws, first.p, HOST_ID, code, opts);
+    if ('t' in first && first.t === 'welcome') return new RelayTransport(ws, first.p, HOST_ID, code, opts, directOf(first));
     ws.close();
     throw new Error('t' in first && first.t === 'nohost' ? 'no such game on the relay' : `the relay refused: ${JSON.stringify(first)}`);
   }
@@ -175,6 +186,16 @@ export class RelayTransport extends Emitter implements Transport {
     // The host's broadcast is one frame for the relay to copy, not one per client.
     if (this.isHost) this.payloads(msg, (p) => this.raw(JSON.stringify({ to: '*', ...p })));
     else this.send(this.host, msg);
+  }
+
+  relayTo(peers: PeerId[], msg: unknown): boolean {
+    if (!this.direct || this.closed || this.ws.readyState !== OPEN) return false;
+    const to = peers.filter((p) => p !== this.self);
+    if (to.length === 0) return true;
+    const text = JSON.stringify({ to, d: msg ?? null });
+    if (text.length > DIRECT_MAX) return false;
+    this.raw(text);
+    return true;
   }
 
   kick(peer: PeerId): void {
@@ -236,6 +257,11 @@ export class RelayTransport extends Emitter implements Transport {
           this.shut();
         }
       }
+      return;
+    }
+    // A direct frame: from any member, named by the relay; only the voice listens to these.
+    if (f.r === 1) {
+      if (typeof f.f === 'string' && f.f !== this.self && 'd' in f) this.emit('relayed', f.f, f.d);
       return;
     }
     const from = this.isHost ? f.f : this.host;

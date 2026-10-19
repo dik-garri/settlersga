@@ -423,7 +423,13 @@ export const en: Record<Key, string> = {
   'voice.mute': 'Mute {who}\'s voice (only for you)',
   'voice.unmute': 'Hear {who}\'s voice again',
   'voice.keys': 'Radio: V allies, B everyone',
-  'voice.keysTip': 'V talks to your allies, B to everyone; the same key switches the microphone off, the other one switches over. Voices go through the host; their volume is in the sound settings',
+  'voice.keysTip': 'V talks to your allies, B to everyone; the same key switches the microphone off, the other one switches over. Several people can talk at once — the voices mix, and the top of the screen shows who is talking. Headphones are best; the volume is in the sound settings',
+  'voice.headphones': 'Radio: headphones are best — from loudspeakers the voices go back into your microphone and the others hear an echo',
+  'voice.talking': 'Talking:',
+  'voice.talker': '{who} → {to}',
+  'voice.talkerMuted': '{text} (muted)',
+  'voice.lag': '{n} s',
+  'voice.lagTip': 'Voice delay: from their microphone to your ear, roughly',
   'menu.saveNotFound': 'Save not found',
 
   // In-game menu (pauseMenu.ts)
