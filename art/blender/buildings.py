@@ -280,94 +280,195 @@ def panel_slope(cx, y0, y1, xe, ze, xr, zr, frame, panels, iron, rnd, cols=2, ro
                     lib.sphere((q.x, y + dy * span / cols, q.z), 0.016, iron, subdiv=2)
 
 
+def vboard_walls(x0, x1, y0, y1, z0, z1, mats, core, post, rnd, board=0.09, faces=('y', 'x'), skip=None):
+    """Walls of vertical boards on the visible faces (−Y, +X) over a dark core, uneven at the top and
+    bottom, with corner posts. `skip(face, a)` leaves out the boards where a door or window goes."""
+    lib.box(((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2), (x1 - x0, y1 - y0, z1 - z0), core)
+    for face in faces:
+        a0, a1 = (x0, x1) if face == 'y' else (y0, y1)
+        n = max(2, round((a1 - a0) / board))
+        w = (a1 - a0) / n
+        for k in range(n):
+            a = a0 + (k + 0.5) * w
+            if skip and skip(face, a):
+                continue
+            lo, hi = z0 + rnd.uniform(0, 0.015), z1 - rnd.uniform(0, 0.02)
+            off = rnd.uniform(0.006, 0.014)
+            mat = mats[rnd.randrange(len(mats))]
+            if face == 'y':
+                lib.box((a, y0 - off, (lo + hi) / 2), (w * 0.88, 0.024, hi - lo), mat,
+                        rot=(0, rnd.uniform(-0.015, 0.015), 0), bevel=0.005)
+            else:
+                lib.box((x1 + off, a, (lo + hi) / 2), (0.024, w * 0.88, hi - lo), mat,
+                        rot=(rnd.uniform(-0.015, 0.015), 0, 0), bevel=0.005)
+    for (x, y) in ((x0, y0), (x1, y0), (x1, y1)):
+        lib.box((x, y, (z0 + z1) / 2), (0.065, 0.065, z1 - z0 + 0.02), post, bevel=0.008)
+
+
+def vboard_gable(cx, y, half, H, rh, mats, rnd, board=0.09, face='x', x=None):
+    """Vertical boards filling a gable triangle: on a +X gable at x (ridge along X, the triangle spans
+    Y round `y`) or on a −Y gable at y (ridge along Y, spanning X round cx)."""
+    n = max(2, round(2 * half / board))
+    w = 2 * half / n
+    for k in range(n):
+        a = -half + (k + 0.5) * w
+        top = H + rh * (1 - abs(a) / half) - 0.02
+        if top - H < 0.03:
+            continue
+        mat = mats[rnd.randrange(len(mats))]
+        if face == 'x':
+            lib.box((x + 0.012, y + a, (H + top) / 2), (0.024, w * 0.88, top - H), mat, bevel=0.004)
+        else:
+            lib.box((cx + a, y - 0.012, (H + top) / 2), (w * 0.88, 0.024, top - H), mat, bevel=0.004)
+
+
+def panel_face(e0, e1, r0, r1, frame, panels, iron, rnd, cols=3, rows=2, lift=0.03):
+    """One roof face (eave e0→e1 up to ridge r0→r1) of square plank panels in darker frames, iron
+    rivets at the panel corners: the Settlers 4 sawmill's roof."""
+    from mathutils import Vector
+
+    e0, e1, r0, r1 = (Vector(p) for p in (e0, e1, r0, r1))
+    along, up = e1 - e0, r0.lerp(r1, 0.5) - e0.lerp(e1, 0.5)
+    u = along.normalized()
+    n = u.cross(up.normalized()).normalized()
+    if n.z < 0:
+        n = -n
+    centre = e0.lerp(e1, 0.5) + up * 0.5
+    place_on(lib.box((0, 0, 0), (along.length, up.length, 0.035), frame, bevel=0.006), centre, u, up)
+    for r in range(rows):
+        for c in range(cols):
+            p = e0 + along * ((c + 0.5) / cols) + up * ((r + 0.5) / rows) + n * lift
+            w, h = along.length / cols * 0.84, up.length / rows * 0.8
+            place_on(lib.box((0, 0, 0), (w, h, 0.026), panels[rnd.randrange(len(panels))], bevel=0.005), p,
+                     u + Vector((0, 0, rnd.uniform(-0.02, 0.02))), up)
+            for da in (-0.38, 0.38):
+                for db in (-0.36, 0.36):
+                    q = p + along * (da / cols) + up * (db / rows) + n * 0.02
+                    lib.sphere(tuple(q), 0.017, iron, subdiv=2)
+
+
 def build_sawmill():
-    """After the Settlers 4 sawmill: all dark wood. A low front block with a door, under a low roof of
-    square plank panels with rivets; behind it a taller block with two glass windows facing the
-    camera and a nearly flat plank roof; on the right the great log drum (logs along its axis, bound
-    by two iron hoops), its axis running towards the camera's lower right."""
-    B = _b()
-    logs, ends, beam = logs_mat(), ends_mat(), beam_mat()
-    planks = [lib.mat_grain(f'swplank{k}', a, b, scale=4, stretch=(1, 9, 1), bump=0.7) for k, (a, b) in enumerate((
-        ((0.3, 0.15, 0.06), (0.56, 0.33, 0.15)),
-        ((0.36, 0.2, 0.08), (0.64, 0.4, 0.19)),
-        ((0.26, 0.13, 0.05), (0.48, 0.28, 0.12)),
-    ))]
-    panels = [lib.mat_grain(f'swpanel{k}', a, b, scale=5, stretch=(1, 7, 1), bump=0.6) for k, (a, b) in enumerate((
-        ((0.36, 0.22, 0.09), (0.62, 0.44, 0.2)),
-        ((0.42, 0.28, 0.12), (0.7, 0.52, 0.26)),
-    ))]
-    frame = lib.mat_grain('swframe', (0.18, 0.09, 0.04), (0.32, 0.18, 0.08), scale=5, stretch=(1, 1, 8), bump=0.5)
-    core = lib.mat_flat('swcore', (0.16, 0.09, 0.05))
-    dark = lib.mat_flat('dark', (0.05, 0.04, 0.03))
-    glass = lib.mat_flat('glass', (0.62, 0.78, 0.92), rough=0.15)
-    iron = lib.mat_flat('iron', (0.34, 0.35, 0.38), rough=0.35)
-    drum_logs = lib.mat_grain('drumlogs', (0.4, 0.16, 0.07), (0.72, 0.36, 0.17), scale=6, stretch=(1, 1, 7), bump=0.9)
+    """After the Settlers 4 Roman sawmill: all dark wood of vertical boards. A low front block under a
+    gable roof of riveted square plank panels (ridge along X), a big doorway in a heavy light timber
+    frame in its wall towards the camera's left; behind it a taller block — a second storey with a
+    window of two blue panes over the front roof — under a flat roof of broad boards; on the right
+    the great half-drum of logs lying along its axis, bound by two iron hoops, its open end ragged
+    with log ends; a saw-horse in front."""
     rnd = random.Random(7)
-    earth_pad((0.08, -0.15, 0), 0.98, 1.0, seed=8)
+    beam = beam_mat()
+    ends = ends_mat()
+    planks = grain_set('swplank', (((0.26, 0.13, 0.05), (0.5, 0.28, 0.12)), ((0.32, 0.17, 0.07), (0.58, 0.35, 0.16)),
+                                   ((0.22, 0.11, 0.05), (0.42, 0.24, 0.1)), ((0.36, 0.2, 0.08), (0.64, 0.4, 0.18))),
+                       scale=4, stretch=(1, 1, 9), bump=0.8)
+    panels = grain_set('swpanel', (((0.4, 0.25, 0.1), (0.68, 0.48, 0.22)), ((0.46, 0.3, 0.12), (0.74, 0.54, 0.26)),
+                                   ((0.36, 0.22, 0.09), (0.6, 0.42, 0.19))), scale=5, stretch=(1, 7, 1), bump=0.7)
+    roofb = grain_set('swroof', (((0.32, 0.18, 0.08), (0.56, 0.36, 0.17)), ((0.4, 0.24, 0.1), (0.64, 0.44, 0.2)),
+                                 ((0.28, 0.16, 0.07), (0.5, 0.32, 0.14))), scale=4, stretch=(9, 1, 1), bump=0.7)
+    frame = lib.mat_grain('swframe', (0.18, 0.09, 0.04), (0.32, 0.18, 0.08), scale=5, stretch=(1, 1, 8), bump=0.5)
+    jamb = lib.mat_grain('swjamb', (0.56, 0.38, 0.14), (0.82, 0.62, 0.28), scale=5, stretch=(1, 1, 8), bump=0.6)
+    core = lib.mat_flat('swcore', (0.14, 0.08, 0.04))
+    dark = lib.mat_flat('dark', (0.05, 0.04, 0.03))
+    glass = lib.mat_flat('glass', (0.5, 0.68, 0.9), rough=0.15)
+    iron = lib.mat_flat('iron', (0.26, 0.27, 0.3), rough=0.35)
+    drum_logs = lib.mat_grain('drumlogs', (0.42, 0.17, 0.07), (0.74, 0.38, 0.17), scale=6, stretch=(1, 1, 7), bump=0.9)
+    earth_pad((0.05, -0.12, 0), 1.06, 1.06, seed=8)
     lib.tag(0)
 
-    # Front block (door on −Y), tall block behind it, drum on the +X side.
-    fx0, fx1, fy0, fy1, fH, frh = -0.9, -0.15, -0.95, -0.2, 0.62, 0.24
-    tx0, tx1, ty0, ty1, tH = -0.9, -0.1, -0.25, 0.6, 1.25
-    dcx, dcy, dr, dl = 0.42, 0.12, 0.46, 0.92  # drum centre (x, y), radius, length along X
-    corner_stakes(fx0, dcx + dl / 2, fy0, ty1)
+    # Front block (door in its −Y wall), tall block behind it, half-drum on the +X side.
+    fx0, fx1, fy0, fy1, fH, frh = -0.94, -0.16, -0.96, -0.3, 0.54, 0.3
+    tx0, tx1, ty0, ty1, tH = -0.94, -0.08, -0.36, 0.66, 1.08
+    dx0, dx1, dcy, dr = -0.08, 0.9, 0.14, 0.5  # drum from dx0 to dx1 along X, centre y, radius
+    fcy = (fy0 + fy1) / 2
+    corner_stakes(fx0, dx1, fy0, ty1)
     lib.tag(0, until=0)
 
-    B.timber_frame((fx0 + fx1) / 2, (fy0 + fy1) / 2, fx1 - fx0, fy1 - fy0, fH, frh, beam, axis='y')
-    B.timber_frame((tx0 + tx1) / 2, (ty0 + ty1) / 2, tx1 - tx0, ty1 - ty0, tH, 0.05, beam, axis='y')
-    for x in (dcx - dl / 2 + 0.12, dcx + dl / 2 - 0.12):  # the drum's cradle
-        lib.box((x, dcy, dr * 0.45), (0.08, dr * 1.4, 0.08), beam)
-        for sy in (-1, 1):
-            lib.box((x, dcy + sy * dr * 0.6, dr * 0.3), (0.07, 0.07, dr * 0.6), beam)
+    B = _b()
+    B.timber_frame((fx0 + fx1) / 2, fcy, fx1 - fx0, fy1 - fy0, fH, frh, beam, axis='x')
+    B.timber_frame((tx0 + tx1) / 2, (ty0 + ty1) / 2, tx1 - tx0, ty1 - ty0, tH, 0.04, beam, axis='x')
+    for x in (dx0 + 0.2, dx1 - 0.16):  # the drum's arched ribs
+        pts = [(x, dcy + math.cos(a) * (dr - 0.06), 0.02 + math.sin(a) * (dr - 0.06)) for a in
+               [k / 8 * math.pi for k in range(9)]]
+        for a, b in zip(pts, pts[1:]):
+            rod(a, b, 0.03, beam, verts=6)
     lib.tag(1, until=3)
 
-    plank_walls(fx0, fx1, fy0, fy1, 0.0, fH, planks, core, frame, rnd)
-    plank_walls(tx0, tx1, ty0, ty1, 0.0, tH * 0.5, planks, core, frame, rnd, faces=('x',))
-    lib.tag(2)
-    plank_walls(tx0, tx1, ty0, ty1, tH * 0.5, tH, planks, core, frame, rnd)
-    lib.gable(((fx0 + fx1) / 2, (fy0 + fy1) / 2, fH), fx1 - fx0, frh, fy0 + 0.01, planks[0], along='y')
-    # Door with a dark opening and a frame; a small window on the +X side of the front block.
-    dxm = (fx0 + fx1) / 2
-    lib.box((dxm, fy0 - 0.012, 0.21), (0.28, 0.03, 0.42), dark)
+    # Walls of vertical boards; the doorway in the front block's −Y face.
+    door_x, door_w, door_h = (fx0 + fx1) / 2 - 0.04, 0.34, 0.44
+    gap = lambda face, a: face == 'y' and abs(a - door_x) < door_w / 2 + 0.02
+    vboard_walls(fx0, fx1, fy0, fy1, 0.0, fH, planks, core, frame, rnd, skip=gap)
+    vboard_walls(tx0, tx1, ty0, ty1, 0.0, fH, planks, core, frame, rnd, faces=('x',))
+    lib.box((door_x, fy0 + 0.1, door_h / 2), (door_w, 0.22, door_h), dark)
+    lib.tag(None, split=lambda o: 2 if o.location.z < fH * 0.6 else 3)
+    vboard_walls(tx0, tx1, ty0, ty1, fH, tH, planks, core, frame, rnd)
+    vboard_gable(0, fcy, (fy1 - fy0) / 2, fH, frh, planks, rnd, face='x', x=fx1)
+    lib.gable(((fx0 + fx1) / 2, fcy, fH), fy1 - fy0, frh, fx1, core, along='x')
+    # The doorway's heavy light frame: two posts, a lintel, a sill; a saw dim inside.
     for sgn in (-1, 1):
-        lib.box((dxm + sgn * 0.16, fy0 - 0.03, 0.22), (0.05, 0.04, 0.46), frame, bevel=0.006)
-    lib.box((dxm, fy0 - 0.03, 0.45), (0.38, 0.05, 0.05), frame, bevel=0.006)
-    window(fx1 + 0.02, (fy0 + fy1) / 2, 0.3, 0.14, 0.13, frame, dark, face='x')
-    # Two glass windows on the tall block's front, above the front block's roof.
-    for wx in (tx0 + 0.24, tx0 + 0.52):
-        window(wx, ty0 - 0.02, fH + frh + 0.24, 0.17, 0.2, frame, glass)
-    # The drum: logs along X round a cylinder, an end showing the dark inside.
-    n = 18
+        lib.box((door_x + sgn * (door_w / 2 + 0.02), fy0 - 0.03, door_h / 2 + 0.01), (0.07, 0.07, door_h + 0.04), jamb,
+                rot=(0, sgn * 0.03, 0), bevel=0.01)
+    lib.box((door_x, fy0 - 0.035, door_h + 0.04), (door_w + 0.16, 0.08, 0.07), jamb, bevel=0.01)
+    lib.box((door_x, fy0 - 0.04, 0.02), (door_w + 0.1, 0.1, 0.04), jamb, bevel=0.008)
+    lib.box((door_x + 0.06, fy0 + 0.12, 0.2), (0.03, 0.03, 0.38), iron)
+    lib.cylinder((door_x - 0.04, fy0 + 0.1, 0.16), 0.11, 0.01, lib.mat_flat('sawblade', (0.32, 0.34, 0.36), rough=0.3),
+                 rot=(math.pi / 2, 0, 0), verts=20)
+    window(fx1 + 0.02, fcy, 0.3, 0.15, 0.15, jamb, glass, face='x')
+    # Two blue panes in a light frame on the upper storey, just over the front roof.
+    wz, wx = fH + frh + 0.14, (tx0 + tx1) / 2 - 0.04
+    lib.box((wx, ty0 - 0.03, wz), (0.34, 0.03, 0.2), jamb, bevel=0.008)
+    for dx in (-0.08, 0.08):
+        lib.box((wx + dx, ty0 - 0.05, wz), (0.12, 0.02, 0.14), glass)
+    lib.box((wx, ty0 - 0.05, wz - 0.12), (0.4, 0.06, 0.04), jamb, bevel=0.006)
+    # The half-drum: logs lying along X round a half circle, uneven at the open (+X) end, which
+    # shows a dark inside behind the log ends.
+    n = 13
     for k in range(n):
-        a = k / n * math.tau
+        a = (k + 0.5) / n * math.pi
         y = dcy + math.cos(a) * dr
-        z = dr + 0.02 + math.sin(a) * dr
-        lib.cylinder((dcx + rnd.uniform(-0.03, 0.03), y, z), 0.068, dl + rnd.uniform(-0.05, 0.05), drum_logs,
-                     rot=(0, math.pi / 2, 0), verts=10)
-        lib.cylinder((dcx + dl / 2 + 0.002, y, z), 0.063, 0.008, ends, rot=(0, math.pi / 2, 0), verts=10)
-    lib.cylinder((dcx, dcy, dr + 0.02), dr - 0.05, dl - 0.04, drum_logs, rot=(0, math.pi / 2, 0), verts=28)
-    for ring, count in ((0.0, 1), (0.13, 6), (0.26, 11)):
-        for k in range(count):
-            a = k / count * math.tau + ring
-            lib.cylinder((dcx + dl / 2 - 0.01, dcy + math.cos(a) * ring, dr + 0.02 + math.sin(a) * ring), 0.065, 0.02,
-                         ends, rot=(0, math.pi / 2, 0), verts=10)
-    lib.tag(None, split=lambda o: 2 if o.location.z < fH * 0.5 else 3)
+        z = 0.03 + math.sin(a) * dr
+        x_end = dx1 + rnd.uniform(-0.1, 0.06)
+        lib.cylinder(((dx0 + x_end) / 2, y, z), 0.072, x_end - dx0, drum_logs,
+                     rot=(rnd.uniform(-0.02, 0.02), math.pi / 2, 0), verts=10)
+        lib.cylinder((x_end + 0.002, y, z), 0.066, 0.01, ends, rot=(0, math.pi / 2, 0), verts=10)
+    lib.cylinder((dx1 - 0.14, dcy, 0.0), dr - 0.05, 0.04, lib.mat_flat('druminside', (0.12, 0.07, 0.04)),
+                 rot=(0, math.pi / 2, 0), verts=24)
+    for k in range(5):  # a few logs lying inside, ends showing
+        y = dcy + (k - 2) * 0.13
+        lib.cylinder((dx1 - 0.2, y, 0.06 + (k % 2) * 0.05), 0.06, 0.3, drum_logs, rot=(0, math.pi / 2, 0), verts=10)
+        lib.cylinder((dx1 - 0.049, y, 0.06 + (k % 2) * 0.05), 0.055, 0.01, ends, rot=(0, math.pi / 2, 0), verts=10)
+    lib.tag(None, split=lambda o: 2 if o.location.z < 0.3 else 3)
 
-    for x in (dcx - dl * 0.27, dcx + dl * 0.27):
-        torus((x, dcy, dr + 0.02), dr + 0.07, 0.03, iron, rot=(0, math.pi / 2, 0))
-    # Roofs: the front block's low gable of riveted panels, the tall block's nearly flat planks.
+    # Roofs: the front block's riveted panels, the tall block's flat broad boards.
     fcx = (fx0 + fx1) / 2
-    for sgn in (-1, 1):
-        panel_slope(fcx, fy0 - 0.08, fy1 + 0.02, fcx + sgn * ((fx1 - fx0) / 2 + 0.1), fH - 0.03,
-                    fcx, fH + frh + 0.02, frame, panels, iron, rnd)
+    ov = 0.1
+    drop = ov * frh / ((fy1 - fy0) / 2)
+    for side in (-1, 1):
+        ye = fcy + side * ((fy1 - fy0) / 2 + ov)
+        panel_face((fx0 - 0.06, ye, fH - drop), (fx1 + 0.08, ye, fH - drop), (fx0 - 0.06, fcy, fH + frh + 0.01),
+                   (fx1 + 0.08, fcy, fH + frh + 0.01), frame, panels, iron, rnd, cols=3, rows=2)
     lib.tag(None, split=lambda o: 3 if o.location.x > fcx else 4)
-    for k in range(7):
-        x = tx0 - 0.06 + (k + 0.5) * (tx1 - tx0 + 0.12) / 7
-        lib.box((x + rnd.uniform(-0.01, 0.01), (ty0 + ty1) / 2, tH + 0.03 + (x - tx0) * -0.05),
-                ((tx1 - tx0 + 0.12) / 7 * 0.88, ty1 - ty0 + 0.12 + rnd.uniform(-0.04, 0.04), 0.035),
-                planks[rnd.randrange(len(planks))], rot=(rnd.uniform(-0.03, 0.03), 0.05, rnd.uniform(-0.03, 0.03)),
+    nb = 7
+    for k in range(nb):
+        y = ty0 - 0.1 + (k + 0.5) * (ty1 - ty0 + 0.2) / nb
+        z = tH + 0.03 + (y - ty0) * 0.06
+        lib.box(((tx0 + tx1) / 2 + rnd.uniform(-0.03, 0.03), y, z),
+                (tx1 - tx0 + 0.16 + rnd.uniform(-0.05, 0.03), (ty1 - ty0 + 0.2) / nb * 0.9, 0.035),
+                roofb[rnd.randrange(len(roofb))], rot=(math.atan(0.06) + rnd.uniform(-0.02, 0.02), 0, rnd.uniform(-0.02, 0.02)),
                 bevel=0.006)
-    lib.box(((tx0 + tx1) / 2, ty0 - 0.06, tH + 0.02), (tx1 - tx0 + 0.14, 0.05, 0.06), frame, bevel=0.008)
+    lib.box(((tx0 + tx1) / 2, ty0 - 0.08, tH + 0.0), (tx1 - tx0 + 0.18, 0.05, 0.06), frame, bevel=0.008)
+    # The drum's iron hoops.
+    for x in (dx0 + 0.3, dx0 + 0.7):
+        pts = [(x, dcy + math.cos(a) * (dr + 0.075), 0.03 + math.sin(a) * (dr + 0.075)) for a in
+               [-0.05 + k / 14 * (math.pi + 0.1) for k in range(15)]]
+        for a, b in zip(pts, pts[1:]):
+            rod(a, b, 0.024, iron, verts=6)
+    # A saw-horse of crossed poles with a log on it.
+    hx, hy = 0.42, -0.74
+    for dx in (-0.16, 0.16):
+        for sgn in (-1, 1):
+            lib.box((hx + dx, hy, 0.13), (0.035, 0.035, 0.32), beam, rot=(sgn * 0.5, 0, 0), bevel=0.005)
+    lib.cylinder((hx, hy, 0.22), 0.055, 0.5, drum_logs, rot=(0, math.pi / 2, 0), verts=10)
+    for dx in (-0.25, 0.25):
+        lib.cylinder((hx + dx, hy, 0.22), 0.05, 0.01, ends, rot=(0, math.pi / 2, 0), verts=10)
     lib.tag(4)
 
 
@@ -402,119 +503,169 @@ def coping_line(a, b, mats, rnd, size=0.16):
                 bevel=0.03)
 
 
+def gable_prism(cx, y0, y1, half, H, rh, mat):
+    """A solid triangular gable wall (ridge along Y) between y0 and y1: base 2·half wide at height H,
+    apex rh above it."""
+    verts = [(cx - half, y0, H), (cx + half, y0, H), (cx, y0, H + rh),
+             (cx - half, y1, H), (cx + half, y1, H), (cx, y1, H + rh)]
+    faces = [(0, 1, 2), (3, 5, 4), (0, 3, 4, 1), (1, 4, 5, 2), (2, 5, 3, 0)]
+    mesh = bpy.data.meshes.new('gprism')
+    mesh.from_pydata(verts, [], faces)
+    obj = bpy.data.objects.new('gprism', mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.data.materials.append(mat)
+    return obj
+
+
+def gable_blocks(cx, half, y, H, rh, mats, rnd, block=0.2, depth=0.07, band=0.13):
+    """Rugged blocks on the −Y face (at y) of a triangular gable over H: rows shrinking with height."""
+    z = H
+    while z < H + rh - 0.06:
+        zt = min(H + rh, z + band)
+        hw = half * (1 - (zt - H) / rh) + 0.02
+        if hw > 0.06:
+            stone_course(cx - hw, cx + hw, y, y, z, zt, mats, rnd, block=block, depth=depth, faces=('y',))
+        z = zt
+
+
+def board_slope(e0, e1, r0, r1, mats, rnd, width=0.13, thick=0.035, gap=0.022, out=0.0, sag=0.012):
+    """One roof slope of wide loose boards running from the eave edge e0→e1 up to the ridge edge
+    r0→r1 (boards down the slope), each its own tone, length and lie, with dark gaps between."""
+    from mathutils import Vector
+
+    e0, e1, r0, r1 = (Vector(p) for p in (e0, e1, r0, r1))
+    along = (e1 - e0)
+    n = max(2, round(along.length / width))
+    made = []
+    for k in range(n):
+        t = (k + 0.5) / n
+        a, b = e0.lerp(e1, t), r0.lerp(r1, t)
+        up = b - a
+        u = along.normalized()
+        nrm = u.cross(up.normalized()).normalized()
+        if nrm.z < 0:
+            nrm = -nrm
+        ln = up.length + out + rnd.uniform(-0.05, 0.04)
+        mid = a + up * 0.5 + nrm * (thick / 2 + rnd.uniform(0, sag)) - up.normalized() * (out / 2)
+        board = lib.box((0, 0, 0), (along.length / n - gap, ln, thick), mats[rnd.randrange(len(mats))], bevel=0.006)
+        jit = Vector((rnd.uniform(-0.04, 0.04), rnd.uniform(-0.04, 0.04), 0))
+        place_on(board, mid, u + jit * 0.5, up)
+        made.append(board)
+    return made
+
+
 def build_stonecutter():
-    """After the Settlers 4 stonecutter: a squat box of big rough stone blocks under a mono-pitch roof
-    of wide warm-brown boards (along the ridge, dark gaps between), its wall tops edged all round with
-    chunky coping stones; a big irregular arch fills most of the front wall; on the low side an open
-    timber shed continues the roof down."""
+    """After the Settlers 4 Roman stonecutter: a squat house of big light-grey rubble blocks with dark
+    joints under a gable roof of wide loose orange boards (ridge along Y); both gable walls rise above
+    the boards as parapets edged with chunky stepped coping stones; a big round arch with rough
+    voussoirs opens the gable end towards the camera's left, dark inside; on the right (+X) a lower
+    lean-to shed of timber — posts, a diagonal brace, vertical boards — under its own board roof; a
+    jagged grey rock at the front corner."""
     rnd = random.Random(11)
     walls = stone_walls()
     blocks = block_mats()
     beam = beam_mat()
-    boards = [lib.mat_grain(f'sboard{k}', a, b, scale=4, stretch=(1, 9, 1), bump=0.8) for k, (a, b) in enumerate((
-        ((0.42, 0.24, 0.08), (0.74, 0.5, 0.2)),
-        ((0.34, 0.19, 0.07), (0.62, 0.38, 0.15)),
-        ((0.5, 0.32, 0.11), (0.82, 0.6, 0.28)),
-    ))]
+    boards = grain_set('sboard', (((0.46, 0.25, 0.08), (0.8, 0.52, 0.2)), ((0.38, 0.2, 0.07), (0.66, 0.4, 0.15)),
+                                  ((0.54, 0.34, 0.12), (0.86, 0.62, 0.28)), ((0.42, 0.28, 0.12), (0.7, 0.5, 0.26))),
+                       scale=4, stretch=(1, 9, 1), bump=0.8)
+    shed_boards = grain_set('shb', (((0.3, 0.16, 0.06), (0.52, 0.32, 0.13)), ((0.36, 0.2, 0.08), (0.6, 0.38, 0.17))),
+                            scale=4, stretch=(1, 1, 9), bump=0.7)
     dark = lib.mat_flat('dark', (0.05, 0.04, 0.03))
     floor = lib.mat_grain('archfloor', (0.3, 0.24, 0.17), (0.48, 0.4, 0.3), scale=10, stretch=(1, 1, 1), bump=0.6)
-    earth_pad((0.05, -0.2, 0), 1.0, 1.12, seed=12)
+    rock = lib.mat_crystal('srock', (0.9, 0.9, 0.88), (0.58, 0.6, 0.62), (0.12, 0.13, 0.14), scale=6)
+    earth_pad((0.05, -0.2, 0), 1.02, 1.12, seed=12)
     lib.tag(0)
 
-    # The roof falls from the −X wall (high) to the +X wall (low), where the shed continues it.
-    cx, cy, L, W = -0.22, 0.12, 0.92, 1.0
-    Hh, Hl = 1.2, 0.86
-    x0, x1, y0, y1 = cx - L / 2, cx + L / 2, cy - W / 2, cy + W / 2
-    sx1 = x1 + 0.5  # shed's outer edge
+    # Stone house: ridge along Y, gables at −Y (the arch) and +Y; the shed on the +X side.
+    x0, x1, y0, y1 = -0.84, 0.2, -0.82, 0.78
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    half = (x1 - x0) / 2
+    H, rh = 0.6, 0.6
+    sx1, sy0, sy1, sh_hi, sh_lo = 0.74, -0.6, 0.72, 0.44, 0.3
     corner_stakes(x0, sx1, y0, y1)
     lib.tag(0, until=0)
 
-    lib.box((cx, cy, 0.05), (L + 0.08, W + 0.08, 0.1), blocks[1], bevel=0.02)
+    lib.box((cx, cy, 0.05), (x1 - x0 + 0.1, y1 - y0 + 0.1, 0.1), blocks[1], bevel=0.02)
     lib.tag(1)
-    for x in (x0 - 0.07, x1 + 0.07):
-        for y in (y0 - 0.07, y1 + 0.07):
-            lib.cylinder((x, y, 0.5), 0.025, 1.0, beam, verts=8)
+    for x in (x0 - 0.08, x1 + 0.08):
+        for y in (y0 - 0.08, y1 + 0.08):
+            lib.cylinder((x, y, 0.55), 0.025, 1.1, beam, verts=8)
     lib.tag(1, until=3)
 
-    def top_at(x):
-        return Hh + (Hl - Hh) * (x - x0) / L
-
-    # Walls: a core, then rugged blocks on the two visible faces; above Hl only the part of the
-    # front wall that is still under the sloping top.
-    half = Hl / 2
-    lib.box((cx, cy, 0.1 + (half - 0.1) / 2), (L, W, half - 0.1), walls)
-    stone_course(x0, x1, y0, y1, 0.1, half, blocks, rnd, block=0.24, depth=0.09)
+    # Walls: dark core, rugged blocks on the two faces the camera sees.
+    lib.box((cx, cy, 0.1 + (H * 0.5 - 0.1) / 2), (x1 - x0, y1 - y0, H * 0.5 - 0.1), walls)
+    stone_course(x0, x1, y0, y1, 0.1, H * 0.5, blocks, rnd, block=0.24, depth=0.09)
     lib.tag(2)
-    lib.box((cx, cy, half + half / 2), (L, W, half), walls)
-    stone_course(x0, x1, y0, y1, half, Hl, blocks, rnd, block=0.24, depth=0.09)
-    wedge(x0, x1, y0, y1, Hl, Hh, walls)
-    band = 0.15
-    z = Hl
-    while z < Hh - 0.04:
-        zt = min(Hh, z + band)
-        xr = x0 + (Hh - zt) / (Hh - Hl) * L  # where the slope is above this band
-        if xr - x0 > 0.08:
-            stone_course(x0, xr, y0, y0, z, zt, blocks, rnd, block=0.24, depth=0.09)
-        z = zt
-    # The big arch: a deep dark opening with a floor, framed by irregular chunky stones.
-    ax, ar, az = cx - 0.02, 0.23, 0.34
+    lib.box((cx, cy, H * 0.75), (x1 - x0, y1 - y0, H * 0.5), walls)
+    stone_course(x0, x1, y0, y1, H * 0.5, H, blocks, rnd, block=0.24, depth=0.09)
+    # Gable parapets, front and back, a little thicker than the boards so they stand above them.
+    for ya, yb in ((y0, y0 + 0.16), (y1 - 0.16, y1)):
+        gable_prism(cx, ya, yb, half, H, rh, walls)
+    gable_blocks(cx, half, y0, H, rh, blocks, rnd, block=0.24, depth=0.09)
+    # The big arch: a deep dark opening with a floor, ringed by chunky voussoirs.
+    ax, ar, az = cx - 0.04, 0.27, 0.36
     fy = y0 - 0.1
-    lib.box((ax, y0 + 0.12, az / 2 + 0.05), (ar * 2, 0.5, az + 0.05), dark)
-    lib.cylinder((ax, y0 + 0.12, az + 0.04), ar, 0.5, dark, rot=(math.pi / 2, 0, 0), verts=24)
-    lib.box((ax, y0 + 0.12, 0.11), (ar * 2 - 0.02, 0.48, 0.02), floor)
+    lib.box((ax, y0 + 0.14, az / 2 + 0.05), (ar * 2, 0.5, az + 0.05), dark)
+    lib.cylinder((ax, y0 + 0.14, az + 0.04), ar, 0.5, dark, rot=(math.pi / 2, 0, 0), verts=24)
+    lib.box((ax, y0 + 0.14, 0.11), (ar * 2 - 0.02, 0.48, 0.02), floor)
     lib.box((ax, fy + 0.02, az / 2 + 0.05), (ar * 2, 0.08, az + 0.05), dark)
     lib.cylinder((ax, fy + 0.02, az + 0.04), ar, 0.08, dark, rot=(math.pi / 2, 0, 0), verts=24)
-    for k in range(9):
-        a = math.pi * k / 8
-        sz = rnd.uniform(0.11, 0.15)
-        lib.box((ax + math.cos(a) * (ar + 0.06), fy - 0.02, az + 0.04 + math.sin(a) * (ar + 0.06)), (sz, 0.12, sz * 1.1),
-                blocks[rnd.randrange(len(blocks))], rot=(rnd.uniform(-0.1, 0.1), -a + math.pi / 2 + rnd.uniform(-0.15, 0.15), 0),
-                bevel=0.025)
-    for z in (0.16, 0.32):
+    lib.box((ax, fy - 0.04, 0.02), (ar * 2 + 0.1, 0.12, 0.04), blocks[1], bevel=0.015)  # threshold
+    for k in range(11):
+        a = math.pi * k / 10
+        sz = rnd.uniform(0.12, 0.16)
+        lib.box((ax + math.cos(a) * (ar + 0.07), fy - 0.03, az + 0.04 + math.sin(a) * (ar + 0.07)), (sz, 0.14, sz * 1.15),
+                blocks[(k + 2) % len(blocks)], rot=(rnd.uniform(-0.1, 0.1), -a + math.pi / 2 + rnd.uniform(-0.15, 0.15), 0),
+                bevel=0.03)
+    for z in (0.08, 0.2, 0.32):
         for sgn in (-1, 1):
-            lib.box((ax + sgn * (ar + 0.07), fy - 0.02, z), (0.14, 0.12, 0.15), blocks[rnd.randrange(len(blocks))],
-                    rot=(0, rnd.uniform(-0.1, 0.1), rnd.uniform(-0.1, 0.1)), bevel=0.025)
+            lib.box((ax + sgn * (ar + 0.08), fy - 0.03, z), (0.16, 0.14, 0.13), blocks[rnd.randrange(len(blocks))],
+                    rot=(0, rnd.uniform(-0.1, 0.1), rnd.uniform(-0.1, 0.1)), bevel=0.03)
     lib.tag(3)
 
-    # Roof: wide boards along Y on the slope, from the high wall down past the low one.
-    ang = math.atan2(Hh - Hl, L)
-    slope = math.hypot(L + 0.08, (Hh - Hl) * (L + 0.08) / L)
-    n = 6
+    # Roof: wide boards down each slope, between the two parapets, overhanging the eaves.
+    ov = 0.1
+    drop = ov * rh / half
+    ya, yb = y0 + 0.16, y1 - 0.16
+    zr = H + rh + 0.01
     made = []
-    for k in range(n):
-        t = (k + 0.5) / n
-        x = x0 - 0.04 + (L + 0.08) * t
-        zr = top_at(x) + 0.04
-        b = lib.box((x, cy + rnd.uniform(-0.02, 0.02), zr + rnd.uniform(-0.006, 0.006)),
-                    (slope / n * 0.8, W - 0.14 + rnd.uniform(-0.03, 0.02), 0.04), boards[rnd.randrange(len(boards))],
-                    rot=(rnd.uniform(-0.03, 0.03), ang, rnd.uniform(-0.03, 0.03)), bevel=0.006)
-        made.append((b, t))
-    lib.tag(None, split=lambda o: next((3 if t < 0.5 else 4 for b, t in made if b == o), 4))
-    # Coping stones all round the wall tops.
-    coping_line((x0, y0, Hh), (x0, y1, Hh), blocks, rnd)
-    coping_line((x0, y0, Hh), (x1 + 0.02, y0, Hl), blocks, rnd)
-    coping_line((x0, y1, Hh), (x1 + 0.02, y1, Hl), blocks, rnd)
+    for side in (1, -1):
+        xe = cx + side * (half + ov)
+        made += [(b, side) for b in board_slope((xe, ya, H - drop), (xe, yb, H - drop), (cx, ya, zr), (cx, yb, zr),
+                                                 boards, rnd, width=0.14)]
+    lib.tag(None, split=lambda o: next((3 if s > 0 and o.location.y < cy else 4 for b, s in made if b == o), 4))
+    # Chunky coping stones stepping up the parapets' raking edges.
+    for y in (y0 + 0.06, y1 - 0.08):
+        for side in (-1, 1):
+            coping_line((cx + side * (half + 0.03), y, H - 0.02), (cx, y, H + rh + 0.02), blocks, rnd, size=0.17)
+        lib.box((cx, y, H + rh + 0.08), (0.17, 0.16, 0.13), blocks[0], rot=(0, 0.1, 0.08), bevel=0.03)
     lib.tag(3)
 
-    # Open shed: posts and rails, a board roof running down the slope, the dark inside showing.
-    sh_lo = 0.5
-    for y in (y0 + 0.08, cy, y1 - 0.08):
-        lib.box((sx1 - 0.03, y, sh_lo / 2), (0.06, 0.06, sh_lo), beam, bevel=0.008)
-    lib.box((sx1 - 0.03, cy, sh_lo - 0.02), (0.07, W - 0.1, 0.06), beam, bevel=0.008)
-    lib.box((sx1 - 0.03, cy, 0.12), (0.05, W - 0.1, 0.05), beam, bevel=0.008)
-    # Braces in the open front of the shed.
-    for y in (y0 + 0.08, y1 - 0.08):
-        lib.box(((x1 + sx1) / 2, y, (sh_lo + Hl) / 2 - 0.12), (sx1 - x1, 0.05, 0.05), beam,
-                rot=(0, math.atan2(Hl - sh_lo, sx1 - x1), 0), bevel=0.006)
-    lib.box(((x1 + sx1) / 2, cy, 0.03), (sx1 - x1 - 0.06, W - 0.16, 0.02), lib.mat_flat('shed-floor', (0.12, 0.09, 0.06)))
-    tilt = math.atan2(Hl - sh_lo, sx1 - x1)
-    run = math.hypot(sx1 - x1 + 0.08, Hl - sh_lo)
-    m = 6
-    for k in range(m):
-        y = y0 + 0.02 + (k + 0.5) * (W - 0.04) / m
-        lib.box(((x1 + sx1) / 2 + 0.02, y, (Hl + sh_lo) / 2 + 0.03),
-                (run, (W - 0.04) / m * 0.84, 0.035), boards[rnd.randrange(len(boards))],
-                rot=(rnd.uniform(-0.03, 0.03), tilt, rnd.uniform(-0.04, 0.04)), bevel=0.006)
+    # Lean-to shed on +X: a timber frame, vertical boards on its +X face, open towards the front with a
+    # brace; its board roof runs down from under the house's eave.
+    for (x, y) in ((sx1, sy0), (sx1, sy1), (x1 + 0.05, sy0)):
+        lib.box((x, y, (sh_lo if x == sx1 else sh_hi) / 2), (0.07, 0.07, sh_lo if x == sx1 else sh_hi), beam, bevel=0.008)
+    lib.box((sx1, (sy0 + sy1) / 2, sh_lo - 0.03), (0.07, sy1 - sy0, 0.07), beam, bevel=0.008)
+    lib.box(((x1 + sx1) / 2, sy0, sh_lo * 0.55), (sx1 - x1, 0.06, 0.06), beam, bevel=0.008)
+    lib.box(((x1 + sx1) / 2 + 0.02, sy0, sh_lo * 0.55 + 0.1), (math.hypot(sx1 - x1, 0.3), 0.05, 0.06), beam,
+            rot=(0, math.atan2(0.3, sx1 - x1), 0), bevel=0.006)
+    lib.box(((x1 + sx1) / 2, (sy0 + sy1) / 2, 0.02), (sx1 - x1 - 0.04, sy1 - sy0 - 0.04, 0.02),
+            lib.mat_flat('shed-floor', (0.1, 0.08, 0.05)))
+    lib.box(((x1 + sx1) / 2, sy1 - 0.03, sh_lo / 2 + 0.1), (sx1 - x1, 0.04, sh_lo + 0.1), dark)
+    n = 9
+    for k in range(n):
+        y = sy0 + 0.06 + (k + 0.5) * (sy1 - sy0 - 0.06) / n
+        lib.box((sx1 + 0.01, y, sh_lo * 0.5 - 0.02), (0.03, (sy1 - sy0) / n * 0.86, sh_lo - 0.06 + rnd.uniform(-0.03, 0.02)),
+                shed_boards[k % 2], rot=(rnd.uniform(-0.03, 0.03), 0, 0), bevel=0.004)
+    lib.tag(None, split=lambda o: 2 if o.location.z < 0.25 else 3)
+    made = board_slope((sx1 + 0.12, sy0 - 0.1, sh_lo - 0.05), (sx1 + 0.12, sy1 + 0.06, sh_lo - 0.05),
+                       (x1 + 0.02, sy0 - 0.1, sh_hi + 0.02), (x1 + 0.02, sy1 + 0.06, sh_hi + 0.02), boards, rnd, width=0.14)
+    lib.tag(4)
+
+    # A jagged grey rock at the front left corner and a few chips about the arch.
+    lib.spire((x0 - 0.04, y0 - 0.14, 0), 0.12, 0.42, rock, seed=3)
+    lib.spire((x0 + 0.1, y0 - 0.26, 0), 0.07, 0.2, rock, seed=5)
+    rubble(rnd, (ax + 0.35, y0 - 0.3, 0), 5, 0.18, blocks, size=0.05)
     lib.tag(4)
 
 
@@ -1764,62 +1915,106 @@ def build_bakery():
 # ------------------------------------------------------------------------------------- waterworks (2×2)
 
 def build_waterworks():
-    """Our waterworks: a small stone pump house under terracotta, a timber water wheel on its right
-    wall, and a stone trough of water under a little tiled lean-to in front."""
+    """After the Settlers 4 Roman waterworks: a small house of dark grey stone under a steep roof of big
+    bright red tiles (ridge along Y); its gable end towards the camera's left is light stone in dark
+    timbers, and a lower tiled lean-to steps out from it over a timber basin of blue water; on the
+    right (+X) wall a big dark water wheel turns in a niche ringed with grey stones, fed by a wooden
+    flume on posts from behind."""
     rnd = random.Random(71)
     walls = stone_walls()
-    blocks = block_mats()
+    gb = grey_blocks('wgb')
+    light = block_mats('wlb')
     beam = beam_mat()
     planks = boards_mats()
-    tiles = terracotta_mats()
-    ridge = lib.mat_flat('tc-ridge', (0.62, 0.26, 0.1))
-    water = lib.mat_flat('water', (0.24, 0.56, 0.72), rough=0.1)
+    tiles = grain_set('wtile', (((0.72, 0.16, 0.06), (0.96, 0.34, 0.16)), ((0.64, 0.12, 0.05), (0.88, 0.28, 0.13)),
+                                ((0.78, 0.24, 0.1), (0.98, 0.44, 0.22)), ((0.6, 0.14, 0.06), (0.82, 0.3, 0.14))),
+                      scale=9, bump=0.5)
+    ridge = lib.mat_flat('wt-ridge', (0.6, 0.14, 0.06))
+    plaster = lib.mat_grain('wplaster', (0.66, 0.62, 0.52), (0.84, 0.8, 0.7), scale=12, stretch=(1, 1, 1), bump=0.5)
+    wheelwood = grain_set('wheel', (((0.24, 0.13, 0.06), (0.42, 0.25, 0.12)), ((0.3, 0.17, 0.08), (0.5, 0.31, 0.15))),
+                          scale=5, stretch=(1, 1, 8), bump=0.6)
+    water = lib.mat_flat('water', (0.22, 0.62, 0.86), rough=0.08)
     iron = lib.mat_flat('iron', (0.22, 0.22, 0.24), rough=0.4)
     door = door_mat()
-    earth_pad((0.1, -0.3, 0), 1.0, 1.1, seed=71)
+    dark = lib.mat_flat('dark', (0.05, 0.04, 0.03))
+    earth_pad((0.08, -0.25, 0), 1.04, 1.12, seed=71)
     lib.tag(0)
 
-    x0, x1, y0, y1, H, rh = -0.7, 0.45, -0.6, 0.85, 0.66, 0.4
-    corner_stakes(x0, x1 + 0.3, y0 - 0.45, y1)
+    x0, x1, y0, y1, H, rh = -0.66, 0.4, -0.48, 0.86, 0.66, 0.52
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    lx0, lx1, ly0, lz_hi, lz_lo = -0.74, 0.08, -0.92, 0.46, 0.32  # the lean-to over the basin
+    corner_stakes(lx0, x1 + 0.3, ly0, y1)
     lib.tag(0, until=0)
-    lib.box(((x0 + x1) / 2, (y0 + y1) / 2, 0.05), (x1 - x0 + 0.06, y1 - y0 + 0.06, 0.1), blocks[1], bevel=0.02)
+    lib.box((cx, cy, 0.05), (x1 - x0 + 0.08, y1 - y0 + 0.08, 0.1), gb[1], bevel=0.02)
     lib.tag(1)
-    stone_house(x0, x1, y0, y1, H * 0.5, rnd, walls, blocks)
+    stone_house(x0, x1, y0, y1, H * 0.45, rnd, walls, gb, block=0.2)
     lib.tag(2)
-    stone_house(x0, x1, y0, y1, H, rnd, walls, blocks, z0=H * 0.5)
-    lib.gable(((x0 + x1) / 2, (y0 + y1) / 2, H), x1 - x0, rh - 0.02, y0 + 0.01, walls, along='y')
-    lib.box((0.2, y0 - 0.05, 0.2), (0.22, 0.04, 0.38), door, bevel=0.008)
-    lib.box((0.2, y0 - 0.07, 0.41), (0.3, 0.06, 0.05), beam)
+    stone_house(x0, x1, y0, y1, H, rnd, walls, gb, z0=H * 0.45, block=0.2)
+    # The gable end: light stone set in dark timbers above the lean-to.
+    lib.box((cx, y0 - 0.06, (lz_hi + H) / 2 + 0.02), (x1 - x0, 0.04, H - lz_hi + 0.04), plaster)
+    lib.gable((cx, cy, H), x1 - x0, rh - 0.02, y0 - 0.05, plaster, along='y')
+    for k in range(5):
+        xa = x0 + 0.08 + k * (x1 - x0 - 0.16) / 4
+        lib.box((xa, y0 - 0.085, (lz_hi + H) / 2 + 0.02), (0.05, 0.03, H - lz_hi + 0.06), beam)
+        hw = (x1 - x0) / 2
+        top = H + rh * (1 - abs(xa - cx) / hw) - 0.04
+        if top > H + 0.06:
+            lib.box((xa, y0 - 0.085, (H + top) / 2), (0.05, 0.03, top - H), beam)
+    for z in (lz_hi + 0.02, H):
+        lib.box((cx, y0 - 0.09, z), (x1 - x0 + 0.06, 0.035, 0.05), beam)
+    for k in range(4):  # light stones peeking between the timbers
+        xa = x0 + 0.08 + (k + 0.5) * (x1 - x0 - 0.16) / 4
+        for z in ((lz_hi + H) / 2 + 0.02, H + rh * 0.3):
+            lib.box((xa + rnd.uniform(-0.03, 0.03), y0 - 0.075, z), (0.12, 0.03, 0.08), light[rnd.randrange(len(light))],
+                    rot=(0, rnd.uniform(-0.1, 0.1), 0), bevel=0.012)
+    # Plank door with a lintel, right of the lean-to.
+    lib.box((0.24, y0 - 0.06, 0.21), (0.22, 0.04, 0.4), door, bevel=0.008)
+    lib.box((0.24, y0 - 0.08, 0.43), (0.3, 0.06, 0.05), beam)
+    window(x1 + 0.03, -0.24, 0.48, 0.13, 0.13, beam, dark, face='x')
     lib.tag(3)
-    scale_roof((x0 + x1) / 2, (y0 + y1) / 2, x1 - x0, y1 - y0, H, rh, tiles, ridge, axis='y',
-               overhang=0.1, seed=72, size=0.12, shape='tile')
-    lib.tag(None, split=lambda o: 3 if o.location.x > (x0 + x1) / 2 else 4)
+    scale_roof(cx, cy, x1 - x0, y1 - y0, H, rh, tiles, ridge, axis='y', overhang=0.12, seed=72, size=0.16, shape='tile')
+    lib.tag(None, split=lambda o: 3 if o.location.x > cx + 0.05 and o.location.y < cy else 4)
 
-    # Water wheel on the +X wall: two rims, spokes, paddles, an iron axle.
-    wx, wy, wz, wr = x1 + 0.15, 0.25, 0.36, 0.34
-    for dx in (-0.06, 0.06):
-        torus((wx + dx, wy, wz), wr, 0.02, beam, rot=(0, math.pi / 2, 0))
-    for k in range(4):
-        lib.box((wx, wy, wz), (0.03, wr * 2, 0.03), beam, rot=(k / 4 * math.pi, 0, 0))
-    for k in range(16):
-        a = k / 16 * math.tau
-        lib.box((wx, wy + math.cos(a) * wr, wz + math.sin(a) * wr), (0.16, 0.025, 0.09), planks[k % len(planks)],
-                rot=(a, 0, 0), bevel=0.004)
-    lib.cylinder((wx - 0.06, wy, wz), 0.035, 0.22, iron, rot=(0, math.pi / 2, 0), verts=10)
+    # The basin: a timber box of blue water under the tiled lean-to.
+    bx0, bx1, by0, by1 = -0.66, 0.0, -1.14, -0.58
+    lib.box(((bx0 + bx1) / 2, (by0 + by1) / 2, 0.09), (bx1 - bx0, by1 - by0, 0.18), planks[1], bevel=0.012)
+    for x in (bx0, bx1):
+        for y in (by0, by1):
+            lib.box((x, y, 0.1), (0.05, 0.05, 0.22), beam, bevel=0.006)
+    for y in (by0, by1):
+        lib.box(((bx0 + bx1) / 2, y, 0.17), (bx1 - bx0 + 0.04, 0.04, 0.04), planks[2], bevel=0.006)
+    lib.box(((bx0 + bx1) / 2, (by0 + by1) / 2, 0.165), (bx1 - bx0 - 0.06, by1 - by0 - 0.06, 0.02), water)
+    lib.tag(3)
+    for x in (lx0 + 0.04, lx1 - 0.04):
+        lib.box((x, ly0 + 0.06, lz_lo / 2), (0.05, 0.05, lz_lo), beam, bevel=0.006)
+    lib.box(((lx0 + lx1) / 2, ly0 + 0.06, lz_lo - 0.02), (lx1 - lx0, 0.06, 0.05), beam)
+    place_on(lib.box((0, 0, 0), (lx1 - lx0, math.hypot(ly0 - y0, lz_hi - lz_lo), 0.03), tiles[1]),
+             ((lx0 + lx1) / 2, (ly0 + y0) / 2, (lz_hi + lz_lo) / 2 + 0.01), (1, 0, 0), (0, y0 - ly0, lz_hi - lz_lo))
+    tile_face((lx0, ly0, lz_lo), (lx1, ly0, lz_lo), (lx0, y0 - 0.04, lz_hi), (lx1, y0 - 0.04, lz_hi), tiles, rnd,
+              size=0.15, shape='tile')
     lib.tag(4)
 
-    # Stone trough with water under a lean-to, in front of the house on the left.
-    tx0, tx1, ty0, ty1 = -0.78, -0.12, -1.08, -0.68
-    lib.box(((tx0 + tx1) / 2, (ty0 + ty1) / 2, 0.09), (tx1 - tx0, ty1 - ty0, 0.18), blocks[2], bevel=0.015)
-    lib.box(((tx0 + tx1) / 2, (ty0 + ty1) / 2, 0.175), (tx1 - tx0 - 0.08, ty1 - ty0 - 0.08, 0.02), water)
-    lib.tag(3)
-    for x in (tx0, tx1):
-        lib.box((x, ty0 - 0.02, 0.24), (0.04, 0.04, 0.48), beam)
-    tilt = math.atan2(0.15, ty1 - ty0 + 0.1)
-    for k in range(5):
-        x = tx0 - 0.04 + (k + 0.5) * (tx1 - tx0 + 0.08) / 5
-        lib.box((x, (ty0 + ty1) / 2 + 0.02, 0.5), ((tx1 - tx0 + 0.08) / 5 * 0.9, ty1 - ty0 + 0.26, 0.025),
-                tiles[k % len(tiles)], rot=(-tilt, 0, 0), bevel=0.005)
+    # The water wheel on the +X wall, in a niche ringed with grey stones, fed by a flume from behind.
+    wy, wz, wr = 0.32, 0.26, 0.3
+    wx = x1 + 0.12
+    lib.box((x1 + 0.02, wy, wz * 0.62), (0.04, wr * 2 + 0.08, wz * 1.24), walls)
+    for k in range(9):
+        a = math.pi * k / 8
+        lib.box((x1 + 0.04, wy + math.cos(a) * (wr + 0.08), wz + math.sin(a) * (wr + 0.08)), (0.08, 0.1, 0.12),
+                gb[k % len(gb)], rot=(a, 0, 0), bevel=0.015)
+    for dx in (-0.06, 0.06):
+        torus((wx + dx, wy, wz), wr, 0.025, wheelwood[0], rot=(0, math.pi / 2, 0))
+        torus((wx + dx, wy, wz), wr * 0.45, 0.02, wheelwood[1], rot=(0, math.pi / 2, 0))
+    for k in range(6):
+        lib.box((wx, wy, wz), (0.14, wr * 2, 0.035), wheelwood[k % 2], rot=(k / 6 * math.pi, 0, 0))
+    for k in range(14):
+        a = k / 14 * math.tau
+        lib.box((wx, wy + math.cos(a) * (wr + 0.02), wz + math.sin(a) * (wr + 0.02)), (0.17, 0.03, 0.1),
+                wheelwood[k % 2], rot=(a, 0, 0), bevel=0.005)
+    lib.cylinder((wx - 0.04, wy, wz), 0.04, 0.26, iron, rot=(0, math.pi / 2, 0), verts=10)
+    # The race: a stone-lined channel of water under the wheel, running along the wall.
+    lib.box((wx + 0.02, wy + 0.06, 0.03), (0.24, 0.8, 0.06), gb[2], bevel=0.015)
+    lib.box((wx + 0.02, wy + 0.06, 0.062), (0.13, 0.76, 0.01), lib.mat_flat('race', (0.14, 0.4, 0.56), rough=0.08))
     lib.tag(4)
 
 
@@ -3221,74 +3416,163 @@ def build_market():
 
 
 def build_donkeyranch():
-    """Our donkey ranch: a long stable of fieldstone below and boards above under a thatched roof,
-    a stable door and a hay loft hatch; in front a fenced paddock with donkeys, a water trough and
-    a stack of hay. 3×3 as in Settlers 4: modelled at 2×2 and scaled to 3×3, a little less in height;
-    the donkeys are modelled smaller so they keep the size of the game's donkeys."""
+    """After the Settlers 4 Roman donkey ranch: a big house of grey rubble with light quoins under a
+    steep roof of large wooden shingles (ridge along Y), thick dark barge boards on its gable towards
+    the camera's left, an arched door and a stone chimney under a little board hood; beside it, joined
+    by an open timber frame where a donkey stands, a stable on four stone piers, open at the front over
+    a plank ramp, its roof of broad orange boards on the near slope and golden thatch heaped over the
+    far one; a yard of trodden straw with a trough, buckets and donkeys. Modelled at its 3×3 size."""
     rnd = random.Random(231)
     walls = stone_walls()
-    blocks = block_mats()
+    gb = grey_blocks('dgb')
+    light = block_mats('dlb')
     beam = beam_mat()
     planks = boards_mats()
-    straw = straw_mat('rstraw')
+    sh = grain_set('dsh', (((0.42, 0.24, 0.1), (0.66, 0.44, 0.2)), ((0.52, 0.34, 0.14), (0.76, 0.56, 0.28)),
+                           ((0.58, 0.3, 0.12), (0.84, 0.5, 0.22)), ((0.46, 0.38, 0.26), (0.66, 0.58, 0.42)),
+                           ((0.36, 0.22, 0.1), (0.56, 0.38, 0.18))), scale=10, stretch=(1, 4, 1), bump=0.9)
+    sh = sh[:2] * 2 + sh[3:] * 2 + sh[2:3]  # the orange one about one in seven
+    barge = lib.mat_grain('dbarge', (0.24, 0.12, 0.05), (0.4, 0.22, 0.1), scale=5, stretch=(9, 1, 1), bump=0.6)
+    oboards = grain_set('dob', (((0.52, 0.24, 0.08), (0.84, 0.46, 0.18)), ((0.46, 0.2, 0.07), (0.76, 0.4, 0.16)),
+                                ((0.58, 0.3, 0.1), (0.88, 0.54, 0.24))), scale=4, stretch=(1, 9, 1), bump=0.8)
+    straw = thatch_mat('dthatch')
+    yard = lib.mat_grain('dyard', (0.5, 0.36, 0.16), (0.76, 0.6, 0.3), scale=22, stretch=(1, 1, 1), bump=0.8)
+    hay = lib.mat_grain('dhay', (0.6, 0.46, 0.14), (0.86, 0.74, 0.34), scale=14, stretch=(1, 1, 1), bump=1.0)
     dark = lib.mat_flat('dark', (0.05, 0.04, 0.03))
     door = door_mat()
-    water = lib.mat_flat('rwater', (0.16, 0.34, 0.46), rough=0.15)
-    mud = lib.mat_grain('rmud', (0.3, 0.2, 0.1), (0.46, 0.33, 0.19), scale=14, stretch=(1, 1, 1), bump=0.9)
+    iron = lib.mat_flat('diron', (0.2, 0.2, 0.22), rough=0.4)
+    water = lib.mat_flat('rwater', (0.2, 0.5, 0.68), rough=0.12)
     coat = lib.mat_grain('dcoat', (0.42, 0.4, 0.38), (0.56, 0.54, 0.5), scale=24, stretch=(1, 1, 1), bump=0.3)
     coat2 = lib.mat_grain('dcoat2', (0.36, 0.28, 0.22), (0.5, 0.4, 0.32), scale=24, stretch=(1, 1, 1), bump=0.3)
     belly = lib.mat_flat('dbelly', (0.82, 0.78, 0.72))
     hoof = lib.mat_flat('dhoof', (0.12, 0.1, 0.08))
-    earth_pad((0.05, -0.15, 0), 1.0, 1.08, seed=231)
+    earth_pad((0.02, -0.2, 0), 1.55, 1.62, seed=231)
     lib.tag(0)
-    corner_stakes(-0.85, 0.85, -0.85, 0.85)
+    corner_stakes(-1.44, 1.44, -1.0, 1.14)
     lib.tag(0, until=0)
-    # The stable along the back, long side to the front.
-    x0, x1, y0, y1, H, rh = -0.85, 0.65, 0.2, 0.8, 0.46, 0.34
-    lib.box(((x0 + x1) / 2, (y0 + y1) / 2, 0.04), (x1 - x0 + 0.06, y1 - y0 + 0.06, 0.08), blocks[2], bevel=0.02)
+
+    # The house: ridge along Y, its gable (door, chimney) towards −Y.
+    x0, x1, y0, y1, H, rh = -1.44, -0.04, -0.98, 1.12, 0.66, 0.66
+    cx, cy, half = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2
+    lib.box((cx, cy, 0.05), (x1 - x0 + 0.08, y1 - y0 + 0.08, 0.1), gb[1], bevel=0.02)
+    stone_house(x0, x1, y0, y1, H * 0.4, rnd, walls, gb, block=0.2)
+    quoins(x0, x1, y0, y1, 0.04, H * 0.4, light, rnd, block=0.24, row=0.17)
     lib.tag(1)
-    stone_house(x0, x1, y0, y1, H * 0.45, rnd, walls, blocks, block=0.17)
-    lib.tag(2)
-    plank_walls(x0, x1, y0, y1, H * 0.45, H, planks, planks[0], beam, rnd)
-    for x in (x0 + 0.02, x1 - 0.02):
-        lib.box((x, y0 - 0.01, H / 2), (0.06, 0.05, H), beam)
-    lib.gable(((x0 + x1) / 2, (y0 + y1) / 2, H), y1 - y0, rh - 0.02, x1 - 0.01, planks[1], along='x')
-    # Stable door (two leaves, the upper one open) and the loft hatch in the gable.
-    dx = 0.25
-    lib.box((dx, y0 - 0.03, 0.12), (0.26, 0.03, 0.2), door, bevel=0.006)
-    lib.box((dx, y0 - 0.02, 0.32), (0.26, 0.02, 0.18), dark)
-    lib.box((dx - 0.2, y0 - 0.12, 0.33), (0.03, 0.2, 0.17), door, bevel=0.006, rot=(0, 0, 0.5))
-    lib.box((x1 + 0.03, (y0 + y1) / 2, H + 0.1), (0.02, 0.14, 0.12), dark)
-    for k in range(2):
-        window(x0 + 0.2 + k * 0.3, y0 - 0.04, 0.33, 0.12, 0.08, beam, dark)
-    lib.tag(None, split=lambda o: 2 if o.location.z < H * 0.6 else 3)
-    # Thatch: two thick slopes meeting at the ridge.
-    run = (y1 - y0) / 2 + 0.12
-    ang = math.atan2(rh, run - 0.12)
+    stone_house(x0, x1, y0, y1, H, rnd, walls, gb, z0=H * 0.4, block=0.2)
+    quoins(x0, x1, y0, y1, H * 0.4, H, light, rnd, block=0.24, row=0.17)
+    gable_prism(cx, y0, y0 + 0.12, half, H, rh, walls)
+    gable_blocks(cx, half, y0, H, rh, gb, rnd, block=0.2, depth=0.055)
+    arch_door(cx + 0.36, y0, 0.02, 0.28, 0.46, door, [light[0], light[2]])
+    window(cx - 0.3, y0 - 0.04, 0.38, 0.14, 0.15, beam, dark)
+    window(cx, y0 - 0.04, H + rh * 0.4, 0.12, 0.13, beam, dark)
+    window(x1 + 0.04, 0.5, 0.4, 0.14, 0.15, beam, dark, face='x')
+    lib.tag(None, split=lambda o: 2 if o.location.z < H * 0.75 else 3)
+    ov = 0.14
+    scale_roof(cx, cy, x1 - x0, y1 - y0, H, rh, sh, lib.mat_flat('dridge', (0.3, 0.16, 0.07)), axis='y',
+               overhang=ov, seed=232, size=0.2, shape='tile')
+    lib.tag(None, split=lambda o: 3 if o.location.x > cx + 0.05 and o.location.y < cy else 4)
+    # Thick barge boards along the gable's raking edges, a board hood on the chimney.
+    drop = ov * rh / half
     for side in (-1, 1):
-        lib.box(((x0 + x1) / 2, (y0 + y1) / 2 + side * run / 2, H + rh / 2), (x1 - x0 + 0.2, math.hypot(run, rh) + 0.04, 0.1),
-                straw, rot=(-side * ang, 0, 0), bevel=0.03)
-    lib.cylinder(((x0 + x1) / 2, (y0 + y1) / 2, H + rh + 0.02), 0.05, x1 - x0 + 0.22, straw, rot=(0, math.pi / 2, 0),
-                 verts=10)
-    lib.tag(None, split=lambda o: 3 if o.location.y > (y0 + y1) / 2 else 4)
-    # Paddock in front: muddy ground, a rail fence, a trough, hay and donkeys.
-    lib.pad((-0.15, -0.45, 0.004), 0.6, 0.36, mud, jitter=0.15, seed=232, core=0.8, reach=1.1)
-    fx0, fx1, fy0, fy1 = -0.85, 0.35, -0.9, y0 - 0.05
-    for (xa, ya, xb, yb) in ((fx0, fy0, fx1, fy0), (fx0, fy0, fx0, fy1), (fx1, fy0, fx1, fy1 - 0.25)):
-        n = max(2, int(math.hypot(xb - xa, yb - ya) / 0.22))
-        for k in range(n + 1):
-            t = k / n
-            lib.box((xa + (xb - xa) * t, ya + (yb - ya) * t, 0.11), (0.035, 0.035, 0.22), beam)
-        for z in (0.1, 0.19):
-            rod((xa, ya, z), (xb, yb, z), 0.014, beam, verts=6)
-    lib.box((-0.55, -0.1, 0.06), (0.4, 0.12, 0.1), planks[1], bevel=0.01)
-    lib.box((-0.55, -0.1, 0.105), (0.36, 0.08, 0.01), water)
-    lib.lumpy((0.62, -0.45, 0.14), 0.16, straw, scale=(1, 1, 1.1), strength=0.25, noise=2.5, seed=233, subdiv=2)
-    lib.lumpy((0.72, -0.2, 0.08), 0.1, straw, scale=(1.2, 1, 0.7), strength=0.25, noise=2.5, seed=234, subdiv=2)
-    donkey(-0.35, -0.55, 0.5, coat, belly, hoof, s=0.72)
-    donkey(0.05, -0.3, 2.6, coat2, belly, hoof, s=0.68)
+        a = (cx + side * (half + ov), y0 - ov - 0.02, H - drop + 0.02)
+        b = (cx, y0 - ov - 0.02, H + rh + 0.06)
+        place_on(lib.box((0, 0, 0), (0.07, math.dist(a, b) + 0.06, 0.12), barge, bevel=0.012),
+                 ((a[0] + b[0]) / 2, a[1], (a[2] + b[2]) / 2), (0, 1, 0), (b[0] - a[0], 0, b[2] - a[2]))
+    chx, chy, ztop = cx - 0.02, y0 + 0.26, H + rh + 0.26
+    chimney(chx, chy, H + rh - 0.3, ztop, light, rnd)
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            lib.box((chx + sx * 0.08, chy + sy * 0.08, ztop + 0.1), (0.025, 0.025, 0.14), beam)
+        lib.box((chx + sx * 0.07, chy, ztop + 0.2), (0.17, 0.28, 0.025), planks[1], rot=(0, sx * 0.6, 0), bevel=0.004)
     lib.tag(4)
-    scale_scene(1.45, kz=1.3)
+
+    # The stable: four stone piers, a stone back wall, boards on its +X side, open at the front.
+    sx0, sx1, sy0, sy1, sH, srh = 0.42, 1.44, -0.86, 0.96, 0.6, 0.46
+    scx, scy, shalf = (sx0 + sx1) / 2, (sy0 + sy1) / 2, (sx1 - sx0) / 2
+    lib.box((scx, scy, 0.06), (sx1 - sx0, sy1 - sy0, 0.12), planks[3], bevel=0.01)  # raised plank floor
+    lib.box((scx, scy, 0.125), (sx1 - sx0 - 0.1, sy1 - sy0 - 0.1, 0.01), dark)
+    for (px, py) in ((sx0 + 0.1, sy0 + 0.1), (sx1 - 0.1, sy0 + 0.1), (sx1 - 0.1, sy1 - 0.1), (sx0 + 0.1, sy1 - 0.1)):
+        z = 0.0
+        k = 0
+        while z < sH - 0.02:
+            hgt = min(0.13, sH - z)
+            long_x = k % 2 == 0
+            lib.box((px + rnd.uniform(-0.01, 0.01), py + rnd.uniform(-0.01, 0.01), z + hgt / 2),
+                    (0.24 if long_x else 0.19, 0.19 if long_x else 0.24, hgt * 0.92), (light + gb)[rnd.randrange(8)],
+                    rot=(0, 0, rnd.uniform(-0.05, 0.05)), bevel=0.02)
+            z += hgt
+            k += 1
+    lib.tag(1)
+    lib.box((scx, sy1 - 0.08, sH / 2), (sx1 - sx0 - 0.2, 0.12, sH), walls)
+    lib.box((sx1 - 0.06, scy, sH * 0.25), (0.1, sy1 - sy0 - 0.2, sH * 0.5), walls)
+    stone_course(sx1 - 0.06, sx1 - 0.06, sy0 + 0.2, sy1 - 0.2, 0.0, sH * 0.5, gb, rnd, block=0.18, depth=0.05, faces=('x',))
+    lib.tag(2)
+    vboard_walls(sx1 - 0.1, sx1 - 0.06, sy0 + 0.2, sy1 - 0.2, sH * 0.5, sH, planks, dark, beam, rnd, board=0.1,
+                 faces=('x',))
+    for y in (sy0 + 0.2, sy1 - 0.2):
+        lib.box((sx1 - 0.04, y, sH * 0.75), (0.06, 0.06, sH * 0.5), beam)
+    lib.box((scx, sy0 + 0.1, sH + 0.03), (sx1 - sx0, 0.09, 0.08), beam, bevel=0.008)  # lintel over the opening
+    lib.box((sx0 + 0.1, scy, sH + 0.03), (0.09, sy1 - sy0, 0.08), beam, bevel=0.008)
+    lib.box((sx1 - 0.1, scy, sH + 0.03), (0.09, sy1 - sy0, 0.08), beam, bevel=0.008)
+    vboard_gable(scx, sy0 + 0.1, shalf - 0.02, sH + 0.07, srh - 0.06, planks, rnd, board=0.1, face='y')
+    lib.gable((scx, scy, sH + 0.07), sx1 - sx0 - 0.04, srh - 0.06, sy0 + 0.11, dark, along='y')
+    lib.lumpy((scx + 0.15, sy1 - 0.4, 0.2), 0.24, hay, scale=(1.5, 1.1, 0.6), strength=0.3, noise=2.5, seed=235, subdiv=2)
+    # A plank ramp up into the stable.
+    rl = 0.34
+    for k in range(6):
+        t = (k + 0.5) / 6
+        lib.box((scx + 0.05, sy0 - rl + t * rl, 0.12 * t + 0.01), (0.46, rl / 6 * 0.86, 0.03), planks[k % len(planks)],
+                rot=(math.atan2(0.12, rl), 0, rnd.uniform(-0.04, 0.04)), bevel=0.004)
+    for sgn in (-1, 1):
+        lib.box((scx + 0.05 + sgn * 0.21, sy0 - rl / 2, 0.05), (0.04, rl + 0.04, 0.04), beam,
+                rot=(math.atan2(0.12, rl), 0, 0))
+    lib.tag(None, split=lambda o: 2 if o.location.z < sH * 0.5 else 3)
+    # Roof: broad orange boards on the near (+X) slope, nailed; golden thatch heaped over the far one,
+    # spilling over the ridge.
+    sov = 0.12
+    sdrop = sov * srh / shalf
+    zr = sH + srh + 0.05
+    made = board_slope((scx + shalf + sov, sy0 - 0.06, sH - sdrop + 0.05), (scx + shalf + sov, sy1 + 0.06, sH - sdrop + 0.05),
+                       (scx, sy0 - 0.06, zr), (scx, sy1 + 0.06, zr), oboards, rnd, width=0.16, thick=0.04)
+    from mathutils import Vector
+
+    for b in made:
+        for t in (-0.3, 0.3):
+            lib.sphere(tuple(b.matrix_world @ Vector((0, t * b.dimensions[1], 0.025))), 0.016, iron, subdiv=1)
+    lib.tag(None, split=lambda o: 3 if o.location.y < scy else 4)
+    lib.prism_roof((scx, scy, sH), sy1 - sy0, sx1 - sx0, srh, oboards[1], overhang=sov, thickness=0.04, along='y')
+    lib.tag(4)
+
+    # The open timber frame joining house and stable, a donkey under it.
+    for y in (sy0 + 0.1, 0.1, sy1 - 0.1):
+        lib.box((sx0 - 0.02, y, sH / 2), (0.08, 0.08, sH), beam, bevel=0.008)
+    lib.box(((x1 + sx0) / 2, sy0 + 0.1, sH - 0.02), (sx0 - x1 + 0.1, 0.08, 0.08), beam, bevel=0.008)
+    for y in (sy0 + 0.1, 0.1, sy1 - 0.1):
+        rod((x1 + 0.02, y, H + 0.04), (sx0 + 0.05, y, sH + 0.04), 0.035, beam, verts=8)
+    lib.box((x1 + 0.12, sy0 + 0.1, sH * 0.6), (0.05, 0.05, sH * 1.1), beam, rot=(0, 0.5, 0))
+    lib.tag(3)
+    # The passage's roof: a low, thick thatch reaching under the eaves on both sides.
+    pcx, phalf, pz, prise = (x1 + sx0) / 2, (sx0 - x1) / 2 + 0.16, sH + 0.1, 0.14
+    ptilt = math.atan2(prise, phalf)
+    for side in (-1, 1):
+        slab = lib.box((pcx + side * phalf / 2, scy - 0.02, pz + prise / 2), (math.hypot(phalf, prise) + 0.06,
+                       sy1 - sy0 + 0.16, 0.14), straw, rot=(0, side * ptilt, 0), bevel=0.06)
+        shaggy(slab, 0.03, 0.05, seed=240 + side)
+    lib.tag(4)
+    donkey((x1 + sx0) / 2, -0.2, 4.4, coat, belly, hoof, s=1.04)
+
+    # The yard: trodden straw, a trough, buckets, hay and donkeys.
+    lib.pad((-0.2, -1.2, 0.004), 1.1, 0.4, yard, jitter=0.18, seed=233, core=0.75, reach=1.15)
+    lib.box((-0.98, -1.22, 0.07), (0.56, 0.16, 0.12), planks[1], bevel=0.012)
+    lib.box((-0.98, -1.22, 0.125), (0.5, 0.1, 0.01), water)
+    for (bx, by) in ((-0.32, -1.32), (-0.18, -1.42)):
+        lib.cylinder((bx, by, 0.06), 0.06, 0.12, planks[0], verts=12, radius2=0.07)
+        lib.cylinder((bx, by, 0.115), 0.058, 0.01, water, verts=12)
+        torus((bx, by, 0.08), 0.066, 0.006, iron)
+    lib.lumpy((0.2, -1.38, 0.1), 0.13, hay, scale=(1.2, 1, 0.8), strength=0.3, noise=2.5, seed=234, subdiv=2)
+    donkey(-0.62, -1.3, 0.4, coat, belly, hoof, s=1.04)
+    donkey(0.62, -1.25, 2.7, coat2, belly, hoof, s=1.0)
+    lib.tag(4)
 
 
 # ------------------------------------------------------------------------------------- eyecatchers (1×1, fountain 2×2)
