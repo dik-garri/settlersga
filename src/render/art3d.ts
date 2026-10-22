@@ -103,7 +103,7 @@ export const ART3D_BUILDINGS: Record<string, { w: number; h: number; ax: number;
   stonecutter: { w: 150, h: 140, ax: 75, ay: 100 },
   tower: { w: 150, h: 210, ax: 75, ay: 170 },
   house_large: { w: 220, h: 190, ax: 110, ay: 135 },
-  house_medium: { w: 150, h: 160, ax: 75, ay: 120 },
+  house_medium: { w: 150, h: 140, ax: 75, ay: 100 },
   house_small: { w: 150, h: 140, ax: 75, ay: 100 },
   coalmine: { w: 150, h: 140, ax: 75, ay: 100 },
   stonemine: { w: 150, h: 140, ax: 75, ay: 100 },

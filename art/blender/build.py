@@ -66,11 +66,20 @@ def column(x, y, h, stone, base):
     lib.box((x, y, h - 0.02), (0.13, 0.13, 0.05), base, bevel=0.01)
 
 
-def log_cabin(cx, cy, L, W, H, logs, ends, r=0.045, gable_h=0.0, gable_axis='x', overhang=0.07, door=None):
+def log_cabin(cx, cy, L, W, H, logs, ends, r=0.045, gable_h=0.0, gable_axis='x', overhang=0.07, door=None,
+              ragged=0.0, seed=1):
     """Walls of horizontal round logs crossing at the corners (ends sticking out), the two walls of
     each axis half a log apart. With `gable_h`, the walls across `gable_axis` (the gable ends) keep
-    stacking shorter logs into the roof triangle. `door`: (x, width, height) cut into the −Y wall."""
+    stacking shorter logs into the roof triangle. `door`: (x, width, height) cut into the −Y wall.
+    `ragged` lets every log end stick out by its own amount (up to that much more or less)."""
+    import random
+
+    rnd = random.Random(seed)
     x0, x1, y0, y1 = cx - L / 2, cx + L / 2, cy - W / 2, cy + W / 2
+
+    def full(a0, a1):
+        """A whole wall log's two ends along its axis, ragged if asked."""
+        return a0 - overhang + rnd.uniform(-ragged, ragged), a1 + overhang + rnd.uniform(-ragged, ragged)
     step = 2 * r * 0.92
     k = 0
     z = r
@@ -96,17 +105,23 @@ def log_cabin(cx, cy, L, W, H, logs, ends, r=0.045, gable_h=0.0, gable_axis='x',
                         for a, b in (left, right):
                             lib.cylinder(((a + b) / 2, y, zz), r, b - a, logs, rot=(0, math.pi / 2, 0), verts=10)
                         continue
-                    lib.cylinder((cx, y, zz), r, length, logs, rot=(0, math.pi / 2, 0), verts=10)
                     if above <= 0:
-                        for x in (x0 - overhang, x1 + overhang):
+                        a, b = full(x0, x1)
+                        lib.cylinder(((a + b) / 2, y, zz), r, b - a, logs, rot=(0, math.pi / 2, 0), verts=10)
+                        for x in (a, b):
                             lib.cylinder((x, y, zz), r * 0.92, 0.006, ends, rot=(0, math.pi / 2, 0), verts=10)
+                    else:
+                        lib.cylinder((cx, y, zz), r, length, logs, rot=(0, math.pi / 2, 0), verts=10)
             else:
                 length = W + 2 * overhang if above <= 0 else span
                 for x in (x0, x1):
-                    lib.cylinder((x, cy, zz), r, length, logs, rot=(math.pi / 2, 0, 0), verts=10)
                     if above <= 0:
-                        for y in (y0 - overhang, y1 + overhang):
+                        a, b = full(y0, y1)
+                        lib.cylinder((x, (a + b) / 2, zz), r, b - a, logs, rot=(math.pi / 2, 0, 0), verts=10)
+                        for y in (a, b):
                             lib.cylinder((x, y, zz), r * 0.92, 0.006, ends, rot=(math.pi / 2, 0, 0), verts=10)
+                    else:
+                        lib.cylinder((x, cy, zz), r, length, logs, rot=(math.pi / 2, 0, 0), verts=10)
         z += step
         k += 1
 
@@ -182,32 +197,60 @@ def timber_frame(cx, cy, L, W, H, rh, beam, axis='x'):
         lib.box((cx, cy, H + rh), (t, W + 0.1, t), beam)
 
 
+def board_courses(cx, cy, L, W, H, rh, boards, rnd, overhang=0.14, width=0.13, gable_over=0.12):
+    """A gable roof (ridge along X) of wide loose boards laid in two courses down each slope, the upper
+    course lying over the lower one's top so a step runs along the middle of the slope, as on the
+    Settlers 4 woodcutter's hut. Returns [(board, side, course)]."""
+    run = W / 2 + overhang
+    drop = overhang * rh / (W / 2)
+    xa, xb = cx - L / 2 - gable_over, cx + L / 2 + gable_over
+    made = []
+    for side in (-1, 1):
+        def at(t, lift=0.0):
+            return (cy + side * run * (1 - t), H - drop + (rh + drop) * t + lift)
+
+        for course, (t0, t1, lift) in enumerate(((0.0, 0.58, 0.0), (0.5, 1.0, 0.03))):
+            (ya, za), (yb, zb) = at(t0, lift), at(t1, lift)
+            made += [(b, side, course) for b in buildings.board_slope(
+                (xa, ya, za), (xb, ya, za), (xa, yb, zb), (xb, yb, zb), boards, rnd, width=width, thick=0.03,
+                gap=0.026, sag=0.014)]
+    lib.cylinder((cx, cy, H + rh + 0.055), 0.045, xb - xa + 0.04, boards[1], rot=(0, math.pi / 2, 0), verts=10)
+    return made
+
+
 def build_woodcutter():
-    """A log cabin after the Settlers 4 woodcutter: round-log walls, a roof of loose boards and a
-    lower annex at the side, on trodden earth. Goods (the logs it cuts) are not part of the model:
-    the game draws the real pile at the door. Tagged with construction stages: 0 stakes, 1 timber
-    frame, 2 lower walls, 3 walls and half the roof, 4 finished."""
-    logs = lib.mat_grain('logs', (0.36, 0.18, 0.08), (0.62, 0.36, 0.17), scale=7, stretch=(1, 1, 6), bump=1.0)
-    ends = lib.mat_grain('ends', (0.82, 0.6, 0.32), (0.93, 0.76, 0.48), scale=30, stretch=(1, 1, 1), bump=0.4)
+    """After the Settlers 4 Roman woodcutter's hut: a low cabin of thick orange-red round logs whose
+    ends stick out raggedly at the corners, under a big steep roof of wide weathered boards laid in two
+    courses down each slope (ridge along X, so the big slope faces the camera; log gables at the ends);
+    on its right a lower log annex under a shallow board roof; a dark doorway with poles leaning by it,
+    a chopping block with an axe. Goods (the logs it cuts) are not part of the model: the game draws
+    the real pile at the door. Stages: 0 stakes, 1 timber frame, 2 lower walls, 3 walls and half the
+    roof, 4 finished."""
+    import random
+
+    rnd = random.Random(3)
+    logs = lib.mat_grain('logs', (0.44, 0.19, 0.07), (0.74, 0.4, 0.18), scale=7, stretch=(1, 1, 6), bump=1.0)
+    ends = lib.mat_grain('ends', (0.84, 0.64, 0.38), (0.95, 0.82, 0.58), scale=30, stretch=(1, 1, 1), bump=0.4)
     boards = [
-        lib.mat_grain(f'board{k}', a, b, scale=4, stretch=(1, 9, 1), bump=0.6)
+        lib.mat_grain(f'board{k}', a, b, scale=4, stretch=(1, 9, 1), bump=0.7)
         for k, (a, b) in enumerate((
-            ((0.5, 0.34, 0.12), (0.76, 0.58, 0.26)),
-            ((0.38, 0.24, 0.1), (0.6, 0.42, 0.18)),
-            ((0.62, 0.46, 0.2), (0.84, 0.68, 0.36)),
-            ((0.44, 0.36, 0.22), (0.62, 0.52, 0.34)),
+            ((0.5, 0.32, 0.11), (0.8, 0.58, 0.26)),
+            ((0.44, 0.27, 0.1), (0.72, 0.5, 0.22)),
+            ((0.54, 0.38, 0.15), (0.84, 0.64, 0.32)),
+            ((0.46, 0.33, 0.15), (0.72, 0.56, 0.3)),
         ))
     ]
     beam = lib.mat_grain('beam', (0.3, 0.16, 0.07), (0.46, 0.26, 0.12), scale=5, stretch=(1, 1, 8), bump=0.6)
     dark = lib.mat_flat('dark', (0.07, 0.05, 0.04))
     string = lib.mat_flat('string', (0.92, 0.88, 0.75))
+    iron = lib.mat_flat('axe-iron', (0.4, 0.41, 0.44), rough=0.35)
     # The earth reaches out over the door tile, where the goods piles lie.
     lib.pad((0.08, -0.22, 0), 1.0, 1.12, lib.mat_grain('earth', (0.34, 0.18, 0.09), (0.66, 0.42, 0.22), scale=16,
                                                        stretch=(1, 1, 1), bump=1.0, detail=12), jitter=0.1, seed=5)
     lib.tag(0)
 
-    cx, cy, L, W, H, rh = -0.22, 0.12, 0.95, 0.85, 0.52, 0.46
-    ax, ay, aL, aW, aH, arh = 0.52, 0.2, 0.48, 0.68, 0.36, 0.24
+    cx, cy, L, W, H, rh = -0.24, 0.1, 0.96, 0.9, 0.44, 0.56
+    ax, ay, aL, aW, aH, arh = 0.5, 0.18, 0.5, 0.72, 0.4, 0.12
     stakes([(cx - L / 2, cy - W / 2), (ax + aL / 2, cy - W / 2), (ax + aL / 2, cy + W / 2), (cx - L / 2, cy + W / 2)],
            beam, string)
     lib.tag(0, until=0)
@@ -217,24 +260,27 @@ def build_woodcutter():
     lib.tag(1, until=3)
 
     # Main cabin: ridge along X, so its big board slope faces the camera; the door on the −Y wall.
-    log_cabin(cx, cy, L, W, H, logs, ends, gable_h=rh, gable_axis='x', door=(cx + 0.12, 0.24, 0.36))
-    log_cabin(ax, ay, aL, aW, aH, logs, ends, r=0.04, gable_h=arh, gable_axis='y', overhang=0.05)
-    lib.tag(None, split=lambda o: 2 if o.location.z < H * 0.45 else 3)
+    log_cabin(cx, cy, L, W, H, logs, ends, r=0.056, gable_h=rh, gable_axis='x', overhang=0.1,
+              door=(cx + 0.16, 0.24, 0.3), ragged=0.05, seed=4)
+    log_cabin(ax, ay, aL, aW, aH, logs, ends, r=0.05, gable_h=arh, gable_axis='y', overhang=0.08, ragged=0.04, seed=6)
+    lib.tag(None, split=lambda o: 2 if o.location.z < H * 0.5 else 3)
 
-    plank_roof(cx, cy, L, W, H, rh, boards, axis='x', seed=2)
-    plank_roof(ax, ay, aL, aW, aH, arh, boards, axis='y', overhang=0.09, seed=4)
-    # Half the boards go on in stage 3 (those on the camera's side of each ridge), the rest at the end.
-    lib.tag(None, split=lambda o: 3 if o.location.y < cy - 0.05 or o.location.x > ax + 0.05 else 4)
+    made = board_courses(cx, cy, L, W, H, rh, boards, rnd, overhang=0.1)
+    # The camera's slope, lower course, goes on in stage 3; the rest at the end.
+    lib.tag(None, split=lambda o: next((3 if s < 0 and c == 0 else 4 for b, s, c in made if b == o), 4))
+    plank_roof(ax, ay, aL, aW, aH, arh, boards, axis='y', overhang=0.1, width=0.13, seed=4)
 
-    lib.box((cx + 0.12, cy - W / 2 + 0.03, 0.18), (0.22, 0.06, 0.36), dark)
-    for dx in (-0.13, 0.13):
-        lib.box((cx + 0.12 + dx, cy - W / 2 - 0.04, 0.19), (0.04, 0.04, 0.38), boards[1])
-    lib.box((cx + 0.12, cy - W / 2 - 0.04, 0.39), (0.32, 0.05, 0.04), boards[1])
-    lib.box((ax, ay - aW / 2 - 0.01, 0.16), (0.18, 0.04, 0.2), dark)
-    # Chopping block and a few chips by the door.
-    lib.cylinder((-0.55, -0.6, 0.08), 0.1, 0.16, logs, verts=14)
-    lib.cylinder((-0.55, -0.6, 0.163), 0.095, 0.006, ends, verts=14)
-    for k, (x, y) in enumerate(((-0.35, -0.7), (-0.7, -0.45), (-0.2, -0.55), (0.0, -0.8))):
+    lib.box((cx + 0.16, cy - W / 2 + 0.04, 0.15), (0.22, 0.06, 0.3), dark)
+    lib.box((cx + 0.16, cy - W / 2 - 0.05, 0.31), (0.34, 0.06, 0.05), beam)
+    for dx, lean in ((-0.15, 0.22), (0.19, -0.18), (0.25, -0.3)):  # poles leaning by the door
+        lib.cylinder((cx + 0.16 + dx, cy - W / 2 - 0.1, 0.2), 0.018, 0.42, beam, rot=(-0.25, lean, 0), verts=6)
+    lib.box((ax, ay - aW / 2 - 0.02, 0.17), (0.16, 0.04, 0.18), dark)
+    # Chopping block with the axe in it, and chips about.
+    lib.cylinder((-0.6, -0.62, 0.08), 0.1, 0.16, logs, verts=14)
+    lib.cylinder((-0.6, -0.62, 0.163), 0.095, 0.006, ends, verts=14)
+    lib.cylinder((-0.58, -0.66, 0.26), 0.012, 0.22, beam, rot=(0.5, 0.35, 0), verts=6)
+    lib.box((-0.61, -0.62, 0.18), (0.08, 0.012, 0.05), iron, rot=(0.5, 0.35, 0))
+    for k, (x, y) in enumerate(((-0.38, -0.74), (-0.74, -0.46), (-0.24, -0.58), (-0.02, -0.82), (-0.5, -0.86))):
         lib.box((x, y, 0.015), (0.06, 0.03, 0.015), ends, rot=(0, 0, k * 1.3))
     lib.tag(4)
 
@@ -272,7 +318,7 @@ SINGLE = {
     'stonecutter': (buildings.build_stonecutter, 150, 140, 75, 100),
     'tower': (buildings.build_tower, 150, 210, 75, 170),
     'house_large': (buildings.build_house_large, 220, 190, 110, 135),
-    'house_medium': (buildings.build_house_medium, 150, 160, 75, 120),
+    'house_medium': (buildings.build_house_medium, 150, 140, 75, 100),
     'house_small': (buildings.build_house_small, 150, 140, 75, 100),
     'coalmine': (buildings.build_coalmine, 150, 140, 75, 100),
     'stonemine': (buildings.build_stonemine, 150, 140, 75, 100),

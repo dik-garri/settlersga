@@ -631,8 +631,7 @@ export function siteSprite(side: number): SiteSprite {
 /** Sprite canvas per building; `site2`…`site4` are construction sites for 2×2 to 4×4 footprints. */
 export const BUILDING_CANVAS: Record<BuildingType | SiteSprite, BuildingCanvas> = {
   house_small: SMALL,
-  // The tall half-timbered house's roof needs more room above than SMALL gives.
-  house_medium: { w: 150, h: 160, ax: 75, ay: 120 },
+  house_medium: SMALL,
   house_large: LARGE,
   woodcutter: SMALL,
   sawmill: SMALL,
