@@ -103,7 +103,7 @@ export const ART3D_BUILDINGS: Record<string, { w: number; h: number; ax: number;
   stonecutter: { w: 150, h: 140, ax: 75, ay: 100 },
   tower: { w: 150, h: 210, ax: 75, ay: 170 },
   house_large: { w: 220, h: 190, ax: 110, ay: 135 },
-  house_medium: { w: 150, h: 140, ax: 75, ay: 100 },
+  house_medium: { w: 150, h: 160, ax: 75, ay: 120 },
   house_small: { w: 150, h: 140, ax: 75, ay: 100 },
   coalmine: { w: 150, h: 140, ax: 75, ay: 100 },
   stonemine: { w: 150, h: 140, ax: 75, ay: 100 },
@@ -222,7 +222,7 @@ export const ART3D_POSTS: Record<string, GarrisonPosts> = {
 export const ART3D_FX: Record<string, { smoke?: [number, number][]; glow?: [number, number][]; hub?: [number, number] }> = {
   farm: { smoke: [[-10.9, -81.6]] },
   mill: { hub: [28.1, -45.6] },
-  bakery: { smoke: [[33.6, -68.6]], glow: [[-36.5, 6.9]] },
+  bakery: { smoke: [[7.0, -25.4]], glow: [[17.9, 18.3]] },
   ironsmelter: { smoke: [[-16.6, -59.2]], glow: [[-37.0, -3.4]] },
   goldsmelter: { smoke: [[14.4, -40.5]], glow: [[-7.0, 7.7]] },
   weaponsmith: { smoke: [[11.8, -49.7]], glow: [[-0.6, 7.1]] },

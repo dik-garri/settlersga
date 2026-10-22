@@ -804,95 +804,6 @@ def mullion_window(x, y, z, w, h, frame, glass, face='y'):
         lib.box((x + 0.03, y, z), (0.02, w, 0.022), frame)
 
 
-def build_house_large_blocks():
-    """Three joined blocks (since scaled down into the medium residence, `build_house_large` below
-    is the new large one): on the left a two-storey
-    half-timbered house (light plaster panels, dark timbers, teal mullioned windows) on stone corner
-    piers under a steep roof of blue-grey slate scales; behind on the right a higher dark-stone block
-    under orange terracotta tiles; in front a lower stone annex under blue slate."""
-    rnd = random.Random(31)
-    walls = stone_walls()
-    blocks = block_mats()
-    dark_blocks = [lib.mat_grain(f'dblocks{k}', a, b, scale=7, stretch=(1, 1, 1), bump=1.0) for k, (a, b) in enumerate((
-        ((0.2, 0.21, 0.2), (0.42, 0.43, 0.4)),
-        ((0.25, 0.26, 0.25), (0.5, 0.5, 0.47)),
-        ((0.17, 0.18, 0.18), (0.36, 0.37, 0.36)),
-    ))]
-    plaster = lib.mat_stones('plaster', (0.88, 0.8, 0.66), (0.72, 0.64, 0.5), (0.6, 0.52, 0.4), scale=6, bump=0.3)
-    beam = lib.mat_grain('timber', (0.24, 0.15, 0.06), (0.42, 0.28, 0.12), scale=5, stretch=(1, 1, 8), bump=0.6)
-    slates = [lib.mat_grain(f'slate{k}', a, b, scale=10, stretch=(1, 1, 1), bump=0.5) for k, (a, b) in enumerate((
-        ((0.2, 0.25, 0.34), (0.36, 0.42, 0.52)),
-        ((0.26, 0.31, 0.42), (0.44, 0.5, 0.62)),
-        ((0.15, 0.19, 0.27), (0.28, 0.33, 0.42)),
-    ))]
-    tiles = [lib.mat_grain(f'tile{k}', a, b, scale=9, stretch=(1, 1, 1), bump=0.5) for k, (a, b) in enumerate((
-        ((0.66, 0.3, 0.12), (0.9, 0.5, 0.26)),
-        ((0.58, 0.24, 0.09), (0.82, 0.42, 0.2)),
-        ((0.72, 0.36, 0.16), (0.94, 0.58, 0.32)),
-    ))]
-    slate_ridge = lib.mat_flat('slate-ridge', (0.22, 0.29, 0.42))
-    tile_ridge = lib.mat_flat('tile-ridge', (0.66, 0.32, 0.14))
-    teal = lib.mat_flat('teal', (0.2, 0.5, 0.52), rough=0.5)
-    glass = lib.mat_flat('glass', (0.36, 0.56, 0.62), rough=0.2)
-    door = lib.mat_grain('door', (0.36, 0.2, 0.08), (0.56, 0.34, 0.14), scale=4, stretch=(1, 1, 9), bump=0.6)
-    dark = lib.mat_flat('dark', (0.06, 0.05, 0.04))
-    earth_pad((0.15, -0.3, 0), 1.42, 1.42, seed=31)
-    lib.tag(0)
-
-    # A: half-timbered house on the left, ridge along Y, its gable towards the camera (−Y).
-    ax0, ax1, ay0, ay1, aH, arh = -1.35, -0.45, -1.2, 0.6, 1.3, 0.68
-    # B: dark stone block behind on the right, ridge along X.
-    bx0, bx1, by0, by1, bH, brh = -0.45, 0.95, 0.0, 1.2, 1.0, 0.48
-    # C: stone annex in front of B, ridge along X.
-    cx0, cx1, cy0, cy1, cH, crh = -0.45, 0.9, -1.2, 0.0, 0.62, 0.3
-    corner_stakes(ax0, bx1, ay0, by1)
-    lib.tag(0, until=0)
-
-    B = _b()
-    B.timber_frame((ax0 + ax1) / 2, (ay0 + ay1) / 2, ax1 - ax0, ay1 - ay0, aH, arh, beam, axis='y')
-    lib.box(((bx0 + bx1) / 2, (by0 + by1) / 2, 0.05), (bx1 - bx0 + 0.06, by1 - by0 + 0.06, 0.1), dark_blocks[0], bevel=0.02)
-    lib.box(((cx0 + cx1) / 2, (cy0 + cy1) / 2, 0.05), (cx1 - cx0 + 0.06, cy1 - cy0 + 0.06, 0.1), blocks[1], bevel=0.02)
-    lib.tag(1, until=3)
-
-    # A: stone piers at the visible corners, plaster and timbers between, two storeys.
-    for (x, y) in ((ax0, ay0), (ax1, ay0), (ax1, ay1)):
-        for k in range(3):
-            lib.box((x, y, 0.08 + k * 0.13), (0.14, 0.14, 0.12), blocks[rnd.randrange(len(blocks))],
-                    rot=(0, 0, rnd.uniform(-0.1, 0.1)), bevel=0.02)
-    half_timber(ax0, ax1, ay0, ay1, 0.0, aH * 0.5, plaster, beam, rnd)
-    # B and C walls: rugged stone, dark on B.
-    lib.box(((bx0 + bx1) / 2, (by0 + by1) / 2, bH / 2), (bx1 - bx0, by1 - by0, bH), walls)
-    stone_course(bx0, bx1, by0, by1, 0.1, bH * 0.5, dark_blocks, rnd, block=0.22, depth=0.07)
-    lib.box(((cx0 + cx1) / 2, (cy0 + cy1) / 2, cH / 2), (cx1 - cx0, cy1 - cy0, cH), walls)
-    stone_course(cx0, cx1, cy0, cy1, 0.1, cH * 0.5, blocks, rnd, block=0.2, depth=0.06)
-    lib.tag(2)
-    half_timber(ax0 - 0.04, ax1 + 0.04, ay0 - 0.04, ay1, aH * 0.5, aH, plaster, beam, rnd)
-    lib.gable(((ax0 + ax1) / 2, (ay0 + ay1) / 2, aH), ax1 - ax0 + 0.08, arh - 0.02, ay0 - 0.03, plaster, along='y')
-    stone_course(bx0, bx1, by0, by1, bH * 0.5, bH, dark_blocks, rnd, block=0.22, depth=0.07)
-    lib.gable(((bx0 + bx1) / 2, (by0 + by1) / 2, bH), by1 - by0, brh - 0.02, bx1 - 0.01, dark_blocks[1], along='x')
-    stone_course(cx0, cx1, cy0, cy1, cH * 0.5, cH, blocks, rnd, block=0.2, depth=0.06)
-    lib.gable(((cx0 + cx1) / 2, (cy0 + cy1) / 2, cH), cy1 - cy0, crh - 0.02, cx1 - 0.01, blocks[0], along='x')
-    # Windows: two on each storey of A's gable front, one under its gable; door in the annex.
-    for wz in (aH * 0.25, aH * 0.72):
-        for wx in (ax0 + 0.24, ax1 - 0.24):
-            mullion_window(wx, ay0 - 0.06, wz, 0.18, 0.2, teal, glass)
-    mullion_window((ax0 + ax1) / 2, ay0 - 0.05, aH + arh * 0.38, 0.15, 0.15, teal, glass)
-    mullion_window(ax1 + 0.04, (ay0 + ay1) / 2 + 0.2, aH * 0.72, 0.18, 0.2, teal, glass, face='x')
-    lib.box((cx1 - 0.35, cy0 - 0.07, 0.22), (0.26, 0.04, 0.44), door, bevel=0.01)
-    lib.box((cx1 - 0.35, cy0 - 0.09, 0.46), (0.34, 0.08, 0.07), blocks[2], bevel=0.015)
-    mullion_window(cx1 + 0.08, (cy0 + cy1) / 2, cH * 0.55, 0.16, 0.16, teal, dark, face='x')
-    lib.tag(3)
-
-    scale_roof((ax0 + ax1) / 2, (ay0 + ay1) / 2, ax1 - ax0, ay1 - ay0, aH, arh, slates, slate_ridge, axis='y',
-               overhang=0.12, seed=33, size=0.15)
-    lib.tag(None, split=lambda o: 3 if o.location.x > (ax0 + ax1) / 2 else 4)
-    scale_roof((bx0 + bx1) / 2, (by0 + by1) / 2, bx1 - bx0, by1 - by0, bH, brh, tiles, tile_ridge, axis='x',
-               overhang=0.1, seed=34, size=0.12, shape='tile')
-    scale_roof((cx0 + cx1) / 2, (cy0 + cy1) / 2, cx1 - cx0, cy1 - cy0, cH, crh, slates, slate_ridge, axis='x',
-               overhang=0.1, seed=35, size=0.14)
-    lib.tag(4)
-
-
 # ------------------------------------------------------------------------------------- effect anchors
 
 # Screen-space points (relative to the sprite anchor) of a building's live effects — chimney mouths
@@ -1705,62 +1616,6 @@ def render_mill_sails(out_dir, tmp_dir, w, h, ax, ay, save_strip):
     save_strip(frames, os.path.join(out_dir, 'millsails.png'))  # rows stay in Blender's bottom-up order
 
 
-# ------------------------------------------------------------------------------------- bakery (2×2)
-
-def build_bakery():
-    """Our bakery: a two-storey stone house under orange terracotta with a lower front wing, an arched
-    door, a big stone chimney over the oven, and a hanging sign with a carved pretzel."""
-    rnd = random.Random(61)
-    walls = stone_walls()
-    blocks = block_mats()
-    beam = beam_mat()
-    tiles = terracotta_mats()
-    ridge = lib.mat_flat('tc-ridge', (0.62, 0.26, 0.1))
-    dark = lib.mat_flat('dark', (0.06, 0.05, 0.04))
-    door = door_mat()
-    sign = lib.mat_flat('sign', (0.24, 0.36, 0.56), rough=0.6)
-    bread = lib.mat_grain('bread', (0.58, 0.32, 0.1), (0.82, 0.54, 0.24), scale=12, stretch=(1, 1, 1), bump=0.6)
-    glass = lib.mat_flat('wglass', (0.82, 0.8, 0.72), rough=0.4)
-    earth_pad((0.1, -0.3, 0), 1.05, 1.15, seed=61)
-    lib.tag(0)
-
-    # Main block at the back (ridge along X); the lower front wing (ridge along Y) has its gable
-    # with the door towards −Y, just left of the door tile.
-    mx0, mx1, my0, my1, mH, mrh = -0.8, 0.85, -0.15, 0.85, 0.95, 0.42
-    fx0, fx1, fy0, fy1, fH, frh = -0.7, 0.32, -0.95, -0.15, 0.52, 0.32
-    corner_stakes(mx0, mx1, fy0, my1)
-    lib.tag(0, until=0)
-    lib.box(((mx0 + mx1) / 2, (my0 + my1) / 2, 0.05), (mx1 - mx0 + 0.06, my1 - my0 + 0.06, 0.1), blocks[1], bevel=0.02)
-    lib.box(((fx0 + fx1) / 2, (fy0 + fy1) / 2, 0.05), (fx1 - fx0 + 0.06, fy1 - fy0 + 0.06, 0.1), blocks[1], bevel=0.02)
-    lib.tag(1)
-    stone_house(mx0, mx1, my0, my1, mH * 0.5, rnd, walls, blocks)
-    stone_house(fx0, fx1, fy0, fy1, fH, rnd, walls, blocks)
-    lib.tag(2)
-    stone_house(mx0, mx1, my0, my1, mH, rnd, walls, blocks, z0=mH * 0.5)
-    lib.gable(((mx0 + mx1) / 2, (my0 + my1) / 2, mH), my1 - my0, mrh - 0.02, mx1 - 0.01, walls, along='x')
-    lib.gable(((fx0 + fx1) / 2, (fy0 + fy1) / 2, fH), fx1 - fx0, frh - 0.02, fy0 + 0.01, walls, along='y')
-    arch_door((fx0 + fx1) / 2 + 0.08, fy0, 0.02, 0.24, 0.4, door, [blocks[2], blocks[0]])
-    note_fx('bakery', 'glow', ((fx0 + fx1) / 2 + 0.08, fy0 - 0.08, 0.2))  # the oven's light at the door
-    window(-0.45, fy0 - 0.04, 0.3, 0.13, 0.14, beam, dark)
-    window(0.6, my0 - 0.04, mH * 0.72, 0.16, 0.18, beam, glass)
-    window(mx1 + 0.04, 0.35, mH * 0.72, 0.16, 0.18, beam, glass, face='x')
-    window(mx1 + 0.04, 0.35, mH * 0.28, 0.16, 0.16, beam, dark, face='x')
-    lib.tag(3)
-    scale_roof((mx0 + mx1) / 2, (my0 + my1) / 2, mx1 - mx0, my1 - my0, mH, mrh, tiles, ridge, axis='x',
-               overhang=0.1, seed=62, size=0.12, shape='tile')
-    lib.tag(None, split=lambda o: 3 if o.location.y < (my0 + my1) / 2 else 4)
-    scale_roof((fx0 + fx1) / 2, (fy0 + fy1) / 2, fx1 - fx0, fy1 - fy0, fH, frh, tiles, ridge, axis='y',
-               overhang=0.08, seed=63, size=0.11, shape='tile')
-    chimney(0.5, 0.55, mH, mH + mrh + 0.28, blocks, rnd, name='bakery')
-    # Hanging sign on a bracket at the wing's corner: a blue board with a carved pretzel.
-    sx, sy = fx1 + 0.14, fy0 - 0.02
-    lib.box((sx - 0.07, sy, 0.66), (0.22, 0.03, 0.03), beam)
-    lib.box((sx, sy - 0.01, 0.52), (0.03, 0.15, 0.17), sign, bevel=0.01)
-    torus((sx + 0.025, sy - 0.035, 0.52), 0.045, 0.014, bread, rot=(0, math.pi / 2, 0))
-    torus((sx + 0.025, sy + 0.025, 0.52), 0.045, 0.014, bread, rot=(0, math.pi / 2, 0))
-    lib.tag(4)
-
-
 # ------------------------------------------------------------------------------------- waterworks (2×2)
 
 def build_waterworks():
@@ -1823,50 +1678,6 @@ def build_waterworks():
     lib.tag(4)
 
 
-# ------------------------------------------------------------------------------------- warehouse (2×2)
-
-def build_warehouse():
-    """Our storage yard: an open, round paved platform — rings of dark and light cobbles round a pale
-    centre stone with a gilded wheat-sheaf rosette. The game stacks the stored goods on the ring."""
-    rnd = random.Random(81)
-    cobbles = [lib.mat_grain(f'cob{k}', a, b, scale=8, stretch=(1, 1, 1), bump=0.8) for k, (a, b) in enumerate((
-        ((0.38, 0.38, 0.4), (0.62, 0.62, 0.64)),
-        ((0.46, 0.45, 0.43), (0.7, 0.69, 0.66)),
-        ((0.3, 0.3, 0.32), (0.5, 0.5, 0.52)),
-    ))]
-    light = lib.mat_grain('centre', (0.72, 0.68, 0.58), (0.9, 0.87, 0.78), scale=6, stretch=(1, 1, 1), bump=0.5)
-    gold = lib.mat_flat('wheat', (0.86, 0.68, 0.22), rough=0.4)
-    earth_pad((0.0, -0.15, 0), 1.0, 1.05, seed=81)
-    lib.tag(0)
-    corner_stakes(-0.95, 0.95, -0.95, 0.95)
-    lib.tag(0, until=0)
-
-    def ring(r0, r1, n, mats, stage):
-        rr = (r0 + r1) / 2
-        for k in range(n):
-            a = (k + rnd.uniform(-0.12, 0.12)) / n * math.tau
-            lib.box((math.cos(a) * rr, math.sin(a) * rr, 0.045), (rr * math.tau / n * 0.86, (r1 - r0) * 0.86,
-                    0.05 + rnd.uniform(0, 0.015)), mats[rnd.randrange(len(mats))], rot=(0, 0, a + math.pi / 2),
-                    bevel=0.012)
-        lib.tag(stage)
-
-    lib.cylinder((0, 0, 0.02), 1.0, 0.04, cobbles[2], verts=48)
-    lib.tag(1)
-    ring(0.86, 1.0, 40, cobbles[2:], 1)
-    ring(0.7, 0.86, 34, cobbles[:2], 2)
-    ring(0.56, 0.7, 28, cobbles, 2)
-    ring(0.44, 0.56, 22, cobbles[:2], 3)
-    ring(0.34, 0.44, 18, cobbles[2:], 3)
-    lib.cylinder((0, 0, 0.05), 0.33, 0.06, light, verts=32, bevel=0.01)
-    for k in range(8):
-        a = k / 8 * math.tau
-        o = lib.sphere((math.cos(a) * 0.17, math.sin(a) * 0.17, 0.085), 0.05, gold, scale=(1.6, 0.6, 0.35))
-        o.rotation_euler = (0, 0, a)
-        lib.box((math.cos(a) * 0.08, math.sin(a) * 0.08, 0.085), (0.1, 0.012, 0.012), gold, rot=(0, 0, a))
-    lib.sphere((0, 0, 0.09), 0.055, gold, scale=(1, 1, 0.4))
-    lib.tag(4)
-
-
 # ------------------------------------------------------------------------------------- generic roof pieces
 
 def place_on(obj, origin, u, v):
@@ -1918,10 +1729,10 @@ def tile_face(e0, e1, r0, r1, mats, rnd, size=0.13, shape='scale', lift=0.03):
             place_on(roof_piece(mats[rnd.randrange(len(mats))], size, shape), p, u + jitter, up)
 
 
-def hip_roof(cx, cy, L, W, H, rh, mats, ridge_mat, rnd, overhang=0.1, size=0.13, shape='scale', ridge_frac=0.4):
-    """A hipped roof — four slopes over an L×W block at height H, a ridge along the longer side
-    (`ridge_frac` of it; 0 makes a pyramid) — as a solid body, the two slopes the camera sees (−Y,
-    +X) covered in scales or tiles."""
+def hip_faces(cx, cy, L, W, H, rh, overhang=0.1, ridge_frac=0.4):
+    """The four slopes of a hipped roof over an L×W block at height H (ridge along the longer side,
+    `ridge_frac` of it; 0 makes a pyramid), each as (eave start, eave end, ridge start, ridge end) the
+    way `tile_face` takes them, plus the two ridge ends."""
     x0, x1, y0, y1 = cx - L / 2 - overhang, cx + L / 2 + overhang, cy - W / 2 - overhang, cy + W / 2 + overhang
     z0, zr = H - overhang * 0.5, H + rh
     if L >= W:
@@ -1935,6 +1746,15 @@ def hip_roof(cx, cy, L, W, H, rh, mats, ridge_mat, rnd, overhang=0.1, size=0.13,
         faces = [(c00, c10, ra, rb), (c10, c11, rb, rb), (c11, c01, rb, ra), (c01, c00, ra, ra)]
     else:
         faces = [(c00, c10, ra, ra), (c10, c11, ra, rb), (c11, c01, rb, rb), (c01, c00, rb, ra)]
+    return faces, ra, rb
+
+
+def hip_roof(cx, cy, L, W, H, rh, mats, ridge_mat, rnd, overhang=0.1, size=0.13, shape='scale', ridge_frac=0.4):
+    """A hipped roof — four slopes over an L×W block at height H, a ridge along the longer side
+    (`ridge_frac` of it; 0 makes a pyramid) — as a solid body, the two slopes the camera sees (−Y,
+    +X) covered in scales or tiles."""
+    faces, ra, rb = hip_faces(cx, cy, L, W, H, rh, overhang, ridge_frac)
+    zr = H + rh
     verts, polys = [], []
     for (a, b, p, q) in faces:
         i = len(verts)
@@ -2736,13 +2556,6 @@ def scale_scene(k, keep=('ShadowCatcher',), kz=None):
     return lambda p: (p[0] * k, p[1] * k, p[2] * kz)
 
 
-def build_house_medium():
-    """The medium residence: our three-block house (half-timbered wing under slate, a dark stone block
-    under terracotta, a stone annex under slate), scaled to a 2×2 footprint."""
-    build_house_large_blocks()
-    scale_scene(0.66)
-
-
 def build_house_small():
     """The small residence: a squat fieldstone cottage, ridge along Y, its gable towards the camera
     half-timbered above the stone ground floor, crow-stepped gable edges, a roof of blue-grey slate
@@ -2782,130 +2595,6 @@ def build_house_small():
     lib.tag(None, split=lambda o: 3 if o.location.x > (x0 + x1) / 2 else 4)
     stepped_gable_y((x0 + x1) / 2, y0 - 0.02, x1 - x0 + 0.1, H, rh, blocks, rnd, steps=3)
     lib.tag(4)
-
-
-def build_house_large():
-    """The large residence (3×3): a two-storey fieldstone house, ridge along X under blue-grey slate
-    scales, a crow-stepped west gable; a half-timbered oriel on timber legs in front with teal
-    windows under its own terracotta gable; a round corner turret under a slate cone; a ball finial."""
-    rnd = random.Random(171)
-    walls = stone_walls()
-    blocks = block_mats()
-    beam = lib.mat_grain('timber', (0.24, 0.15, 0.06), (0.42, 0.28, 0.12), scale=5, stretch=(1, 1, 8), bump=0.6)
-    plaster = lib.mat_stones('plaster', (0.88, 0.8, 0.66), (0.72, 0.64, 0.5), (0.6, 0.52, 0.4), scale=6, bump=0.3)
-    slates = slate_mats()
-    tiles = terracotta_mats('ltc')
-    sl_ridge = lib.mat_flat('sl-ridge', (0.22, 0.29, 0.42))
-    tc_ridge = lib.mat_flat('tc-ridge', (0.62, 0.26, 0.1))
-    teal = lib.mat_flat('teal', (0.2, 0.5, 0.52), rough=0.5)
-    glass = lib.mat_flat('glass', (0.36, 0.56, 0.62), rough=0.2)
-    door = door_mat()
-    earth_pad((0.15, -0.3, 0), 1.45, 1.5, seed=171)
-    lib.tag(0)
-    x0, x1, y0, y1, H, rh = -1.15, 1.15, -0.5, 1.05, 1.0, 0.58
-    ox0, ox1, oy0, oy1, oz0, oH, orh = -0.38, 0.38, -0.98, y0, 0.3, 0.98, 0.42
-    tx, ty, tr, tH = x0 + 0.05, y0 - 0.02, 0.3, H + 0.18
-    corner_stakes(x0 - 0.1, x1, y0 - 0.55, y1)
-    lib.tag(0, until=0)
-    lib.box(((x0 + x1) / 2, (y0 + y1) / 2, 0.05), (x1 - x0 + 0.06, y1 - y0 + 0.06, 0.1), blocks[1], bevel=0.02)
-    _b().timber_frame((x0 + x1) / 2, (y0 + y1) / 2, x1 - x0, y1 - y0, H, rh, beam, axis='x')
-    lib.tag(1, until=3)
-    stone_house(x0, x1, y0, y1, H * 0.5, rnd, walls, blocks, block=0.22)
-    quoins(x0, x1, y0, y1, 0.02, H * 0.5, blocks, rnd, block=0.26, row=0.2)
-    round_tower(tx, ty, tr, 0.0, tH * 0.5, walls, blocks, rnd, rows=3)
-    lib.tag(2)
-    stone_house(x0, x1, y0, y1, H, rnd, walls, blocks, z0=H * 0.5, block=0.22)
-    quoins(x0, x1, y0, y1, H * 0.5, H, blocks, rnd, block=0.26, row=0.2)
-    round_tower(tx, ty, tr, tH * 0.5, tH, walls, blocks, rnd, rows=3)
-    lib.gable(((x0 + x1) / 2, (y0 + y1) / 2, H), y1 - y0, rh - 0.02, x1 - 0.01, walls, along='x')
-    lib.gable(((x0 + x1) / 2, (y0 + y1) / 2, H), y1 - y0, rh - 0.02, x0 + 0.01, walls, along='x')
-    arch_door(0.92, y0 - 0.02, 0.0, 0.26, 0.48, door, blocks)
-    for wx in (-0.75, 0.55):
-        mullion_window(wx, y0 - 0.05, H * 0.72, 0.17, 0.2, teal, glass)
-    for wz in (H * 0.28, H * 0.72):
-        mullion_window(x1 + 0.05, 0.3, wz, 0.17, 0.2, teal, glass, face='x')
-    mullion_window(tx + 0.05, ty - tr - 0.02, tH * 0.7, 0.12, 0.16, teal, glass)
-    # The oriel on its legs.
-    for x in (ox0 + 0.04, ox1 - 0.04):
-        lib.box((x, oy0 + 0.04, oz0 / 2), (0.07, 0.07, oz0), beam, bevel=0.01)
-    half_timber(ox0, ox1, oy0, oy1, oz0, oH, plaster, beam, rnd)
-    for wx in (ox0 + 0.2, ox1 - 0.2):
-        mullion_window(wx, oy0 - 0.04, (oz0 + oH) / 2 + 0.05, 0.15, 0.22, teal, glass)
-    mullion_window(ox1 + 0.04, (oy0 + oy1) / 2, (oz0 + oH) / 2 + 0.05, 0.15, 0.22, teal, glass, face='x')
-    lib.gable(((ox0 + ox1) / 2, (oy0 + oy1) / 2, oH), ox1 - ox0, orh - 0.02, oy0 + 0.005, plaster, along='y')
-    lib.tag(3)
-    scale_roof((x0 + x1) / 2, (y0 + y1) / 2, x1 - x0, y1 - y0, H, rh, slates, sl_ridge, axis='x', overhang=0.1,
-               seed=172, size=0.15)
-    lib.tag(None, split=lambda o: 3 if o.location.y < (y0 + y1) / 2 else 4)
-    scale_roof((ox0 + ox1) / 2, (oy0 + oy1) / 2 - 0.05, ox1 - ox0, oy1 - oy0 + 0.25, oH, orh, tiles, tc_ridge, axis='y',
-               overhang=0.08, seed=173, size=0.11, shape='tile')
-    stepped_gable_x((y0 + y1) / 2, x0 - 0.02, y1 - y0, H, rh, blocks, rnd, steps=4)
-    cone_tiles(tx, ty, tH, tr + 0.08, 0.55, slates, rnd, size=0.11, shape='scale')
-    lib.sphere((tx, ty, tH + 0.6), 0.04, sl_ridge)
-    lib.sphere(((x0 + x1) / 2 + 0.4, (y0 + y1) / 2, H + rh + 0.1), 0.05, sl_ridge)
-    lib.tag(4)
-
-
-# ------------------------------------------------------------------------------------- barracks (2×2)
-
-def build_barracks():
-    """Our barracks: a square fieldstone hall under a hipped blue-slate roof with a smaller raised
-    storey (pyramid-roofed) on top, a big iron-banded double door; in front a paved drill yard inside
-    a low wall with a wooden pell and a straw target on a stand. 3×3 as in Settlers 4: modelled at 2×2
-    and scaled ×1.5 (≈ 5 settler heights, a little taller than the large house)."""
-    rnd = random.Random(181)
-    walls = stone_walls()
-    blocks = block_mats()
-    beam = beam_mat()
-    slates = slate_mats('bsl')
-    ridge = lib.mat_flat('bsl-r', (0.22, 0.29, 0.42))
-    door = door_mat()
-    iron = lib.mat_flat('iron', (0.2, 0.2, 0.22), rough=0.35)
-    straw = straw_mat()
-    red = lib.mat_flat('target-red', (0.7, 0.18, 0.12))
-    cobbles = grain_set('bcob', (((0.36, 0.36, 0.34), (0.6, 0.6, 0.58)), ((0.42, 0.41, 0.38), (0.66, 0.65, 0.6))), scale=8,
-                        bump=0.8)
-    earth_pad((0.05, -0.15, 0), 1.0, 1.08, seed=181)
-    lib.tag(0)
-    corner_stakes(-0.85, 0.85, -0.85, 0.85)
-    lib.tag(0, until=0)
-    x0, x1, y0, y1, H = -0.5, 0.65, -0.2, 0.82, 0.7
-    lib.box(((x0 + x1) / 2, (y0 + y1) / 2, 0.05), (x1 - x0 + 0.06, y1 - y0 + 0.06, 0.1), blocks[1], bevel=0.02)
-    lib.tag(1)
-    stone_house(x0, x1, y0, y1, H * 0.5, rnd, walls, blocks, block=0.2)
-    quoins(x0, x1, y0, y1, 0.02, H * 0.5, blocks, rnd, block=0.22, row=0.17)
-    # Drill yard: paving, a low wall, a pell and a target.
-    for k in range(32):
-        x = -0.88 + (k % 8 + 0.5) * 1.6 / 8 + rnd.uniform(-0.02, 0.02)
-        y = -0.98 + (k // 8 + 0.5) * 0.7 / 4
-        lib.box((x, y, 0.02), (0.18, 0.15, 0.03), cobbles[rnd.randrange(2)], rot=(0, 0, rnd.uniform(-0.1, 0.1)), bevel=0.01)
-    for k in range(6):
-        lib.box((-0.92, -0.95 + k * 0.13, 0.09), (0.12, 0.11, 0.16), blocks[rnd.randrange(len(blocks))], bevel=0.015)
-    lib.tag(2)
-    stone_house(x0, x1, y0, y1, H, rnd, walls, blocks, z0=H * 0.5, block=0.2)
-    quoins(x0, x1, y0, y1, H * 0.5, H, blocks, rnd, block=0.22, row=0.17)
-    for dx in (-0.085, 0.085):
-        lib.box((0.35 + dx, y0 - 0.04, 0.24), (0.16, 0.04, 0.48), door, bevel=0.008)
-        for z in (0.12, 0.36):
-            lib.box((0.35 + dx, y0 - 0.065, z), (0.15, 0.012, 0.03), iron)
-    lib.box((0.35, y0 - 0.07, 0.53), (0.44, 0.08, 0.09), blocks[2], bevel=0.02)
-    for wx in (-0.25,):
-        window(wx, y0 - 0.04, H * 0.7, 0.12, 0.16, beam, lib.mat_flat('dark', (0.05, 0.04, 0.03)))
-    lib.tag(3)
-    hip_roof((x0 + x1) / 2, (y0 + y1) / 2, x1 - x0, y1 - y0, H, 0.3, slates, ridge, rnd, overhang=0.1, size=0.14,
-             shape='tile', ridge_frac=0.85)
-    lib.tag(None, split=lambda o: 3 if o.location.x > (x0 + x1) / 2 else 4)
-    ux0, ux1, uy0, uy1, uz0, uH = -0.2, 0.32, 0.08, 0.58, H + 0.12, H + 0.5
-    stone_house(ux0, ux1, uy0, uy1, uH, rnd, walls, blocks, z0=uz0, block=0.15)
-    hip_roof((ux0 + ux1) / 2, (uy0 + uy1) / 2, ux1 - ux0, uy1 - uy0, uH, 0.26, slates, ridge, rnd, overhang=0.08,
-             size=0.12, shape='tile', ridge_frac=0.0)
-    lib.cylinder((-0.55, -0.55, 0.28), 0.045, 0.56, beam, verts=10)
-    lib.box((-0.55, -0.55, 0.42), (0.34, 0.05, 0.05), beam)
-    lib.box((0.78, -0.6, 0.22), (0.05, 0.05, 0.44), beam, rot=(0.2, 0, 0))
-    for k, (rr, m) in enumerate(((0.16, straw), (0.11, red), (0.06, straw), (0.025, red))):
-        lib.cylinder((0.78, -0.66 - k * 0.006, 0.36), rr, 0.04, m, rot=(math.pi / 2 - 0.2, 0, -0.5), verts=24)
-    lib.tag(4)
-    scale_scene(1.5)
 
 
 # ------------------------------------------------------------------------------------- toolsmith (2×2)
@@ -4372,3 +4061,614 @@ def build_slaughterhouse():
     lib.box((bx + 0.01, by - 0.02, 0.21), (0.11, 0.015, 0.07), iron, rot=(0, 0.3, 0.4))
     lib.tag(4)
 
+
+
+# ------------------------------------------------------------------------------------- Roman houses, bakery,
+# yard and barracks after the original's cut-outs (third pass): the medium and large residences, the
+# bakery, the storage yard and the barracks. Own models after the impression of the Settlers 4 Romans.
+
+def face_rafters(e0, e1, r0, r1, beam, step=0.24, r=0.017, battens=(0.3, 0.64)):
+    """The bare skeleton of one roof face (eave e0→e1 up to ridge r0→r1, as `tile_face` takes it):
+    rafters every `step` and battens across them — a roof under construction."""
+    from mathutils import Vector
+
+    e0, e1, r0, r1 = (Vector(p) for p in (e0, e1, r0, r1))
+    n = max(2, round((e1 - e0).length / step))
+    for k in range(n + 1):
+        s = k / n
+        rod(e0.lerp(e1, s), r0.lerp(r1, s), r, beam, verts=6)
+    for t in battens:
+        a, b = e0.lerp(r0, t), e1.lerp(r1, t)
+        if (b - a).length > 0.05:
+            rod(a, b, r * 0.8, beam, verts=6)
+
+
+def gable_faces(cx, cy, L, W, H, rh, axis='x', overhang=0.1):
+    """The two slopes of a gable roof (ridge along `axis`) as (eave start, eave end, ridge start, ridge
+    end), the way `tile_face` and `face_rafters` take them."""
+    along, across = (L, W) if axis == 'x' else (W, L)
+    a, c = along / 2 + overhang, across / 2 + overhang
+    z0 = H - overhang * rh / (across / 2)
+
+    def at(t, u, z):
+        return (cx + t, cy + u, z) if axis == 'x' else (cx + u, cy + t, z)
+
+    return [(at(-a, -c, z0), at(a, -c, z0), at(-a, 0, H + rh), at(a, 0, H + rh)),
+            (at(a, c, z0), at(-a, c, z0), at(a, 0, H + rh), at(-a, 0, H + rh))]
+
+
+def pale_blocks(prefix='pb'):
+    """Light, warm sandstone of the Roman gables and the bakery's upper walls, a greenish one among them."""
+    return [lib.mat_grain(f'{prefix}{k}', a, b, scale=7, stretch=(1, 1, 1), bump=1.0) for k, (a, b) in enumerate((
+        ((0.58, 0.54, 0.42), (0.86, 0.82, 0.66)),
+        ((0.5, 0.52, 0.42), (0.76, 0.79, 0.64)),
+        ((0.62, 0.56, 0.44), (0.9, 0.84, 0.7)),
+        ((0.46, 0.46, 0.4), (0.7, 0.7, 0.6)),
+    ))]
+
+
+def sky_slates(prefix='ss'):
+    """The light, sky-blue slate tiles of the Settlers 4 Roman barracks."""
+    return [lib.mat_grain(f'{prefix}{k}', a, b, scale=10, stretch=(1, 1, 1), bump=0.5) for k, (a, b) in enumerate((
+        ((0.26, 0.42, 0.56), (0.46, 0.64, 0.78)),
+        ((0.3, 0.48, 0.62), (0.52, 0.7, 0.84)),
+        ((0.22, 0.36, 0.5), (0.38, 0.54, 0.68)),
+        ((0.34, 0.5, 0.6), (0.56, 0.72, 0.8)),
+    ))]
+
+
+def dark_slates(prefix='ds'):
+    """The dark blue-grey slate scales of the Roman residences."""
+    return [lib.mat_grain(f'{prefix}{k}', a, b, scale=10, stretch=(1, 1, 1), bump=0.5) for k, (a, b) in enumerate((
+        ((0.17, 0.2, 0.27), (0.32, 0.37, 0.46)),
+        ((0.22, 0.26, 0.34), (0.4, 0.45, 0.55)),
+        ((0.13, 0.15, 0.2), (0.25, 0.28, 0.35)),
+        ((0.24, 0.3, 0.4), (0.44, 0.52, 0.64)),
+    ))]
+
+
+def stepped_wall(x, y0, y1, H, top, mats, rnd, steps=5, t=0.16):
+    """A crow-stepped stone gable wall standing in the plane x (spanning y0..y1, from the ground up to
+    `top`): each step a course a little narrower than the one under it, capped by coping stones."""
+    yc, hw = (y0 + y1) / 2, (y1 - y0) / 2
+    dz = (top - H) / steps
+    lib.box((x, yc, H / 2 + 0.01), (t, y1 - y0, H), mats[0], bevel=0.015)
+    for k in range(steps):
+        w = hw * (1 - k / steps)
+        z = H + (k + 0.5) * dz
+        lib.box((x, yc, z), (t, 2 * w, dz * 0.96), mats[rnd.randrange(len(mats))], bevel=0.015)
+        for side in (-1, 1):
+            lib.box((x, yc + side * (w - 0.06), z + dz / 2 + 0.03), (t + 0.05, 0.16, 0.07), mats[rnd.randrange(len(mats))],
+                    rot=(0, 0, rnd.uniform(-0.04, 0.04)), bevel=0.015)
+    lib.box((x, yc, top + 0.05), (t + 0.06, 0.2, 0.1), mats[0], bevel=0.02)
+
+
+def eagle(cx, cy, z, s, gold):
+    """The Roman eagle in gilded relief lying on the yard's centre disc: wings spread and raised, head
+    turned, tail fanned; upright on the screen (its head towards world −X+Y)."""
+    from mathutils import Vector
+
+    up = Vector((-math.sqrt(0.5), math.sqrt(0.5), 0))  # away from the camera: the top of the screen
+    right = Vector((math.sqrt(0.5), math.sqrt(0.5), 0))
+    yaw = math.atan2(up.y, up.x) - math.pi / 2
+
+    def at(a, b, h=0.0):
+        p = Vector((cx, cy, z)) + (right * a + up * b) * s
+        return (p.x, p.y, p.z + h * s)
+
+    def flat(a, b, size, ang, h=0.0):
+        # A feather or plate lying on the disc, its long side at screen angle `ang` (0 = right, π/2 = up).
+        o = lib.box(at(a, b, h), (size[0] * s, size[1] * s, size[2] * s), gold, bevel=0.01 * s)
+        o.rotation_euler = (0, 0, yaw + ang)
+        return o
+
+    body = lib.sphere(at(0, -0.05, 0.05), 0.1 * s, gold, scale=(0.75, 1.25, 0.45))
+    body.rotation_euler = (0, 0, yaw)
+    lib.sphere(at(0.0, 0.14, 0.07), 0.075 * s, gold, scale=(0.9, 0.9, 0.6))
+    lib.sphere(at(0.05, 0.25, 0.08), 0.058 * s, gold, scale=(1.1, 0.9, 0.7))
+    beak = lib.cylinder(at(0.12, 0.24, 0.08), 0.022 * s, 0.07 * s, gold, verts=8, radius2=0.002 * s)
+    beak.rotation_euler = (0, math.pi / 2, yaw)
+    for side in (-1, 1):
+        # Coverts along the arm, then the long flight feathers fanning out and up.
+        flat(side * 0.15, 0.1, (0.24, 0.1, 0.07), math.pi / 2 - side * 1.15, 0.03)
+        for k in range(6):
+            ang = math.radians(78 - k * 17)
+            length = 0.34 + 0.05 * math.sin(k / 5 * math.pi)
+            a = side * (0.2 + math.cos(ang) * length / 2)
+            b = 0.12 - k * 0.025 + math.sin(ang) * length / 2
+            flat(a, b, (length, 0.075, 0.045), (math.pi - ang) if side < 0 else ang, 0.01 * (k % 2))
+    for k in range(4):
+        ang = -math.pi / 2 + (k - 1.5) * 0.28
+        flat(math.cos(ang) * 0.27, -0.12 + math.sin(ang) * 0.17, (0.2, 0.07, 0.04), ang, 0.01 * (k % 2))
+    for side in (-1, 1):
+        flat(side * 0.06, -0.2, (0.05, 0.1, 0.05), math.pi / 2, 0.02)
+
+
+def build_warehouse():
+    """The Roman storage yard (Settlers 4's Lagerplatz): an open round platform of big, chunky setts in
+    concentric rings — slate blue, grey and rose-brown, each its own height and tilt, dark joints between
+    — round a green disc with the gilded Roman eagle, wings spread. The game stacks the stored goods on
+    the ring (`syncYard`, at about two thirds of the radius)."""
+    rnd = random.Random(81)
+    setts = grain_set('sett', (
+        ((0.24, 0.26, 0.32), (0.42, 0.44, 0.52)),
+        ((0.34, 0.36, 0.42), (0.56, 0.58, 0.64)),
+        ((0.4, 0.33, 0.32), (0.62, 0.52, 0.5)),
+        ((0.28, 0.27, 0.29), (0.48, 0.46, 0.47)),
+        ((0.46, 0.46, 0.48), (0.68, 0.68, 0.7)),
+    ), scale=8, bump=0.9)
+    joint = lib.mat_flat('joints', (0.16, 0.15, 0.15))
+    green = lib.mat_grain('disc', (0.3, 0.5, 0.1), (0.56, 0.74, 0.22), scale=5, stretch=(1, 1, 1), bump=0.3)
+    gold = lib.mat_grain('eagle', (0.78, 0.56, 0.1), (0.98, 0.82, 0.3), scale=14, stretch=(1, 1, 1), bump=0.3)
+    earth_pad((0.0, -0.1, 0), 1.06, 1.08, seed=81)
+    lib.tag(0)
+    corner_stakes(-0.95, 0.95, -0.95, 0.95)
+    lib.tag(0, until=0)
+
+    def ring(r0, r1, n, stage):
+        rr = (r0 + r1) / 2
+        for k in range(n):
+            a = (k + rnd.uniform(-0.1, 0.1)) / n * math.tau
+            o = lib.box((math.cos(a) * rr, math.sin(a) * rr, 0.06 + rnd.uniform(-0.006, 0.01)),
+                        (rr * math.tau / n * rnd.uniform(0.78, 0.9), (r1 - r0) * rnd.uniform(0.8, 0.9), 0.07),
+                        setts[rnd.randrange(len(setts))], bevel=0.022)
+            o.rotation_euler = (rnd.uniform(-0.05, 0.05), rnd.uniform(-0.05, 0.05), a + math.pi / 2 + rnd.uniform(-0.08, 0.08))
+        lib.tag(stage)
+
+    lib.cylinder((0, 0, 0.025), 1.02, 0.05, joint, verts=64)
+    lib.tag(1)
+    rings = ((0.89, 1.02, 44), (0.78, 0.89, 39), (0.67, 0.78, 34), (0.57, 0.67, 29), (0.48, 0.57, 25), (0.395, 0.48, 21))
+    for k, (r0, r1, n) in enumerate(rings):
+        ring(r0, r1, n, 1 + k // 2)
+    lib.cylinder((0, 0, 0.055), 0.39, 0.05, joint, verts=48)
+    lib.cylinder((0, 0, 0.065), 0.375, 0.06, green, verts=48, bevel=0.012)
+    lib.tag(3)
+    eagle(0.0, 0.0, 0.1, 0.7, gold)
+    lib.tag(4)
+
+
+def build_bakery():
+    """The Roman bakery: two stone houses under bright terracotta — a tall one behind (ridge along X,
+    its gable to the right) of pale, greenish stone above a blue-grey ground floor, and a lower one in
+    front on the left (ridge along Y) with a big light window in its gable; between them on the right a
+    dark plank lean-to with the door, and in front of it the bake oven: a drum of wooden staves on
+    iron hoops lying on a stone plinth, its glowing mouth to the right, a square stone chimney on top."""
+    rnd = random.Random(61)
+    walls = stone_walls()
+    blocks = grey_blocks('bkb')
+    pale = pale_blocks('bkp')
+    beam = beam_mat()
+    planks = boards_mats()
+    staves = grain_set('stave', (((0.42, 0.26, 0.1), (0.66, 0.44, 0.2)), ((0.5, 0.32, 0.12), (0.74, 0.52, 0.26)),
+                                 ((0.36, 0.22, 0.09), (0.56, 0.38, 0.17))), scale=6, stretch=(1, 1, 8), bump=0.8)
+    tiles = terracotta_mats('bktc')
+    ridge = lib.mat_flat('bktc-r', (0.66, 0.24, 0.1))
+    dark = lib.mat_flat('dark', (0.05, 0.04, 0.03))
+    iron = lib.mat_flat('iron', (0.2, 0.2, 0.22), rough=0.35)
+    door = door_mat()
+    white = lib.mat_flat('bk-window', (0.86, 0.88, 0.86), rough=0.5)
+    embers = lib.mat_flat('embers', (1.0, 0.72, 0.22), rough=0.6)
+    earth_pad((0.05, -0.25, 0), 1.06, 1.15, seed=61)
+    lib.tag(0)
+
+    # Back house (ridge along X), front house (ridge along Y), lean-to, oven.
+    bx0, bx1, by0, by1, bH, brh = -0.42, 0.5, -0.12, 0.92, 1.02, 0.48
+    fx0, fx1, fy0, fy1, fH, frh = -0.95, -0.08, -0.95, 0.2, 0.62, 0.42
+    lx0, lx1, ly0, ly1, lH0, lH1 = -0.08, 0.5, -0.62, -0.12, 0.46, 0.66
+    oy, ox0, ox1, orr = -0.5, 0.5, 0.98, 0.27
+    corner_stakes(fx0, ox1, fy0, by1)
+    lib.tag(0, until=0)
+    for (x0, x1, y0, y1), h in (((bx0, bx1, by0, by1), 0.1), ((fx0, fx1, fy0, fy1), 0.09)):  # no coplanar overlap
+        lib.box(((x0 + x1) / 2, (y0 + y1) / 2, h / 2), (x1 - x0 + 0.06, y1 - y0 + 0.06, h), blocks[1], bevel=0.02)
+    lib.box(((ox0 + ox1) / 2, oy, 0.06), (ox1 - ox0 + 0.04, 2 * orr + 0.1, 0.12), blocks[0], bevel=0.02)
+    lib.tag(1)
+    _b().timber_frame((bx0 + bx1) / 2, (by0 + by1) / 2, bx1 - bx0, by1 - by0, bH, brh, beam, axis='x')
+    _b().timber_frame((fx0 + fx1) / 2, (fy0 + fy1) / 2, fx1 - fx0, fy1 - fy0, fH, frh, beam, axis='y')
+    lib.tag(1, until=2)
+
+    stone_house(bx0, bx1, by0, by1, bH * 0.42, rnd, walls, blocks, block=0.17)
+    quoins(bx0, bx1, by0, by1, 0.02, bH * 0.42, blocks, rnd, block=0.2, row=0.15)
+    stone_house(fx0, fx1, fy0, fy1, fH * 0.55, rnd, walls, blocks, block=0.17)
+    quoins(fx0, fx1, fy0, fy1, 0.02, fH * 0.55, blocks, rnd, block=0.2, row=0.15)
+    # The oven's plinth.
+    lib.box(((ox0 + ox1) / 2, oy, 0.17), (ox1 - ox0, 2 * orr + 0.04, 0.12), walls)
+    stone_course(ox0, ox1, oy - orr - 0.02, oy + orr + 0.02, 0.12, 0.23, blocks, rnd, block=0.14, depth=0.04)
+    lib.tag(2)
+
+    # Upper walls: pale stone on the back house, grey on the front one; gables and windows.
+    stone_house(bx0, bx1, by0, by1, bH, rnd, walls, pale, z0=bH * 0.42, block=0.16)
+    quoins(bx0, bx1, by0, by1, bH * 0.42, bH, pale, rnd, block=0.2, row=0.15)
+    lib.gable(((bx0 + bx1) / 2, (by0 + by1) / 2, bH), by1 - by0, brh - 0.02, bx1 - 0.01, walls, along='x')
+    stone_course(bx1 - 0.02, bx1, by0 + 0.12, by1 - 0.12, bH, bH + brh * 0.45, pale, rnd, block=0.15, faces=('x',))
+    stone_house(fx0, fx1, fy0, fy1, fH, rnd, walls, blocks, z0=fH * 0.55, block=0.17)
+    quoins(fx0, fx1, fy0, fy1, fH * 0.55, fH, blocks, rnd, block=0.2, row=0.15)
+    lib.gable(((fx0 + fx1) / 2, (fy0 + fy1) / 2, fH), fx1 - fx0, frh - 0.02, fy0 + 0.01, walls, along='y')
+    stone_course(fx0 + 0.12, fx1 - 0.12, fy0, fy0 + 0.02, fH, fH + frh * 0.4, blocks, rnd, block=0.15, faces=('y',))
+    window((fx0 + fx1) / 2, fy0 - 0.05, fH * 0.5, 0.3, 0.26, beam, white)
+    window((fx0 + fx1) / 2, fy0 - 0.03, fH + frh * 0.35, 0.12, 0.12, beam, dark)
+    window(fx1 + 0.05, -0.55, 0.3, 0.14, 0.16, beam, dark, face='x')
+    window(0.22, by0 - 0.05, bH * 0.76, 0.16, 0.18, beam, dark)
+    window(bx1 + 0.05, 0.4, bH * 0.74, 0.16, 0.18, beam, white, face='x')
+    window(bx1 + 0.05, 0.4, bH + brh * 0.32, 0.11, 0.11, beam, dark, face='x')
+    # The lean-to: dark planks, the door.
+    plank_walls(lx0, lx1, ly0, ly1, 0.0, lH0, planks[1:2] + planks[3:], dark, beam, rnd, faces=('y',))
+    plank_door(0.25, ly0 - 0.035, 0.0, 0.22, 0.4, door, dark, iron, beam)
+    lib.tag(3)
+
+    scale_roof((bx0 + bx1) / 2, (by0 + by1) / 2, bx1 - bx0, by1 - by0, bH, brh, tiles, ridge, axis='x',
+               overhang=0.1, seed=62, size=0.15, shape='tile')
+    lib.tag(None, split=lambda o: 3 if o.location.y < (by0 + by1) / 2 else 4)
+    scale_roof((fx0 + fx1) / 2, (fy0 + fy1) / 2, fx1 - fx0, fy1 - fy0, fH, frh, tiles, ridge, axis='y',
+               overhang=0.09, seed=63, size=0.15, shape='tile')
+    # The lean-to's roof: tiles from the back house's wall down over the planks.
+    run = math.hypot(ly1 - ly0 + 0.12, lH1 - lH0)
+    tilt = math.atan2(lH1 - lH0, ly1 - ly0 + 0.12)
+    lib.box(((lx0 + lx1) / 2, (ly0 + ly1) / 2 - 0.06, (lH0 + lH1) / 2), (lx1 - lx0 + 0.1, run, 0.04), tiles[0],
+            rot=(tilt, 0, 0))
+    tile_face((lx0 - 0.05, ly0 - 0.12, lH0), (lx1 + 0.05, ly0 - 0.12, lH0), (lx0 - 0.05, ly1, lH1 + 0.01),
+              (lx1 + 0.05, ly1, lH1 + 0.01), tiles, rnd, size=0.14, shape='tile', lift=0.025)
+    # The oven: a drum of staves on iron hoops, closed at the back, its mouth glowing at the +X end.
+    n = 16
+    for k in range(n + 1):
+        th = math.radians(-12) + math.radians(192) * k / n
+        y, z = oy - math.cos(th) * orr, 0.23 + math.sin(th) * orr
+        st = lib.box(((ox0 + ox1) / 2, y, z), (ox1 - ox0 - 0.02, 0.07, 0.04), staves[k % len(staves)], bevel=0.008)
+        st.rotation_euler = (math.pi / 2 - th, 0, 0)
+    for x in (ox0 + 0.08, (ox0 + ox1) / 2, ox1 - 0.08):
+        torus((x, oy, 0.23), orr + 0.015, 0.014, iron, rot=(0, math.pi / 2, 0))
+    lib.cylinder((ox1 - 0.005, oy, 0.23), orr, 0.03, staves[2], rot=(0, math.pi / 2, 0), verts=24)
+    lib.cylinder((ox1 + 0.012, oy, 0.2), 0.13, 0.012, embers, rot=(0, math.pi / 2, 0), verts=20)
+    lib.box((ox1 + 0.012, oy, 0.14), (0.012, 0.26, 0.12), embers)
+    for k in range(7):
+        a = math.pi * k / 6
+        lib.box((ox1 + 0.025, oy + math.cos(a) * 0.16, 0.2 + math.sin(a) * 0.16), (0.04, 0.07, 0.06), blocks[k % 4],
+                rot=(-a + math.pi / 2, 0, 0), bevel=0.01)
+    note_fx('bakery', 'glow', (ox1 + 0.08, oy, 0.17))
+    chimney(ox0 + 0.14, oy + 0.08, 0.36, 1.0, blocks, rnd, name='bakery')
+    lib.box((ox0 + 0.14, oy + 0.08, 1.04), (0.1, 0.1, 0.03), dark)
+    # A sack of flour by the door.
+    sack = lib.lumpy((-0.02, ly0 - 0.2, 0.09), 0.08, white, scale=(0.9, 0.8, 1.2), strength=0.2, seed=6)
+    sack.rotation_euler = (0.1, 0, 0.3)
+    lib.tag(4)
+
+
+def build_house_medium():
+    """The Roman medium residence: three joined houses as in Settlers 4 — on the left a tall
+    half-timbered house (dark timbers, pale plaster, teal windows) over a stone ground course, under a
+    very steep roof of dark slate scales; behind on the right a stone house under bright terracotta,
+    its gable to the right; in front of it a low stone porch under slate with a round-arched door.
+    Ridges all along X. Stages as in the original: a timber frame, then rafters, then walls and roofs."""
+    rnd = random.Random(151)
+    walls = stone_walls()
+    blocks = grey_blocks('hmb')
+    beam = lib.mat_grain('timber', (0.2, 0.12, 0.05), (0.38, 0.24, 0.1), scale=5, stretch=(1, 1, 8), bump=0.6)
+    plaster = lib.mat_stones('plaster', (0.9, 0.84, 0.7), (0.76, 0.68, 0.54), (0.62, 0.54, 0.42), scale=6, bump=0.3)
+    slates = dark_slates('hms')
+    tiles = terracotta_mats('hmt')
+    sl_ridge = lib.mat_flat('sl-ridge', (0.2, 0.25, 0.36))
+    tc_ridge = lib.mat_flat('tc-ridge', (0.66, 0.26, 0.1))
+    teal = lib.mat_flat('teal', (0.16, 0.46, 0.5), rough=0.5)
+    glass = lib.mat_flat('glass', (0.3, 0.52, 0.6), rough=0.2)
+    door = door_mat()
+    dark = lib.mat_flat('dark', (0.05, 0.04, 0.03))
+    earth_pad((0.05, -0.2, 0), 1.06, 1.15, seed=151)
+    lib.tag(0)
+    # A: tall half-timbered house, B: stone house under terracotta, C: low porch under slate.
+    ax0, ax1, ay0, ay1, aH, arh = -0.98, -0.16, -0.78, 0.92, 1.1, 0.88
+    bx0, bx1, by0, by1, bH, brh = -0.16, 0.92, -0.02, 0.92, 0.86, 0.58
+    cx0, cx1, cy0, cy1, cH, crh = -0.16, 0.88, -0.95, -0.02, 0.56, 0.24
+    corner_stakes(ax0, bx1, cy0, by1)
+    lib.tag(0, until=0)
+    B = _b()
+    for (x0, x1, y0, y1), h in (((ax0, ax1, ay0, ay1), 0.08), ((bx0, bx1, by0, by1), 0.07), ((cx0, cx1, cy0, cy1), 0.06)):
+        lib.box(((x0 + x1) / 2, (y0 + y1) / 2, h / 2), (x1 - x0 + 0.06, y1 - y0 + 0.06, h), blocks[1], bevel=0.02)
+    lib.tag(1)
+    B.timber_frame((ax0 + ax1) / 2, (ay0 + ay1) / 2, ax1 - ax0, ay1 - ay0, aH, arh, beam, axis='x')
+    B.timber_frame((bx0 + bx1) / 2, (by0 + by1) / 2, bx1 - bx0, by1 - by0, bH, brh, beam, axis='x')
+    B.timber_frame((cx0 + cx1) / 2, (cy0 + cy1) / 2, cx1 - cx0, cy1 - cy0, cH, crh, beam, axis='x')
+    for x in (ax0 + 0.28, ax1 - 0.28):  # the half-timbered house's inner posts
+        lib.box((x, ay0, aH / 2), (0.05, 0.05, aH), beam)
+    lib.tag(1, until=3)
+    # Roof skeletons (stages 2–3), as in the original: rafters and battens before the slates.
+    for f in gable_faces((ax0 + ax1) / 2, (ay0 + ay1) / 2, ax1 - ax0, ay1 - ay0, aH, arh, 'x', 0.1):
+        face_rafters(*f, beam)
+    for f in gable_faces((bx0 + bx1) / 2, (by0 + by1) / 2, bx1 - bx0, by1 - by0, bH, brh, 'x', 0.1):
+        face_rafters(*f, beam)
+    lib.tag(2, until=3)
+
+    # Stone ground course of A with corner stones; B and C lower walls.
+    stone_house(ax0, ax1, ay0, ay1, 0.3, rnd, walls, blocks, block=0.17)
+    quoins(ax0, ax1, ay0, ay1, 0.02, 0.36, blocks, rnd, block=0.2, row=0.12)
+    stone_house(bx0, bx1, by0, by1, bH * 0.5, rnd, walls, blocks, block=0.18)
+    stone_house(cx0, cx1, cy0, cy1, cH * 0.5, rnd, walls, blocks, block=0.18)
+    quoins(cx0, cx1, cy0, cy1, 0.02, cH * 0.5, blocks, rnd, block=0.2, row=0.13)
+    lib.tag(2)
+    half_timber(ax0, ax1, ay0 + 0.01, ay1, 0.3, aH, plaster, beam, rnd)
+    lib.gable(((ax0 + ax1) / 2, (ay0 + ay1) / 2, aH), ay1 - ay0, arh - 0.04, ax1 - 0.01, plaster, along='x')
+    for dy in (-0.3, 0.0, 0.3):
+        top = aH + (arh - 0.04) * (1 - abs(dy) / ((ay1 - ay0) / 2))
+        lib.box((ax1 + 0.005, (ay0 + ay1) / 2 + dy, (aH + top) / 2), (0.03, 0.045, top - aH), beam)
+    for wz in (0.52, 0.88):
+        for wx in (ax0 + 0.2, ax1 - 0.2):
+            mullion_window(wx, ay0 - 0.04, wz, 0.15, 0.18, teal, glass)
+    stone_house(bx0, bx1, by0, by1, bH, rnd, walls, blocks, z0=bH * 0.5, block=0.18)
+    quoins(bx0, bx1, by0, by1, 0.02, bH, blocks, rnd, block=0.2, row=0.14)
+    lib.gable(((bx0 + bx1) / 2, (by0 + by1) / 2, bH), by1 - by0, brh - 0.02, bx1 - 0.01, walls, along='x')
+    stone_course(bx1 - 0.02, bx1, by0 + 0.12, by1 - 0.12, bH, bH + brh * 0.5, blocks, rnd, block=0.15, faces=('x',))
+    mullion_window(bx1 + 0.05, (by0 + by1) / 2, bH * 0.6, 0.15, 0.18, teal, glass, face='x')
+    mullion_window(bx1 + 0.04, (by0 + by1) / 2, bH + brh * 0.3, 0.1, 0.1, teal, dark, face='x')
+    stone_house(cx0, cx1, cy0, cy1, cH, rnd, walls, blocks, z0=cH * 0.5, block=0.18)
+    quoins(cx0, cx1, cy0, cy1, cH * 0.5, cH, blocks, rnd, block=0.2, row=0.13)
+    lib.gable(((cx0 + cx1) / 2, (cy0 + cy1) / 2, cH), cy1 - cy0, crh - 0.02, cx1 - 0.01, walls, along='x')
+    arch_door(0.47, cy0 - 0.01, 0.0, 0.34, 0.5, door, blocks)
+    lib.tag(3)
+
+    scale_roof((ax0 + ax1) / 2, (ay0 + ay1) / 2, ax1 - ax0, ay1 - ay0, aH, arh, slates, sl_ridge, axis='x',
+               overhang=0.07, seed=152, size=0.13)
+    lib.tag(None, split=lambda o: 3 if o.location.y < (ay0 + ay1) / 2 else 4)
+    scale_roof((bx0 + bx1) / 2, (by0 + by1) / 2, bx1 - bx0, by1 - by0, bH, brh, tiles, tc_ridge, axis='x',
+               overhang=0.1, seed=153, size=0.14, shape='tile')
+    lib.tag(None, split=lambda o: 3 if o.location.y < (by0 + by1) / 2 else 4)
+    scale_roof((cx0 + cx1) / 2, (cy0 + cy1) / 2, cx1 - cx0, cy1 - cy0, cH, crh, slates, sl_ridge, axis='x',
+               overhang=0.09, seed=154, size=0.14)
+    lib.tag(4)
+
+
+def build_house_large():
+    """The Roman large residence (3×3): a stone house under one huge, almost pyramidal tent of dark
+    slate scales with an iron bird on the top; in the middle of the front a half-octagonal timber bay
+    with teal windows under a cone of terracotta tiles rising into the slate; on the left a crow-stepped
+    gable of pale stone through the roof and a little hexagonal oriel under a slate cap on the corner;
+    on the right a round-arched door and a terracotta dormer in the slope. Stages as in the original: a
+    frame whose rafters meet at the top, walls, then the slates."""
+    rnd = random.Random(171)
+    walls = stone_walls()
+    blocks = grey_blocks('hlb')
+    pale = pale_blocks('hlp')
+    beam = lib.mat_grain('timber', (0.2, 0.12, 0.05), (0.38, 0.24, 0.1), scale=5, stretch=(1, 1, 8), bump=0.6)
+    planks = grain_set('hlpl', (((0.34, 0.2, 0.09), (0.52, 0.34, 0.16)), ((0.4, 0.25, 0.11), (0.6, 0.4, 0.2))),
+                       scale=4, stretch=(1, 1, 9), bump=0.6)
+    slates = dark_slates('hls')
+    tiles = terracotta_mats('hlt')
+    sl_ridge = lib.mat_flat('sl-ridge', (0.2, 0.25, 0.36))
+    tc_ridge = lib.mat_flat('tc-ridge', (0.66, 0.26, 0.1))
+    teal = lib.mat_flat('teal', (0.16, 0.46, 0.5), rough=0.5)
+    glass = lib.mat_flat('glass', (0.3, 0.52, 0.6), rough=0.2)
+    iron = lib.mat_flat('iron', (0.16, 0.16, 0.18), rough=0.4)
+    door = door_mat()
+    dark = lib.mat_flat('dark', (0.05, 0.04, 0.03))
+    earth_pad((0.05, -0.25, 0), 1.5, 1.55, seed=171)
+    lib.tag(0)
+    x0, x1, y0, y1, H, rh = -1.2, 1.2, -0.92, 1.18, 0.92, 1.42
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    bxc, byc, br, bH = -0.2, y0, 0.44, 1.08  # the bay
+    tx, ty, tr = x0 + 0.02, y0 + 0.02, 0.25  # the oriel
+    corner_stakes(x0 - 0.2, x1, y0 - 0.45, y1)
+    lib.tag(0, until=0)
+    lib.box((cx, cy, 0.04), (x1 - x0 + 0.06, y1 - y0 + 0.06, 0.08), blocks[1], bevel=0.02)
+    for k in range(10):
+        a = math.tau * k / 10
+        lib.box((-0.9 + 0.3 * math.cos(a), -0.6 + 0.2 * math.sin(a), 0.11), (0.16, 0.12, 0.1), blocks[k % 4],
+                rot=(0, 0, a), bevel=0.02)
+    lib.tag(1)
+    # The frame: posts, plates and the rafters of the tent roof meeting at the top.
+    for x in (x0, -0.4, 0.4, x1):
+        for y in (y0, y1):
+            lib.box((x, y, H / 2), (0.06, 0.06, H), beam)
+    for y in (y0, cy, y1):
+        lib.box((x0, y, H / 2), (0.06, 0.06, H), beam)
+        lib.box((x1, y, H / 2), (0.06, 0.06, H), beam)
+    for (a, b) in (((x0, y0), (x1, y0)), ((x1, y0), (x1, y1)), ((x1, y1), (x0, y1)), ((x0, y1), (x0, y0))):
+        rod((a[0], a[1], H), (b[0], b[1], H), 0.03, beam, verts=6)
+    faces, ra, rb = hip_faces(cx, cy, x1 - x0, y1 - y0, H, rh, overhang=0.1, ridge_frac=0.14)
+    for f in faces:
+        face_rafters(*f, beam, step=0.3, battens=(0.4,))
+    lib.tag(1, until=3)
+
+    stone_house(x0, x1, y0, y1, H * 0.5, rnd, walls, blocks, block=0.2)
+    quoins(x0, x1, y0, y1, 0.02, H * 0.5, blocks, rnd, block=0.24, row=0.16)
+    lib.cylinder((tx, ty, 0.2), tr, 0.4, walls, verts=6)
+    lib.tag(2)
+    stone_house(x0, x1, y0, y1, H, rnd, walls, blocks, z0=H * 0.5, block=0.2)
+    quoins(x0, x1, y0, y1, H * 0.5, H, blocks, rnd, block=0.24, row=0.16)
+    for wz in (0.3, 0.7):
+        for wy in (-0.3, 0.55):
+            mullion_window(x1 + 0.05, wy, wz, 0.16, 0.2, teal, glass, face='x')
+    mullion_window(0.45, y0 - 0.05, 0.68, 0.16, 0.2, teal, glass)
+    arch_door(0.98, y0 - 0.01, 0.0, 0.32, 0.56, door, pale)
+    # The bay: a half octagon of timber-framed planks, windows on its front faces.
+    lib.cylinder((bxc, byc, 0.05), br + 0.04, 0.1, blocks[1], verts=8, rot=(0, 0, math.pi / 8))
+    lib.cylinder((bxc, byc, bH / 2 + 0.05), br, bH - 0.1, planks[0], verts=8, rot=(0, 0, math.pi / 8))
+    for k in range(8):
+        a = math.pi / 8 + k * math.pi / 4  # the octagon's corners
+        px, py = bxc + math.cos(a) * br, byc + math.sin(a) * br
+        if py > byc + 0.05:
+            continue
+        lib.box((px, py, bH / 2 + 0.05), (0.05, 0.05, bH - 0.1), beam)
+    for k in range(8):
+        a = k * math.pi / 4  # the middles of the octagon's faces
+        fx, fy = bxc + math.cos(a) * br * 0.93, byc + math.sin(a) * br * 0.93
+        if fy > byc - 0.1:
+            continue
+        for (size, mat, out) in (((0.22, 0.02, 0.3), teal, 0.035), ((0.17, 0.03, 0.25), glass, 0.045)):
+            o = lib.box((bxc + math.cos(a) * (br * 0.92 + out), byc + math.sin(a) * (br * 0.92 + out), 0.62), size, mat)
+            o.rotation_euler = (0, 0, a + math.pi / 2)
+        for z in (0.3, 0.92):
+            r = lib.box((bxc + math.cos(a) * (br * 0.92 + 0.03), byc + math.sin(a) * (br * 0.92 + 0.03), z),
+                        (0.34, 0.035, 0.04), beam)
+            r.rotation_euler = (0, 0, a + math.pi / 2)
+    # The oriel: stone foot, timber walls with a window, at the front-left corner.
+    lib.cylinder((tx, ty, 0.6), tr - 0.01, 0.4, planks[1], verts=6)
+    for k in range(6):
+        a = k * math.pi / 3
+        lib.box((tx + math.cos(a) * tr, ty + math.sin(a) * tr, 0.6), (0.04, 0.04, 0.4), beam)
+    mullion_window(tx + 0.02, ty - tr + 0.02, 0.62, 0.11, 0.16, teal, glass)
+    lib.box((tx, ty, 0.81), (2 * tr + 0.04, 2 * tr + 0.04, 0.04), beam)
+    stepped_wall(x0 + 0.24, y0 + 0.06, y1 - 0.5, H, H + 0.95, pale, rnd, steps=5)
+    lib.tag(3)
+
+    hip_roof(cx, cy, x1 - x0, y1 - y0, H, rh, slates, sl_ridge, rnd, overhang=0.1, size=0.15, shape='scale',
+             ridge_frac=0.14)
+    for (a, b, p, q) in faces[:3]:  # the hips the camera sees, capped with a slate roll
+        rod((a[0], a[1], a[2] + 0.04), (p[0], p[1], p[2] + 0.04), 0.04, sl_ridge, verts=8)
+    lib.tag(None, split=lambda o: 4 if o.name.startswith('hip') or o.location.z > H + rh * 0.8
+            else (3 if (o.location.y - cy) < (o.location.x - cx) else 4))
+    cone_tiles(bxc, byc, bH, br + 0.12, 0.85, tiles, rnd, size=0.13, shape='tile')
+    lib.sphere((bxc, byc, bH + 0.88), 0.04, tc_ridge)
+    cone_tiles(tx, ty, 0.83, tr + 0.08, 0.48, slates, rnd, size=0.11, shape='scale')
+    lib.sphere((tx, ty, 1.33), 0.035, sl_ridge)
+    lib.tag(3)
+    # The dormer on the front slope, right of the bay.
+    dx, dy, dz = 0.5, -0.65, 1.36  # front wall standing on the slope, window centre height
+    lib.box((dx, dy + 0.12, dz - 0.01), (0.34, 0.44, 0.32), walls)
+    stone_course(dx - 0.17, dx + 0.17, dy - 0.1, dy + 0.34, dz - 0.17, dz + 0.14, blocks, rnd, block=0.12, depth=0.03)
+    lib.gable((dx, dy + 0.12, dz + 0.15), 0.34, 0.2, dy - 0.1, walls, along='y')
+    window(dx, dy - 0.13, dz, 0.13, 0.15, beam, dark)
+    scale_roof(dx, dy + 0.12, 0.34, 0.48, dz + 0.15, 0.2, tiles, tc_ridge, axis='y', overhang=0.06, seed=174,
+               size=0.1, shape='tile')
+    # The weathervane: an iron bird on a rod at the top.
+    top = H + rh
+    rod((ra[0], ra[1], top), (ra[0], ra[1], top + 0.3), 0.012, iron, verts=6)
+    bird = lib.sphere((ra[0], ra[1], top + 0.3), 0.045, iron, scale=(1.6, 0.6, 0.7))
+    bird.rotation_euler = (0, 0, 0.6)
+    lib.sphere((ra[0] + 0.05, ra[1] + 0.035, top + 0.34), 0.025, iron)
+    for s_ in (-1, 1):
+        lib.box((ra[0] - 0.01, ra[1] + s_ * 0.03, top + 0.34), (0.08, 0.07, 0.01), iron, rot=(s_ * 0.6, 0, 0.6))
+    lib.tag(4)
+
+
+def build_barracks():
+    """The Roman barracks (3×3): a square hall of big pale-grey squared stones, rugged blocks along the
+    wall top, under a low hipped roof of sky-blue slate tiles, and on it a square stone upper storey
+    under a steep pyramid of the same tiles; a dark red double door studded with iron; in front a drill
+    yard of mossy flagstones between low stone walls, with a gallows-pell and its straw-yellow dummy, a
+    round target on a stand and swords lying on the stones."""
+    rnd = random.Random(181)
+    walls = stone_walls()
+    blocks = grain_set('bkb', (((0.4, 0.42, 0.45), (0.7, 0.72, 0.74)), ((0.46, 0.47, 0.48), (0.78, 0.79, 0.8)),
+                               ((0.34, 0.36, 0.4), (0.6, 0.62, 0.66)), ((0.5, 0.5, 0.48), (0.82, 0.81, 0.78))),
+                       scale=7, bump=1.0)
+    beam = beam_mat()
+    slates = sky_slates('bsl')
+    ridge = lib.mat_flat('bsl-r', (0.3, 0.46, 0.6))
+    door = lib.mat_grain('bdoor', (0.34, 0.12, 0.07), (0.52, 0.22, 0.12), scale=4, stretch=(1, 1, 9), bump=0.6)
+    iron = lib.mat_flat('iron', (0.2, 0.2, 0.22), rough=0.35)
+    steel = lib.mat_flat('steel', (0.7, 0.72, 0.76), rough=0.3)
+    dark = lib.mat_flat('dark', (0.05, 0.04, 0.03))
+    straw = thatch_mat('dummy')
+    rings = lib.mat_flat('target-ring', (0.45, 0.22, 0.08))
+    flags = grain_set('bflag', (((0.3, 0.34, 0.28), (0.5, 0.56, 0.46)), ((0.34, 0.36, 0.34), (0.56, 0.58, 0.54)),
+                                ((0.26, 0.32, 0.22), (0.42, 0.52, 0.34))), scale=8, bump=0.8)
+    moss = lib.mat_grain('moss', (0.16, 0.3, 0.08), (0.34, 0.5, 0.14), scale=12, stretch=(1, 1, 1), bump=0.6)
+    earth_pad((0.0, -0.2, 0), 1.52, 1.58, seed=181)
+    lib.tag(0)
+    corner_stakes(-1.45, 1.4, -1.45, 1.4)
+    lib.tag(0, until=0)
+    x0, x1, y0, y1, H = -0.42, 1.28, -0.48, 1.25, 1.3
+    ux0, ux1, uy0, uy1, uH = 0.12, 0.88, 0.04, 0.8, 2.2
+    hcx, hcy = (x0 + x1) / 2, (y0 + y1) / 2
+    lib.box((hcx, hcy, 0.05), (x1 - x0 + 0.08, y1 - y0 + 0.08, 0.1), blocks[2], bevel=0.02)
+    # Yard: a bed under the flagstones.
+    lib.box((0.0, -0.98, 0.012), (2.9, 1.0, 0.024), walls)
+    lib.box((-0.94, 0.4, 0.012), (1.02, 1.8, 0.024), walls)
+    lib.tag(1)
+    for x in (x0, (x0 + x1) / 2, x1):
+        for y in (y0, y1):
+            lib.box((x, y, H / 2), (0.07, 0.07, H), beam)
+    lib.box((x0, hcy, H / 2), (0.07, 0.07, H), beam)
+    lib.box((x1, hcy, H / 2), (0.07, 0.07, H), beam)
+    for (a, b) in (((x0, y0), (x1, y0)), ((x1, y0), (x1, y1)), ((x1, y1), (x0, y1)), ((x0, y1), (x0, y0))):
+        rod((a[0], a[1], H), (b[0], b[1], H), 0.035, beam, verts=6)
+    lib.tag(1, until=2)
+
+    stone_house(x0, x1, y0, y1, H * 0.45, rnd, walls, blocks, block=0.26)
+    quoins(x0, x1, y0, y1, 0.02, H * 0.45, blocks, rnd, block=0.3, row=0.2)
+
+    def flags_in(xa, xb, ya, yb):
+        nx, ny = max(1, round((xb - xa) / 0.25)), max(1, round((yb - ya) / 0.22))
+        for j in range(ny):
+            for i in range(nx):
+                x = xa + (i + 0.5 + (0.25 if j % 2 else -0.25)) * (xb - xa) / nx
+                if x > xb - 0.05 or x < xa + 0.05:
+                    continue
+                y = ya + (j + 0.5) * (yb - ya) / ny
+                lib.box((x + rnd.uniform(-0.02, 0.02), y + rnd.uniform(-0.02, 0.02), 0.03),
+                        ((xb - xa) / nx * rnd.uniform(0.78, 0.92), (yb - ya) / ny * rnd.uniform(0.78, 0.9), 0.035),
+                        flags[rnd.randrange(len(flags))], rot=(0, 0, rnd.uniform(-0.12, 0.12)), bevel=0.012)
+    flags_in(-1.38, 1.38, -1.46, -0.5)
+    flags_in(-1.38, x0 - 0.06, -0.5, 1.28)
+    for k in range(14):
+        lib.lumpy((rnd.uniform(-1.3, 1.2), rnd.uniform(-1.4, -0.6), 0.04), rnd.uniform(0.04, 0.08), moss,
+                  scale=(1.3, 1.0, 0.25), strength=0.4, seed=k)
+    # Low walls on both sides of the yard.
+    for (xa, ya, xb, yb) in ((-1.44, 1.25, -1.44, -1.42), (1.42, y0 - 0.05, 1.42, -1.38)):
+        n = max(2, round(math.hypot(xb - xa, yb - ya) / 0.24))
+        for k in range(n):
+            t = (k + 0.5) / n
+            px, py = xa + (xb - xa) * t, ya + (yb - ya) * t
+            for z, hz in ((0.08, 0.15), (0.22, 0.13)):
+                lib.box((px, py, z), (0.2, 0.24 if k % 2 == 0 else 0.22, hz), blocks[rnd.randrange(len(blocks))],
+                        rot=(0, 0, rnd.uniform(-0.08, 0.08)), bevel=0.02)
+            if k % 2 == 0:
+                lib.box((px, py, 0.33), (0.22, 0.24, 0.1), blocks[rnd.randrange(len(blocks))], bevel=0.02)
+    lib.tag(2)
+
+    stone_house(x0, x1, y0, y1, H, rnd, walls, blocks, z0=H * 0.45, block=0.26)
+    quoins(x0, x1, y0, y1, H * 0.45, H, blocks, rnd, block=0.3, row=0.2)
+    battlements(x0 + 0.06, x1 - 0.06, y0 + 0.06, y1 - 0.06, H, blocks, rnd, size=0.2, h=0.16)
+    for (x, y) in ((x0 + 0.08, y0 + 0.08), (x1 - 0.08, y0 + 0.08), (x1 - 0.08, y1 - 0.08), (x0 + 0.08, y1 - 0.08)):
+        lib.box((x, y, H + 0.1), (0.24, 0.24, 0.2), blocks[rnd.randrange(len(blocks))], bevel=0.025)
+    # The double door under a stone arch, the windows.
+    dxc, dw, dh = 0.9, 0.52, 0.74
+    for s_ in (-1, 1):
+        lib.box((dxc + s_ * dw / 4, y0 - 0.04, dh / 2), (dw / 2 - 0.015, 0.04, dh), door, bevel=0.008)
+        for z in (0.14, 0.36, 0.56):
+            lib.box((dxc + s_ * dw / 4, y0 - 0.065, z), (dw / 2 - 0.04, 0.012, 0.03), iron)
+            for k in range(3):
+                lib.sphere((dxc + s_ * dw / 4 + (k - 1) * 0.06, y0 - 0.075, z), 0.012, iron, subdiv=1)
+    for k in range(9):
+        a = math.pi * k / 8
+        lib.box((dxc + math.cos(a) * (dw / 2 + 0.06), y0 - 0.07, dh + math.sin(a) * 0.14),
+                (0.1, 0.08, 0.1), blocks[k % len(blocks)], rot=(0, -a + math.pi / 2, 0), bevel=0.015)
+    lib.box((dxc, y0 - 0.06, dh + 0.04), (dw + 0.04, 0.06, 0.08), blocks[1], bevel=0.015)
+    for wx in (0.0, 0.42):
+        slit(wx, y0 - 0.02, H * 0.68, 'y', dark, blocks[3])
+    for wy in (0.05, 0.75):
+        slit(x1 + 0.02, wy, H * 0.68, 'x', dark, blocks[3])
+    # The upper storey.
+    stone_house(ux0, ux1, uy0, uy1, uH, rnd, walls, blocks, z0=H, block=0.22)
+    quoins(ux0, ux1, uy0, uy1, H + 0.15, uH, blocks, rnd, block=0.24, row=0.18)
+    slit((ux0 + ux1) / 2, uy0 - 0.02, uH - 0.32, 'y', dark, blocks[3])
+    slit(ux1 + 0.02, (uy0 + uy1) / 2, uH - 0.32, 'x', dark, blocks[3])
+    lib.tag(3)
+
+    hip_roof(hcx, hcy, x1 - x0 - 0.26, y1 - y0 - 0.26, H + 0.06, 0.62, slates, ridge, rnd, overhang=0.04, size=0.16,
+             shape='tile', ridge_frac=0.0)
+    lib.tag(None, split=lambda o: 4 if o.name.startswith('hip') else (3 if (o.location.y - hcy) < (o.location.x - hcx) else 4))
+    hip_roof((ux0 + ux1) / 2, (uy0 + uy1) / 2, ux1 - ux0, uy1 - uy0, uH, 0.7, slates, ridge, rnd, overhang=0.1,
+             size=0.15, shape='tile', ridge_frac=0.0)
+    # The pell: a gallows of squared timber with the straw dummy hanging from it.
+    px, py = -1.12, -0.7
+    lib.box((px, py, 0.5), (0.07, 0.07, 1.0), beam, bevel=0.008)
+    lib.box((px + 0.22, py, 0.97), (0.5, 0.06, 0.06), beam, bevel=0.008)
+    rod((px, py, 0.72), (px + 0.2, py, 0.95), 0.02, beam, verts=6)
+    lib.box((px, py, 0.03), (0.22, 0.22, 0.06), beam, bevel=0.01)
+    hx = px + 0.38
+    rod((hx, py, 0.94), (hx, py, 0.78), 0.008, beam, verts=4)
+    lib.cylinder((hx, py, 0.6), 0.075, 0.3, straw, verts=12, radius2=0.06)
+    lib.sphere((hx, py, 0.81), 0.055, straw)
+    lib.box((hx, py, 0.68), (0.06, 0.32, 0.05), straw, rot=(0.25, 0, 0))
+    for s_ in (-1, 1):
+        lib.cylinder((hx, py + s_ * 0.03, 0.38), 0.025, 0.16, straw, verts=8)
+    # Swords on the ground by the pell.
+    for (sx, sy, a) in ((-0.7, -1.1, 0.4), (-0.62, -1.18, -0.5)):
+        lib.box((sx, sy, 0.065), (0.34, 0.035, 0.01), steel, rot=(0, 0, a))
+        lib.box((sx - math.cos(a) * 0.17, sy - math.sin(a) * 0.17, 0.07), (0.03, 0.12, 0.02), iron, rot=(0, 0, a))
+    # The target: rings of straw and red-brown on a slanted stand.
+    tgx, tgy = 0.2, -1.2
+    for dx in (-0.12, 0.12):
+        rod((tgx + dx, tgy + 0.08, 0.0), (tgx + dx * 0.4, tgy + 0.02, 0.62), 0.022, beam, verts=6)
+    rod((tgx, tgy + 0.22, 0.0), (tgx, tgy + 0.04, 0.6), 0.02, beam, verts=6)
+    for k, (rr, m) in enumerate(((0.26, straw), (0.2, rings), (0.15, straw), (0.09, rings), (0.04, straw))):
+        lib.cylinder((tgx, tgy - k * 0.006, 0.44), rr, 0.05, m, rot=(math.pi / 2 - 0.25, 0, 0.35), verts=28)
+    lib.tag(4)

@@ -272,7 +272,7 @@ SINGLE = {
     'stonecutter': (buildings.build_stonecutter, 150, 140, 75, 100),
     'tower': (buildings.build_tower, 150, 210, 75, 170),
     'house_large': (buildings.build_house_large, 220, 190, 110, 135),
-    'house_medium': (buildings.build_house_medium, 150, 140, 75, 100),
+    'house_medium': (buildings.build_house_medium, 150, 160, 75, 120),
     'house_small': (buildings.build_house_small, 150, 140, 75, 100),
     'coalmine': (buildings.build_coalmine, 150, 140, 75, 100),
     'stonemine': (buildings.build_stonemine, 150, 140, 75, 100),
@@ -389,7 +389,8 @@ def main():
                 continue
             staged = any('stage' in o for o in scene.objects)
             if staged:
-                for k in range(STAGES):
+                # ART_NOSTAGES=1 renders only the finished look (a quick preview).
+                for k in range(0 if os.environ.get('ART_NOSTAGES') else STAGES):
                     lib.show_stage(k)
                     lib.render_to(scene, os.path.join(OUT, f'{n}-s{k}.png'))
                 lib.show_stage(STAGES)
