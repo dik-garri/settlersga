@@ -33,6 +33,7 @@ import {
   GATHER_ACTION,
   PLANT_ACTION,
   TASK_ACTION,
+  outfitOf,
   styleOf,
   type ActionId,
   type ActionDef,
@@ -2207,7 +2208,8 @@ export class GameRenderer {
       if (s3d) {
         // Pre-rendered figure: full frame, its tunic/shield part tinted, the hat on top; 8 painted
         // directions, so no mirroring.
-        const fr = action ? workFrames(s3d, action, style.outfit)[shown][f] : holdFrames(s3d, tool, style.outfit)[shown][f];
+        const outfit = outfitOf(style, s.level);
+        const fr = action ? workFrames(s3d, action, outfit)[shown][f] : holdFrames(s3d, tool, outfit)[shown][f];
         setFrame(v.body, fr.full);
         v.tunic.visible = fr.tint !== null;
         if (fr.tint) setFrame(v.tunic, fr.tint);

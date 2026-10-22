@@ -250,6 +250,7 @@ export function paintHat(ctx: Ctx, pd: number, style: HatStyle): void {
     }
     // falls through: the helmet itself
     case 'galea1':
+    case 'galea1t':
     case 'helmet':
       ctx.fillStyle = '#d0d0d0';
       ctx.beginPath();

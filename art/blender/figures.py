@@ -34,20 +34,29 @@ PAGE = 2048  # atlas page size in pixels (at lib.RESOLUTION)
 # Mirrors src/render/animConfig.ts: tool shapes, hat styles and the work actions with their tool
 # and near-arm angles (turns of π: 0 hanging down, 0.5 forward, 1 straight up) and bow pull.
 TOOLS = ['none', 'axe', 'hammer', 'pick', 'shovel', 'scythe', 'rod', 'bucket', 'sword', 'bow', 'carry', 'spear']
-HAT_STYLES = ['cap', 'straw', 'helmet', 'hood', 'chef', 'bare', 'plume', 'galea1', 'galea2', 'galea3', 'coif', 'knit']
+HAT_STYLES = ['cap', 'straw', 'helmet', 'hood', 'chef', 'bare', 'plume', 'galea1', 'galea2', 'galea3', 'coif', 'knit',
+              'galea1t']
 
 #: Outfits (src/render/animConfig.ts `Outfit`): what a profession wears over the tunic, rendered as
 #: its own pose groups `hold:<tool>@<outfit>` and `work:<action>@<outfit>`.
 OUTFITS = {
-    'legion': (['sword'], ['sword']),  # swordsman: plated armour, big curved shield
-    'archer': (['bow'], ['shoot']),  # bowman: leather armour, quiver
-    'leader': (['sword'], ['sword']),  # squad leader: gilded cuirass, round golden shield, cloak
+    # Swordsmen by level (`build_fighters`): leather cuirass and a small scutum; a steel chest plate
+    # and an oval shield; banded steel and a big scutum with a winged emblem.
+    'legion1': (['sword'], ['sword']),
+    'legion2': (['sword'], ['sword']),
+    'legion3': (['sword'], ['sword']),
+    # Bowmen by level: a leather jerkin; studded leather with steel shoulder guards; banded steel.
+    'archer1': (['bow'], ['shoot']),
+    'archer2': (['bow'], ['shoot']),
+    'archer3': (['bow'], ['shoot']),
+    'leader': (['sword'], ['sword']),  # squad leader: gilded cuirass, round gilded shield, cloak
     'healer': (['none'], []),  # infirmary's healer: long linen robe, stole, satchel of herbs
     'watch': (['spear'], []),  # lookout's watchman: short wool cape, horn at the hip (and his spear)
     'saboteur': (['pick'], ['smash']),  # saboteur: dark jerkin, sash with pouches, leg wraps (and a pick)
 }
 #: Bumped when a look changes, so its cached groups are rendered again.
-LOOK_REV = {'legion': 1, 'archer': 1, 'leader': 2, 'healer': 1, 'watch': 1, 'saboteur': 1}
+LOOK_REV = {'legion1': 1, 'legion2': 1, 'legion3': 1, 'archer1': 1, 'archer2': 1, 'archer3': 1, 'leader': 3,
+            'healer': 1, 'watch': 1, 'saboteur': 1}
 ACTIONS = {
     'chop': ('axe', [0.95, 0.62, 0.2, 0.1], None),
     'hammer': ('hammer', [0.82, 0.5, 0.16, 0.34], None),
@@ -258,18 +267,28 @@ class Figure:
             lib.cylinder((0, 0, 0.1), 0.058, 0.11, W, radius2=0.07, verts=12),
             lib.cylinder((0, 0, 0.16), 0.072, 0.01, M, verts=12),
         ])
+        # The gladius: a short broad blade with a long point, a brass guard and a round pommel.
+        brass = lib.mat_flat('swordbrass', BRASS, rough=0.3)
+        brass.node_tree.nodes['Principled BSDF'].inputs['Metallic'].default_value = 0.9
         self.tool('sword', r, [
-            lib.box((0, 0, 0.24), (0.04, 0.012, 0.36), M, bevel=0.006),
-            lib.box((0, 0, 0.055), (0.11, 0.03, 0.022), M),
-            lib.cylinder((0, 0, 0.0), 0.018, 0.1, self.leather, verts=8),
+            lib.box((0, 0, 0.22), (0.048, 0.012, 0.3), M, bevel=0.006),
+            lib.box((0, 0, 0.385), (0.034, 0.011, 0.05), M, rot=(0, math.pi / 4, 0), bevel=0.004),
+            lib.box((0, 0, 0.065), (0.09, 0.032, 0.022), brass, bevel=0.006),
+            lib.cylinder((0, 0, 0.01), 0.016, 0.09, self.leather, verts=8),
+            lib.sphere((0, 0, -0.04), 0.024, brass),
         ])
         # Bow in the left hand: a curved stave and its string.
+        # A long recurve of light orange wood (Settlers 4's bows), its tips curling forward, a grip wrap.
+        bow_wood = lib.mat_grain('bowwood', (0.66, 0.34, 0.1), (0.86, 0.52, 0.2), scale=6, stretch=(1, 1, 8), bump=0.3)
         stave = []
-        for k in range(7):
-            t = k / 6 - 0.5
-            stave.append(lib.cylinder((0.07 * (1 - (2 * t) ** 2), 0, t * 0.5), 0.013, 0.1, W,
-                                      rot=(0, -1.6 * t, 0), verts=6))
-        stave.append(lib.cylinder((-0.005, 0, 0), 0.003, 0.5, self.dark, verts=4))
+        n = 11
+        for k in range(n):
+            t = k / (n - 1) - 0.5
+            bulge = 0.075 * (1 - (2 * t) ** 2) - 0.03 * max(0.0, abs(2 * t) - 0.75) / 0.25
+            stave.append(lib.cylinder((bulge, 0, t * 0.62), 0.013 - 0.004 * abs(2 * t), 0.072, bow_wood,
+                                      rot=(0, -1.5 * t + (0.9 * math.copysign(1, t) if abs(2 * t) > 0.75 else 0), 0), verts=6))
+        stave.append(lib.cylinder((0.075, 0, 0), 0.017, 0.07, self.leather, verts=8))
+        stave.append(lib.cylinder((-0.012, 0, 0), 0.003, 0.58, self.dark, verts=4))
         self.tool('bow', l, stave)
         # The watchman's spear: a long ash shaft, butt near the ground, a leaf-shaped iron head.
         self.tool('spear', r, [
@@ -306,53 +325,7 @@ class Figure:
             obj['mask'] = 1
             return obj
 
-        # Plated armour: overlapping steel bands round the chest, layered shoulder plates, a leather
-        # kilt of strips — wider than a civilian, so a soldier reads as one at a glance.
-        bands = on_body([lib.cylinder((0, 0, 0.47 + 0.042 * k), 0.142 - 0.006 * k, 0.05, steel, radius2=0.136 - 0.006 * k,
-                                      verts=20) for k in range(5)])
-        pauldrons = on_body([lib.sphere((0, side * (0.15 + 0.012 * k), 0.63 - 0.035 * k), 0.07 - 0.008 * k, steel,
-                                        scale=(1.1, 0.9, 0.55)) for side in (-1, 1) for k in range(3)])
-        kilt = on_body([lib.box((math.cos(a) * 0.13, math.sin(a) * 0.13, 0.38), (0.035, 0.05, 0.11), L,
-                                rot=(0, 0, a)) for a in [k * math.pi / 5 for k in range(10)]])
-        belt = on_body([lib.cylinder((0, 0, 0.45), 0.146, 0.035, brass, verts=20)])
-
-        # The legionary's shield: tall, curved round the arm, face in the player's colour with a
-        # brass rim, a boss and two brass bars across (our own simple motif).
-        scutum = []
-        n, half_w, height = 7, 0.17, 0.46
-        for k in range(n):
-            t = (k + 0.5) / n * 2 - 1  # −1 … 1 across the width
-            a = t * 0.55
-            y = math.sin(a) * 0.3
-            x = 0.09 + (1 - math.cos(a)) * 0.3 * -1 + 0.08
-            scutum.append(masked(lib.box((x, y, 0.03), (0.016, 2 * half_w / n + 0.004, height), self.tunic,
-                                         rot=(0, 0, a))))
-            for z in (0.03 + height / 2, 0.03 - height / 2):
-                scutum.append(lib.box((x + 0.004, y, z), (0.02, 2 * half_w / n + 0.004, 0.022), brass, rot=(0, 0, a)))
-            if k in (0, n - 1):
-                scutum.append(lib.box((x + 0.004, y, 0.03), (0.02, 0.018, height), brass, rot=(0, 0, a)))
-        scutum += [lib.sphere((0.185, 0, 0.03), 0.05, brass, scale=(0.7, 1, 1))]
-        scutum += [lib.box((0.182, 0, 0.03 + dz), (0.012, 0.2, 0.025), brass) for dz in (0.13, -0.13)]
-        scutum = on_grip(scutum)
-
-        # The bowman: leather armour with shoulder pads, a quiver on the back.
-        jerkin = on_body([lib.cylinder((0, 0, 0.555), 0.13, 0.18, L, radius2=0.105, verts=18)] +
-                         [lib.sphere((0, side * 0.145, 0.615), 0.065, L, scale=(1, 1, 0.6)) for side in (-1, 1)])
-        quiver = on_body([lib.cylinder((-0.15, 0.05, 0.6), 0.048, 0.32, L, rot=(0.25, -0.2, 0), verts=10)] +
-                         [lib.box((-0.165 + 0.02 * k, 0.05 + 0.01 * k, 0.79), (0.012, 0.03, 0.05),
-                                  lib.mat_flat('feather', (0.9, 0.85, 0.7)), rot=(0.25, -0.2, 0)) for k in range(3)])
-
-        # The squad leader: a gilded muscled cuirass, a round golden shield, a cloak in the player's
-        # colour hanging from the shoulders.
-        cuirass = on_body([lib.cylinder((0, 0, 0.54), 0.148, 0.2, gold, radius2=0.132, verts=22),
-                           lib.sphere((0.07, 0.05, 0.57), 0.07, gold, scale=(0.7, 1, 0.8)),
-                           lib.sphere((0.07, -0.05, 0.57), 0.07, gold, scale=(0.7, 1, 0.8)),
-                           lib.cylinder((0, 0, 0.445), 0.15, 0.03, gold, verts=22)] +
-                          [lib.sphere((0, side * 0.155, 0.625), 0.072, gold, scale=(1.1, 0.9, 0.55)) for side in (-1, 1)])
-        cloak = on_body([masked(lib.box((-0.15, 0, 0.42), (0.03, 0.3, 0.44), self.tunic, rot=(0, -0.18, 0), bevel=0.01)),
-                         masked(lib.box((-0.11, 0, 0.64), (0.07, 0.3, 0.04), self.tunic))])
-        round_shield = on_grip([lib.cylinder((0.11, 0, 0.02), 0.17, 0.026, gold, rot=(0, math.pi / 2, 0), verts=28),
-                                lib.sphere((0.124, 0, 0.02), 0.06, gold, scale=(0.5, 1, 1))])
+        fighters = self.build_fighters(steel, gold, brass, on_grip, on_body, masked)
 
         # The healer: a long linen robe to the ankles over the tunic, a stole in the player's colour
         # round the neck and down the front, a rope girdle, a leather satchel of herbs at the hip and
@@ -433,12 +406,212 @@ class Figure:
             wraps += parts
 
         self.extras = {
-            'legion': bands + pauldrons + kilt + belt + scutum,
-            'archer': jerkin + quiver + kilt + belt,
-            'leader': cuirass + kilt + cloak + round_shield,
+            **fighters,
             'healer': robe + stole + satchel,
             'watch': cape + horn,
             'saboteur': doublet + sash + pouches + wraps,
+        }
+
+    def build_fighters(self, steel, gold, brass, on_grip, on_body, masked):
+        """The Roman fighters by level, after Settlers 4: their gear changes with the level, not only
+        the helmet's crest. Swordsmen go from a leather cuirass and a curved rectangular scutum with
+        zigzag bolts (level 1) over leather with a steel chest plate and an oval shield (2) to banded
+        steel armour and a broad round shield (3), both with a running scroll; bowmen from a leather
+        jerkin (1) over steel shoulder guards on studded leather (2) to banded steel (3), a light green
+        quiver across the back and a long orange recurve bow. All of
+        them show the tunic — skirt and sleeves, in the player's colour — under the armour, wear a
+        cloth scarf at the neck, a belt with a short apron of studded straps, and strapped legionary
+        sandals up the shins. The squad leader: a gilded muscled cuirass, a cloak in the player's
+        colour, a round gilded shield. Returns outfit → parts."""
+        L = self.leather
+        hide = lib.mat_grain('hide', (0.5, 0.27, 0.1), (0.7, 0.42, 0.17), scale=22, stretch=(1, 1, 1), bump=0.45)
+        scarf_cloth = lib.mat_grain('scarf', (0.82, 0.55, 0.22), (0.95, 0.72, 0.36), scale=30, stretch=(1, 1, 3), bump=0.4)
+        quiver_hide = lib.mat_grain('quiver', (0.5, 0.68, 0.22), (0.68, 0.84, 0.36), scale=20, stretch=(1, 1, 4), bump=0.4)
+        feather = lib.mat_flat('feather', (0.94, 0.92, 0.86))
+        red_fletch = lib.mat_flat('fletch', (0.78, 0.12, 0.08))
+
+        def ring(z, r, depth, mat, verts=22):
+            return lib.cylinder((0, 0, z), r, depth, mat, verts=verts)
+
+        # --- what every fighter wears
+        def sandals():
+            """Legionary sandals: straps wound up the shin to mid-calf (on the legs, so they walk)."""
+            parts = []
+            for i, side in enumerate((-1, 1)):
+                own = [lib.cylinder((0.004, side * 0.062, 0.055 + 0.04 * k), 0.054 - 0.002 * k, 0.013, L,
+                                    rot=((0.2 if k % 2 else -0.2), 0, 0), verts=12) for k in range(4)]
+                own.append(lib.box((0.05, side * 0.062, 0.05), (0.03, 0.03, 0.06), L))  # the front lacing
+                for obj in own:
+                    self.attach(obj, self.legs[i])
+                parts += own
+            return parts
+
+        def scarf():
+            return on_body([lib.cylinder((0, 0, 0.652), 0.104, 0.04, scarf_cloth, radius2=0.09, verts=20),
+                            lib.sphere((0.085, 0.0, 0.63), 0.032, scarf_cloth, scale=(0.8, 1.4, 0.8))])
+
+        def belt_and_apron(studs):
+            """A belt over the tunic and, in front, the apron of four straps with metal studs."""
+            parts = [ring(0.452, 0.146, 0.036, studs)]
+            for k in range(4):
+                y = (k - 1.5) * 0.034
+                parts.append(lib.box((0.142, y, 0.38), (0.012, 0.024, 0.12), L, rot=(0, -0.12, 0)))
+                parts += [lib.sphere((0.15 - 0.012 * j, y, 0.41 - 0.045 * j), 0.008, studs) for j in range(2)]
+            return on_body(parts)
+
+        # --- torso armour
+        def leather_cuirass(mat=hide):
+            """A moulded leather cuirass with rounded shoulder flaps."""
+            return on_body([lib.cylinder((0, 0, 0.555), 0.141, 0.19, mat, radius2=0.11, verts=22),
+                            lib.sphere((0.06, 0.045, 0.575), 0.068, mat, scale=(0.72, 0.95, 0.8)),
+                            lib.sphere((0.06, -0.045, 0.575), 0.068, mat, scale=(0.72, 0.95, 0.8))] +
+                           [lib.sphere((0, side * 0.148, 0.618), 0.066, mat, scale=(1.05, 0.95, 0.55)) for side in (-1, 1)])
+
+        def chest_plate():
+            """A steel plate over the chest, with a rivet in each corner."""
+            parts = [lib.sphere((0.098, 0, 0.565), 0.085, steel, scale=(0.42, 1.15, 0.95))]
+            parts += [lib.sphere((0.128, dy, 0.565 + dz), 0.008, brass) for dy in (-0.06, 0.06) for dz in (-0.05, 0.05)]
+            return on_body(parts)
+
+        def shoulder_guards(layers=1, mat=None):
+            mat = mat or steel
+            return on_body([lib.sphere((0, side * (0.152 + 0.012 * k), 0.632 - 0.035 * k), 0.074 - 0.008 * k, mat,
+                                       scale=(1.12, 0.9, 0.52)) for side in (-1, 1) for k in range(layers)])
+
+        def bands(n=5):
+            """Banded steel armour round the chest (lorica segmentata), dark seams between the bands."""
+            return on_body([lib.cylinder((0, 0, 0.47 + 0.042 * k), 0.143 - 0.006 * k, 0.046, steel,
+                                         radius2=0.137 - 0.006 * k, verts=22) for k in range(n)] +
+                           [lib.box((0.13, 0, 0.555), (0.014, 0.016, 0.17), brass, rot=(0, -0.2, 0))])
+
+        def studded():
+            """Rows of brass studs over a leather jerkin."""
+            parts = []
+            for row in range(3):
+                for k in range(5):
+                    a = (k - 2) * 0.32
+                    r = 0.137 - 0.009 * row
+                    parts.append(lib.sphere((math.cos(a) * r, math.sin(a) * r, 0.5 + 0.045 * row), 0.009, brass))
+            return on_body(parts)
+
+        # --- shields: a curved face in the player's colour, a steel rim, a boss and our thunderbolt
+        def shield(half_w, height, curv, radius, oval=False, emblem='bolts', n=9):
+            """Curved round the arm: across position t ∈ [−1, 1] sits at angle t·curv on a cylinder of
+            `radius`, the face's centre `x0` ahead of the hand. An oval one is cut to an ellipse."""
+            x0 = 0.175
+
+            def at(t, off=0.0):
+                a = t * curv
+                return (x0 - (1 - math.cos(a)) * radius + off * math.cos(a), math.sin(a) * radius + off * math.sin(a), a)
+
+            def tall(t):
+                return height * (math.sqrt(max(0.0, 1 - t * t)) * 0.9 + 0.1 if oval else 1.0)
+
+            parts = []
+            w = 2 * half_w / n
+            for k in range(n):
+                t = (k + 0.5) / n * 2 - 1
+                x, y, a = at(t)
+                h = tall(t)
+                parts.append(masked(lib.box((x, y, 0.03), (0.016, w + 0.004, h), self.tunic, rot=(0, 0, a))))
+                # The rim along the top and bottom edge, rolled to follow an oval's slope.
+                dt = 1 / n
+                slope = (tall(min(1, t + dt)) - tall(max(-1, t - dt))) / 2 / (2 * dt * half_w)
+                for sgn in (1, -1):
+                    xr, yr, _ = at(t, 0.006)
+                    parts.append(lib.box((xr, yr, 0.03 + sgn * h / 2), (0.02, w + 0.006, 0.022), steel,
+                                         rot=(sgn * math.atan(slope), 0, a)))
+            for t in (-1, 1):
+                x, y, a = at(t, 0.006)
+                parts.append(lib.box((x, y, 0.03), (0.02, 0.02, tall(t * 0.97) + 0.02), steel, rot=(0, 0, a)))
+
+            def piece(t0, z0, t1, z1, wide=0.02, mat=steel):
+                """A flat strip on the face from (t0, z0) to (t1, z1)."""
+                tm = (t0 + t1) / 2
+                x, y, a = at(tm, 0.011)
+                du, dz = (t1 - t0) * half_w, z1 - z0
+                return lib.box((x, y, 0.03 + (z0 + z1) / 2), (0.01, math.hypot(du, dz), wide), mat,
+                               rot=(math.atan2(dz, du), 0, a))
+
+            x, y, a = at(0, 0.008)
+            if emblem == 'bolts':
+                # The boss, then four zigzag bolts out to the corners (the level-1 scutum).
+                parts.append(lib.sphere((x, y, 0.03), 0.048, steel, scale=(0.6, 1, 1)))
+                reach_t, reach_z = 0.72, height * 0.36
+                for sx in (-1, 1):
+                    for sz in (-1, 1):
+                        mt, mz = sx * reach_t * 0.45, sz * reach_z * 0.62
+                        parts.append(piece(sx * 0.18, sz * 0.03, mt, mz))
+                        parts.append(piece(mt - sx * 0.08, mz - sz * 0.02, sx * reach_t, sz * reach_z, wide=0.016))
+            else:
+                # A running scroll: two spirals turning out of the middle, point-symmetric like an S
+                # (the round shields of levels 2 and 3); a small boss where they meet.
+                parts.append(lib.sphere((x, y, 0.03), 0.034, steel, scale=(0.6, 1, 1)))
+                su, sv = 0.62, height * 0.36
+                pts = []
+                for k in range(10):
+                    th = -math.pi / 2 - k / 9 * 1.6 * math.pi
+                    r = 0.5 * (1 - 0.5 * k / 9)
+                    pts.append((r * math.cos(th), 0.5 + r * math.sin(th)))
+                for sgn in (1, -1):
+                    for (u0, v0), (u1, v1) in zip(pts, pts[1:]):
+                        parts.append(piece(sgn * u0 * su, sgn * v0 * sv, sgn * u1 * su, sgn * v1 * sv, wide=0.02))
+                if emblem == 'scroll+studs':
+                    for k in range(8):
+                        th = k * math.pi / 4 + math.pi / 8
+                        parts.append(piece(0.86 * math.cos(th), 0.43 * height * math.sin(th),
+                                           0.86 * math.cos(th) + 0.02, 0.43 * height * math.sin(th), wide=0.02))
+            return on_grip(parts)
+
+        # --- the bowman's quiver: pale hide, a dark trim, fletchings out of the top; a strap across
+        def quiver():
+            parts = [lib.cylinder((-0.155, 0.05, 0.6), 0.05, 0.33, quiver_hide, rot=(0.25, -0.22, 0), verts=12),
+                     lib.cylinder((-0.19, 0.09, 0.755), 0.054, 0.025, L, rot=(0.25, -0.22, 0), verts=12),
+                     lib.cylinder((-0.12, 0.012, 0.44), 0.052, 0.022, L, rot=(0.25, -0.22, 0), verts=12),
+                     lib.cylinder((0, 0, 0.55), 0.15, 0.022, L, rot=(-0.6, 0, 0), verts=24)]
+            for k in range(4):
+                mat = red_fletch if k % 2 else feather
+                parts.append(lib.box((-0.2 + 0.015 * k, 0.085 + 0.012 * (k % 2) - 0.008 * k, 0.8 + 0.008 * (k % 2)),
+                                     (0.012, 0.026, 0.06), mat, rot=(0.25, -0.22, 0)))
+            return on_body(parts)
+
+        common_steel = lambda: sandals() + scarf() + belt_and_apron(steel)  # noqa: E731
+        common_brass = lambda: sandals() + scarf() + belt_and_apron(brass)  # noqa: E731
+
+        # The squad leader.
+        cuirass = on_body([lib.cylinder((0, 0, 0.545), 0.15, 0.2, gold, radius2=0.128, verts=24),
+                           lib.sphere((0.072, 0.05, 0.575), 0.07, gold, scale=(0.7, 1, 0.8)),
+                           lib.sphere((0.072, -0.05, 0.575), 0.07, gold, scale=(0.7, 1, 0.8)),
+                           lib.sphere((0.1, 0, 0.49), 0.06, gold, scale=(0.5, 1.4, 0.6)),
+                           ring(0.445, 0.152, 0.032, gold)] +
+                          [lib.sphere((0, side * (0.155 + 0.012 * k), 0.632 - 0.035 * k), 0.076 - 0.008 * k, gold,
+                                      scale=(1.12, 0.9, 0.52)) for side in (-1, 1) for k in range(2)])
+        pteruges = on_body([lib.box((math.cos(a) * 0.14, math.sin(a) * 0.14, 0.39), (0.03, 0.045, 0.1), hide,
+                                    rot=(0, 0, a)) for a in [k * math.pi / 6 for k in range(12)]] +
+                           [lib.sphere((math.cos(a) * 0.15, math.sin(a) * 0.15, 0.345), 0.009, gold)
+                            for a in [k * math.pi / 6 for k in range(12)]])
+        cloak = on_body([masked(lib.box((-0.155, 0, 0.42), (0.03, 0.31, 0.46), self.tunic, rot=(0, -0.2, 0), bevel=0.01)),
+                         masked(lib.box((-0.115, 0, 0.645), (0.08, 0.31, 0.045), self.tunic)),
+                         lib.sphere((0.02, 0.135, 0.645), 0.022, gold), lib.sphere((0.02, -0.135, 0.645), 0.022, gold)])
+        round_shield = []
+        for k, (r, mat, x) in enumerate(((0.175, gold, 0.11), (0.15, None, 0.122), (0.06, gold, 0.13))):
+            if mat is None:
+                round_shield.append(masked(lib.cylinder((x, 0, 0.02), r, 0.01, self.tunic, rot=(0, math.pi / 2, 0), verts=28)))
+            else:
+                round_shield.append(lib.cylinder((x, 0, 0.02), r, 0.026 if k == 0 else 0.03, mat, rot=(0, math.pi / 2, 0), verts=28))
+        round_shield.append(lib.sphere((0.145, 0, 0.02), 0.04, gold, scale=(0.6, 1, 1)))
+        round_shield = on_grip(round_shield)
+
+        return {
+            'legion1': leather_cuirass() + common_steel() + shield(0.15, 0.42, 0.5, 0.3),
+            'legion2': leather_cuirass() + chest_plate() + shoulder_guards(1) + common_steel() +
+                       shield(0.16, 0.42, 0.45, 0.3, oval=True, emblem='scroll'),
+            'legion3': bands() + shoulder_guards(3) + common_steel() +
+                       shield(0.2, 0.42, 0.3, 0.45, oval=True, emblem='scroll+studs', n=11),
+            'archer1': leather_cuirass(hide) + common_brass() + quiver(),
+            'archer2': leather_cuirass(hide) + studded() + shoulder_guards(1) + common_brass() + quiver(),
+            'archer3': bands(4) + shoulder_guards(2) + common_steel() + quiver(),
+            'leader': cuirass + pteruges + cloak + round_shield + sandals() + scarf(),
         }
 
     def show(self, shape, outfit=None):
@@ -453,9 +626,11 @@ class Figure:
 
     # ------------------------------------------------------------------------------------- poses
 
-    def pose(self, yaw, leg=0.0, right=None, left=None, right_yaw=0.0, left_yaw=0.0, tilt=0.0, left_tilt=0.0, bend=0.0):
+    def pose(self, yaw, leg=0.0, right=None, left=None, right_yaw=0.0, left_yaw=0.0, tilt=0.0, left_tilt=0.0, bend=0.0,
+             left_roll=0.0):
         """Arm angles in turns (0 down … 1 up), None for a hanging arm; yaws (degrees) swing a raised
-        arm inward; tilts (degrees) turn the tool at the hand; `bend` (degrees) bows the torso forward."""
+        arm inward; tilts (degrees) turn the tool at the hand; `left_roll` (degrees) turns the left
+        hand's tool across the body (the bowman's bow held low); `bend` (degrees) bows the torso forward."""
         self.root.rotation_euler = (0, 0, yaw)
         self.waist.rotation_euler = (0, math.radians(bend), 0)
         self.tunic_whole.hide_render = bend != 0
@@ -465,7 +640,7 @@ class Figure:
         for side, p, a, y in ((-1, self.arms[0], right, right_yaw), (1, self.arms[1], left, left_yaw)):
             p.rotation_euler = (0, -math.pi * (a or 0.0), math.radians(-side * y))
         self.grips[0].rotation_euler = (0, math.radians(tilt), 0)
-        self.grips[1].rotation_euler = (0, math.radians(left_tilt), 0)
+        self.grips[1].rotation_euler = (math.radians(left_roll), math.radians(left_tilt), 0)
         bpy.context.view_layer.update()
 
     def point(self, obj):
@@ -483,14 +658,17 @@ def swing(deg):
     return deg / 180
 
 
-def hold_frames(shape):
-    """Walk frames then standing, holding `shape`: [(shape, pose kwargs)]."""
+def hold_frames(shape, outfit=None):
+    """Walk frames then standing, holding `shape` (in `outfit`): [(shape, pose kwargs)]."""
     arm, tilt = HOLD[shape]
     frames = []
     for f in range(WALK_FRAMES + 1):
         leg, sw = WALK[f] if f < WALK_FRAMES else (0, 0)
         if shape == 'carry':
             kw = dict(leg=leg * 0.8, right=0.42, left=0.42, right_yaw=26, left_yaw=26)
+        elif shape == 'bow' and outfit and outfit.startswith('archer'):
+            # Settlers 4's bowman carries the bow low before him, slanting across the body.
+            kw = dict(leg=leg, right=swing(-sw) + 0.04, left=0.16, left_yaw=18, left_roll=-62, left_tilt=-12)
         elif shape == 'bow':
             kw = dict(leg=leg, right=swing(-sw), left=0.1, left_tilt=0)
         elif shape == 'sword':
@@ -534,7 +712,7 @@ def poses():
     groups = [(f'hold:{shape}', hold_frames(shape), None) for shape in TOOLS]
     groups += [(f'work:{action}', work_frames(action), None) for action in ACTIONS]
     for outfit, (tools, actions) in OUTFITS.items():
-        groups += [(f'hold:{shape}@{outfit}', hold_frames(shape), outfit) for shape in tools]
+        groups += [(f'hold:{shape}@{outfit}', hold_frames(shape, outfit), outfit) for shape in tools]
         groups += [(f'work:{action}@{outfit}', work_frames(action), outfit) for action in actions]
     return groups
 
@@ -601,8 +779,11 @@ def build_hat_proxy(fig):
         lib.cylinder((0, 0, z + 0.07), 0.25, 0.03, None, verts=24),
         lib.cylinder((-0.01, 0, z + 0.16), 0.15, 0.26, None, verts=18),
         lib.cylinder((-0.02, 0, z - 0.1), 0.17, 0.1, None, verts=18),
-        # Tall crests of fighters' helmets, front to back.
-        lib.box((-0.02, 0, z + 0.3), (0.38, 0.08, 0.3), None),
+        # Fighters' helmets: their crests front to back (down the back at level 3) and the squad
+        # leader's side to side.
+        lib.box((-0.06, 0, z + 0.28), (0.5, 0.12, 0.42), None),
+        lib.box((-0.2, 0, z + 0.05), (0.2, 0.12, 0.3), None),
+        lib.box((-0.01, 0, z + 0.28), (0.12, 0.5, 0.36), None),
     ]
     for o in objs:
         fig.attach(o, fig.waist)
@@ -839,41 +1020,68 @@ def build_hat(style, fig):
     shiny = lib.mat_flat('helm', (0.96, 0.96, 0.98), rough=0.2)
     shiny.node_tree.nodes['Principled BSDF'].inputs['Metallic'].default_value = 0.85
     z = 0.76
-    steel = lib.mat_flat('galea', (0.9, 0.92, 0.95), rough=0.18)
-    steel.node_tree.nodes['Principled BSDF'].inputs['Metallic'].default_value = 0.92
+    # Settlers 4's helmets read bright silver with a hard highlight: a light base, less mirror.
+    steel = lib.mat_flat('galea', (0.95, 0.95, 0.96), rough=0.22)
+    steel.node_tree.nodes['Principled BSDF'].inputs['Metallic'].default_value = 0.55
     gilt = lib.mat_flat('gilt', (0.98, 0.78, 0.3), rough=0.22)
     gilt.node_tree.nodes['Principled BSDF'].inputs['Metallic'].default_value = 0.95
     knit = lib.mat_grain('knit', (0.8, 0.8, 0.78), (0.98, 0.98, 0.97), scale=34, stretch=(1, 1, 6), bump=0.6)
     red = lib.mat_grain('crest', (0.62, 0.05, 0.04), (0.9, 0.16, 0.1), scale=40, stretch=(1, 6, 1), bump=0.6)
 
-    def galea(metal, crest_size=0.0):
-        """A legionary-style helmet: dome, brow band, cheek guards, a flared neck guard at the back, a
-        knob on top; with `crest_size` a red brush crest running front to back on a small holder."""
+    def dome(loc, r, scale, mat):
+        """The upper half of a sphere, open below (a helmet's bowl, so the face shows under it)."""
+        import bmesh
+        bpy.ops.mesh.primitive_uv_sphere_add(segments=28, ring_count=14, radius=r, location=loc)
+        obj = bpy.context.active_object
+        bm = bmesh.new()
+        bm.from_mesh(obj.data)
+        bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.co.z < -0.002], context='VERTS')
+        bm.to_mesh(obj.data)
+        bm.free()
+        obj.scale = scale
+        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+        obj.data.materials.append(mat)
+        bpy.ops.object.shade_smooth()
+        return obj
+
+    def galea(metal, crest=None, across=False):
+        """Settlers 4's Roman helmet, big on the head: a deep dome to below the ears, a brow band with a
+        small peak, broad cheek guards, a wide flared neck guard and a knob on top. `crest` = (front,
+        back, height, tufts): a red brush crest as a fan of flat tufts along the dome from angle
+        `front` to `back` (radians from the top, + forwards), tallest in the middle; `across` sets
+        it side to side instead (the squad leader's)."""
+        brow = z + 0.035  # the rim sits just above the eyes: the face shows under it
         parts = [
-            lib.sphere((-0.005, 0, z + 0.05), 0.138, metal, scale=(1.05, 1.05, 0.88)),
-            lib.cylinder((0, 0, z + 0.0), 0.148, 0.03, metal, verts=22),
-            # Neck guard: a flared plate at the back (−X).
-            lib.box((-0.13, 0, z - 0.03), (0.06, 0.24, 0.02), metal, rot=(0, 0.45, 0), bevel=0.008),
+            dome((-0.008, 0, brow), 0.152, (1.06, 1.07, 0.95), metal),
+            lib.cylinder((0, 0, brow), 0.163, 0.03, metal, verts=26),
+            # The peak over the brow and the flared neck guard at the back (−X), down over the nape.
+            lib.box((0.158, 0, brow - 0.004), (0.05, 0.21, 0.014), metal, rot=(0, -0.28, 0), bevel=0.005),
+            lib.box((-0.13, 0, brow - 0.07), (0.035, 0.25, 0.11), metal, rot=(0, -0.1, 0), bevel=0.01),
+            lib.box((-0.165, 0, brow - 0.13), (0.075, 0.3, 0.018), metal, rot=(0, 0.5, 0), bevel=0.008),
+            lib.sphere((-0.01, 0, brow + 0.15), 0.024, metal),
         ]
-        for side in (-1, 1):  # cheek guards
-            parts.append(lib.box((0.04, side * 0.125, z - 0.04), (0.075, 0.016, 0.1), metal, rot=(side * 0.12, 0, 0), bevel=0.008))
-        if crest_size <= 0:
-            parts.append(lib.sphere((-0.01, 0, z + 0.175), 0.022, metal))
+        for side in (-1, 1):  # cheek guards, hinged at the rim, angled in towards the chin
+            parts.append(lib.box((0.04, side * 0.143, brow - 0.07), (0.1, 0.018, 0.13), metal, rot=(side * 0.18, 0, 0),
+                                 bevel=0.01))
+        if not crest:
             return parts
-        # The crest: brush tufts along an arc over the dome, front to back, tallest in the middle; its
-        # height and length grow with `crest_size` (small at level 2, big at level 3, taller still for
-        # the squad leader).
-        h = 0.035 + 0.13 * crest_size
-        span = 0.55 + 0.5 * min(crest_size, 1.0)
-        n = 7
+        front, back, height, n = crest
         for k in range(n):
-            t = k / (n - 1) * 2 - 1
-            a = t * span
-            x = -0.01 + math.sin(a) * 0.125
-            zc = z + 0.05 + math.cos(a) * 0.112
-            hh = h * (1 - 0.45 * t * t)
-            parts.append(lib.lumpy((x, 0, zc + hh / 2), 0.05, red, scale=(0.9, 0.62, max(0.4, hh / 0.1)),
-                                   strength=0.3, noise=0.9, seed=11 + k, subdiv=2))
+            t = k / (n - 1)
+            a = front + (back - front) * t
+            mid = 1 - (2 * t - 1) ** 2  # tallest in the middle
+            hh = height * (0.45 + 0.55 * mid)
+            r = 0.14
+            if across:
+                y, zc = math.sin(a) * r, z + 0.04 + math.cos(a) * r * 0.95
+                loc, rot, scale = (-0.01, y + math.sin(a) * hh / 2, zc + math.cos(a) * hh / 2), (-a, 0, 0), (0.42, 0.75, hh / 0.1)
+            else:
+                x, zc = -0.01 + math.sin(a) * r, z + 0.04 + math.cos(a) * r * 0.95
+                loc, rot, scale = (x + math.sin(a) * hh / 2, 0, zc + math.cos(a) * hh / 2), (0, a, 0), (0.75, 0.42, hh / 0.1)
+            tuft = lib.lumpy(loc, 0.05, red, scale=scale, strength=0.35, noise=1.1, seed=11 + k, subdiv=2)
+            tuft.modifiers['Displace'].texture_coords = 'LOCAL'
+            tuft.rotation_euler = rot
+            parts.append(tuft)
         return parts
 
     parts = {
@@ -898,12 +1106,14 @@ def build_hat(style, fig):
         # The healer's linen coif: a close cap over the hair, the face left open, a flap at the nape.
         'coif': lambda: [lib.sphere((-0.04, 0, z + 0.06), 0.14, white, scale=(1.05, 1.08, 0.75)),
                          lib.box((-0.115, 0, z - 0.045), (0.05, 0.19, 0.13), white, rot=(0, 0.28, 0), bevel=0.02)],
-        # Squad leader: a gilded helmet with a very tall crest.
-        'plume': lambda: galea(gilt, crest_size=1.35),
-        # Fighters' helmets (galea) by level: no crest, a small crest, a big crest.
+        # Squad leader: a gilded helmet with a tall crest set side to side, a centurion's.
+        'plume': lambda: galea(gilt, (-1.2, 1.2, 0.15, 13), across=True),
+        # Fighters' helmets by level, as in Settlers 4: swordsmen none at level 1 (bowmen a little
+        # tuft, `galea1t`), an upright brush at level 2, a big fan from the brow down the back at 3.
         'galea1': lambda: galea(steel),
-        'galea2': lambda: galea(steel, crest_size=0.35),
-        'galea3': lambda: galea(steel, crest_size=1.0),
+        'galea1t': lambda: galea(steel, (-0.25, -0.5, 0.045, 3)),
+        'galea2': lambda: galea(steel, (0.32, -0.45, 0.16, 7)),
+        'galea3': lambda: galea(steel, (0.6, -1.8, 0.2, 15)),
     }
     objs = parts[style]()
     for o in objs:

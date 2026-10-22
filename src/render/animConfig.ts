@@ -9,16 +9,40 @@ import type { BuildingType, PlantKind, Resource, SettlerKind, Task } from '../si
 export const TOOLS = ['none', 'axe', 'hammer', 'pick', 'shovel', 'scythe', 'rod', 'bucket', 'sword', 'bow', 'carry', 'spear'] as const;
 export type ToolShape = (typeof TOOLS)[number];
 
-export type HatStyle = 'cap' | 'straw' | 'helmet' | 'hood' | 'chef' | 'bare' | 'plume' | 'galea1' | 'galea2' | 'galea3' | 'coif' | 'knit';
-export const HAT_STYLES: readonly HatStyle[] = ['cap', 'straw', 'helmet', 'hood', 'chef', 'bare', 'plume', 'galea1', 'galea2', 'galea3', 'coif', 'knit'];
+export type HatStyle =
+  | 'cap'
+  | 'straw'
+  | 'helmet'
+  | 'hood'
+  | 'chef'
+  | 'bare'
+  | 'plume'
+  | 'galea1'
+  | 'galea2'
+  | 'galea3'
+  | 'coif'
+  | 'knit'
+  | 'galea1t';
+export const HAT_STYLES: readonly HatStyle[] = ['cap', 'straw', 'helmet', 'hood', 'chef', 'bare', 'plume', 'galea1', 'galea2', 'galea3', 'coif', 'knit', 'galea1t'];
 
 /**
  * 3D outfits (`art/blender/figures.py` `OUTFITS`): what a profession wears over the tunic, rendered
  * as their own pose groups (`hold:<tool>@<outfit>`, `work:<action>@<outfit>`); professions without
- * one use the plain groups. Fighters' armour, the healer's robe, the watchman's cape and the
+ * one use the plain groups. Fighters' armour and shields by level (`legion1..3`, `archer1..3`, as in
+ * Settlers 4 their gear changes with the level), the healer's robe, the watchman's cape and the
  * saboteur's dark jerkin.
  */
-export type Outfit = 'legion' | 'archer' | 'leader' | 'healer' | 'watch' | 'saboteur';
+export type Outfit =
+  | 'legion1'
+  | 'legion2'
+  | 'legion3'
+  | 'archer1'
+  | 'archer2'
+  | 'archer3'
+  | 'leader'
+  | 'healer'
+  | 'watch'
+  | 'saboteur';
 
 /** Synthesised sound effects (see `audio/sounds.ts`). */
 export type SoundId =
@@ -93,12 +117,18 @@ export interface SettlerStyle {
   levelHats?: readonly HatStyle[];
   /** What the 3D figure wears over the tunic (armour, shield, quiver…). */
   outfit?: Outfit;
+  /** Outfit by level (`Settler.level`), replacing `outfit`: a fighter's armour and shield. */
+  levelOutfits?: readonly Outfit[];
 }
 
 const DEFAULT_STYLE: SettlerStyle = { tunic: '#7a6a58', hat: '#5a4636', hatStyle: 'cap', work: 'idle', holds: 'none' };
 
-/** A fighter's helmet (galea) by level: no crest, a small crest, a big crest. */
-const FIGHTER_HELMETS: readonly HatStyle[] = ['galea1', 'galea2', 'galea3'];
+/**
+ * A fighter's helmet (galea) by level, as in Settlers 4: a swordsman's has no crest at level 1, a
+ * bowman's a little tuft; then an upright brush at level 2 and a big fan down the back at level 3.
+ */
+const SWORD_HELMETS: readonly HatStyle[] = ['galea1', 'galea2', 'galea3'];
+const BOW_HELMETS: readonly HatStyle[] = ['galea1t', 'galea2', 'galea3'];
 
 const STYLES: Partial<Record<SettlerKind, Partial<SettlerStyle>>> = {
   carrier: { tunic: '#3f6fb5', hat: '#6b4423', hatStyle: 'cap' },
@@ -123,10 +153,30 @@ const STYLES: Partial<Record<SettlerKind, Partial<SettlerStyle>>> = {
   smelter: { tunic: '#6e4a33', hat: '#3b2b1a', hatStyle: 'hood' },
   toolsmith: { tunic: '#5a5048', hat: '#8c4a3a', hatStyle: 'cap', work: 'hammer', holds: 'hammer' },
   weaponsmith: { tunic: '#4a4f55', hat: '#8c4a3a', hatStyle: 'cap', work: 'hammer', holds: 'hammer' },
-  // Fighters: a steel helmet whose crest shows the level (none, small, big), as in Settlers 4.
-  soldier: { hat: '#9aa0a6', hatStyle: 'galea1', levelHats: FIGHTER_HELMETS, work: 'sword', holds: 'sword', fighter: true, outfit: 'legion' },
-  archer: { hat: '#9aa0a6', hatStyle: 'galea1', levelHats: FIGHTER_HELMETS, work: 'shoot', holds: 'bow', fighter: true, outfit: 'archer' },
-  /** Squad leader: a gilded helmet with a tall crest, gilded cuirass, round golden shield, cloak. */
+  // Fighters: the helmet's crest and the armour and shield show the level, as in Settlers 4 —
+  // swordsmen from leather and a rectangular scutum to banded steel and a round shield, bowmen
+  // from a leather jerkin to banded steel.
+  soldier: {
+    hat: '#9aa0a6',
+    hatStyle: 'galea1',
+    levelHats: SWORD_HELMETS,
+    work: 'sword',
+    holds: 'sword',
+    fighter: true,
+    outfit: 'legion1',
+    levelOutfits: ['legion1', 'legion2', 'legion3'],
+  },
+  archer: {
+    hat: '#9aa0a6',
+    hatStyle: 'galea1t',
+    levelHats: BOW_HELMETS,
+    work: 'shoot',
+    holds: 'bow',
+    fighter: true,
+    outfit: 'archer1',
+    levelOutfits: ['archer1', 'archer2', 'archer3'],
+  },
+  /** Squad leader: a gilded helmet with a crest side to side, gilded cuirass, round gilded shield, cloak. */
   leader: { hat: '#d23a2a', hatStyle: 'plume', work: 'sword', holds: 'sword', fighter: true, outfit: 'leader' },
   // Specialists: the pioneer digs border stones in, the thief goes about in a dark hood, hands free.
   pioneer: { tunic: '#a8743a', hat: '#6b4a2a', hatStyle: 'straw', work: 'dig', holds: 'shovel' },
@@ -156,6 +206,11 @@ export const GATHER_ACTION: Partial<Record<Resource, ActionId>> = {
   fish: 'fish',
   grain: 'reap',
 };
+
+/** What a settler of this style wears at `level` (fighters' gear changes with the level). */
+export function outfitOf(style: SettlerStyle, level: number): Outfit | undefined {
+  return style.levelOutfits?.[level] ?? style.outfit;
+}
 
 const resolved = new Map<string, SettlerStyle>();
 

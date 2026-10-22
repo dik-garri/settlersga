@@ -56,7 +56,7 @@ import {
 } from './art3d';
 import { addAnimalSprites } from './animals';
 import { ANIMAL_CELLS, ANIMAL_COLUMNS, ANIMAL_STAND, paintAnimal, UNIT_ANIMALS } from './animalArt';
-import { ACTION_IDS, ACTIONS, HAT_STYLES, styleOf, TOOLS, type ActionId, type HatStyle, type ToolShape } from './animConfig';
+import { ACTION_IDS, ACTIONS, HAT_STYLES, outfitOf, styleOf, TOOLS, type ActionId, type HatStyle, type ToolShape } from './animConfig';
 import { paintFlash, paintGlint, paintGlow, paintPuff, paintSpark } from './fxArt';
 import {
   actionPose,
@@ -537,7 +537,7 @@ export function settlerIcon(kind: SettlerKind, size = 56): HTMLCanvasElement {
   if (iconArt) {
     // Standing with the profession's tool, facing south-east.
     const st3 = styleOf(kind);
-    const { page, rect } = iconArt.settlers.portrait(st3.holds, 1, st3.outfit);
+    const { page, rect } = iconArt.settlers.portrait(st3.holds, 1, outfitOf(st3, 0));
     return imageIcon(page, size, '', rect, 1);
   }
   const { canvas, ctx, px } = iconCanvas(size);

@@ -19,7 +19,7 @@ import type { Building, BuildingType, Settler } from '../sim/types';
 import type { World } from '../sim/world';
 import type { SettlerTextures } from './atlas';
 import { dirTowards, FACES_AWAY, idleDir, MIRRORED, PAINTED_DIR, WALK_FRAMES, workFrame } from './anim';
-import { ACTIONS, styleOf, type ActionId } from './animConfig';
+import { ACTIONS, outfitOf, styleOf, type ActionId } from './animConfig';
 import { ART3D_POSTS, SETTLER_3D_SCALE, type GarrisonPost, type GarrisonPosts } from './art3d';
 import { holdFrames, setFrame, workFrames, type Settler3d } from './settler3d';
 import { BODY_STAND, BODY_WORK } from './settlerArt';
@@ -264,7 +264,8 @@ export class GarrisonLayer {
     const hatStyle = style.levelHats?.[s.level] ?? style.hatStyle;
     const s3d = this.s3d;
     if (s3d) {
-      const fr = action ? workFrames(s3d, action, style.outfit)[dir][f] : holdFrames(s3d, style.holds, style.outfit)[dir][WALK_FRAMES];
+      const outfit = outfitOf(style, s.level);
+      const fr = action ? workFrames(s3d, action, outfit)[dir][f] : holdFrames(s3d, style.holds, outfit)[dir][WALK_FRAMES];
       // A swordsman at a window is cut off at its sill (the figure is drawn scaled).
       const cut = (post.cut ?? 0) / (SETTLER_3D_SCALE * CREW_SCALE);
       this.put(fig.body, fr.full, cut);
