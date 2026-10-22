@@ -144,7 +144,7 @@ export const ART3D_STAGED = Object.keys(ART3D_BUILDINGS);
  */
 export const ART3D_BANNERS: Record<string, { x: number; y: number }> = {
   tower: { x: 3.2, y: -55.7 },
-  fortress: { x: 17.1, y: -98.0 },
+  fortress: { x: 0.0, y: -115.4 },
   bigtower: { x: 3.4, y: -53.2 },
 };
 /**
@@ -200,17 +200,17 @@ export const ART3D_POSTS: Record<string, GarrisonPosts> = {
   },
   fortress: {
     ranged: [
-      { x: 42.7, y: -76.0, dir: 2 },
-      { x: -8.5, y: -78.1, dir: 3 },
-      { x: 46.9, y: -97.3, dir: 1 },
-      { x: -6.4, y: -100.5, dir: 3 },
-      { x: 67.0, y: -85.2, dir: 1 },
+      { x: -17.3, y: -107.4, dir: 3 },
+      { x: 17.3, y: -107.4, dir: 1 },
+      { x: -85.8, y: -59.5, dir: 3 },
+      { x: 85.8, y: -57.9, dir: 1 },
+      { x: 0.6, y: -7.6, dir: 2 },
     ],
     melee: [
-      { x: -25.4, y: -33.4, dir: 3, window: true, cut: 12.0 },
-      { x: -3.2, y: -22.3, dir: 3, window: true, cut: 12.0 },
-      { x: 51.0, y: -29.1, dir: 1, window: true, cut: 12.1 },
-      { x: 68.1, y: -37.7, dir: 1, window: true, cut: 12.0 },
+      { x: -104.2, y: -7.1, dir: 3, window: true, cut: 18.0 },
+      { x: -18.5, y: 46.5, dir: 3, window: true, cut: 18.1 },
+      { x: 18.2, y: 46.6, dir: 1, window: true, cut: 18.0 },
+      { x: 97.8, y: -2.3, dir: 1, window: true, cut: 18.0 },
     ],
   },
 };
@@ -223,8 +223,8 @@ export const ART3D_FX: Record<string, { smoke?: [number, number][]; glow?: [numb
   farm: { smoke: [[-10.9, -81.6]] },
   mill: { hub: [28.1, -45.6] },
   bakery: { smoke: [[33.6, -68.6]], glow: [[-36.5, 6.9]] },
-  ironsmelter: { smoke: [[11.2, -42.6]], glow: [[-9.9, 9.9]] },
-  goldsmelter: { smoke: [[20.5, -37.2]], glow: [[0.2, 10.4]] },
+  ironsmelter: { smoke: [[-16.6, -59.2]], glow: [[-37.0, -3.4]] },
+  goldsmelter: { smoke: [[14.4, -40.5]], glow: [[-7.0, 7.7]] },
   weaponsmith: { smoke: [[11.8, -49.7]], glow: [[-0.6, 7.1]] },
   toolsmith: { smoke: [[-7.4, -60.9]], glow: [[-15.7, -19.9]] },
 };
