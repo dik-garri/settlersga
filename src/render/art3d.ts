@@ -220,8 +220,8 @@ export const ART3D_POSTS: Record<string, GarrisonPosts> = {
  * the procedural painters' `buildingFxAnchors` for these types.
  */
 export const ART3D_FX: Record<string, { smoke?: [number, number][]; glow?: [number, number][]; hub?: [number, number] }> = {
-  farm: { smoke: [[10.2, -72.4]] },
-  mill: { hub: [1.6, -63.2] },
+  farm: { smoke: [[-10.9, -81.6]] },
+  mill: { hub: [28.1, -45.6] },
   bakery: { smoke: [[33.6, -68.6]], glow: [[-36.5, 6.9]] },
   ironsmelter: { smoke: [[11.2, -42.6]], glow: [[-9.9, 9.9]] },
   goldsmelter: { smoke: [[20.5, -37.2]], glow: [[0.2, 10.4]] },

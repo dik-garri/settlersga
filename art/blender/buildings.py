@@ -956,16 +956,6 @@ def chimney(x, y, zb, zt, blocks, rnd, name=None):
         note_fx(name, 'smoke', (x, y, zt + 0.08))
 
 
-def thatch_cone(loc, r, h, straw, layers=3):
-    """A conical thatched roof of a few overlapping straw skirts, with a little knob on top."""
-    x, y, z = loc
-    for k in range(layers):
-        t = k / layers
-        lib.cylinder((x, y, z + h * t * 0.5 + h * (1 - t * 0.5) / 2), r * (1 - t * 0.5) + 0.02, h * (1 - t * 0.5), straw,
-                     radius2=0.01 + r * 0.05 * (layers - k - 1), verts=28)
-    lib.cylinder((x, y, z + h + 0.03), 0.03, 0.08, straw, radius2=0.012, verts=10)
-
-
 def arch_door(x, y, z0, w, h, door, stones, face='y'):
     """A plank door with a round top and a ring of voussoirs, set in the −Y wall at x."""
     r = w / 2
@@ -977,179 +967,684 @@ def arch_door(x, y, z0, w, h, door, stones, face='y'):
                 stones[k % len(stones)], rot=(0, -a + math.pi / 2, 0), bevel=0.012)
 
 
+# ------------------------------------------------------------------------------------- S4 shapes
+# Barrel roofs of shingles, turned (lathe) bodies, nets, sheep and a horseman: the pieces of the
+# Settlers 4 Roman farm buildings (farm, sheep farm, mill, slaughterhouse, fisher, market, lookout).
+
+def grey_blocks(prefix='gb'):
+    """Blue-grey squared stone of the Settlers 4 Roman walls, a few tones."""
+    return [lib.mat_grain(f'{prefix}{k}', a, b, scale=7, stretch=(1, 1, 1), bump=1.0) for k, (a, b) in enumerate((
+        ((0.3, 0.32, 0.36), (0.52, 0.55, 0.6)),
+        ((0.36, 0.37, 0.4), (0.6, 0.61, 0.64)),
+        ((0.25, 0.27, 0.3), (0.44, 0.46, 0.5)),
+        ((0.42, 0.42, 0.43), (0.66, 0.66, 0.66)),
+    ))]
+
+
+def thatch_mat(name='thatch'):
+    """Bright golden thatch, streaky along local Z."""
+    return lib.mat_grain(name, (0.7, 0.52, 0.1), (0.98, 0.84, 0.32), scale=10, stretch=(1, 1, 16), bump=1.2)
+
+
+def barrel_shingles(prefix='bsh'):
+    """Wooden shingles of the barrel roofs: browns, a silvered one and the odd orange-red."""
+    return [lib.mat_grain(f'{prefix}{k}', a, b, scale=10, stretch=(1, 4, 1), bump=0.8) for k, (a, b) in enumerate((
+        ((0.36, 0.22, 0.1), (0.58, 0.4, 0.2)),
+        ((0.46, 0.3, 0.13), (0.68, 0.48, 0.24)),
+        ((0.46, 0.38, 0.28), (0.64, 0.56, 0.42)),
+        ((0.42, 0.26, 0.11), (0.62, 0.42, 0.2)),
+        ((0.6, 0.26, 0.1), (0.84, 0.44, 0.2)),
+    ))]
+
+
+def shingle_mix(mats):
+    """Mostly brown shingles, the orange-red one (the last) about one in nine."""
+    return mats[:4] * 2 + mats[4:]
+
+
+def barrel_frame(cx, cy, H, axis):
+    """Maps (t along the ridge, a across it, u up from the eaves) of a barrel roof to world points;
+    a = +c is the eave the camera sees (−Y for a ridge along X, +X for one along Y)."""
+    if axis == 'x':
+        return (lambda t, a, u: (cx + t, cy - a, H + u)), (1.0, 0.0, 0.0)
+    return (lambda t, a, u: (cx + a, cy + t, H + u)), (0.0, 1.0, 0.0)
+
+
+def arc_points(c, s, th0, th1, n):
+    return [(c * math.cos(th0 + (th1 - th0) * k / n), s * math.sin(th0 + (th1 - th0) * k / n)) for k in range(n + 1)]
+
+
+def barrel_roof(cx, cy, H, length, c, s, mats, core, rim, rnd, axis='x', overhang=0.1, size=0.13, upto=0.62,
+                ends=(True, True)):
+    """A barrel (round-vaulted) roof as on the Settlers 4 Roman farm and sheep farm: a half-elliptic
+    vault (half-width `c`, rise `s`) over walls of height H, ridge along `axis`, covered row by row
+    with square wooden shingles (each its own tone, askew, the lower edge proud), up to `upto` of the
+    arc on the camera's side, and a thick plank rim along each end arch (`ends`: −t, +t)."""
+    from mathutils import Vector
+
+    at, along = barrel_frame(cx, cy, H, axis)
+    along = Vector(along)
+    half = length / 2 + overhang
+    # The vault: a solidified half-elliptic shell a little outside the walls, its eaves below the top.
+    cc, ss = c + 0.07, s + 0.04
+    prof = arc_points(cc, ss, -0.1, math.pi + 0.1, 28)
+    verts = []
+    for t in (-half, half):
+        verts += [at(t, a, u) for a, u in prof]
+    m = len(prof)
+    faces = [(i, i + 1, m + i + 1, m + i) for i in range(m - 1)]
+    mesh = bpy.data.meshes.new('vault')
+    mesh.from_pydata(verts, [], faces)
+    obj = bpy.data.objects.new('vault', mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.modifiers.new('Solid', 'SOLIDIFY').thickness = 0.05
+    obj.data.materials.append(core)
+    obj['stage'], obj['until'] = 4, 99  # the solid vault only with the finished roof: stage 3 shows the ribs
+    # Shingles: walk the arc by length, a row every ~0.6 size.
+    th_end = math.pi * upto
+    dense = arc_points(cc + 0.025, ss + 0.025, -0.1, th_end, 400)
+    acc, rows, last = 0.0, [], None
+    for k, p in enumerate(dense):
+        if last is not None:
+            acc += math.hypot(p[0] - last[0], p[1] - last[1])
+        last = p
+        if not rows or acc - rows[-1][0] >= size * 0.6:
+            th = -0.1 + (th_end + 0.1) * k / 400
+            rows.append((acc, th))
+    cols = max(2, int(2 * half / (size * 0.92)))
+    for r, (_, th) in enumerate(rows):
+        a, u = (cc + 0.025) * math.cos(th), (ss + 0.025) * math.sin(th)
+        tan = (Vector(at(0, -cc * math.sin(th), ss * math.cos(th))) - Vector(at(0, 0, 0))).normalized()
+        n = along.cross(tan).normalized()
+        for k in range(cols + (r % 2)):
+            t = -half + (k + 0.5 * (1 - r % 2)) * 2 * half / cols
+            if abs(t) > half - size * 0.3:
+                continue
+            p = Vector(at(t + rnd.uniform(-0.012, 0.012), a, u)) + n * (0.012 * (r % 2))
+            jitter = Vector((rnd.uniform(-0.07, 0.07), rnd.uniform(-0.07, 0.07), rnd.uniform(-0.07, 0.07)))
+            # Downhill edge proud: tip the piece's up direction a little into the roof.
+            place_on(roof_piece(mats[rnd.randrange(len(mats))], size, 'tile'), p, along + jitter, tan - n * 0.18)
+    # Plank rims along the end arches.
+    rim_prof = arc_points(cc + 0.04, ss + 0.04, -0.08, math.pi + 0.08, 22)
+    for end, on in zip((-1, 1), ends):
+        if not on:
+            continue
+        t = end * (half + 0.01)
+        for (a0, u0), (a1, u1) in zip(rim_prof, rim_prof[1:]):
+            p0, p1 = Vector(at(t, a0, u0)), Vector(at(t, a1, u1))
+            seg = lib.box((0, 0, 0), ((p1 - p0).length + 0.012, 0.075, 0.06), rim, bevel=0.008)
+            place_on(seg, (p0 + p1) / 2, p1 - p0, along)
+    return at
+
+
+def arch_infill(at, t, c, s, mat, thickness=0.04):
+    """A solid half-elliptic slab closing a barrel vault's end at `t` (frame from `barrel_frame`)."""
+    prof = arc_points(c, s, 0, math.pi, 24)
+    verts = [at(t, a, u) for a, u in prof]
+    mesh = bpy.data.meshes.new('infill')
+    mesh.from_pydata(verts, [], [tuple(range(len(verts)))])
+    obj = bpy.data.objects.new('infill', mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.modifiers.new('Solid', 'SOLIDIFY').thickness = thickness
+    obj.data.materials.append(mat)
+    return obj
+
+
+def arch_boards(at, t, c, s, mats, rnd, axis, width=0.11, out=0.02):
+    """Upright boards filling a barrel vault's end arch at `t`, each cut to the arch."""
+    n = max(3, int(2 * c / width))
+    for k in range(n):
+        a = -c + (k + 0.5) * 2 * c / n
+        h = s * math.sqrt(max(0.0, 1 - (a / c) ** 2)) - 0.02
+        if h < 0.05:
+            continue
+        x, y, z = at(t, a, h / 2)
+        if axis == 'x':
+            lib.box((x + out, y, z), (0.03, 2 * c / n - 0.012, h), mats[k % len(mats)], bevel=0.004,
+                    rot=(rnd.uniform(-0.01, 0.01), 0, 0))
+        else:
+            lib.box((x, y - out, z), (2 * c / n - 0.012, 0.03, h), mats[k % len(mats)], bevel=0.004,
+                    rot=(0, rnd.uniform(-0.01, 0.01), 0))
+
+
+def barrel_ribs(at, along_len, c, s, beam, count=4, battens=5):
+    """The bare skeleton of a barrel vault (construction stage): arched ribs and battens."""
+    from mathutils import Vector
+
+    prof = arc_points(c + 0.02, s + 0.02, 0, math.pi, 16)
+    for j in range(count):
+        t = -along_len / 2 + j * along_len / (count - 1)
+        for (a0, u0), (a1, u1) in zip(prof, prof[1:]):
+            p0, p1 = Vector(at(t, a0, u0)), Vector(at(t, a1, u1))
+            seg = lib.box((0, 0, 0), ((p1 - p0).length + 0.02, 0.045, 0.045), beam)
+            place_on(seg, (p0 + p1) / 2, p1 - p0, Vector(at(1, 0, 0)) - Vector(at(0, 0, 0)))
+    for k in range(battens):
+        th = math.pi * (k + 0.5) / battens
+        a, u = (c + 0.05) * math.cos(th), (s + 0.05) * math.sin(th)
+        rod(at(-along_len / 2 - 0.05, a, u), at(along_len / 2 + 0.05, a, u), 0.018, beam, verts=6)
+
+
+def lathe(cx, cy, prof, mat, segs=48, a0=0.0, a1=math.tau, smooth=True, z=0.0):
+    """A surface of revolution about the vertical through (cx, cy): `prof` lists (radius, height)
+    from the outer bottom up; `a0`..`a1` limits it to a sector (an apse, the camera's half)."""
+    full = abs(a1 - a0 - math.tau) < 1e-6
+    n = segs if full else segs + 1
+    verts, faces = [], []
+    for j in range(n):
+        a = a0 + (a1 - a0) * j / segs
+        for (r, h) in prof:
+            verts.append((r * math.cos(a), r * math.sin(a), h + z))
+    m = len(prof)
+    for j in range(segs):
+        j2 = (j + 1) % n if full else j + 1
+        for i in range(m - 1):
+            faces.append((j * m + i, j2 * m + i, j2 * m + i + 1, j * m + i + 1))
+    mesh = bpy.data.meshes.new('lathe')
+    mesh.from_pydata(verts, [], faces)
+    for p in mesh.polygons:
+        p.use_smooth = smooth
+    obj = bpy.data.objects.new('lathe', mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.location = (cx, cy, 0)
+    obj.data.materials.append(mat)
+    return obj
+
+
+def shaggy(obj, strength=0.03, scale=0.08, seed=0):
+    """Roughens a surface (thatch) with a displacement along its normals."""
+    sub = obj.modifiers.new('Sub', 'SUBSURF')
+    sub.levels = 1
+    sub.render_levels = 1
+    tex = bpy.data.textures.new(f'shag{seed}', 'CLOUDS')
+    tex.noise_scale = scale
+    tex.noise_depth = 2
+    mod = obj.modifiers.new('Displace', 'DISPLACE')
+    mod.texture = tex
+    mod.strength = strength
+    mod.mid_level = 0.5
+    mod.texture_coords = 'GLOBAL'
+    return obj
+
+
+def lathe_tiles(cx, cy, prof, mats, rnd, size=0.11, shape='tile', lift=0.025, far=-0.35, z=0.0):
+    """Rings of tiles or scales over a turned roof (`prof` as for `lathe`, bottom up), on the half
+    the camera sees."""
+    from mathutils import Vector
+
+    dense = []
+    for (r0, h0), (r1, h1) in zip(prof, prof[1:]):
+        for k in range(20):
+            f = k / 20
+            dense.append((r0 + (r1 - r0) * f, h0 + (h1 - h0) * f))
+    dense.append(prof[-1])
+    acc, last, rows = 0.0, None, []
+    for i, p in enumerate(dense):
+        if last is not None:
+            acc += math.hypot(p[0] - last[0], p[1] - last[1])
+        last = p
+        if not rows or acc - rows[-1][0] >= size * 0.62:
+            q = dense[min(i + 1, len(dense) - 1)]
+            pr = dense[max(i - 1, 0)]
+            rows.append((acc, p, (q[0] - pr[0], q[1] - pr[1])))
+    for k, (_, (r, h), (dr, dh)) in enumerate(rows):
+        if r < size * 0.4:
+            continue
+        L = math.hypot(dr, dh) or 1.0
+        dr, dh = dr / L, dh / L
+        n = max(3, int(r * math.tau / (size * 0.9)))
+        for j in range(n):
+            a = (j + 0.5 * (k % 2)) / n * math.tau + rnd.uniform(-0.03, 0.03)
+            if math.cos(a + math.pi / 4) < far:
+                continue
+            u = Vector((-math.sin(a), math.cos(a), 0))
+            v = Vector((dr * math.cos(a), dr * math.sin(a), dh))
+            nn = u.cross(v).normalized()
+            p = Vector((cx + math.cos(a) * r, cy + math.sin(a) * r, h + z)) + nn * lift
+            jitter = Vector((rnd.uniform(-0.06, 0.06), rnd.uniform(-0.06, 0.06), 0))
+            place_on(roof_piece(mats[rnd.randrange(len(mats))], size * min(1.0, r / 0.3 + 0.3), shape), p, u + jitter,
+                     v - nn * 0.15)
+
+
+def mat_net(name, color=(0.94, 0.93, 0.88), cells=1.0, line=0.16):
+    """Knotted net: a diamond mesh of white cord, transparent between (UV space, one cell per unit)."""
+    mat, nodes, links, bsdf = lib._principled(name)
+    bsdf.inputs['Base Color'].default_value = (*lib.lin(color), 1)
+    bsdf.inputs['Roughness'].default_value = 0.9
+    uv = nodes.new('ShaderNodeUVMap')
+    sep = nodes.new('ShaderNodeSeparateXYZ')
+    links.new(uv.outputs['UV'], sep.inputs['Vector'])
+
+    def math_node(op, a, b=None, value=None):
+        nd = nodes.new('ShaderNodeMath')
+        nd.operation = op
+        links.new(a, nd.inputs[0])
+        if b is not None:
+            links.new(b, nd.inputs[1])
+        elif value is not None:
+            nd.inputs[1].default_value = value
+        return nd.outputs['Value']
+
+    def cord(sock):
+        f = math_node('FRACT', math_node('MULTIPLY', sock, value=cells))
+        d = math_node('ABSOLUTE', math_node('SUBTRACT', f, value=0.5))
+        return math_node('GREATER_THAN', d, value=0.5 - line)
+
+    s1 = math_node('ADD', sep.outputs['X'], sep.outputs['Y'])
+    s2 = math_node('SUBTRACT', sep.outputs['X'], sep.outputs['Y'])
+    alpha = math_node('MAXIMUM', cord(s1), cord(s2))
+    links.new(alpha, bsdf.inputs['Alpha'])
+    return mat
+
+
+def net_sheet(corners, mat, cells=(10, 8), sag=0.06, res=8):
+    """A net hung between four points (a quad, corners in order), sagging in the middle."""
+    from mathutils import Vector
+
+    c0, c1, c2, c3 = (Vector(c) for c in corners)
+    verts, faces, uvs = [], [], []
+    for j in range(res + 1):
+        for i in range(res + 1):
+            s, t = i / res, j / res
+            p = c0.lerp(c1, s).lerp(c3.lerp(c2, s), t)
+            p.z -= sag * math.sin(math.pi * s) * math.sin(math.pi * t)
+            verts.append(p)
+    for j in range(res):
+        for i in range(res):
+            a = j * (res + 1) + i
+            faces.append((a, a + 1, a + res + 2, a + res + 1))
+    mesh = bpy.data.meshes.new('net')
+    mesh.from_pydata(verts, [], faces)
+    layer = mesh.uv_layers.new(name='UVMap')
+    for poly in mesh.polygons:
+        for li in poly.loop_indices:
+            vi = mesh.loops[li].vertex_index
+            i, j = vi % (res + 1), vi // (res + 1)
+            layer.data[li].uv = (i / res * cells[0], j / res * cells[1])
+    obj = bpy.data.objects.new('net', mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.data.materials.append(mat)
+    return obj
+
+
+def sheep(x, y, a, wool, black, s=1.0, seed=0):
+    """A white woolly sheep with a black face and legs, at (x, y) facing angle `a`."""
+    c, si = math.cos(a), math.sin(a)
+    at = lambda f, g, z: (x + (c * f - si * g) * s, y + (si * f + c * g) * s, z * s)
+    body = lib.lumpy(at(0, 0, 0.15), 0.095 * s, wool, scale=(1.4, 1.0, 0.9), strength=0.35, noise=2.2, seed=seed,
+                     subdiv=3)
+    body.rotation_euler = (0, 0, a)
+    head = lib.sphere(at(0.175, 0, 0.18), 0.048 * s, black, scale=(1.5, 0.78, 0.85))
+    head.rotation_euler = (0, 0.5, a)
+    lib.sphere(at(0.13, 0, 0.2), 0.045 * s, wool, scale=(0.8, 1.0, 0.8))
+    for g in (0.045, -0.045):
+        ear = lib.box(at(0.15, g, 0.215), (0.045 * s, 0.02 * s, 0.012 * s), black)
+        ear.rotation_euler = (0, 0, a + (0.7 if g > 0 else -0.7))
+    for f, g in ((0.07, 0.045), (0.07, -0.045), (-0.07, 0.045), (-0.07, -0.045)):
+        lib.cylinder(at(f, g, 0.05), 0.013 * s, 0.1 * s, black, verts=6)
+
+
+def horseman(x, y, z0, heading, stone, s=1.0):
+    """A stone equestrian statue: a horse with one foreleg raised, its rider holding up a sword."""
+    c, si = math.cos(heading), math.sin(heading)
+
+    def at(f, g, z):
+        return (x + (c * f - si * g) * s, y + (si * f + c * g) * s, z0 + z * s)
+
+    def limb(p, q, r):
+        rod(at(*p), at(*q), r * s, stone, verts=8)
+
+    body = lib.sphere(at(0, 0, 0.56), 0.3 * s, stone, scale=(1.0, 0.42, 0.48), subdiv=3)
+    body.rotation_euler = (0, -0.08, heading)
+    lib.sphere(at(-0.2, 0, 0.56), 0.15 * s, stone, scale=(1.0, 0.95, 1.0))
+    lib.sphere(at(0.2, 0, 0.6), 0.15 * s, stone, scale=(1.0, 0.9, 1.05))
+    # Legs: hind pair and one foreleg standing, the other foreleg raised and bent.
+    for g in (0.075, -0.075):
+        limb((-0.22, g, 0.5), (-0.26, g, 0.22), 0.045)
+        limb((-0.26, g, 0.22), (-0.22, g, 0.0), 0.032)
+    limb((0.2, -0.075, 0.5), (0.22, -0.075, 0.22), 0.042)
+    limb((0.22, -0.075, 0.22), (0.21, -0.075, 0.0), 0.03)
+    limb((0.2, 0.075, 0.52), (0.36, 0.075, 0.4), 0.042)
+    limb((0.36, 0.075, 0.4), (0.34, 0.075, 0.24), 0.03)
+    # Neck and head, mane, tail.
+    limb((0.24, 0, 0.66), (0.4, 0, 0.92), 0.08)
+    head = lib.sphere(at(0.46, 0, 0.9), 0.1 * s, stone, scale=(1.5, 0.55, 0.62))
+    head.rotation_euler = (0, 0.75, heading)
+    for g in (0.03, -0.03):
+        limb((0.4, g, 1.0), (0.39, g, 1.08), 0.016)
+    limb((0.18, 0, 0.74), (0.36, 0, 1.0), 0.03)
+    limb((-0.3, 0, 0.6), (-0.4, 0, 0.32), 0.03)
+    # Rider: legs down the flanks, torso, head with a crested helmet, sword arm raised.
+    for g in (0.12, -0.12):
+        limb((0.0, g * 0.6, 0.78), (0.08, g, 0.62), 0.04)
+        limb((0.08, g, 0.62), (0.04, g, 0.44), 0.032)
+    lib.cylinder(at(0.0, 0, 0.92), 0.075 * s, 0.3 * s, stone, verts=12, radius2=0.085 * s)
+    lib.sphere(at(0.01, 0, 1.12), 0.06 * s, stone)
+    lib.sphere(at(0.0, 0, 1.15), 0.062 * s, stone, scale=(1.0, 1.0, 0.7))
+    limb((-0.03, 0, 1.19), (0.03, 0, 1.2), 0.02)
+    limb((0.0, -0.09, 1.02), (0.12, -0.1, 0.9), 0.026)
+    limb((0.0, 0.09, 1.02), (0.04, 0.14, 1.2), 0.026)
+    limb((0.04, 0.14, 1.2), (0.08, 0.15, 1.36), 0.022)
+    lib.box(at(0.11, 0.15, 1.56), (0.025 * s, 0.012 * s, 0.36 * s), stone, rot=(0.0, 0.18, heading))
+    lib.box(at(0.08, 0.15, 1.38), (0.09 * s, 0.02 * s, 0.02 * s), stone, rot=(0, 0, heading))
+
+
 # ------------------------------------------------------------------------------------- farm (3×3)
 
 def build_farm():
-    """Our farm: a long fieldstone farmhouse under wooden shingles with a chimney, an open thatched
-    barn on posts full of hay on the left, a round stave granary under a straw cap on the right, a
-    bit of fence and a trough by the door."""
+    """The Settlers 4 Roman grain farm: a long hall of dark fieldstone under a tall barrel roof of
+    wooden shingles (a dormer with a little tiled roof, a stone chimney), ending at +X in a round
+    stave apse with a thick straw skirt and a plank half-cone roof inside the vault's end arch; at −X
+    an open timber barn under deep golden thatch with hay inside. Stages after the original: low
+    walls and the apse frame, full walls, the bare vault ribs, then the roof."""
     rnd = random.Random(41)
     walls = stone_walls()
-    blocks = block_mats()
+    gb = grey_blocks('fgb')
     beam = beam_mat()
-    straw = straw_mat()
-    hay = lib.mat_grain('hay', (0.7, 0.56, 0.2), (0.95, 0.84, 0.44), scale=14, stretch=(1, 1, 1), bump=1.0)
-    staves = lib.mat_grain('staves', (0.38, 0.22, 0.09), (0.6, 0.4, 0.18), scale=5, stretch=(1, 1, 9), bump=0.6)
-    iron = lib.mat_flat('iron', (0.22, 0.22, 0.24), rough=0.4)
+    straw = thatch_mat()
+    sh = shingle_mix(barrel_shingles('fsh'))
+    planks = boards_mats()
+    staves = lib.mat_grain('staves', (0.36, 0.2, 0.08), (0.6, 0.38, 0.16), scale=5, stretch=(1, 1, 9), bump=0.6)
+    hay = lib.mat_grain('hay', (0.72, 0.56, 0.16), (0.96, 0.84, 0.4), scale=14, stretch=(1, 1, 1), bump=1.0)
+    iron = lib.mat_flat('iron', (0.2, 0.2, 0.22), rough=0.4)
+    red = lib.mat_flat('red', (0.62, 0.1, 0.06), rough=0.6)
+    glass = lib.mat_flat('glass', (0.82, 0.8, 0.72), rough=0.4)
+    tc = terracotta_mats('ftc')
     door = door_mat()
     dark = lib.mat_flat('dark', (0.06, 0.05, 0.04))
-    sh = shingle_mats()
-    earth_pad((0.2, -0.35, 0), 1.5, 1.6, seed=41)
+    earth_pad((0.05, -0.3, 0), 1.55, 1.6, seed=41)
     lib.tag(0)
-    corner_stakes(-1.45, 1.45, -1.3, 1.3)
+    corner_stakes(-1.45, 1.45, -1.3, 1.0)
     lib.tag(0, until=0)
 
-    # House: ridge along Y — its long shingled slope faces the camera's right (+X), the gable with
-    # the door faces −Y (the door tile is in front of x = 1).
-    hx0, hx1, hy0, hy1, H, rh = -0.55, 0.62, -1.3, 0.95, 0.7, 0.55
-    B = _b()
-    B.timber_frame((hx0 + hx1) / 2, (hy0 + hy1) / 2, hx1 - hx0, hy1 - hy0, H, rh, beam, axis='y')
-    lib.box(((hx0 + hx1) / 2, (hy0 + hy1) / 2, 0.05), (hx1 - hx0 + 0.06, hy1 - hy0 + 0.06, 0.1), blocks[1], bevel=0.02)
-    lib.tag(1, until=3)
-    stone_house(hx0, hx1, hy0, hy1, H * 0.5, rnd, walls, blocks, block=0.2)
+    # The hall: ridge along X, the stone front with the door facing −Y.
+    hx0, hx1, hy0, hy1, Hw = -0.72, 0.78, -0.78, 0.5, 0.72
+    cy = (hy0 + hy1) / 2
+    c, s = (hy1 - hy0) / 2, 0.84
+    lib.box(((hx0 + hx1) / 2, cy, 0.05), (hx1 - hx0 + 0.06, hy1 - hy0 + 0.06, 0.1), gb[1], bevel=0.02)
+    stone_house(hx0, hx1, hy0, hy1, Hw * 0.4, rnd, walls, gb, block=0.2)
+    lib.tag(1)
+    stone_house(hx0, hx1, hy0, hy1, Hw, rnd, walls, gb, z0=Hw * 0.4, block=0.2)
+    lib.box((0.42, hy0 - 0.05, 0.23), (0.24, 0.04, 0.46), door, bevel=0.01)
+    lib.box((0.42, hy0 - 0.08, 0.48), (0.34, 0.07, 0.07), beam, bevel=0.01)
+    for dx in (-0.14, 0.14):
+        lib.box((0.42 + dx, hy0 - 0.07, 0.24), (0.05, 0.05, 0.48), beam, bevel=0.008)
+    window(-0.3, hy0 - 0.04, 0.4, 0.15, 0.16, beam, dark)
     lib.tag(2)
-    stone_house(hx0, hx1, hy0, hy1, H, rnd, walls, blocks, z0=H * 0.5, block=0.2)
-    lib.gable(((hx0 + hx1) / 2, (hy0 + hy1) / 2, H), hx1 - hx0, rh - 0.02, hy0 + 0.01, walls, along='y')
-    lib.gable(((hx0 + hx1) / 2, (hy0 + hy1) / 2, H), hx1 - hx0, rh - 0.02, hy1 - 0.01, walls, along='y')
-    lib.box((0.32, hy0 - 0.05, 0.22), (0.24, 0.04, 0.44), door, bevel=0.01)
-    lib.box((0.32, hy0 - 0.07, 0.46), (0.32, 0.06, 0.06), beam, bevel=0.01)
-    window(-0.2, hy0 - 0.04, 0.42, 0.14, 0.15, beam, dark)
-    window(hx1 + 0.04, 0.15, 0.45, 0.16, 0.16, beam, dark, face='x')
-    window(hx1 + 0.04, -0.75, 0.45, 0.16, 0.16, beam, dark, face='x')
-    window((hx0 + hx1) / 2, hy0 - 0.03, H + rh * 0.38, 0.12, 0.12, beam, dark)
+    at = barrel_frame((hx0 + hx1) / 2, cy, Hw, 'x')[0]
+    barrel_ribs(at, hx1 - hx0, c, s, beam, count=4, battens=5)
+    lib.tag(3, until=3)
+    arch_infill(at, -(hx1 - hx0) / 2 - 0.02, c, s, walls)
+    arch_boards(at, (hx1 - hx0) / 2, c, s, planks, rnd, 'x')
     lib.tag(3)
-    scale_roof((hx0 + hx1) / 2, (hy0 + hy1) / 2, hx1 - hx0, hy1 - hy0, H, rh, sh, lib.mat_flat('ridge', (0.38, 0.24, 0.1)),
-               axis='y', overhang=0.12, seed=42, size=0.13, shape='tile')
-    lib.tag(None, split=lambda o: 3 if o.location.x > (hx0 + hx1) / 2 else 4)
-    chimney(hx0 + 0.32, hy1 - 0.4, H, H + rh + 0.2, blocks, rnd, name='farm')
+    barrel_roof((hx0 + hx1) / 2, cy, Hw, hx1 - hx0, c, s, sh, lib.mat_grain('fvault', (0.3, 0.18, 0.08), (0.46, 0.3, 0.14),
+                scale=6, stretch=(1, 1, 1), bump=0.4), beam, rnd, axis='x', overhang=0.1, size=0.17, upto=0.6)
+    # The lower rows of the camera's slope go on in stage 3.
+    lib.tag(None, split=lambda o: 3 if o.location.z < Hw + s * 0.45 and o.location.y < cy - c * 0.5 else 4)
+    # Dormer on the front slope, above the door, under a little tiled gable.
+    dx_, th = 0.28, 0.3 * math.pi
+    da, du = (c + 0.1) * math.cos(th), (s + 0.1) * math.sin(th)
+    dy0 = cy - da
+    lib.box((dx_, dy0 + 0.12, Hw + du), (0.26, 0.3, 0.24), walls, bevel=0.01)
+    stone_course(dx_ - 0.13, dx_ + 0.13, dy0 - 0.03, dy0 + 0.2, Hw + du - 0.12, Hw + du + 0.12, gb, rnd, block=0.11,
+                 depth=0.03, faces=('y',))
+    window(dx_, dy0 - 0.05, Hw + du + 0.01, 0.12, 0.12, red, glass)
+    lib.box((dx_, dy0 - 0.075, Hw + du + 0.01), (0.02, 0.02, 0.12), red)
+    lib.box((dx_, dy0 - 0.075, Hw + du + 0.01), (0.12, 0.02, 0.02), red)
+    lib.prism_roof((dx_, dy0 + 0.12, Hw + du + 0.12), 0.36, 0.3, 0.13, tc[1], overhang=0.04, thickness=0.03, along='y')
+    for k in range(4):
+        for side in (-1, 1):
+            lib.box((dx_ + side * 0.085, dy0 - 0.05 + k * 0.09, Hw + du + 0.2), (0.15, 0.1, 0.022), tc[(k + side) % 3],
+                    rot=(0, side * -0.72, 0), bevel=0.006)
+    chimney(-0.32, cy + 0.12, Hw + s - 0.3, Hw + s + 0.32, gb, rnd, name='farm')
     lib.tag(4)
 
-    # Open barn on the left: posts, a thatched lean-to sloping away from the house, hay heaped inside.
-    bx0, bx1, by0, by1 = -1.45, hx0 - 0.02, -1.0, 0.75
-    lo, hi = 0.42, 0.68
-    for (x, y, h) in ((bx0, by0, lo), (bx0, by1, lo), (bx1, by0, hi), (bx1, by1, hi)):
-        lib.cylinder((x, y, h / 2), 0.035, h, beam, verts=8)
-    lib.box((bx0, (by0 + by1) / 2, lo), (0.05, by1 - by0 + 0.1, 0.05), beam)
+    # Apse at the +X end: a half-round drum of staves with iron hoops and a red-framed window.
+    ax, ar, Hd = hx1, c - 0.02, Hw
+    lib.cylinder((ax, cy, 0.05), ar + 0.05, 0.1, gb[1], verts=32)
+    for k in range(7):
+        a = -math.pi / 2 + k * math.pi / 6
+        lib.box((ax + math.cos(a) * ar, cy + math.sin(a) * ar, Hd / 2), (0.06, 0.06, Hd), beam, rot=(0, 0, a))
+    torus((ax, cy, Hd - 0.02), ar, 0.025, beam)
+    lib.tag(1, until=1)
+    lib.cylinder((ax, cy, Hd / 2 + 0.04), ar - 0.03, Hd - 0.02, staves, verts=32)
+    n = 24
+    for k in range(n + 1):
+        a = -math.pi / 2 + k * math.pi / n
+        lib.box((ax + math.cos(a) * ar, cy + math.sin(a) * ar, Hd / 2 + 0.04), (0.035, ar * math.pi / n * 1.02, Hd),
+                planks[k % len(planks)] if k % 3 else staves, rot=(0, 0, a), bevel=0.005)
+    for z in (0.16, Hd - 0.06):
+        torus((ax, cy, z), ar + 0.022, 0.014, iron)
+    wa = -0.55
+    wx, wy = ax + math.cos(wa) * (ar + 0.03), cy + math.sin(wa) * (ar + 0.03)
+    lib.box((wx, wy, 0.34), (0.03, 0.17, 0.17), glass, rot=(0, 0, wa))
+    for (bw, bh) in ((0.03, 0.2), (0.2, 0.03)):
+        lib.box((wx + math.cos(wa) * 0.012, wy + math.sin(wa) * 0.012, 0.34), (0.03, bw, bh), red, rot=(0, 0, wa))
+    lib.tag(2)
+    # Rafters of the apse roof (stage 3), then its planks and the straw skirt.
+    for k in range(7):
+        a = -math.pi / 2 + k * math.pi / 6
+        rod((ax + math.cos(a) * (ar + 0.05), cy + math.sin(a) * (ar + 0.05), Hd), (ax, cy, Hd + 0.5), 0.022, beam, verts=6)
+    lib.tag(3, until=3)
+    lathe(ax, cy, [(ar + 0.04, Hd + 0.02), (0.02, Hd + 0.52)], planks[1], segs=12, a0=-math.pi / 2, a1=math.pi / 2,
+          smooth=False)
+    for k in range(13):
+        a = -math.pi / 2 + (k + 0.5) * math.pi / 13
+        p0 = (ax + math.cos(a) * (ar + 0.02), cy + math.sin(a) * (ar + 0.02), Hd + 0.05)
+        rod(p0, (ax + math.cos(a) * 0.05, cy + math.sin(a) * 0.05, Hd + 0.54), 0.02, planks[k % len(planks)], verts=4)
+    skirt = lathe(ax, cy, [(ar + 0.2, Hd - 0.16), (ar + 0.18, Hd - 0.08), (ar + 0.1, Hd + 0.06), (ar - 0.02, Hd + 0.14),
+                           (ar - 0.1, Hd + 0.12)], straw, segs=28, a0=-math.pi / 2 - 0.15, a1=math.pi / 2 + 0.15)
+    shaggy(skirt, 0.035, 0.06, seed=41)
+    lib.tag(4)
+
+    # Open barn at −X under deep thatch (ridge along Y), with hay inside.
+    bx0, bx1, by0, by1, bH, bR = -1.5, hx0 + 0.05, -1.22, 0.42, 0.46, 1.08
+    bcx = (bx0 + bx1) / 2
+    for (x, y) in ((bx0, by0), (bx1 - 0.04, by0), (bx0, by1), (bx0, (by0 + by1) / 2)):
+        lib.box((x, y, bH / 2), (0.07, 0.07, bH), beam, bevel=0.008)
+    lib.tag(1)
+    lib.box((bx0 + 0.02, (by0 + by1) / 2, bH / 2), (0.04, by1 - by0, bH), planks[3], bevel=0.005)
+    lib.box((bcx, by0, bH), (bx1 - bx0 + 0.08, 0.07, 0.07), beam)
+    for side in (-1, 1):
+        rod((bcx + side * (bx1 - bx0) / 2, by0, bH), (bcx, by0, bR), 0.03, beam, verts=6)
+    rod((bcx, by0, bH), (bcx, by0, bR), 0.025, beam, verts=6)
     lib.tag(2)
     for k in range(5):
-        lib.lumpy((bx0 + 0.22 + (k % 2) * 0.32, by0 + 0.3 + k * 0.32, 0.13), 0.19, hay, scale=(1.1, 1, 0.75),
+        lib.lumpy((bx0 + 0.25 + (k % 2) * 0.22, by0 + 0.3 + k * 0.26, 0.14), 0.18, hay, scale=(1.1, 1, 0.8),
                   strength=0.35, noise=0.9, seed=k)
     lib.tag(3)
-    tilt = math.atan2(hi - lo, bx1 - bx0)
-    run = math.hypot(bx1 - bx0, hi - lo) + 0.22
-    for k in range(3):  # three overlapping straw layers, the lower ones further out
-        lib.box(((bx0 + bx1) / 2 - 0.04 * k, (by0 + by1) / 2, (lo + hi) / 2 + 0.06 - 0.025 * k),
-                (run - 0.12 * k, by1 - by0 + 0.3, 0.07), straw, rot=(0, -tilt, 0), bevel=0.035)
-    lib.tag(4)
-
-    # Round granary on the right of the house.
-    gx, gy, gr, gh = 1.08, 0.55, 0.34, 0.6
-    lib.cylinder((gx, gy, 0.04), gr + 0.05, 0.08, blocks[1], verts=24)
-    lib.tag(1)
-    for k in range(22):
-        a = k / 22 * math.tau
-        lib.box((gx + math.cos(a) * gr, gy + math.sin(a) * gr, gh / 2 + 0.06), (0.1, 0.035, gh), staves,
-                rot=(0, 0, a + math.pi / 2), bevel=0.006)
-    for z in (0.18, gh - 0.02):
-        torus((gx, gy, z), gr + 0.02, 0.014, iron)
-    lib.tag(None, split=lambda o: 2 if o.location.z < 0.3 else 3)
-    thatch_cone((gx, gy, gh + 0.04), gr + 0.12, 0.42, straw)
-    lib.tag(4)
-
-    # A short fence and a water trough near the door.
-    for k in range(5):
-        lib.box((0.72 + k * 0.17, -1.42, 0.12), (0.035, 0.035, 0.24), beam)
-    for z in (0.1, 0.2):
-        lib.box((1.06, -1.42, z), (0.7, 0.03, 0.035), beam)
-    lib.box((-0.8, -1.2, 0.07), (0.4, 0.16, 0.12), staves, bevel=0.01)
+    run = math.hypot((bx1 - bx0) / 2 + 0.16, bR - bH + 0.1)
+    tilt = math.atan2(bR - bH + 0.1, (bx1 - bx0) / 2 + 0.16)
+    for side in (-1, 1):
+        for k in range(2):
+            slab = lib.box((bcx + side * ((bx1 - bx0) / 4 + 0.06), (by0 + by1) / 2 - 0.06,
+                            (bH + bR) / 2 + 0.04 - 0.05 * k), (run - 0.06 * k, by1 - by0 + 0.36, 0.16), straw,
+                           rot=(0, side * tilt, 0), bevel=0.07)
+            shaggy(slab, 0.025, 0.05, seed=50 + k + side)
     lib.tag(4)
 
 
 # ------------------------------------------------------------------------------------- mill (2×2)
 
+#: The mill's tower and cap (shared by `build_mill`, `mill_hub` and the sails).
+MILL = {'cx': -0.02, 'cy': 0.3, 'R': 0.5, 'body': 1.3, 'eave': 1.18, 'cap_r': 0.98, 'top': 2.26, 'hub_z': 1.6,
+        'hub_out': 0.98}
+
+
+def mill_cap_profile():
+    """(radius, height) of the mill's straw cap: a flared, thick eave, then a broad cone of thatch laid
+    in courses (each a little proud of the one above) up to a rounded crown."""
+    m = MILL
+    r0, z0, top = m['cap_r'], m['eave'], m['top']
+    prof = [(r0 - 0.08, z0 - 0.06), (r0 + 0.03, z0 - 0.02), (r0 + 0.04, z0 + 0.04)]
+    courses = 4
+    crown = top - 0.18
+    def dome(f):
+        return r0 * (1 - 0.78 * f ** 2.0), z0 + 0.04 + (crown - z0 - 0.04) * f
+
+    for k in range(courses):
+        f0, f1 = k / courses, (k + 1) / courses
+        (ra, za), (rb, zb) = dome(f0), dome(f1)
+        rm, zm = dome((f0 + f1) / 2)
+        prof.append((ra - 0.015, za + 0.02))
+        prof.append((rm - 0.01, zm))
+        prof.append((rb + 0.015, zb - 0.01))
+        prof.append((rb + 0.02, zb + 0.01))
+    rc = r0 * 0.22
+    for k in range(1, 7):
+        a = k / 6 * math.pi / 2
+        prof.append((rc * math.cos(a), crown + 0.01 + (top - crown) * math.sin(a)))
+    return prof
+
+
 def build_mill():
-    """Our windmill: a round stone tower tapering up from a wider drum of planks on a stone footing,
-    with small windows and a railed gallery, under a conical thatched cap. The sails are not
-    modelled: the game turns its own sails sprite at the hub this model records (FX_AT['mill'])."""
+    """The Settlers 4 Roman windmill: a stout round tower — a drum of dark boards in a timber frame at
+    the foot, rugged grey stone above — under a huge golden straw cap, a timber porch at the door and
+    a low round annex at the side: stone footing, lattice-framed walls of pale panels, a plank deck
+    with a rail on top, ivy. The sails are not modelled: the game flips the pre-rendered sail frames
+    (`render_mill_sails`) over the hub recorded here (FX_AT['mill'])."""
     rnd = random.Random(51)
-    blocks = block_mats()
+    gb = grey_blocks('mgb')
     walls = stone_walls()
     beam = beam_mat()
-    straw = straw_mat()
+    straw = thatch_mat()
     planks = boards_mats()
-    glass = lib.mat_flat('glass', (0.7, 0.62, 0.42), rough=0.3)
+    boards = grain_set('mboard', (((0.24, 0.14, 0.07), (0.4, 0.26, 0.13)), ((0.3, 0.18, 0.08), (0.48, 0.32, 0.16)),
+                                  ((0.2, 0.13, 0.08), (0.36, 0.24, 0.14))), scale=4, stretch=(1, 1, 9), bump=0.6)
+    panel = lib.mat_grain('mpanel', (0.78, 0.66, 0.4), (0.94, 0.84, 0.58), scale=6, stretch=(1, 1, 1), bump=0.3)
+    ivy = lib.mat_leaves('mivy', (0.04, 0.14, 0.03), (0.12, 0.34, 0.07), (0.32, 0.56, 0.14))
     door = door_mat()
-    earth_pad((0.1, -0.3, 0), 1.0, 1.1, seed=51)
+    dark = lib.mat_flat('dark', (0.05, 0.04, 0.03))
+    earth_pad((0.0, -0.25, 0), 1.0, 1.1, seed=51)
     lib.tag(0)
-    corner_stakes(-0.85, 0.85, -0.85, 0.85)
+    corner_stakes(-0.9, 0.85, -0.85, 0.9)
     lib.tag(0, until=0)
 
-    cx, cy = 0.0, 0.05
-    R, DH = 0.64, 0.5
-    lib.cylinder((cx, cy, 0.06), R + 0.04, 0.12, blocks[1], verts=32)
+    m = MILL
+    cx, cy, R = m['cx'], m['cy'], m['R']
+    DH = 0.6  # the board drum at the foot
+    lib.cylinder((cx, cy, 0.05), R + 0.06, 0.1, gb[1], verts=32)
+    for k in range(8):
+        a = k / 8 * math.tau
+        lib.box((cx + math.cos(a) * (R + 0.02), cy + math.sin(a) * (R + 0.02), DH / 2 + 0.05), (0.07, 0.07, DH),
+                beam, rot=(0, 0, a))
     lib.tag(1)
-    lib.cylinder((cx, cy, 0.12 + DH / 2), R - 0.02, DH, walls, verts=32)
-    for k in range(26):
-        a = k / 26 * math.tau
-        lib.box((cx + math.cos(a) * R, cy + math.sin(a) * R, 0.12 + DH / 2), (0.18, 0.04, DH),
-                planks[k % len(planks)], rot=(0, 0, a + math.pi / 2), bevel=0.005)
-    for a in (-2.1, -1.0, -0.2):  # windows on the camera side
-        lib.box((cx + math.cos(a) * (R + 0.025), cy + math.sin(a) * (R + 0.025), 0.33), (0.14, 0.03, 0.13), glass,
-                rot=(0, 0, a + math.pi / 2))
-    a = -1.55  # door, towards the door tile
-    lib.box((cx + math.cos(a) * (R + 0.03), cy + math.sin(a) * (R + 0.03), 0.21), (0.22, 0.03, 0.3), door,
-            rot=(0, 0, a + math.pi / 2), bevel=0.008)
+    lib.cylinder((cx, cy, DH / 2 + 0.05), R - 0.01, DH, boards[0], verts=32)
+    n = 30
+    for k in range(n):
+        a = k / n * math.tau
+        if math.cos(a + math.pi / 4) < -0.5:
+            continue
+        lib.box((cx + math.cos(a) * R, cy + math.sin(a) * R, DH / 2 + 0.05), (0.03, R * math.tau / n * 1.02, DH - 0.02),
+                boards[k % len(boards)], rot=(0, 0, a), bevel=0.004)
+    for z in (0.12, DH * 0.55, DH + 0.04):
+        torus((cx, cy, z), R + 0.03, 0.028, beam)
+    # Door towards the door tile, framed by a small timber porch with a step.
+    da = -1.25
+    dxp, dyp = cx + math.cos(da) * (R + 0.03), cy + math.sin(da) * (R + 0.03)
+    lib.box((dxp, dyp, 0.27), (0.03, 0.22, 0.4), dark, rot=(0, 0, da))
+    lib.box((dxp + math.cos(da) * 0.01, dyp + math.sin(da) * 0.01, 0.26), (0.03, 0.19, 0.37), door, rot=(0, 0, da),
+            bevel=0.006)
+    ox, oy = math.cos(da), math.sin(da)
+    tx, ty = -math.sin(da), math.cos(da)
+    for side in (-1, 1):
+        px, py = dxp + ox * 0.2 + tx * side * 0.17, dyp + oy * 0.2 + ty * side * 0.17
+        lib.box((px, py, 0.3), (0.06, 0.06, 0.6), beam, rot=(0, 0, da), bevel=0.006)
+        rod((px, py, 0.6), (px - ox * 0.2, py - oy * 0.2, 0.62), 0.025, beam, verts=6)
+        rod((px, py, 0.42), (px - ox * 0.16, py - oy * 0.16, 0.58), 0.018, beam, verts=6)
+    lib.box((dxp + ox * 0.2, dyp + oy * 0.2, 0.6), (0.07, 0.42, 0.06), beam, rot=(0, 0, da))
+    lib.box((dxp + ox * 0.12, dyp + oy * 0.12, 0.03), (0.22, 0.34, 0.06), planks[1], rot=(0, 0, da), bevel=0.008)
     lib.tag(2)
-    gz = 0.12 + DH
-    lib.cylinder((cx, cy, gz + 0.02), R + 0.08, 0.04, planks[1], verts=32)
+    # Stone above the boards, a little narrower, up into the cap.
+    top = m['body']
+    rows = 6
+    rh = (top - DH - 0.05) / rows
+    for r in range(rows):
+        z = DH + 0.07 + (r + 0.5) * rh
+        rr = R - 0.03 - 0.03 * r / rows
+        lib.cylinder((cx, cy, z), rr - 0.04, rh + 0.01, walls, verts=24)
+        nb = 13
+        for k in range(nb):
+            a = (k + 0.5 * (r % 2)) / nb * math.tau + rnd.uniform(-0.05, 0.05)
+            if math.cos(a + math.pi / 4) < -0.45:
+                continue
+            lib.box((cx + math.cos(a) * rr, cy + math.sin(a) * rr, z + rnd.uniform(-0.01, 0.01)),
+                    (0.08, rr * math.tau / nb * rnd.uniform(0.78, 0.95), rh * rnd.uniform(0.78, 0.9)),
+                    gb[rnd.randrange(len(gb))], rot=(rnd.uniform(-0.05, 0.05), 0, a), bevel=0.014)
+    lib.tag(None, split=lambda o: 2 if o.location.z < DH + 0.3 else 3)
+    # The cap: a thick straw dome overhanging far, a knob on top.
+    cap = lathe(cx, cy, mill_cap_profile(), straw, segs=48)
+    shaggy(cap, 0.045, 0.07, seed=51)
+    lib.lumpy((cx, cy, m['top'] - 0.02), 0.09, straw, scale=(1, 1, 0.8), strength=0.4, noise=2.0, seed=52)
+    lib.cylinder((cx, cy, m['top'] + 0.1), 0.02, 0.2, beam, verts=6)
+    # The hub on the camera's right of the cap, where the game turns the sails.
+    a = MILL_HUB_AXIS
+    hx, hy, hz = mill_hub()
+    lib.box((hx - math.cos(a) * 0.16, hy - math.sin(a) * 0.16, hz), (0.3, 0.16, 0.16), beam, rot=(0, 0, a),
+            bevel=0.02)
+    lib.cylinder((hx, hy, hz), 0.06, 0.1, beam, rot=(math.pi / 2, 0, a + math.pi / 2), verts=12)
+    note_fx('mill', 'hub', (hx + math.cos(a) * 0.09, hy + math.sin(a) * 0.09, hz))
+    lib.tag(4)
+
+    # Low round annex at the side: stone footing, lattice frames with pale panels, a railed deck.
+    nx, ny, nr, nH = -0.6, -0.38, 0.36, 0.56
+    lib.cylinder((nx, ny, 0.09), nr + 0.04, 0.18, walls, verts=28)
     for k in range(16):
         a = k / 16 * math.tau
-        lib.cylinder((cx + math.cos(a) * (R + 0.04), cy + math.sin(a) * (R + 0.04), gz + 0.12), 0.018, 0.2, beam, verts=6)
-    torus((cx, cy, gz + 0.22), R + 0.04, 0.02, beam)
+        lib.box((nx + math.cos(a) * (nr + 0.03), ny + math.sin(a) * (nr + 0.03), 0.09),
+                (0.06, (nr + 0.03) * math.tau / 16 * 0.9, 0.15), gb[rnd.randrange(len(gb))], rot=(0, 0, a),
+                bevel=0.012)
+    lib.tag(1)
+    lib.cylinder((nx, ny, (0.18 + nH) / 2), nr - 0.01, nH - 0.18, panel, verts=28)
+    for k in range(12):
+        a = k / 12 * math.tau
+        lib.box((nx + math.cos(a) * nr, ny + math.sin(a) * nr, (0.18 + nH) / 2), (0.045, 0.045, nH - 0.18), beam,
+                rot=(0, 0, a))
+    for z in (0.2, 0.38, nH):
+        torus((nx, ny, z), nr + 0.005, 0.02, beam)
+    for k in range(24):
+        a = (k + 0.5) / 24 * math.tau
+        lib.box((nx + math.cos(a) * (nr + 0.01), ny + math.sin(a) * (nr + 0.01), (0.2 + 0.38) / 2), (0.012, 0.012, 0.18),
+                beam, rot=(0, 0, a))
+    lib.tag(2)
+    for k in range(7):
+        t = -nr - 0.04 + (k + 0.5) * (2 * nr + 0.08) / 7
+        w = math.sqrt(max(0.0, (nr + 0.05) ** 2 - t ** 2)) * 2
+        lib.box((nx + t, ny, nH + 0.03), ((2 * nr + 0.08) / 7 - 0.012, w, 0.035), planks[k % len(planks)],
+                rot=(0, 0, rnd.uniform(-0.01, 0.01)), bevel=0.005)
+    for k in range(12):
+        a = k / 12 * math.tau
+        if math.cos(a + math.pi / 4) < -0.6:
+            continue
+        lib.cylinder((nx + math.cos(a) * (nr + 0.02), ny + math.sin(a) * (nr + 0.02), nH + 0.12), 0.018, 0.18, beam,
+                     verts=6)
+    torus((nx, ny, nH + 0.2), nr + 0.02, 0.02, beam)
     lib.tag(3)
-    TH, r0, r1, rows = 1.35, 0.46, 0.33, 12
-    for r in range(rows):
-        t = (r + 0.5) / rows
-        rr = r0 + (r1 - r0) * t
-        z = gz + 0.04 + TH * t
-        lib.cylinder((cx, cy, z), rr - 0.03, TH / rows + 0.01, walls, verts=20)
-        for k in range(14):
-            a = (k + 0.5 * (r % 2)) / 14 * math.tau
-            lib.box((cx + math.cos(a) * rr, cy + math.sin(a) * rr, z), (rr * math.tau / 14 * 0.92, 0.08, TH / rows * 0.86),
-                    blocks[rnd.randrange(len(blocks))], rot=(0, 0, a + math.pi / 2), bevel=0.012)
-    lib.tag(None, split=lambda o: 3 if o.location.z < gz + TH * 0.5 else 4)
-    top = gz + 0.04 + TH
-    thatch_cone((cx, cy, top - 0.04), r1 + 0.24, 0.6, straw)
-    # The hub: a timber block on the camera side of the tower, where the game turns the sails.
-    a = -math.pi / 4  # between −Y and +X: straight at the camera
-    hx, hy, hz = cx + math.cos(a) * (r1 + 0.1), cy + math.sin(a) * (r1 + 0.1), top - 0.1
-    lib.box((hx, hy, hz), (0.14, 0.14, 0.14), beam, rot=(0, 0, a), bevel=0.02)
-    lib.cylinder((hx + math.cos(a) * 0.08, hy + math.sin(a) * 0.08, hz), 0.05, 0.06, beam,
-                 rot=(math.pi / 2, 0, a + math.pi / 2), verts=12)
-    note_fx('mill', 'hub', (hx + math.cos(a) * 0.12, hy + math.sin(a) * 0.12, hz))
+    for (a, z, rr) in ((-2.4, 0.3, 0.1), (-2.0, 0.18, 0.09), (-2.8, 0.42, 0.08), (2.9, 0.2, 0.09)):
+        lib.lumpy((nx + math.cos(a) * (nr + 0.03), ny + math.sin(a) * (nr + 0.03), z), rr, ivy, scale=(1, 1, 1.4),
+                  strength=0.5, noise=3.0, seed=int(z * 100))
     lib.tag(4)
 
 
-#: Where the mill's sails turn: the hub `build_mill` places (same constants), and the axis direction.
-MILL_HUB_AXIS = -math.pi / 4
+#: Where the mill's sails turn: their shaft points this way (between +X and the camera, as on the
+#: original, so the sails face the screen's lower right).
+MILL_HUB_AXIS = -0.38
 #: Sail frames over a quarter turn (four arms repeat every 90°).
 SAIL_FRAMES = 12
 
 
 def mill_hub():
-    cx, cy, r1, gz, TH = 0.0, 0.05, 0.33, 0.12 + 0.5, 1.35
-    top = gz + 0.04 + TH
+    m = MILL
     a = MILL_HUB_AXIS
-    return (cx + math.cos(a) * (r1 + 0.22), cy + math.sin(a) * (r1 + 0.22), top - 0.1)
+    return (m['cx'] + math.cos(a) * m['hub_out'], m['cy'] + math.sin(a) * m['hub_out'], m['hub_z'])
 
 
 def build_mill_sails():
-    """Four sail arms on the mill's hub: a timber stock with a lattice of laths and a cloth sail on one
-    side of each arm, as on old post and tower mills. Built around an empty whose local X is the
-    shaft, so a frame is just the empty turned about X (see `render_mill_sails`)."""
+    """Four sail arms on the mill's hub, as on the Settlers 4 mill: a timber stock carrying a lattice
+    of laths on one side, with weathered grey boards set in it. Built around an empty whose local X
+    is the shaft, so a frame is just the empty turned about X (see `render_mill_sails`)."""
     beam = beam_mat()
-    laths = lib.mat_grain('laths', (0.5, 0.36, 0.2), (0.7, 0.54, 0.32), scale=5, stretch=(1, 1, 8), bump=0.4)
-    cloth = lib.mat_grain('cloth', (0.86, 0.78, 0.6), (0.97, 0.92, 0.78), scale=14, stretch=(1, 1, 3), bump=0.3)
+    laths = lib.mat_grain('laths', (0.42, 0.28, 0.14), (0.62, 0.44, 0.24), scale=5, stretch=(1, 1, 8), bump=0.4)
+    cloth = lib.mat_grain('cloth', (0.52, 0.5, 0.46), (0.76, 0.74, 0.68), scale=6, stretch=(1, 6, 1), bump=0.5)
     hub = bpy.data.objects.new('sails', None)
     bpy.context.scene.collection.objects.link(hub)
     hub.location = mill_hub()
@@ -1157,29 +1652,30 @@ def build_mill_sails():
     hub.rotation_euler = (0, 0, MILL_HUB_AXIS)
     bpy.context.view_layer.update()
     parts = []
-    parts.append(lib.cylinder((0.05, 0, 0), 0.055, 0.1, beam, rot=(0, math.pi / 2, 0), verts=12))
-    length, w0, w1 = 0.95, 0.24, 0.24
+    parts.append(lib.cylinder((0.05, 0, 0), 0.06, 0.12, beam, rot=(0, math.pi / 2, 0), verts=12))
+    length, w = 1.0, 0.32
     for k in range(4):
         t = k * math.pi / 2
         c, s_ = math.cos(t), math.sin(t)
 
-        def P(along, side):
+        def P(along, side, x=0.1):
             # Local YZ plane: radial direction (c, s) in (Y, Z), the side across it; X towards the camera.
-            return (0.09, c * along - s_ * side, s_ * along + c * side)
+            return (x, c * along - s_ * side, s_ * along + c * side)
 
-        def rot_for():
-            return (t, 0, 0)
-
-        parts.append(lib.box(P(length / 2, 0), (0.035, length, 0.04), beam, rot=rot_for(), bevel=0.006))
-        # Lattice: two side rails and cross laths, on one side of the stock.
-        for side in (0.03, w0):
-            parts.append(lib.box(P(0.2 + (length - 0.2) / 2, side), (0.02, length - 0.2, 0.015), laths, rot=rot_for()))
+        rot = (t, 0, 0)
+        parts.append(lib.box(P(length / 2, 0), (0.04, length, 0.045), beam, rot=rot, bevel=0.006))
+        for side in (0.03, w):
+            parts.append(lib.box(P(0.18 + (length - 0.18) / 2, side), (0.022, length - 0.18, 0.018), laths, rot=rot))
         for j in range(8):
-            along = 0.24 + j * (length - 0.28) / 7
-            parts.append(lib.box(P(along, (0.03 + w1) / 2), (0.02, 0.012, w1), laths, rot=rot_for()))
-        # The cloth, slightly behind the lattice, a little billowed.
-        parts.append(lib.box((0.062, *P(0.2 + (length - 0.24) / 2, (0.03 + w1) / 2)[1:]),
-                             (0.008, length - 0.26, w1 - 0.03), cloth, rot=rot_for()))
+            along = 0.22 + j * (length - 0.26) / 7
+            parts.append(lib.box(P(along, (0.03 + w) / 2), (0.022, 0.014, w), laths, rot=rot))
+        # Boards in the lattice, slightly behind it, with a gap here and there.
+        for j in range(7):
+            if j == 5:
+                continue
+            a0 = 0.23 + j * (length - 0.26) / 7
+            parts.append(lib.box(P(a0 + (length - 0.26) / 14, (0.03 + w) / 2, 0.075),
+                                 (0.008, (length - 0.26) / 7 - 0.02, w - 0.035), cloth, rot=rot))
     for o in parts:
         world = o.matrix_world.copy()
         o.parent = hub
@@ -2204,71 +2700,98 @@ def build_toolsmith():
 # ------------------------------------------------------------------------------------- pig farm (2×2)
 
 def build_pigfarm():
-    """Our pig farm: a low half-timbered sty with a deep thatched roof running down to the yard side,
-    a small fieldstone house with a wooden-shingle roof and a chimney at its end, and a fenced muddy
-    yard in front with a feeding trough and a few pigs. 3×3 as the Settlers 4 sheep farm: modelled at
-    2×2 and scaled to 3×3, a little less in height."""
+    """The Settlers 4 Roman sheep farm (our `pigfarm`: the Romans keep sheep): a barn of grey
+    fieldstone under a barrel roof of wooden shingles, its arched front gable boarded with a round
+    window and a small door, a stone chimney on the ridge; beside it a low stone shed under deep
+    golden thatch, open towards a strawy yard with a trough and a flock of white, black-faced sheep.
+    Modelled at its 3×3 size."""
     rnd = random.Random(201)
     walls = stone_walls()
-    blocks = block_mats()
+    gb = grey_blocks('pgb')
     beam = beam_mat()
+    straw = thatch_mat()
+    sh = shingle_mix(barrel_shingles('psh'))
+    gable_planks = grain_set('pgable', (((0.4, 0.17, 0.08), (0.6, 0.3, 0.14)), ((0.46, 0.22, 0.1), (0.66, 0.36, 0.18)),
+                                        ((0.36, 0.16, 0.08), (0.54, 0.28, 0.14))), scale=4, stretch=(1, 1, 9), bump=0.6)
     planks = boards_mats()
-    straw = straw_mat()
-    sh = shingle_mats('psh')
-    plaster = lib.mat_stones('pplaster', (0.86, 0.8, 0.66), (0.72, 0.64, 0.5), (0.6, 0.52, 0.4), scale=6, bump=0.3)
-    mud = lib.mat_grain('mud', (0.26, 0.17, 0.09), (0.44, 0.3, 0.17), scale=14, stretch=(1, 1, 1), bump=0.9)
-    pig = lib.mat_grain('pig', (0.86, 0.6, 0.54), (0.96, 0.74, 0.68), scale=20, stretch=(1, 1, 1), bump=0.2)
+    yard = lib.mat_grain('pyard', (0.5, 0.36, 0.16), (0.78, 0.62, 0.3), scale=22, stretch=(1, 1, 1), bump=0.8)
+    wool = lib.mat_grain('wool', (0.84, 0.84, 0.8), (0.98, 0.98, 0.95), scale=30, stretch=(1, 1, 1), bump=0.6)
+    black = lib.mat_flat('sheep-black', (0.08, 0.07, 0.07), rough=0.6)
+    teal = lib.mat_grain('trough', (0.12, 0.36, 0.32), (0.2, 0.5, 0.44), scale=8, stretch=(1, 1, 6), bump=0.4)
+    water = lib.mat_flat('water', (0.3, 0.5, 0.56), rough=0.1)
+    glass = lib.mat_flat('pglass', (0.62, 0.66, 0.62), rough=0.3)
     door = door_mat()
-    earth_pad((0.1, -0.2, 0), 0.98, 1.08, seed=201)
+    dark = lib.mat_flat('dark', (0.05, 0.04, 0.03))
+    earth_pad((0.05, -0.25, 0), 1.55, 1.6, seed=201)
     lib.tag(0)
-    corner_stakes(-0.85, 0.85, -0.85, 0.85)
+    corner_stakes(-1.4, 1.45, -1.45, 1.0)
     lib.tag(0, until=0)
-    # Stone house at the back left.
-    hx0, hx1, hy0, hy1, H, rh = -0.85, -0.2, 0.05, 0.85, 0.6, 0.36
-    lib.box(((hx0 + hx1) / 2, (hy0 + hy1) / 2, 0.05), (hx1 - hx0 + 0.06, hy1 - hy0 + 0.06, 0.1), blocks[1], bevel=0.02)
-    # Sty along the back right.
-    sx0, sx1, sy0, sy1, sH = -0.2, 0.75, 0.15, 0.8, 0.42
-    lib.box(((sx0 + sx1) / 2, (sy0 + sy1) / 2, 0.04), (sx1 - sx0, sy1 - sy0, 0.08), blocks[3], bevel=0.02)
+
+    # Barn: ridge along Y, its arched gable towards the camera's left (−Y).
+    bx0, bx1, by0, by1, Hw = -1.38, 0.0, -0.95, 0.95, 0.58
+    bcx = (bx0 + bx1) / 2
+    c, s = (bx1 - bx0) / 2, 0.82
+    lib.box((bcx, 0, 0.05), (bx1 - bx0 + 0.06, by1 - by0 + 0.06, 0.1), gb[1], bevel=0.02)
+    stone_house(bx0, bx1, by0, by1, Hw * 0.4, rnd, walls, gb, block=0.2)
     lib.tag(1)
-    stone_house(hx0, hx1, hy0, hy1, H * 0.5, rnd, walls, blocks, block=0.18)
-    half_timber(sx0, sx1, sy0, sy1, 0.08, sH, plaster, beam, rnd)
+    stone_house(bx0, bx1, by0, by1, Hw, rnd, walls, gb, z0=Hw * 0.4, block=0.2)
+    # A small door in the gable wall, the wide dark doorway to the yard in the side wall.
+    lib.box((bx0 + 0.36, by0 - 0.05, 0.2), (0.2, 0.04, 0.4), door, bevel=0.008)
+    lib.box((bx0 + 0.36, by0 - 0.08, 0.42), (0.28, 0.06, 0.06), beam)
+    lib.box((bx1 + 0.02, -0.32, 0.27), (0.04, 0.42, 0.54), dark)
+    for dy in (-0.23, 0.23):
+        lib.box((bx1 + 0.05, -0.32 + dy, 0.28), (0.05, 0.05, 0.56), beam)
+    lib.box((bx1 + 0.05, -0.32, 0.56), (0.06, 0.52, 0.06), beam)
     lib.tag(2)
-    stone_house(hx0, hx1, hy0, hy1, H, rnd, walls, blocks, z0=H * 0.5, block=0.18)
-    lib.gable(((hx0 + hx1) / 2, (hy0 + hy1) / 2, H), hx1 - hx0, rh - 0.02, hy0 + 0.01, walls, along='y')
-    lib.box((hx0 + 0.42, hy0 - 0.05, 0.2), (0.2, 0.04, 0.38), door, bevel=0.008)
-    window(hx0 + 0.15, hy0 - 0.04, 0.42, 0.12, 0.13, beam, lib.mat_flat('dark', (0.05, 0.04, 0.03)))
-    for k in range(3):  # low half-doors of the sty
-        lib.box((sx0 + 0.18 + k * 0.3, sy0 - 0.03, 0.17), (0.16, 0.03, 0.18), planks[k % len(planks)], bevel=0.006)
+    at = barrel_frame(bcx, 0.0, Hw, 'y')[0]
+    barrel_ribs(at, by1 - by0, c, s, beam, count=4, battens=5)
+    lib.tag(3, until=3)
+    arch_infill(at, -(by1 - by0) / 2 + 0.01, c - 0.01, s, walls)
+    arch_boards(at, -(by1 - by0) / 2, c - 0.01, s, gable_planks, rnd, 'y', width=0.12, out=0.04)
+    # Round window with spokes in the gable.
+    wz = Hw + s * 0.42
+    lib.cylinder((bcx, by0 - 0.07, wz), 0.13, 0.03, beam, rot=(math.pi / 2, 0, 0), verts=20)
+    lib.cylinder((bcx, by0 - 0.08, wz), 0.1, 0.03, glass, rot=(math.pi / 2, 0, 0), verts=20)
+    for k in range(4):
+        lib.box((bcx, by0 - 0.095, wz), (0.2, 0.012, 0.018), beam, rot=(0, k * math.pi / 4, 0))
     lib.tag(3)
-    scale_roof((hx0 + hx1) / 2, (hy0 + hy1) / 2, hx1 - hx0, hy1 - hy0, H, rh, sh, lib.mat_flat('psh-r', (0.36, 0.24, 0.12)),
-               axis='y', overhang=0.08, seed=202, size=0.11, shape='tile')
-    chimney((hx0 + hx1) / 2, hy1 - 0.15, H, H + rh + 0.18, blocks, rnd)
-    # Deep thatch over the sty, a lean-to sloping towards the yard (−Y).
-    tz_hi, tz_lo = sH + 0.34, sH - 0.06
-    lib.box(((sx0 + sx1) / 2, (sy0 + sy1) / 2 - 0.04, (tz_hi + tz_lo) / 2),
-            (sx1 - sx0 + 0.16, math.hypot(sy1 - sy0 + 0.22, tz_hi - tz_lo), 0.1), straw,
-            rot=(math.atan2(tz_hi - tz_lo, sy1 - sy0 + 0.22), 0, 0), bevel=0.03)
-    lib.tag(None, split=lambda o: 3 if o.location.x > 0.3 else 4)
-    # Fenced yard in front with mud, a trough and pigs.
-    lib.pad((0.25, -0.38, 0.004), 0.55, 0.36, mud, jitter=0.15, seed=203, core=0.8, reach=1.1)
-    fx0, fx1, fy0, fy1 = -0.4, 0.82, -0.85, sy0
-    for (xa, ya, xb, yb) in ((fx0, fy0, fx1, fy0), (fx1, fy0, fx1, fy1), (fx0, fy0, fx0, fy1 - 0.1)):
-        n = max(2, int(math.hypot(xb - xa, yb - ya) / 0.22))
-        for k in range(n + 1):
-            t = k / n
-            lib.box((xa + (xb - xa) * t, ya + (yb - ya) * t, 0.1), (0.035, 0.035, 0.2), beam)
-        for z in (0.08, 0.16):
-            rod((xa, ya, z), (xb, yb, z), 0.014, beam, verts=6)
-    lib.box((0.1, -0.2, 0.05), (0.42, 0.12, 0.08), planks[1], bevel=0.01)
-    for k, (x, y, a) in enumerate(((0.45, -0.5, 0.4), (-0.05, -0.55, 2.0), (0.6, -0.15, -1.2))):
-        body = lib.sphere((x, y, 0.09), 0.08, pig, scale=(1.5, 0.95, 0.9))
-        body.rotation_euler = (0, 0, a)
-        lib.sphere((x + math.cos(a) * 0.13, y + math.sin(a) * 0.13, 0.1), 0.05, pig, scale=(1.2, 1, 1))
-        for dx, dy in ((0.07, 0.04), (0.07, -0.04), (-0.07, 0.04), (-0.07, -0.04)):
-            c, s = math.cos(a), math.sin(a)
-            lib.cylinder((x + c * dx - s * dy, y + s * dx + c * dy, 0.025), 0.015, 0.05, pig, verts=6)
+    barrel_roof(bcx, 0.0, Hw, by1 - by0, c, s, sh, lib.mat_grain('pvault', (0.3, 0.18, 0.08), (0.46, 0.3, 0.14),
+                scale=6, stretch=(1, 1, 1), bump=0.4), beam, rnd, axis='y', overhang=0.1, size=0.16, upto=0.6)
+    lib.tag(None, split=lambda o: 3 if o.location.z < Hw + s * 0.45 and o.location.x > bcx + c * 0.5 else 4)
+    chimney(bcx + 0.12, 0.25, Hw + s - 0.25, Hw + s + 0.24, gb, rnd)
     lib.tag(4)
-    scale_scene(1.45, kz=1.3)
+
+    # Shed: ridge along X, stone back and end walls, open to the yard (−Y), deep thatch.
+    sx0, sx1, sy0, sy1, sH, sR = bx1, 1.42, -0.12, 0.92, 0.46, 0.96
+    scy = (sy0 + sy1) / 2
+    lib.box(((sx0 + sx1) / 2, scy, 0.04), (sx1 - sx0, sy1 - sy0, 0.08), gb[3], bevel=0.02)
+    lib.tag(1)
+    lib.box(((sx0 + sx1) / 2, sy1 - 0.08, sH / 2), (sx1 - sx0, 0.16, sH), walls)
+    lib.box(((sx0 + sx1) / 2, scy, 0.1), (sx1 - sx0 - 0.1, sy1 - sy0 - 0.2, 0.02), dark)
+    stone_house(sx1 - 0.16, sx1, sy0, sy1, sH, rnd, walls, gb, block=0.18)
+    lib.gable((sx1 - 0.08, scy, sH), sy1 - sy0, sR - sH - 0.02, sx1 - 0.01, walls, along='x')
+    stone_course(sx1 - 0.16, sx1, sy0, sy1, sH, sH + (sR - sH) * 0.45, gb, rnd, block=0.16, depth=0.04, faces=('x',))
+    for x in (sx0 + 0.5, sx0 + 0.98):
+        lib.box((x, sy0 + 0.02, sH / 2), (0.07, 0.07, sH), beam, bevel=0.008)
+    lib.box(((sx0 + sx1) / 2, sy0 + 0.02, sH), (sx1 - sx0, 0.08, 0.07), beam)
+    lib.tag(2)
+    run = math.hypot((sy1 - sy0) / 2 + 0.2, sR - sH + 0.08)
+    tilt = math.atan2(sR - sH + 0.08, (sy1 - sy0) / 2 + 0.2)
+    for side in (-1, 1):
+        slab = lib.box(((sx0 + sx1) / 2 + 0.04, scy + side * ((sy1 - sy0) / 4 + 0.07), (sH + sR) / 2 + 0.04),
+                       (sx1 - sx0 + 0.26, run, 0.16), straw, rot=(-side * tilt, 0, 0), bevel=0.07)
+        shaggy(slab, 0.025, 0.05, seed=210 + side)
+    lib.tag(None, split=lambda o: 3 if o.location.y < scy else 4)
+
+    # The yard: trodden straw, a trough, the flock.
+    lib.pad((0.72, -0.78, 0.004), 0.72, 0.62, yard, jitter=0.18, seed=203, core=0.75, reach=1.15)
+    lib.box((1.02, -0.62, 0.06), (0.16, 0.5, 0.1), teal, bevel=0.012, rot=(0, 0, 0.2))
+    lib.box((1.02, -0.62, 0.105), (0.1, 0.44, 0.01), water, rot=(0, 0, 0.2))
+    flock = ((0.32, -0.82, 2.3), (0.62, -1.08, 1.6), (0.18, -1.2, 0.6), (0.6, -0.55, 2.8), (0.95, -1.22, 1.2),
+             (0.28, -0.4, 3.6))
+    for k, (x, y, a) in enumerate(flock):
+        sheep(x, y, a, wool, black, s=1.45, seed=230 + k)
+    lib.tag(4)
 
 
 # ------------------------------------------------------------------------------------- forester (2×2)
@@ -2361,91 +2884,54 @@ def donkey(x, y, a, coat, belly, dark, s=1.0, pack=None):
 
 
 def build_market():
-    """Our marketplace: an open hall of stout timber posts on a flagstone floor under a hipped
-    terracotta roof, its counter piled with crates, sacks and baskets, a striped awning stall with a
-    trestle table in front, barrels and a waiting pack donkey by the door."""
+    """The Settlers 4 Roman marketplace: a round plaza of mossy flagstones edged with a ring of big
+    pale kerbstones, and in its middle a stone horseman — the rider holding up his sword — on a round
+    pedestal inside a blue wrought-iron railing. No hall, no stalls: the donkeys and the goods piles
+    the game draws make the market."""
     rnd = random.Random(221)
-    blocks = block_mats()
-    beam = beam_mat()
-    planks = boards_mats()
-    tc = terracotta_mats('mtc')
-    flag = lib.mat_stones('mflag', (0.7, 0.66, 0.58), (0.52, 0.48, 0.42), (0.34, 0.3, 0.26), scale=5, bump=0.4)
-    cloth_a = lib.mat_grain('mcloth-a', (0.62, 0.12, 0.08), (0.74, 0.2, 0.12), scale=12, stretch=(1, 1, 1), bump=0.2)
-    cloth_b = lib.mat_grain('mcloth-b', (0.86, 0.8, 0.62), (0.94, 0.9, 0.74), scale=12, stretch=(1, 1, 1), bump=0.2)
-    sack = lib.mat_grain('msack', (0.66, 0.56, 0.38), (0.8, 0.7, 0.5), scale=18, stretch=(1, 1, 1), bump=0.5)
-    wicker = lib.mat_grain('mwicker', (0.48, 0.34, 0.16), (0.66, 0.5, 0.26), scale=30, stretch=(1, 4, 1), bump=0.8)
-    apple = lib.mat_flat('mapple', (0.72, 0.12, 0.08), rough=0.4)
-    pear = lib.mat_flat('mpear', (0.72, 0.68, 0.18), rough=0.45)
-    iron = lib.mat_flat('miron', (0.16, 0.16, 0.17), rough=0.5)
-    coat = lib.mat_grain('dcoat', (0.42, 0.4, 0.38), (0.56, 0.54, 0.5), scale=24, stretch=(1, 1, 1), bump=0.3)
-    belly = lib.mat_flat('dbelly', (0.82, 0.78, 0.72))
-    hoof = lib.mat_flat('dhoof', (0.12, 0.1, 0.08))
-    earth_pad((0.05, -0.15, 0), 1.0, 1.08, seed=221)
+    floor = lib.mat_stones('mfloor', (0.72, 0.72, 0.66), (0.5, 0.52, 0.46), (0.36, 0.42, 0.22), scale=7, bump=0.5)
+    kerb = grain_set('mkerb', (((0.56, 0.56, 0.52), (0.82, 0.82, 0.78)), ((0.5, 0.5, 0.48), (0.74, 0.74, 0.7)),
+                               ((0.6, 0.58, 0.52), (0.86, 0.84, 0.78))), scale=6)
+    moss = lib.mat_leaves('mmoss', (0.16, 0.26, 0.06), (0.34, 0.48, 0.12), (0.56, 0.66, 0.24), scale=30)
+    stone = lib.mat_grain('mstatue', (0.42, 0.42, 0.4), (0.7, 0.69, 0.65), scale=9, stretch=(1, 1, 1), bump=0.6)
+    plinth_m = lib.mat_grain('mplinth', (0.62, 0.6, 0.54), (0.84, 0.82, 0.74), scale=7, stretch=(1, 1, 1), bump=0.5)
+    blue = lib.mat_flat('mblue', (0.14, 0.18, 0.5), rough=0.35)
+    earth_pad((0.0, -0.1, 0), 1.1, 1.1, seed=221)
     lib.tag(0)
-    corner_stakes(-0.85, 0.85, -0.85, 0.85)
+    cx, cy, R = 0.02, -0.05, 1.12
+    corner_stakes(cx - R, cx + R, cy - R, cy + R)
     lib.tag(0, until=0)
-    # Flagstone floor and the corner posts of the hall (back half of the plot).
-    hx0, hx1, hy0, hy1, H = -0.8, 0.6, -0.15, 0.8, 0.58
-    lib.box(((hx0 + hx1) / 2, (hy0 + hy1) / 2, 0.04), (hx1 - hx0 + 0.08, hy1 - hy0 + 0.08, 0.08), flag, bevel=0.02)
-    posts = [(hx0 + (hx1 - hx0) * k / 3, y) for k in range(4) for y in (hy0, hy1)]
-    for (x, y) in posts:
-        lib.box((x, y, 0.1), (0.1, 0.1, 0.06), blocks[1], bevel=0.01)
+    lib.cylinder((cx, cy, 0.02), R - 0.06, 0.04, floor, verts=64)
+    n = 30
+    for k in range(n):
+        a = k / n * math.tau + rnd.uniform(-0.03, 0.03)
+        rr = R + rnd.uniform(-0.02, 0.02)
+        lib.lumpy((cx + math.cos(a) * rr, cy + math.sin(a) * rr, 0.06), 0.11, kerb[k % len(kerb)],
+                  scale=(1.0, 1.25 * (0.85 + 0.3 * rnd.random()), 0.55), strength=0.25, noise=1.2, seed=k,
+                  subdiv=2, flat=True).rotation_euler = (0, 0, a)
     lib.tag(1)
-    for (x, y) in posts:
-        lib.box((x, y, (0.12 + H) / 2 + 0.02), (0.07, 0.07, H - 0.1), beam, bevel=0.006)
-    for y in (hy0, hy1):
-        lib.box(((hx0 + hx1) / 2, y, H), (hx1 - hx0 + 0.1, 0.08, 0.07), beam)
-    for x in (hx0, hx1):
-        lib.box((x, (hy0 + hy1) / 2, H), (0.08, hy1 - hy0 + 0.1, 0.07), beam)
-    # Back wall of planks, the counter and the goods on it.
-    lib.box(((hx0 + hx1) / 2, hy1 - 0.02, (0.08 + H) / 2), (hx1 - hx0, 0.04, H - 0.08), planks[0], bevel=0.005)
-    lib.box(((hx0 + hx1) / 2, hy0 + 0.22, 0.17), (hx1 - hx0 - 0.2, 0.14, 0.18), planks[1], bevel=0.008)
+    for k in range(14):
+        a, rr = rnd.uniform(0, math.tau), rnd.uniform(0.35, R - 0.2)
+        lib.lumpy((cx + math.cos(a) * rr, cy + math.sin(a) * rr, 0.03), rnd.uniform(0.06, 0.13), moss,
+                  scale=(1.4, 1.0, 0.12), strength=0.5, noise=2.0, seed=40 + k, subdiv=2)
+    # Pedestal: a round drum with a moulded base and cap.
+    pz = 0.46
+    lib.cylinder((cx, cy, 0.07), 0.36, 0.1, plinth_m, verts=32, bevel=0.01)
+    lib.cylinder((cx, cy, 0.14), 0.32, 0.06, plinth_m, verts=32)
     lib.tag(2)
-    for k in range(5):
-        x = hx0 + 0.2 + k * 0.25 + rnd.uniform(-0.03, 0.03)
-        kind = k % 3
-        if kind == 0:
-            lib.box((x, hy0 + 0.22, 0.31), (0.13, 0.11, 0.1), planks[2], bevel=0.008, rot=(0, 0, rnd.uniform(-0.2, 0.2)))
-        elif kind == 1:
-            lib.lumpy((x, hy0 + 0.22, 0.32), 0.07, sack, scale=(1, 0.8, 1.1), strength=0.2, noise=2.0, seed=k, subdiv=2)
-        else:
-            lib.cylinder((x, hy0 + 0.22, 0.3), 0.065, 0.07, wicker, verts=12, radius2=0.08)
-            for j in range(5):
-                lib.sphere((x + rnd.uniform(-0.04, 0.04), hy0 + 0.22 + rnd.uniform(-0.04, 0.04), 0.35), 0.022,
-                           apple if j % 2 else pear, subdiv=2)
-    for k in range(3):  # sacks and crates stacked at the back wall
-        lib.lumpy((hx0 + 0.25 + k * 0.42, hy1 - 0.15, 0.16), 0.08, sack, scale=(1, 0.8, 1.1), strength=0.2, noise=2.0,
-                  seed=10 + k, subdiv=2)
-        lib.box((hx0 + 0.45 + k * 0.42, hy1 - 0.14, 0.15), (0.14, 0.12, 0.14), planks[k % len(planks)], bevel=0.008)
-    lib.tag(None, split=lambda o: 3 if o.location.z > 0.25 else 2)
-    hip_roof((hx0 + hx1) / 2, (hy0 + hy1) / 2, hx1 - hx0, hy1 - hy0, H + 0.03, 0.28, tc,
-             lib.mat_flat('mtc-r', (0.5, 0.2, 0.12)), rnd, overhang=0.07, size=0.12, shape='tile', ridge_frac=0.45)
-    lib.tag(None, split=lambda o: 3 if o.location.x < (hx0 + hx1) / 2 else 4)
-    # Awning stall in front, left of the door path.
-    sx, sy = -0.35, -0.6
-    lib.box((sx, sy, 0.14), (0.46, 0.2, 0.03), planks[1], bevel=0.006)
-    for dx in (-0.2, 0.2):
-        for dy in (-0.08, 0.08):
-            lib.box((sx + dx, sy + dy, 0.07), (0.025, 0.025, 0.14), beam)
-    for dx in (-0.24, 0.24):
-        lib.box((sx + dx, sy + 0.12, 0.25), (0.03, 0.03, 0.5), beam)
-        lib.box((sx + dx, sy - 0.16, 0.2), (0.025, 0.025, 0.4), beam)
-    for k in range(6):  # striped cloth, sloping to the front
-        x = sx - 0.25 + (k + 0.5) * 0.5 / 6
-        lib.box((x, sy - 0.02, 0.45), (0.5 / 6 + 0.002, 0.34, 0.012), cloth_a if k % 2 else cloth_b,
-                rot=(math.atan2(0.1, 0.3), 0, 0))
-    for k in range(3):
-        x = sx - 0.14 + k * 0.14
-        lib.cylinder((x, sy, 0.18), 0.045, 0.05, wicker, verts=10, radius2=0.055)
-        for j in range(3):
-            lib.sphere((x + rnd.uniform(-0.025, 0.025), sy + rnd.uniform(-0.025, 0.025), 0.215), 0.018,
-                       apple if (j + k) % 2 else pear, subdiv=2)
-    # Barrels and a pack donkey waiting by the door.
-    for k, (x, y) in enumerate(((0.75, -0.25), (0.82, -0.05), (-0.75, -0.4))):
-        lib.cylinder((x, y, 0.1), 0.075, 0.2, planks[k % len(planks)], verts=14)
-        for z in (0.04, 0.16):
-            lib.cylinder((x, y, z), 0.078, 0.018, iron, verts=14)
-    donkey(0.0, -0.75, 0.3, coat, belly, hoof, s=0.9, pack=wicker)
+    lib.cylinder((cx, cy, (0.17 + pz - 0.06) / 2), 0.27, pz - 0.23, plinth_m, verts=32)
+    lib.cylinder((cx, cy, pz - 0.04), 0.33, 0.08, plinth_m, verts=32, bevel=0.012)
+    # The railing round it.
+    rr = 0.5
+    for k in range(20):
+        a = k / 20 * math.tau
+        x, y = cx + math.cos(a) * rr, cy + math.sin(a) * rr
+        lib.cylinder((x, y, 0.2), 0.012, 0.36, blue, verts=6)
+        lib.sphere((x, y, 0.39), 0.022, blue, subdiv=1)
+    for z in (0.1, 0.3):
+        torus((cx, cy, z), rr, 0.012, blue)
+    lib.tag(3)
+    horseman(cx + 0.02, cy + 0.04, pz, 3.6, stone, s=1.1)
     lib.tag(4)
 
 
@@ -2677,90 +3163,114 @@ def build_fountain():
 
 # ------------------------------------------------------------------------------------- fisher (2×2)
 
-def hull(cx, cy, L, B, D, planks, keel, rnd, strakes=6):
-    """An upturned clinker hull lying keel-up along X: overlapping strakes from the gunwale on the
-    ground up to the keel, narrowing to a point at each end."""
-    from mathutils import Vector
+def boat_shell(cx, cy, L, B, D, planks, keel, rib, rnd, strakes=7, door_gap=None):
+    """An upturned clinker hull lying keel-up along Y (bow at −Y): a smooth shell (planking along the
+    hull in the material, `planks[0]`), clinker edges as thin laths from stem to stern, a keel and
+    stems, a few dark ribs over it. `door_gap` = (u0, u1, a1): the stretch u0..u1 along the hull left
+    open on the +X side from the ground up to the angle a1 (radians from the gunwale), a doorway."""
+    nu, na = 24, 18
 
-    for side in (-1, 1):
-        for s in range(strakes):
-            t = (s + 0.5) / strakes  # 0 at the gunwale, 1 at the keel
-            a = t * math.pi / 2
-            for k in range(8):
-                u0, u1 = k / 8, (k + 1) / 8
-                um = (u0 + u1) / 2
-                taper = math.sin(um * math.pi) ** 0.6
-                x = cx - L / 2 + um * L
-                y = cy + side * B / 2 * math.cos(a) * taper
-                z = D * math.sin(a) * (0.75 + 0.25 * taper)
-                along = Vector((L / 8, side * B / 2 * math.cos(a) * (math.sin(u1 * math.pi) ** 0.6 - math.sin(u0 * math.pi) ** 0.6), 0))
-                down = Vector((0, side * B / 2 * math.sin(a) * taper, -D * math.cos(a)))
-                plank = lib.box((0, 0, 0), (along.length * 1.04, 0.075 * taper + 0.02, 0.022),
-                                planks[(s + k) % len(planks)], bevel=0.004)
-                place_on(plank, (x, y, z), along, -down if side > 0 else down)
-    rod((cx - L / 2 - 0.04, cy, D * 0.78), (cx + L / 2 + 0.04, cy, D * 0.78), 0.035, keel)
+    def point(u, a):
+        taper = math.sin(max(0.0, min(1.0, u)) * math.pi) ** 0.5
+        return (cx + B / 2 * math.cos(a) * taper, cy - L / 2 + u * L, D * math.sin(a) * (0.72 + 0.28 * taper))
+
+    def open_at(u, a):
+        return bool(door_gap) and door_gap[0] <= u <= door_gap[1] and a < door_gap[2]
+
+    verts, faces = [], []
+    for i in range(nu + 1):
+        for j in range(na + 1):
+            verts.append(point(0.01 + 0.98 * i / nu, math.pi * j / na))
+    for i in range(nu):
+        for j in range(na):
+            um, am = 0.01 + 0.98 * (i + 0.5) / nu, math.pi * (j + 0.5) / na
+            if open_at(um, am):
+                continue
+            a = i * (na + 1) + j
+            faces.append((a, a + na + 1, a + na + 2, a + 1))
+    mesh = bpy.data.meshes.new('hull')
+    mesh.from_pydata(verts, [], faces)
+    for p in mesh.polygons:
+        p.use_smooth = True
+    obj = bpy.data.objects.new('hull', mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.modifiers.new('Solid', 'SOLIDIFY').thickness = 0.035
+    obj.data.materials.append(planks[0])
+    obj.location = (0, 0, 0)
+    obj['stage'], obj['until'] = 2, 99
+    # Clinker edges: laths along the hull at each strake's lower edge, lighter and darker by turns.
+    for k in range(1, strakes):
+        a = math.pi / 2 * k / strakes
+        for side in (0, 1):
+            aa = a if side == 0 else math.pi - a
+            pts = [point(0.03 + 0.94 * i / 12, aa) for i in range(13)]
+            for i, (p, q) in enumerate(zip(pts, pts[1:])):
+                um = 0.03 + 0.94 * (i + 0.5) / 12
+                if open_at(um, aa):
+                    continue
+                n = (math.cos(aa), 0, math.sin(aa))
+                lift = 0.02
+                rod((p[0] + n[0] * lift, p[1], p[2] + n[2] * lift), (q[0] + n[0] * lift, q[1], q[2] + n[2] * lift),
+                    0.014, planks[1 + (k % (len(planks) - 1))], verts=6)
+    rod((cx, cy - L / 2 - 0.02, D * 0.73), (cx, cy + L / 2 + 0.02, D * 0.73), 0.04, keel)
     for end in (-1, 1):
-        rod((cx + end * L / 2, cy, 0.0), (cx + end * (L / 2 + 0.06), cy, D * 0.85), 0.03, keel)
+        rod((cx, cy + end * L / 2, 0.0), (cx, cy + end * (L / 2 + 0.1), D * 0.86), 0.036, keel)
+    for um in (0.22, 0.75):
+        pts = [point(um, math.pi * j / 10) for j in range(11)]
+        for j, (p, q) in enumerate(zip(pts, pts[1:])):
+            if open_at(um, math.pi * (j + 0.5) / 10):
+                continue
+            n0 = (math.cos(math.pi * j / 10), math.sin(math.pi * j / 10))
+            rod((p[0] + n0[0] * 0.03, p[1], p[2] + n0[1] * 0.03), (q[0] + n0[0] * 0.03, q[1], q[2] + n0[1] * 0.03), 0.02,
+                rib, verts=6)
 
 
 def build_fisher():
-    """Our fisherman's hut, after the old shore custom: a big clinker boat hull turned keel-up on low
-    stone footings as a shelter, a plank door in its end; beside it a frame of poles with nets drying,
-    a rack of fish, baskets and a short plank jetty towards the water."""
+    """The Settlers 4 Roman fisherman's hut: a big upturned boat of orange clinker planks with dark
+    ribs, lying keel-up on stone footings with a doorway cut in its side; long poles lean over it and
+    hold a white net stretched out to dry, another net hangs at the bow."""
     rnd = random.Random(271)
-    blocks = block_mats()
-    planks = grain_set('hull', (((0.3, 0.22, 0.14), (0.5, 0.38, 0.24)), ((0.36, 0.28, 0.18), (0.56, 0.44, 0.3)),
-                                ((0.26, 0.2, 0.14), (0.44, 0.34, 0.24))), scale=4, stretch=(1, 9, 1), bump=0.7)
-    keel = lib.mat_grain('keel', (0.2, 0.12, 0.06), (0.36, 0.24, 0.12), scale=5, stretch=(1, 1, 8), bump=0.6)
-    pole = lib.mat_grain('pole', (0.42, 0.3, 0.16), (0.62, 0.46, 0.26), scale=6, stretch=(1, 1, 8), bump=0.5)
-    net = lib.mat_flat('net', (0.62, 0.58, 0.46), rough=0.9)
-    fish = lib.mat_flat('fish', (0.66, 0.7, 0.74), rough=0.35)
-    wicker = lib.mat_grain('wicker', (0.5, 0.36, 0.16), (0.74, 0.58, 0.3), scale=24, stretch=(1, 1, 1), bump=0.8)
+    gb = grey_blocks('fgb')
+    planks = [lib.mat_grain('shell', (0.6, 0.28, 0.08), (0.9, 0.54, 0.2), scale=5, stretch=(12, 0.7, 12), bump=0.8)]
+    planks += grain_set('hull', (((0.42, 0.18, 0.06), (0.62, 0.32, 0.12)), ((0.72, 0.4, 0.14), (0.94, 0.62, 0.3))),
+                        scale=4, stretch=(1, 9, 1), bump=0.7)
+    keel = lib.mat_grain('keel', (0.24, 0.12, 0.05), (0.4, 0.22, 0.1), scale=5, stretch=(1, 1, 8), bump=0.6)
+    pole = lib.mat_grain('pole', (0.6, 0.42, 0.2), (0.8, 0.62, 0.34), scale=6, stretch=(1, 1, 8), bump=0.5)
+    net = mat_net('net')
+    fish = lib.mat_flat('fish', (0.3, 0.62, 0.66), rough=0.3)
     dark = lib.mat_flat('dark', (0.05, 0.04, 0.03))
     door = door_mat()
-    earth_pad((0.1, -0.2, 0), 0.98, 1.08, seed=271)
+    earth_pad((0.05, -0.2, 0), 1.0, 1.1, seed=271)
     lib.tag(0)
-    corner_stakes(-0.85, 0.85, -0.85, 0.85)
+    corner_stakes(-0.85, 0.85, -0.9, 0.85)
     lib.tag(0, until=0)
-    cx, cy, L, B, D = -0.15, 0.2, 1.35, 0.9, 0.62
-    for x in (cx - L / 2 + 0.2, cx, cx + L / 2 - 0.2):
-        for y in (cy - B / 2 + 0.04, cy + B / 2 - 0.04):
-            lib.box((x, y, 0.06), (0.16, 0.14, 0.12), blocks[rnd.randrange(len(blocks))], bevel=0.02)
+    cx, cy, L, B, D = 0.05, 0.02, 1.9, 1.2, 0.95
+    for y in (cy - 0.5, cy, cy + 0.5):
+        for x in (cx - B / 2 * 0.95, cx + B / 2 * 0.95):
+            lib.box((x, y, 0.05), (0.16, 0.16, 0.1), gb[rnd.randrange(len(gb))], bevel=0.02)
+    lib.box((cx, cy, 0.03), (B * 0.9, L * 0.7, 0.06), dark)
     lib.tag(1)
-    hull(cx, cy, L, B, D, planks, keel, rnd)
+    gap = (0.36, 0.52, 1.0)
+    boat_shell(cx, cy, L, B, D, planks, keel, keel, rnd, door_gap=gap)
     lib.tag(None, split=lambda o: 2 if o.location.z < D * 0.5 else 3)
-    # The end towards the camera's right (+X) closed by an upright plank wall with a door.
-    ex = cx + L / 2 - 0.12
-    for k in range(5):
-        y = cy - 0.26 + k * 0.13
-        h = D * 0.85 * math.sin(math.acos(min(1.0, abs(y - cy) / (B / 2 * 0.62))))
-        lib.box((ex, y, h / 2), (0.03, 0.12, h), planks[k % len(planks)], bevel=0.004)
-    lib.box((ex + 0.02, cy - 0.02, 0.18), (0.03, 0.16, 0.34), dark)
-    lib.box((ex + 0.035, cy - 0.02, 0.17), (0.02, 0.14, 0.32), door)
-    lib.tag(4)
-    # Net frame: three poles and a cross pole, nets draped between.
-    nx, ny = 0.6, -0.35
-    for dy in (-0.32, 0.0, 0.32):
-        lib.cylinder((nx, ny + dy, 0.32), 0.022, 0.64, pole, verts=8)
-    rod((nx, ny - 0.34, 0.6), (nx, ny + 0.34, 0.6), 0.02, pole)
-    for k in range(2):
-        y0n = ny - 0.3 + k * 0.32
-        lib.box((nx - 0.02, y0n + 0.14, 0.4), (0.012, 0.26, 0.38), net)
-        lib.box((nx - 0.04, y0n + 0.14, 0.24), (0.01, 0.22, 0.06), net, rot=(0.2, 0, 0))
-    # Fish rack: a low frame with fish hung in a row.
-    fx, fy = -0.55, -0.62
-    for dx in (-0.25, 0.25):
-        lib.box((fx + dx, fy, 0.18), (0.03, 0.03, 0.36), pole)
-    rod((fx - 0.27, fy, 0.34), (fx + 0.27, fy, 0.34), 0.015, pole)
-    for k in range(5):
-        x = fx - 0.18 + k * 0.09
-        lib.sphere((x, fy, 0.26), 0.035, fish, scale=(0.5, 0.4, 1.8))
-    # Baskets and a jetty plank towards the shore.
-    for (x, y, r) in ((0.2, -0.75, 0.08), (0.35, -0.82, 0.07)):
-        lib.cylinder((x, y, 0.06), r, 0.12, wicker, radius2=r * 0.85, verts=14)
-    for k in range(4):
-        lib.box((0.75 + k * 0.08, -0.9 + k * 0.02, 0.03), (0.07, 0.36, 0.025), planks[k % len(planks)],
-                rot=(0, 0, 0.3), bevel=0.004)
+    # The doorway: a dark opening with a plank door set back, a step.
+    dy = cy - L / 2 + (gap[0] + gap[1]) / 2 * L
+    lib.box((cx + B / 2 * 0.5, dy, 0.3), (0.04, 0.32, 0.6), dark)
+    lib.box((cx + B / 2 * 0.56, dy + 0.02, 0.26), (0.03, 0.22, 0.5), door, bevel=0.006)
+    lib.box((cx + B / 2 + 0.04, dy, 0.03), (0.16, 0.32, 0.05), planks[2], bevel=0.008)
+    lib.tag(3)
+    # Poles leaning over the boat, a net stretched between their tops, another hanging at the bow.
+    tops = [(cx - 0.62, cy - 0.62, 0.72), (cx + 0.32, cy - 0.38, 1.08), (cx + 0.5, cy + 0.75, 1.3), (cx - 0.5, cy + 0.6, 0.92)]
+    feet = [(cx - 0.9, cy - 0.78, 0.0), (cx + 0.62, cy - 0.62, 0.0), (cx + 0.75, cy + 0.85, 0.0), (cx - 0.85, cy + 0.7, 0.0)]
+    for f, t in zip(feet, tops):
+        tip = (t[0] + (t[0] - f[0]) * 0.12, t[1] + (t[1] - f[1]) * 0.12, t[2] + (t[2] - f[2]) * 0.12)
+        rod(f, tip, 0.032, pole, verts=8)
+        lib.sphere(t, 0.03, pole, subdiv=1)
+    net_sheet(tops, net, cells=(11, 9), sag=0.1)
+    bow = (cx, cy - L / 2 - 0.02)
+    net_sheet([(bow[0] - 0.24, bow[1] - 0.12, 0.5), (bow[0] + 0.2, bow[1] - 0.18, 0.56), (bow[0] + 0.26, bow[1] - 0.26, 0.0),
+               (bow[0] - 0.3, bow[1] - 0.2, 0.0)], net, cells=(3, 4), sag=-0.04)
+    lib.sphere((bow[0] - 0.05, bow[1] - 0.2, 0.32), 0.045, fish, scale=(1.8, 0.5, 0.6))
     lib.tag(4)
 
 
@@ -3083,60 +3593,79 @@ def build_bigtower():
 
 
 def build_lookout():
-    """A timber watchtower, low as the Settlers 4 one (lower than the small tower, ≈ 3.5 settler
-    heights): four splayed legs on stone pads with X-braces, a ladder up the front, a plank platform
-    with a rail under a little pyramid roof of shingles. No garrison — vision only."""
+    """The Settlers 4 Roman lookout tower: a slim square tower — dark blue-grey squared stone with pale
+    corner stones and a plank door at the foot, a storey of horizontal planks with a slit, an open
+    belfry on corner posts with a brass bell, under a pyramid roof grown over with green leaves. Lower
+    than the small tower (≈ 3.8 settler heights). No garrison — vision only."""
     rnd = random.Random(41)
-    wood = lib.mat_grain('lwood', (0.42, 0.26, 0.1), (0.7, 0.48, 0.22), scale=5, stretch=(1, 1, 8), bump=0.6)
-    plank = lib.mat_grain('lplank', (0.46, 0.3, 0.12), (0.72, 0.52, 0.24), scale=4, stretch=(1, 9, 1), bump=0.6)
-    shingles = shingle_mats('lsh')
-    stone = block_mats()
+    walls = stone_walls()
+    dark_blocks = grain_set('ldb', (((0.2, 0.22, 0.27), (0.36, 0.39, 0.45)), ((0.24, 0.26, 0.3), (0.42, 0.44, 0.5)),
+                                    ((0.17, 0.19, 0.23), (0.32, 0.34, 0.4))), scale=7)
+    pale = grain_set('lpale', (((0.66, 0.66, 0.64), (0.9, 0.9, 0.86)), ((0.6, 0.6, 0.58), (0.84, 0.84, 0.8))), scale=7)
+    planks = grain_set('lplank', (((0.3, 0.2, 0.1), (0.5, 0.36, 0.2)), ((0.36, 0.24, 0.12), (0.56, 0.4, 0.22)),
+                                  ((0.26, 0.18, 0.1), (0.44, 0.32, 0.18))), scale=4, stretch=(1, 9, 1), bump=0.6)
+    beam = beam_mat()
+    brass = lib.mat_flat('brass', (0.82, 0.62, 0.22), rough=0.25)
+    leaves = lib.mat_leaves('lleaves', (0.04, 0.16, 0.03), (0.14, 0.42, 0.08), (0.42, 0.7, 0.18), scale=18)
+    door = door_mat()
+    dark = lib.mat_flat('dark', (0.05, 0.04, 0.03))
     earth_pad((0.1, -0.15, 0), 0.8, 0.9, seed=41)
     lib.tag(0)
-    corner_stakes(-0.6, 0.6, -0.6, 0.6)
+    cx, cy, h = 0.05, 0.12, 0.38  # half-side of the shaft
+    x0, x1, y0, y1 = cx - h, cx + h, cy - h, cy + h
+    corner_stakes(x0 - 0.1, x1 + 0.1, y0 - 0.1, y1 + 0.1)
     lib.tag(0, until=0)
-
-    H, b0, b1 = 0.66, 0.55, 0.38  # platform height, half-spread at the foot and at the top
-    feet = [(-b0, -b0), (b0, -b0), (b0, b0), (-b0, b0)]
-    heads = [(-b1, -b1), (b1, -b1), (b1, b1), (-b1, b1)]
-    for (x, y) in feet:
-        lib.box((x, y, 0.06), (0.2, 0.2, 0.12), stone[rnd.randrange(len(stone))], bevel=0.02)
+    S1, S2, S3, S4 = 0.48, 0.84, 1.38, 1.44  # stone top, plank top, belfry top, roof base
+    lib.box((cx, cy, 0.05), (2 * h + 0.1, 2 * h + 0.1, 0.1), dark_blocks[0], bevel=0.02)
+    lib.box((cx, cy, S1 * 0.25), (2 * h, 2 * h, S1 * 0.5), walls)
+    stone_course(x0, x1, y0, y1, 0.08, S1 * 0.5, dark_blocks, rnd, block=0.16, depth=0.04)
     lib.tag(1)
-    for (f, h) in zip(feet, heads):
-        rod((f[0], f[1], 0.1), (h[0], h[1], H), 0.055, wood)
-    for (za, zb) in ((0.12, H),):
-        ta, tb = za / H, zb / H
-        for k in range(4):
-            fa, fb = feet[k], feet[(k + 1) % 4]
-            ha, hb = heads[k], heads[(k + 1) % 4]
-            pa = (fa[0] + (ha[0] - fa[0]) * ta, fa[1] + (ha[1] - fa[1]) * ta, za)
-            pb = (fb[0] + (hb[0] - fb[0]) * ta, fb[1] + (hb[1] - fb[1]) * ta, za)
-            qa = (fa[0] + (ha[0] - fa[0]) * tb, fa[1] + (ha[1] - fa[1]) * tb, zb)
-            qb = (fb[0] + (hb[0] - fb[0]) * tb, fb[1] + (hb[1] - fb[1]) * tb, zb)
-            rod(pa, qb, 0.03, wood)
-            rod(pb, qa, 0.03, wood)
-            rod(qa, qb, 0.035, wood)
-    lib.tag(None, split=lambda o: 2 if o.location.z < H * 0.62 else 3)  # legs and braces first, then the top rail
-    # Ladder up the front (−Y) face.
-    la, lb = (0.12, -b0 - 0.1, 0.0), (0.1, -b1 - 0.06, H)
-    for side in (-0.1, 0.1):
-        rod((la[0] + side, la[1], la[2]), (lb[0] + side, lb[1], lb[2]), 0.02, wood)
-    for k in range(8):
-        t = (k + 0.5) / 8
-        x, y = la[0] + (lb[0] - la[0]) * t, la[1] + (lb[1] - la[1]) * t
-        rod((x - 0.1, y, H * t), (x + 0.1, y, H * t), 0.013, wood)
+    lib.box((cx, cy, S1 * 0.75), (2 * h, 2 * h, S1 * 0.5), walls)
+    stone_course(x0, x1, y0, y1, S1 * 0.5, S1, dark_blocks, rnd, block=0.16, depth=0.04)
+    quoins(x0, x1, y0, y1, 0.06, S1, pale, rnd, block=0.14, row=0.12)
+    lib.box((cx - 0.08, y0 - 0.04, 0.22), (0.22, 0.04, 0.4), dark)
+    lib.box((cx - 0.08, y0 - 0.055, 0.21), (0.18, 0.03, 0.38), door, bevel=0.006)
+    lib.box((cx - 0.08, y0 - 0.07, 0.43), (0.28, 0.05, 0.05), pale[0], bevel=0.01)
+    lib.tag(2)
+    # Plank storey, a little wider, with corner posts and a slit window.
+    hp = h + 0.03
+    lib.box((cx, cy, (S1 + S2) / 2), (2 * hp - 0.04, 2 * hp - 0.04, S2 - S1), planks[0])
+    rows = 7
+    rh = (S2 - S1) / rows
+    for r in range(rows):
+        z = S1 + (r + 0.5) * rh
+        lib.box((cx + rnd.uniform(-0.01, 0.01), y0 - 0.03 - rnd.uniform(0, 0.01), z), (2 * hp + 0.04, 0.03, rh * 0.9),
+                planks[rnd.randrange(len(planks))], rot=(0, rnd.uniform(-0.02, 0.02), 0), bevel=0.005)
+        lib.box((x1 + 0.03 + rnd.uniform(0, 0.01), cy + rnd.uniform(-0.01, 0.01), z), (0.03, 2 * hp + 0.04, rh * 0.9),
+                planks[rnd.randrange(len(planks))], rot=(rnd.uniform(-0.02, 0.02), 0, 0), bevel=0.005)
+    for (x, y) in ((x0 - 0.03, y0 - 0.03), (x1 + 0.03, y0 - 0.03), (x1 + 0.03, y1 + 0.03), (x0 - 0.03, y1 + 0.03)):
+        lib.box((x, y, (S1 + S3) / 2 + 0.02), (0.08, 0.08, S3 - S1 + 0.04), beam, bevel=0.008)
+    lib.box((cx + 0.06, y0 - 0.06, S1 + (S2 - S1) * 0.6), (0.3, 0.03, 0.06), dark)
+    lib.box((x1 + 0.06, cy, S1 + (S2 - S1) * 0.6), (0.03, 0.3, 0.06), dark)
+    lib.box((cx, cy, S2 + 0.02), (2 * hp + 0.14, 2 * hp + 0.14, 0.05), beam, bevel=0.01)
     lib.tag(3)
-    ps = 2 * b1 + 0.4
-    for k in range(7):
-        t = -ps / 2 + (k + 0.5) * ps / 7
-        lib.box((0, t, H + 0.04), (ps, ps / 7 - 0.012, 0.04), plank, rot=(0, 0, rnd.uniform(-0.015, 0.015)), bevel=0.006)
-    corners = [(-ps / 2, -ps / 2), (ps / 2, -ps / 2), (ps / 2, ps / 2), (-ps / 2, ps / 2)]
-    for (x, y) in corners:
-        lib.cylinder((x, y, H + 0.33), 0.035, 0.58, wood, verts=8)
-    for k in range(4):
-        (xa, ya), (xb, yb) = corners[k], corners[(k + 1) % 4]
-        rod((xa, ya, H + 0.3), (xb, yb, H + 0.3), 0.03, wood)
-    hip_roof(0, 0, ps, ps, H + 0.62, 0.3, shingles, wood, rnd, overhang=0.1, size=0.11, shape='tile', ridge_frac=0.0)
+    # Open belfry: a rail, the bell hanging from a beam, the leafy pyramid roof.
+    for (x, y) in ((cx, y0 - 0.04), (x1 + 0.04, cy)):
+        if y != cy:
+            lib.box((x, y, S2 + 0.14), (2 * hp + 0.08, 0.03, 0.04), beam)
+        else:
+            lib.box((x, y, S2 + 0.14), (0.03, 2 * hp + 0.08, 0.04), beam)
+    lib.box((cx, cy, S3 - 0.04), (2 * hp + 0.08, 0.05, 0.05), beam)
+    lib.cylinder((cx, cy, S3 - 0.11), 0.012, 0.08, beam, verts=6)
+    bell = lathe(cx, cy, [(0.22, S2 + 0.12), (0.21, S2 + 0.16), (0.15, S2 + 0.24), (0.12, S2 + 0.34), (0.1, S3 - 0.11),
+                          (0.0, S3 - 0.09)], brass, segs=24)
+    bell.modifiers.new('Solid', 'SOLIDIFY').thickness = 0.01
+    lib.sphere((cx, cy, S2 + 0.18), 0.025, brass, subdiv=1)
+    lib.box((cx, cy, S3 + 0.02), (2 * hp + 0.14, 2 * hp + 0.14, 0.05), beam, bevel=0.01)
+    roof = hip_roof(cx, cy, 2 * hp + 0.06, 2 * hp + 0.06, S4, 0.36, [leaves], beam, rnd, overhang=0.1, size=0.12,
+                    shape='scale', ridge_frac=0.0)
+    for k in range(16):
+        a = rnd.uniform(0, math.tau)
+        f = rnd.uniform(0.2, 0.9)
+        rr = (hp + 0.12) * (1 - f)
+        lib.lumpy((cx + math.cos(a) * rr, cy + math.sin(a) * rr, S4 + 0.04 + 0.36 * f), rnd.uniform(0.05, 0.08), leaves,
+                  scale=(1.2, 1.2, 0.7), strength=0.5, noise=3.0, seed=60 + k, subdiv=2)
+    lib.cylinder((cx, cy, S4 + 0.46), 0.016, 0.22, beam, verts=6)
     lib.tag(4)
 
 
@@ -3259,55 +3788,87 @@ def build_hunter():
 
 
 def build_slaughterhouse():
-    """A round stone house — the type's silhouette: a squat drum of rugged blocks with an arched
-    door, a skirt of red tiles and a wooden drum top with a plank lid and a vent. Our own details: a
-    hook rail with hams, a chopping block, a water trough."""
+    """The Settlers 4 Roman butcher's: a squat round house of squared blue-grey stone under a bulging
+    skirt of red tiles that rises to a broad wooden top — a plank lid in a thick rim, crossed by two
+    beams round a hatch. An arched stone porch with a wooden arch shelters the door; a small window
+    at the side, a chopping block outside."""
     rnd = random.Random(101)
-    walls, blocks = stone_walls(), block_mats()
+    walls = stone_walls()
+    gb = grey_blocks('sgb')
     tiles = terracotta_mats('stc')
     door, beam = door_mat(), beam_mat()
     boards = boards_mats()
     logs, ends = logs_mat(), ends_mat()
     iron = lib.mat_flat('iron', (0.36, 0.37, 0.4), rough=0.35)
-    ham = lib.mat_grain('ham', (0.55, 0.22, 0.14), (0.78, 0.4, 0.28), scale=10, stretch=(1, 1, 1), bump=0.4)
-    water = lib.mat_flat('trough', (0.28, 0.42, 0.48), rough=0.15)
+    glass = lib.mat_flat('sglass', (0.34, 0.46, 0.62), rough=0.2)
+    lid = grain_set('slid', (((0.62, 0.4, 0.18), (0.86, 0.62, 0.32)), ((0.56, 0.36, 0.16), (0.8, 0.56, 0.28)),
+                             ((0.66, 0.46, 0.22), (0.9, 0.68, 0.38))), scale=4, stretch=(1, 9, 1), bump=0.6)
+    dark = lib.mat_flat('dark', (0.05, 0.04, 0.03))
     earth_pad((0.05, -0.2, 0), 1.0, 1.1, seed=101)
     lib.tag(0)
-    cx, cy, R, H = -0.05, 0.15, 0.6, 0.62
+    cx, cy, R, H = 0.0, 0.18, 0.66, 0.5
     corner_stakes(cx - R, cx + R, cy - R, cy + R)
     lib.tag(0, until=0)
-    lib.cylinder((cx, cy, 0.05), R + 0.06, 0.1, blocks[1], verts=28)
+    lib.cylinder((cx, cy, 0.05), R + 0.05, 0.1, gb[1], verts=32)
     lib.tag(1)
-    round_tower(cx, cy, R, 0.1, H * 0.5, walls, blocks, rnd, rows=2)
-    lib.tag(2)
-    round_tower(cx, cy, R, H * 0.5, H, walls, blocks, rnd, rows=2)
-    arch_door(cx + 0.05, cy - R - 0.0, 0.1, 0.26, 0.42, door, blocks)
+    lib.cylinder((cx, cy, H / 2), R - 0.04, H, walls, verts=32)
+    rows = 4
+    rh = (H - 0.08) / rows
+    for r in range(rows):
+        z = 0.1 + (r + 0.5) * rh
+        nb = 22
+        for k in range(nb):
+            a = (k + 0.5 * (r % 2)) / nb * math.tau + rnd.uniform(-0.03, 0.03)
+            if math.cos(a + math.pi / 4) < -0.45:
+                continue
+            lib.box((cx + math.cos(a) * R, cy + math.sin(a) * R, z), (0.07, R * math.tau / nb * rnd.uniform(0.8, 0.94),
+                    rh * rnd.uniform(0.8, 0.9)), gb[rnd.randrange(len(gb))], rot=(0, 0, a), bevel=0.012)
+    lib.tag(None, split=lambda o: 2 if o.location.z < H * 0.55 else 3)
+    # Window and the porch towards the door tile.
+    wa = -0.35
+    wx, wy = cx + math.cos(wa) * (R + 0.04), cy + math.sin(wa) * (R + 0.04)
+    lib.box((wx, wy, 0.3), (0.03, 0.15, 0.13), glass, rot=(0, 0, wa))
+    lib.box((wx + math.cos(wa) * 0.01, wy + math.sin(wa) * 0.01, 0.385), (0.04, 0.22, 0.04), gb[3], rot=(0, 0, wa))
+    lib.box((wx + math.cos(wa) * 0.01, wy + math.sin(wa) * 0.01, 0.215), (0.04, 0.22, 0.04), gb[3], rot=(0, 0, wa))
+    pa = -1.62
+    ox, oy, tx, ty = math.cos(pa), math.sin(pa), -math.sin(pa), math.cos(pa)
+    px, py = cx + ox * (R + 0.1), cy + oy * (R + 0.1)
+    for side in (-1, 1):
+        for k in range(3):
+            lib.box((px + tx * side * 0.17, py + ty * side * 0.17, 0.07 + k * 0.1), (0.24, 0.1, 0.09),
+                    gb[(k + side) % len(gb)], rot=(0, 0, pa), bevel=0.014)
+    lib.box((px + ox * 0.02, py + oy * 0.02, 0.18), (0.06, 0.26, 0.34), dark, rot=(0, 0, pa))
+    lib.box((px - ox * 0.08, py - oy * 0.08, 0.17), (0.03, 0.2, 0.32), door, rot=(0, 0, pa), bevel=0.006)
+    for k in range(9):
+        a = math.pi * k / 8
+        r0 = 0.2
+        u = (-math.sin(a) * tx, -math.sin(a) * ty, math.cos(a))
+        for depth, size, mats in ((0.1, (0.08, 0.075, 0.06), boards), (-0.02, (0.08, 0.16, 0.07), gb)):
+            p = (px + ox * depth + tx * math.cos(a) * r0, py + oy * depth + ty * math.cos(a) * r0, 0.34 + math.sin(a) * r0)
+            place_on(lib.box((0, 0, 0), size, mats[k % len(mats)], bevel=0.01), p, u, (ox, oy, 0))
     lib.tag(3)
-    cone_tiles(cx, cy, H - 0.02, R + 0.14, 0.3, tiles, rnd, size=0.11)
-    tr = R * 0.62
-    lib.cylinder((cx, cy, H + 0.36), tr, 0.16, boards[1], verts=24)
-    for k in range(18):
-        ang = k / 18 * math.tau
-        lib.box((cx + math.cos(ang) * tr, cy + math.sin(ang) * tr, H + 0.36), (tr * math.tau / 18 * 0.9, 0.025, 0.16),
-                boards[k % len(boards)], rot=(0, 0, ang + math.pi / 2), bevel=0.004)
-    torus((cx, cy, H + 0.44), tr, 0.018, iron)
-    for k in range(6):
-        lib.box((cx, cy - tr + (k + 0.5) * 2 * tr / 6, H + 0.45), (2 * tr * 0.92, 2 * tr / 6 * 0.86, 0.025),
-                boards[k % len(boards)], bevel=0.004)
-    for ang in (0.0, math.pi / 2):
-        lib.box((cx, cy, H + 0.47), (2 * tr, 0.05, 0.03), beam, rot=(0, 0, ang))
-    lib.box((cx + 0.08, cy + 0.05, H + 0.56), (0.14, 0.14, 0.14), boards[2], bevel=0.01)
+    # Bulging tile skirt up to the wooden top.
+    prof = [(R + 0.1, H - 0.04), (R + 0.12, H + 0.06), (R + 0.06, H + 0.2), (R - 0.06, H + 0.3), (R - 0.18, H + 0.36)]
+    lathe(cx, cy, prof, tiles[1], segs=40)
+    lathe_tiles(cx, cy, prof, tiles, rnd, size=0.1, shape='tile', lift=0.02)
+    tr = R - 0.15
+    lib.tag(None, split=lambda o: 3 if o.location.z < H + 0.14 else 4)
+    lib.cylinder((cx, cy, H + 0.38), tr + 0.04, 0.09, beam, verts=40)
+    torus((cx, cy, H + 0.43), tr + 0.02, 0.035, boards[0])
+    for k in range(7):
+        t = -tr + (k + 0.5) * 2 * tr / 7
+        w = 2 * math.sqrt(max(0.0, tr ** 2 - t ** 2)) - 0.02
+        lib.box((cx + t * 0.7071, cy - t * 0.7071, H + 0.43), (2 * tr / 7 - 0.022, w, 0.025), lid[k % len(lid)],
+                rot=(0, 0, -math.pi / 4), bevel=0.004)
+    for ang in (math.pi / 4 + 0.35, math.pi / 4 - 0.35):
+        lib.box((cx, cy, H + 0.465), (2 * tr, 0.06, 0.04), beam, rot=(0, 0, ang), bevel=0.006)
+    lib.box((cx, cy, H + 0.48), (0.2, 0.16, 0.04), boards[2], rot=(0, 0, math.pi / 4), bevel=0.006)
+    lib.box((cx, cy, H + 0.505), (0.04, 0.12, 0.02), iron, rot=(0, 0, math.pi / 4))
     lib.tag(4)
-    hx, hy = cx - R - 0.12, cy - R * 0.4
-    for y in (hy - 0.25, hy + 0.25):
-        lib.cylinder((hx, y, 0.3), 0.02, 0.6, beam, verts=8)
-    rod((hx, hy - 0.25, 0.58), (hx, hy + 0.25, 0.58), 0.018, beam)
-    for y in (hy - 0.12, hy + 0.05):
-        rod((hx, y, 0.57), (hx, y, 0.48), 0.004, iron)
-        lib.sphere((hx, y, 0.42), 0.055, ham, scale=(0.8, 0.8, 1.3))
-    lib.cylinder((cx + 0.55, cy - R - 0.25, 0.08), 0.1, 0.16, logs, verts=12)
-    lib.cylinder((cx + 0.55, cy - R - 0.25, 0.163), 0.095, 0.006, ends, verts=12)
-    lib.box((cx + 0.55, cy - R - 0.27, 0.27), (0.02, 0.1, 0.06), iron, rot=(0.3, 0, 0))
-    lib.box((cx + R + 0.25, cy + 0.1, 0.08), (0.18, 0.5, 0.12), boards[0], bevel=0.01)
-    lib.box((cx + R + 0.25, cy + 0.1, 0.13), (0.13, 0.44, 0.02), water)
+    # Chopping block with a cleaver.
+    bx, by = cx + 0.62, cy - R - 0.3
+    lib.cylinder((bx, by, 0.08), 0.1, 0.16, logs, verts=12)
+    lib.cylinder((bx, by, 0.163), 0.095, 0.006, ends, verts=12)
+    lib.box((bx + 0.01, by - 0.02, 0.21), (0.11, 0.015, 0.07), iron, rot=(0, 0.3, 0.4))
     lib.tag(4)
+
