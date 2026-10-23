@@ -1298,6 +1298,10 @@ def build_settlers(out, tmp, only=None, hats=None, add=False, civil=False):
         if hats if hats is not None else not only:
             meta['hats'] = render_hats(scene, fig, yaws, pack, path)
         meta['pages'] = pack.save(out, 'settlers')
+        # A denser sheet may need fewer pages than the one it replaces: drop the pages left over.
+        for name in os.listdir(out):
+            if name.startswith('settlers-') and name.endswith('.png') and name not in meta['pages']:
+                os.remove(os.path.join(out, name))
     meta['frames'] = pack.frames
     with open(os.path.join(out, 'settlers.json'), 'w') as f:
         json.dump(meta, f, separators=(',', ':'))
