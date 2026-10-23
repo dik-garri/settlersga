@@ -328,7 +328,6 @@ SINGLE = {
     'goldsmelter': (buildings.build_goldsmelter, 150, 140, 75, 100),
     'weaponsmith': (buildings.build_weaponsmith, 150, 140, 75, 100),
     'barracks': (buildings.build_barracks, 220, 190, 110, 135),
-    'castle': (buildings.build_castle, 320, 290, 160, 200),
     'fortress': (buildings.build_fortress, 320, 290, 160, 200),
     'bigtower': (buildings.build_bigtower, 170, 240, 85, 190),
     'lookout': (buildings.build_lookout, 150, 210, 75, 170),

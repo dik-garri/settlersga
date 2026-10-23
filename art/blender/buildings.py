@@ -3628,60 +3628,6 @@ def scaffold(x0, x1, y0, y1, h, beam):
             lib.cylinder((x, y, h / 2), 0.025, h, beam, verts=8)
 
 
-def build_castle():
-    """The player's seat, the biggest building (4×4, as the Settlers 4 castle): a curtain wall with four
-    round corner towers under terracotta cones, a gatehouse in the front wall, and a tall square keep
-    under a pyramid roof rising behind; the owner's banner flies from the keep. Modelled at the old 3×3
-    size and scaled up to the 4×4 footprint (a little more in height: ≈ 7.8 settler heights)."""
-    rnd = random.Random(81)
-    walls, blocks = stone_walls(), block_mats()
-    tiles = terracotta_mats('ctc')
-    door, iron = door_mat(), lib.mat_flat('iron', (0.36, 0.37, 0.4), rough=0.35)
-    dark = lib.mat_flat('dark', (0.05, 0.04, 0.03))
-    ridge = lib.mat_flat('ridge', (0.55, 0.2, 0.08))
-    beam = beam_mat()
-    earth_pad((0.05, -0.15, 0), 1.55, 1.6, seed=81)
-    lib.tag(0)
-    corner_stakes(-1.35, 1.35, -1.35, 1.35)
-    lib.tag(0, until=0)
-
-    R, WH, T = 1.15, 0.6, 0.16  # half size of the curtain, wall height, wall thickness
-    lib.box((0, 0, 0.05), (2 * R + 0.1, 2 * R + 0.1, 0.1), blocks[1], bevel=0.02)
-    lib.tag(1)
-    scaffold(-R - 0.12, R + 0.12, -R - 0.12, R + 0.12, 1.8, beam)
-    lib.tag(1, until=3)
-    for (x0, x1, y0, y1) in ((-R, R, -R, -R + T), (R - T, R, -R, R), (-R, R, R - T, R), (-R, -R + T, -R, R)):
-        stone_house(x0, x1, y0, y1, WH, rnd, walls, blocks, z0=0.1, block=0.2)
-    for (tx, ty) in ((-R, -R), (R, -R), (R, R), (-R, R)):
-        round_tower(tx, ty, 0.3, 0.1, WH + 0.5, walls, blocks, rnd, rows=5)
-    lib.tag(None, split=lambda o: 2 if o.location.z < 0.45 else 3)
-    battlements(-R, R, -R - 0.02, R + 0.02, WH, blocks, rnd, faces=('y0', 'x1'))
-    for (tx, ty) in ((-R, -R), (R, -R), (R, R), (-R, R)):
-        slit(tx + 0.21, ty - 0.21, WH * 0.75, 'y', dark, blocks[2])
-    # Gatehouse in the front wall.
-    gx = 0.15
-    square_keep(gx, -R + 0.1, 0.62, 0.1, WH + 0.35, walls, blocks, rnd, block=0.2)
-    gate(gx, -R - 0.2, 0.1, 0.36, 0.52, door, blocks, iron)
-    battlements(gx - 0.31, gx + 0.31, -R - 0.21, -R + 0.41, WH + 0.35, blocks, rnd, size=0.14, faces=('y0', 'x1'))
-    lib.tag(3)
-    for (tx, ty) in ((-R, -R), (R, -R), (R, R), (-R, R)):
-        cone_tiles(tx, ty, WH + 0.5, 0.38, 0.55, tiles, rnd, size=0.11)
-    lib.tag(4)
-    # The keep behind the gate.
-    kx, ky, ks, KH = -0.2, 0.25, 1.0, 1.75
-    kx0, kx1, ky0, ky1 = square_keep(kx, ky, ks, 0.1, KH, walls, blocks, rnd)
-    lib.tag(None, split=lambda o: 2 if o.location.z < 0.7 else 3)
-    for z in (0.95, 1.4):
-        slit(kx - 0.15, ky0, z, 'y', dark, blocks[2])
-        slit(kx + 0.25, ky0, z, 'y', dark, blocks[2])
-        slit(kx1, ky - 0.2, z, 'x', dark, blocks[2])
-    lib.tag(3)
-    hip_roof(kx, ky, ks, ks, KH, 0.62, tiles, ridge, rnd, overhang=0.1, size=0.12, shape='tile', ridge_frac=0.0)
-    lib.tag(4)
-    at = scale_scene(4 / 3, kz=1.5)
-    note_banner('castle', at((kx, ky, KH + 0.66)))
-
-
 def cage(cx, cy, ps, top, wood, plank, beam, rnd, rail=0.42):
     """A Settlers 4 fighting platform: joists poking out in two layers over a tower's top, a plank floor
     and a box railing of round beams on corner and middle posts, X-braced in every panel. Returns the
