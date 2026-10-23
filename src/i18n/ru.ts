@@ -9,6 +9,12 @@ export const ru = {
   'app.title': 'Поселенцы',
   'app.subtitle': 'экономическая стратегия',
   'app.pageTitle': 'Поселенцы — экономическая стратегия',
+  // The page's description for search engines and link previews (index.html; en/ and de/ copies at build)
+  'app.metaDescription': 'Экономическая стратегия в духе The Settlers 4 прямо в браузере: стройте поселение, налаживайте цепочки товаров, ведите армию. Графика, музыка и тексты — свои.',
+  'app.ogTitle': 'Поселенцы — экономическая стратегия в браузере',
+  'app.ogDescription': 'Стройте поселение, налаживайте цепочки товаров и ведите армию — в духе The Settlers 4, прямо в браузере.',
+  'app.twitterDescription': 'Стройте поселение, налаживайте цепочки товаров и ведите армию — в духе The Settlers 4.',
+  'app.ogImageAlt': 'Поселение с башнями, домами, лесом и рекой',
 
   // Buildings (`BUILDINGS`)
   'building.house_small': 'Малый дом',

@@ -6,7 +6,7 @@ Ein Prototyp einer Wirtschaftsstrategie im Geiste von The Settlers 3/4: isometri
 
 ![Bildschirmfoto](docs/screenshot.jpg)
 
-**Im Browser spielen:** https://dik-garri.github.io/settlersga/ (wird bei jedem Push nach `main` automatisch gebaut und veröffentlicht).
+**Im Browser spielen:** https://dik-garri.github.io/settlersga/de/ (auf Deutsch; die russische Seite ist https://dik-garri.github.io/settlersga/, die englische https://dik-garri.github.io/settlersga/en/; wird bei jedem Push nach `main` automatisch gebaut und veröffentlicht).
 
 ## Systemanforderungen
 

@@ -41,12 +41,14 @@ export function setLang(l: Lang): void {
 }
 
 /**
- * The language to start with: `?lang=` in the address, else the saved choice, else the browser's
- * language when it is English or German, else Russian.
+ * The language to start with: `?lang=` in the address, else the saved choice, else the page's own
+ * (the build's `en/` and `de/` pages, `tools/pageLocale.ts`), else the browser's language when it is
+ * English or German, else Russian.
  */
-export function pickLang(param: string | null, saved: unknown, browser: readonly string[]): Lang {
+export function pickLang(param: string | null, saved: unknown, browser: readonly string[], page?: unknown): Lang {
   if (isLang(param)) return param;
   if (isLang(saved)) return saved;
+  if (isLang(page)) return page;
   for (const b of browser) {
     const base = b.toLowerCase().split('-')[0];
     if (base === 'ru') return 'ru';

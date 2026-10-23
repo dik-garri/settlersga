@@ -10,6 +10,12 @@ export const de: Record<Key, string> = {
   'app.title': 'Siedler',
   'app.subtitle': 'Wirtschaftsstrategie',
   'app.pageTitle': 'Siedler — Wirtschaftsstrategie',
+  // The page's description for search engines and link previews (index.html; en/ and de/ copies at build)
+  'app.metaDescription': 'Ein Wirtschaftsstrategiespiel im Geist von Die Siedler 4, direkt im Browser: Baut eine Siedlung, richtet Warenketten ein, führt ein Heer. Grafik, Musik und Texte sind unsere eigenen.',
+  'app.ogTitle': 'Siedler — ein Wirtschaftsstrategiespiel im Browser',
+  'app.ogDescription': 'Baut eine Siedlung, richtet Warenketten ein und führt ein Heer — im Geist von Die Siedler 4, direkt im Browser.',
+  'app.twitterDescription': 'Baut eine Siedlung, richtet Warenketten ein und führt ein Heer — im Geist von Die Siedler 4.',
+  'app.ogImageAlt': 'Eine Siedlung mit Türmen, Häusern, Wald und Fluss',
 
   // Buildings (`BUILDINGS`)
   'building.house_small': 'Kleines Wohnhaus',

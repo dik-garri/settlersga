@@ -6,7 +6,7 @@
 
 ![Скриншот](docs/screenshot.jpg)
 
-**Играть в браузере:** https://dik-garri.github.io/settlersga/ (собирается и публикуется автоматически при каждом пуше в `main`).
+**Играть в браузере:** https://dik-garri.github.io/settlersga/ (английская страница — https://dik-garri.github.io/settlersga/en/, немецкая — https://dik-garri.github.io/settlersga/de/; собирается и публикуется автоматически при каждом пуше в `main`).
 
 ## Системные требования
 

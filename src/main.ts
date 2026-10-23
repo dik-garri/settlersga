@@ -73,7 +73,7 @@ async function main() {
   // The interface language: ?lang, else the one chosen in the settings, else the browser's (en/de), else Russian.
   const asked = params.get('lang');
   setAddressLang(isLang(asked) ? asked : null);
-  setLang(pickLang(asked, prefs.lang, navigator.languages ?? [navigator.language]));
+  setLang(pickLang(asked, prefs.lang, navigator.languages ?? [navigator.language], document.documentElement.dataset.lang));
   showLang();
   window.addEventListener(LANG_EVENT, () => {
     // A choice in the settings wins over the address from now on.

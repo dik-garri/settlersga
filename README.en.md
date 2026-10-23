@@ -6,7 +6,7 @@ A prototype economy strategy game in the spirit of The Settlers 3/4: isometric 2
 
 ![Screenshot](docs/screenshot.jpg)
 
-**Play in the browser:** https://dik-garri.github.io/settlersga/ (built and published automatically on every push to `main`).
+**Play in the browser:** https://dik-garri.github.io/settlersga/en/ (in English; the Russian page is https://dik-garri.github.io/settlersga/, the German one https://dik-garri.github.io/settlersga/de/; built and published automatically on every push to `main`).
 
 ## System requirements
 

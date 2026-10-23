@@ -9,6 +9,12 @@ export const en: Record<Key, string> = {
   'app.title': 'Settlers',
   'app.subtitle': 'an economy strategy game',
   'app.pageTitle': 'Settlers — an economy strategy game',
+  // The page's description for search engines and link previews (index.html; en/ and de/ copies at build)
+  'app.metaDescription': 'An economy strategy game in the spirit of The Settlers 4, right in the browser: build a settlement, set up chains of goods, lead an army. Graphics, music and texts are our own.',
+  'app.ogTitle': 'Settlers — an economy strategy game in the browser',
+  'app.ogDescription': 'Build a settlement, set up chains of goods and lead an army — in the spirit of The Settlers 4, right in the browser.',
+  'app.twitterDescription': 'Build a settlement, set up chains of goods and lead an army — in the spirit of The Settlers 4.',
+  'app.ogImageAlt': 'A settlement with towers, houses, a forest and a river',
 
   // Buildings (`BUILDINGS`)
   'building.house_small': 'Small house',

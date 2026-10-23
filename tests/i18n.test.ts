@@ -129,5 +129,10 @@ describe('pickLang', () => {
     expect(pickLang(null, undefined, ['fr-FR', 'en-GB'])).toBe('en');
     expect(pickLang(null, undefined, ['ru-RU', 'en'])).toBe('ru');
     expect(pickLang(null, undefined, ['fr-FR', 'es'])).toBe('ru');
+    // The en/ and de/ pages: after ?lang and the saved choice, before the browser's language.
+    expect(pickLang(null, undefined, ['ru-RU'], 'de')).toBe('de');
+    expect(pickLang(null, 'en', ['ru-RU'], 'de')).toBe('en');
+    expect(pickLang('ru', undefined, [], 'en')).toBe('ru');
+    expect(pickLang(null, undefined, ['de-DE'], undefined)).toBe('de');
   });
 });
