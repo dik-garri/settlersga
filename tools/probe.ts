@@ -48,7 +48,7 @@ for (const seed of seeds) {
     // Trees do not spread by themselves (Settlers 4): a second forester among the woodcutters.
     [10, 'forester', 7, -4],
     [15, 'fisher', -3, 7],
-    [15, 'pigfarm', 6, -5],
+    [15, 'sheepfarm', 6, -5],
     [15, 'slaughterhouse', -7, 5],
     [20, 'coalmine', -4, -9],
     [20, 'ironmine', -1, -9],
@@ -68,7 +68,7 @@ for (const seed of seeds) {
   for (let i = 1; i <= minutes * ticksPerMinute; i++) {
     if ((i - 1) % ticksPerMinute === 0) {
       // Due entries that found no spot (e.g. a mine before the tower widened the border) retry every
-      // minute; ten minutes overdue they look further (a 3×3 pig farm in a full core goes out on the
+      // minute; ten minutes overdue they look further (a 3×3 sheep farm in a full core goes out on the
       // tower's land).
       for (let k = 0; k < pending.length; k++) {
         const [minute, type, dx, dy] = pending[k];

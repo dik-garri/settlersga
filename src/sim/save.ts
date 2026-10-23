@@ -2,8 +2,9 @@ import type { AiState } from './ai';
 import type { Animal } from './animals';
 import type { Command } from './commands';
 import type { GameResult, GameRules } from './modes';
+import { TRANSPORT_PRIORITY } from './config';
 import { GameMap } from './map';
-import type { Building, PlayerId, Settler } from './types';
+import { RESOURCES, type Building, type PlayerId, type Resource, type Settler } from './types';
 import type { Player, World } from './world';
 
 /** Bump when the save layout changes incompatibly. */
@@ -126,9 +127,47 @@ export function mapFromSave(data: SaveData): GameMap {
   return map;
 }
 
+/**
+ * Goods added to `RESOURCES` after saves of this version were first written — always at its end, so
+ * goods on the ground (`map.goods`, index + 1) keep their codes. An older save lacks them in its
+ * stocks and transport lists; `upgradeGoods` fills them in on load.
+ */
+export const LATER_GOODS: readonly Resource[] = ['sheep'];
+const EARLIER_GOODS = RESOURCES.filter((r) => !LATER_GOODS.includes(r));
+
+/**
+ * Brings an older save's goods up to date, in place: every full stock (an object counting every
+ * earlier good — buildings' piles, reservations and deliveries, the statistics) gets the later goods
+ * at 0, and every player's transport list gets the goods it lacks, in `TRANSPORT_PRIORITY`'s order,
+ * at its end. A save that has them all is left as it is.
+ */
+export function upgradeGoods(data: SaveData): void {
+  const visit = (v: unknown): void => {
+    if (Array.isArray(v)) {
+      for (const x of v) visit(x);
+      return;
+    }
+    if (v === null || typeof v !== 'object') return;
+    const o = v as Record<string, unknown>;
+    if (EARLIER_GOODS.every((r) => typeof o[r] === 'number')) {
+      for (const r of LATER_GOODS) if (typeof o[r] !== 'number') o[r] = 0;
+    }
+    for (const k of Object.keys(o)) visit(o[k]);
+  };
+  visit(data.buildings);
+  visit(data.stats);
+  visit(data.players);
+  for (const p of data.players) {
+    const list = p.economy?.transport;
+    if (!list) continue;
+    for (const r of TRANSPORT_PRIORITY) if (!list.includes(r)) list.push(r);
+  }
+}
+
 /** Copies everything except the map (built by `mapFromSave`) from the save into a fresh world. */
 export function restoreWorld(w: World, raw: SaveData): void {
   const data = structuredClone(raw);
+  upgradeGoods(data);
   w.tick = data.tick;
   w.nextId = data.nextId;
   w.rng.state = data.rngState;

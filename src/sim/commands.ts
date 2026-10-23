@@ -13,7 +13,7 @@
  */
 import { createAi } from './ai';
 import { addBuilding, doorOf } from './buildings';
-import { BUILDINGS, OUTPUT_SHARES, PROFESSIONS, SITE } from './config';
+import { BUILDINGS, buildableBy, OUTPUT_SHARES, PROFESSIONS, SITE } from './config';
 import { levelTarget, needsDigger, needsLevelling } from './digging';
 import {
   ENDLESS,
@@ -238,7 +238,7 @@ export const SPECS: { [K in CommandKind]: Spec<K> } = {
     fields: { type: isType, x: isInt, y: isInt },
     refused: null,
     run: (w, c) => placeBuilding(w, c.type, c.x, c.y, c.player),
-    ahead: (w, c) => !!BUILDINGS[c.type].playerBuildable && w.canPlace(c.type, c.x, c.y, c.player),
+    ahead: (w, c) => buildableBy(c.type) && w.canPlace(c.type, c.x, c.y, c.player),
   },
   demolish: { fields: { id: isInt }, refused: false, run: (w, c) => demolish(w, c.id, c.player) },
   setPriority: { fields: { id: isInt, on: isBool }, refused: false, run: (w, c) => setPriority(w, c.id, c.on, c.player) },
@@ -382,7 +382,8 @@ export function commandOrder(a: Command, b: Command): number {
 
 /** Player command: lay out a construction site (`World.placeBuilding`). */
 function placeBuilding(w: World, type: BuildingType, x: number, y: number, player: PlayerId): Building | null {
-  if (!BUILDINGS[type].playerBuildable || !w.canPlace(type, x, y, player)) return null;
+  // Only what the player's race builds (`BuildingDef.races`); another race's building stays demolishable.
+  if (!buildableBy(type) || !w.canPlace(type, x, y, player)) return null;
   const def = BUILDINGS[type];
   const door = doorOf(x, y, def.w, def.h);
   // Reachable from where the player started (unless something now stands there).

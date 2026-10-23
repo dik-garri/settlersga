@@ -1,5 +1,5 @@
 import { buildingIcon, wareIcon } from '../render/atlas';
-import { BUILDINGS, CATEGORIES, costOf } from '../sim/config';
+import { buildableBy, BUILDINGS, CATEGORIES, costOf } from '../sim/config';
 import { RESOURCES, type Building, type BuildingType } from '../sim/types';
 import type { World } from '../sim/world';
 import { el, type View } from './dom';
@@ -24,7 +24,7 @@ import type { GameState, Placeable } from './state';
 export const MENU = CATEGORIES.map((category) => ({
   category,
   types: (Object.keys(BUILDINGS) as BuildingType[]).filter(
-    (t) => BUILDINGS[t].playerBuildable && BUILDINGS[t].category === category,
+    (t) => buildableBy(t) && BUILDINGS[t].category === category,
   ),
 }));
 

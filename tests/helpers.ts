@@ -5,7 +5,7 @@
 import { addBuilding } from '../src/sim/buildings';
 import { goodsOn } from '../src/sim/ground';
 import { isFighter, killSettler } from '../src/sim/military';
-import { RESOURCES, type Building, type PlayerId, type Point, type Resource } from '../src/sim/types';
+import { RESOURCES, type Building, type BuildingType, type PlayerId, type Point, type Resource } from '../src/sim/types';
 import type { World } from '../src/sim/world';
 
 /** The player's start tower (the building whose door is `World.homeOf`). */
@@ -105,4 +105,23 @@ export function noGeologists(w: World, p: PlayerId = 1): void {
   for (const s of w.settlers) if (s.owner === p && s.kind === 'geologist') killSettler(w, s);
   w.orderSpecialist('geologist', 0, p);
   w.step();
+}
+
+/**
+ * A building of a type its owner's race cannot place (`buildableBy`: another race's, as an older
+ * save may hold), laid down directly on the free spot nearest (x, y) — a site, or finished with `done`.
+ */
+export function placeForeign(w: World, type: BuildingType, x: number, y: number, done = false, p: PlayerId = 1): Building | null {
+  let best: Point | null = null;
+  let bestD = Infinity;
+  for (let ty = y - 12; ty <= y + 12; ty++) {
+    for (let tx = x - 12; tx <= x + 12; tx++) {
+      const d = Math.hypot(tx - x, ty - y);
+      if (d < bestD && w.canPlace(type, tx, ty, p)) {
+        best = { x: tx, y: ty };
+        bestD = d;
+      }
+    }
+  }
+  return best ? addBuilding(w, type, best.x, best.y, p, done) : null;
 }

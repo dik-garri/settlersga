@@ -1,8 +1,8 @@
 import { wareIcon } from '../render/atlas';
-import { TICKS_PER_SECOND } from '../sim/config';
+import { GOODS_ORDER, TICKS_PER_SECOND } from '../sim/config';
 import { isFighter } from '../sim/military';
 import { scoreOf } from '../sim/score';
-import { RESOURCES, type BuildingType, type PlayerId, type SettlerKind, type Stock } from '../sim/types';
+import { type BuildingType, type PlayerId, type SettlerKind, type Stock } from '../sim/types';
 import type { World } from '../sim/world';
 import { el, type View } from './dom';
 import { clock, economyTable } from './modeView';
@@ -154,8 +154,8 @@ export class StatsView implements View {
     }
     body.append(el('h4', '', t('stats.production', { n: minutes })));
     const grid = el('div', 'stats-grid');
-    for (const r of RESOURCES) {
-      if (now.produced[r] === 0) continue;
+    for (const r of GOODS_ORDER) {
+      if (!(now.produced[r] > 0)) continue;
       grid.append(row(resName(r), `${now.produced[r] - old.produced[r]} / ${now.produced[r]}`, wareIcon(r, 16)));
     }
     body.append(grid);

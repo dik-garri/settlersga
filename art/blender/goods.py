@@ -61,6 +61,9 @@ MATERIALS = {
     'score': lambda: lib.mat_flat('score', (0.94, 0.8, 0.52)),
     'pig': lambda: lib.mat_grain('pig', (0.9, 0.62, 0.6), (0.98, 0.76, 0.72), scale=10, stretch=(1, 1, 1), bump=0.2),
     'snout': lambda: lib.mat_flat('snout', (0.86, 0.48, 0.5)),
+    'wool': lambda: lib.mat_grain('wool', (0.84, 0.84, 0.8), (0.98, 0.98, 0.95), scale=30, stretch=(1, 1, 1), bump=0.6),
+    'face': lambda: lib.mat_flat('face', (0.08, 0.07, 0.07), rough=0.6),
+    'horn': lambda: lib.mat_grain('horn', (0.5, 0.42, 0.3), (0.72, 0.64, 0.5), scale=20, stretch=(1, 1, 1), bump=0.5),
     'meat': lambda: lib.mat_grain('meat', (0.62, 0.12, 0.1), (0.84, 0.3, 0.26), scale=12, stretch=(1, 1, 1), bump=0.5),
     'fat': lambda: lib.mat_flat('fat', (0.96, 0.9, 0.82)),
     'bone': lambda: lib.mat_flat('bone', (0.95, 0.93, 0.86)),
@@ -176,6 +179,25 @@ def item_pig(m, rnd):
         lib.cylinder((0.095, s * 0.03, 0.13), 0.015, 0.03, m['snout'], radius2=0.002, verts=6, rot=(s * 0.4, 0, 0))
         for x in (-0.06, 0.05):
             lib.cylinder((x, s * 0.035, 0.022), 0.014, 0.045, m['pig'], verts=8)
+
+
+def item_sheep(m, rnd):
+    """A ram as on the Roman sheep farm: a white woolly body, black face and legs, curled horns."""
+    lib.lumpy((0, 0, 0.088), 0.068, m['wool'], scale=(1.45, 1.05, 0.95), strength=0.35, noise=2.2, seed=5, subdiv=3)
+    head = lib.sphere((0.118, 0, 0.1), 0.034, m['face'], scale=(1.5, 0.8, 0.85))
+    head.rotation_euler = (0, 0.5, 0)
+    lib.sphere((0.092, 0, 0.122), 0.032, m['wool'], scale=(0.8, 1.0, 0.8))
+    lib.sphere((-0.1, 0, 0.1), 0.02, m['wool'])  # tail
+    for s in (-1, 1):
+        lib.box((0.1, s * 0.04, 0.122), (0.03, 0.014, 0.008), m['face'], rot=(0, 0, s * 0.7))
+        # A horn curling back and down beside the head.
+        bpy.ops.mesh.primitive_torus_add(major_radius=0.017, minor_radius=0.0065, major_segments=20, minor_segments=6,
+                                         location=(0.094, s * 0.034, 0.122), rotation=(math.pi / 2, 0, 0))
+        horn = bpy.context.active_object
+        horn.data.materials.append(m['horn'])
+        bpy.ops.object.shade_smooth()
+        for x in (-0.06, 0.065):
+            lib.cylinder((x, s * 0.03, 0.026), 0.0085, 0.052, m['face'], verts=8)
 
 
 def item_meat(m, rnd):
@@ -370,6 +392,8 @@ GOODS = {
     'sword': (item_sword, bundle(0.075)),
     'bow': (item_bow, bundle(0.08)),
     'armor': (item_armor, grid(0.15, 0.05)),
+    # Added after the others: goods lying on the ground keep their `RESOURCES` index (saves).
+    'sheep': (item_sheep, spread(0.17)),
 }
 
 
@@ -497,17 +521,36 @@ def render_stacks(out, tmp, only=None):
         print('rendered stack', res)
 
 
-def render_wares(out, tmp):
-    """`wares.png`: one carried ware per resource, in `GOODS` order (listed in `wares.json`)."""
+def render_wares(out, tmp, only=None):
+    """`wares.png`: one carried ware per resource, in `GOODS` order (listed in `wares.json`). With
+    `only`, re-renders just those (and any the strip lacks) and keeps the others' pixels."""
+    old = {}
+    path = os.path.join(out, 'wares.png')
+    meta = os.path.join(out, 'wares.json')
+    if only and os.path.exists(path) and os.path.exists(meta):
+        with open(meta) as f:
+            order = json.load(f)['order']
+        img = bpy.data.images.load(path)
+        px = np.empty(len(img.pixels), dtype=np.float32)
+        img.pixels.foreach_get(px)
+        fw, fh = WARE[0] * lib.RESOLUTION, WARE[1] * lib.RESOLUTION
+        if tuple(img.size) == (fw * len(order), fh):
+            strip_px = px.reshape(fh, fw * len(order), 4)
+            old = {res: strip_px[:, k * fw:(k + 1) * fw].copy() for k, res in enumerate(order)}
+        bpy.data.images.remove(img)
     frames = []
     for res, (build, _) in GOODS.items():
+        if only and res not in only and res in old:
+            frames.append(old[res])
+            continue
+
         def setup(scene, build=build):
             bpy.data.objects['ShadowCatcher'].hide_render = True
             root = place(build, Mats(), random.Random(1), 0, 0, 0, screen_yaw())
             centre(root)
         frames.append(render_frame(os.path.join(tmp, f'ware-{res}.png'), WARE, setup))
-    save_strip(frames, os.path.join(out, 'wares.png'))
-    with open(os.path.join(out, 'wares.json'), 'w') as f:
+    save_strip(frames, path)
+    with open(meta, 'w') as f:
         json.dump({'frame': list(WARE), 'order': list(GOODS)}, f)
     print('rendered wares')
 
@@ -797,6 +840,7 @@ ICONS = {
     'sword': upright(icon_sword),
     'bow': upright(icon_bow, turn=10),
     'armor': upright(icon_armor, roll=-90, turn=14, tilt=14),
+    'sheep': ground([(0, 0, 0, 0)], yaw=-28),
 }
 assert list(ICONS) == list(GOODS), 'ICONS must list every resource in GOODS order'
 

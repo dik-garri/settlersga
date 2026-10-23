@@ -93,7 +93,7 @@ describe('hunter', () => {
 
 describe('goods distribution (as in Settlers 4)', () => {
   it('derives each good\'s consumers from the recipes', () => {
-    expect(consumersOf('grain')).toEqual(expect.arrayContaining(['mill', 'pigfarm']));
+    expect(consumersOf('grain')).toEqual(expect.arrayContaining(['mill', 'sheepfarm']));
     expect(distributableGoods()).toContain('grain');
     expect(distributableGoods()).not.toContain('log'); // only the sawmill takes logs
   });
@@ -102,15 +102,15 @@ describe('goods distribution (as in Settlers 4)', () => {
     const w = richWorld();
     const c = base(w);
     const mill = placeNear(w, 'mill', c.x + 5, c.y - 1)!;
-    const pigs = placeNear(w, 'pigfarm', c.x - 5, c.y - 1)!;
+    const sheep = placeNear(w, 'sheepfarm', c.x - 5, c.y - 1)!;
     run(w, 3000);
-    expect(mill.done && pigs.done).toBe(true);
-    expect(w.setDistribution('grain', 'pigfarm', 0)).toBe(true);
+    expect(mill.done && sheep.done).toBe(true);
+    expect(w.setDistribution('grain', 'sheepfarm', 0)).toBe(true);
     expect(w.setDistribution('grain', 'sawmill', 50)).toBe(false); // not a grain consumer
     startTower(w).output.grain = 6;
     run(w, 1500);
-    expect(pigs.input.grain + pigs.inbound.grain).toBe(0);
-    expect(w.stats.produced.pig).toBe(0);
+    expect(sheep.input.grain + sheep.inbound.grain).toBe(0);
+    expect(w.stats.produced.sheep).toBe(0);
     expect(mill.input.grain + mill.inbound.grain + w.stats.produced.flour).toBeGreaterThan(0);
   });
 });

@@ -84,7 +84,7 @@ describe('farming', () => {
 });
 
 describe('food chain', () => {
-  it('turns grain and water into bread, and pigs into meat', () => {
+  it('turns grain and water into bread, and sheep into meat', () => {
     const { w, shore } = worldWithShore();
     const c = base(w);
     placeNear(w, 'waterworks', shore.x, shore.y, 6);
@@ -93,7 +93,7 @@ describe('food chain', () => {
     placeNear(w, 'farm', c.x - 6, c.y + 5);
     placeNear(w, 'mill', c.x + 4, c.y - 4);
     placeNear(w, 'bakery', c.x - 5, c.y - 1);
-    placeNear(w, 'pigfarm', c.x + 7, c.y - 1);
+    placeNear(w, 'sheepfarm', c.x + 7, c.y - 1);
     placeNear(w, 'slaughterhouse', c.x - 1, c.y + 6);
     run(w, 24000);
     for (const b of w.buildings.values()) expect(b.done, b.type).toBe(true);

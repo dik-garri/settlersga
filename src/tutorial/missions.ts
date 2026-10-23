@@ -310,7 +310,7 @@ const bread: MissionDef = {
       people: { carrier: 4, builder: 2, digger: 2 },
     },
   ],
-  unlock: { buildings: ['waterworks', 'farm', 'mill', 'bakery', 'fisher', 'hunter', 'pigfarm', 'slaughterhouse'] },
+  unlock: { buildings: ['waterworks', 'farm', 'mill', 'bakery', 'fisher', 'hunter', 'sheepfarm', 'slaughterhouse'] },
   minutes: 14,
   objectives: [
     { text: 'tut.bread.goal.1', done: { k: 'produced', res: 'bread', min: 1 }, params: { building: { building: 'bakery' } } },

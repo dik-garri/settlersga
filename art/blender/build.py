@@ -3,7 +3,7 @@
     blender -b --factory-startup -P art/blender/build.py -- [names...]
 
 Names: settlers (every figure, see figures.py), settlers:add (only the pose groups settlers.json
-lacks, appended to its last page), signs (the geologist's signs, see signs.py), woodcutter, sawmill, stonecutter, tower, house_large, tree, deposit, piles (or piles:fish,coal), stacks (or stacks:fish,coal: goods lying on the ground), tower:front / bigtower:front / fortress:front (only the parts standing before the garrison on the top, `<name>-front.png`; a full render of those buildings writes it too), tower:posts (prints the garrison posts and banner point, renders nothing), ruins (ruin1..ruin4), rocks (mountain stones and outcrops, see rocks.py), wares, icons (or icons:axe,saw: the menu icons) (default: all). Every sprite keeps the size and anchor
+lacks, appended to its last page), signs (the geologist's signs, see signs.py), woodcutter, sawmill, stonecutter, tower, house_large, tree, deposit, piles (or piles:fish,coal), stacks (or stacks:fish,coal: goods lying on the ground), tower:front / bigtower:front / fortress:front (only the parts standing before the garrison on the top, `<name>-front.png`; a full render of those buildings writes it too), tower:posts (prints the garrison posts and banner point, renders nothing), ruins (ruin1..ruin4), rocks (mountain stones and outcrops, see rocks.py), wares (or wares:sheep: those carried wares only, the rest of the strip kept), icons (or icons:axe,saw: the menu icons) (default: all). Every sprite keeps the size and anchor
 of the procedural sprite it replaces (src/render/sprites.ts, settlerArt.ts), so the game can swap
 them in without other changes.
 """
@@ -336,6 +336,7 @@ SINGLE = {
     'hunter': (buildings.build_hunter, 150, 140, 75, 100),
     'slaughterhouse': (buildings.build_slaughterhouse, 150, 140, 75, 100),
     'toolsmith': (buildings.build_toolsmith, 150, 140, 75, 100),
+    'sheepfarm': (buildings.build_sheepfarm, 220, 190, 110, 135),
     'pigfarm': (buildings.build_pigfarm, 220, 190, 110, 135),
     'forester': (buildings.build_forester, 150, 140, 75, 100),
     'market': (buildings.build_market, 150, 140, 75, 100),
@@ -403,8 +404,9 @@ def main():
                 _, w, h, ax, ay = SINGLE['mill']
                 buildings.render_mill_sails(OUT, TMP, w, h, ax, ay, goods.save_strip)
                 continue
-            if n == 'wares':
-                goods.render_wares(OUT, TMP)
+            if n == 'wares' or n.startswith('wares:'):
+                # `wares` renders every carried ware, `wares:sheep` only those into the existing strip.
+                goods.render_wares(OUT, TMP, n.split(':', 1)[1].split(',') if ':' in n else None)
                 continue
             if n == 'signs':
                 signs.render_signs(OUT, TMP)

@@ -29,6 +29,8 @@ export const RESOURCES = [
   'sword',
   'bow',
   'armor',
+  // Goods added later go last: goods on the ground are saved by their index here (`map.goods`).
+  'sheep',
 ] as const;
 export type Resource = (typeof RESOURCES)[number];
 export type Stock = Record<Resource, number>;
@@ -67,6 +69,7 @@ export type BuildingType =
   | 'farm'
   | 'mill'
   | 'bakery'
+  | 'sheepfarm'
   | 'pigfarm'
   | 'slaughterhouse'
   | 'coalmine'
@@ -104,6 +107,7 @@ export type SettlerKind =
   | 'farmer'
   | 'miller'
   | 'baker'
+  | 'shepherd'
   | 'pigfarmer'
   | 'butcher'
   | 'miner'

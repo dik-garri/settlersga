@@ -1,5 +1,6 @@
 import { wareIcon } from '../render/atlas';
-import { RESOURCES, type Resource } from '../sim/types';
+import { GOODS_SHOWN } from '../sim/config';
+import type { Resource } from '../sim/types';
 import { button, el } from './dom';
 import { t } from './i18n';
 import { goodsTip } from './tips';
@@ -42,16 +43,16 @@ export function goodsLists(spec: GoodsListsSpec): HTMLElement {
   const column = (on: boolean) => {
     const col = el('div', `accept-col ${on ? 'yes' : 'no'}`);
     const head = el('div', 'accept-head');
-    const n = RESOURCES.filter((r) => spec.isIn(r) === on).length;
+    const n = GOODS_SHOWN.filter((r) => spec.isIn(r) === on).length;
     head.append(el('span', '', `${on ? spec.inTitle : spec.outTitle} (${n})`));
     head.append(
       button(on ? t('lists.none') : t('lists.all'), on ? spec.noneTip : spec.allTip, () => {
-        for (const r of RESOURCES) spec.set(r, !on);
+        for (const r of GOODS_SHOWN) spec.set(r, !on);
       }),
     );
     col.append(head);
     const list = el('div', 'accept-list');
-    for (const r of RESOURCES) {
+    for (const r of GOODS_SHOWN) {
       if (spec.isIn(r) !== on) continue; // the other list's
       const name = spec.nameOf(r);
       const action = on ? spec.tipIn(name) : spec.tipOut(name);

@@ -1,6 +1,6 @@
 import { addBuilding, spawnSettler } from '../sim/buildings';
 import { recomputeTerritory } from '../sim/territory';
-import { BUILD_TICKS_PER_UNIT, BUILDINGS, buildingHp, costOf, CROP_KINDS, CROP_RIPE, CROP_STUBBLE, hpOf, ORE_RESOURCES, totalCost } from '../sim/config';
+import { BUILD_TICKS_PER_UNIT, buildableBy, BUILDINGS, buildingHp, costOf, CROP_KINDS, CROP_RIPE, CROP_STUBBLE, hpOf, ORE_RESOURCES, totalCost } from '../sim/config';
 import { clearStrokes } from '../sim/digging';
 import { ENDLESS } from '../sim/economy';
 import { formationSpots } from '../sim/field';
@@ -213,12 +213,16 @@ export function buildShowcase(): World {
   for (const b of w.buildings.values()) if (b.owner === LOCAL_PLAYER && b.done && BUILDINGS[b.type].garrison) w.fillGarrison(b.id);
 
   // Every building type, finished and staffed, in a ring around the start.
-  const types = (Object.keys(BUILDINGS) as BuildingType[]).filter((t) => BUILDINGS[t].playerBuildable && t !== 'tower');
+  const types = (Object.keys(BUILDINGS) as BuildingType[]).filter((t) => buildableBy(t) && t !== 'tower');
   types.forEach((type, k) => {
     const a = (k / types.length) * Math.PI * 2;
     const r = BUILDINGS[type].terrain === 'mountain' ? 14 : 7 + (k % 2) * 3;
     placeNear(w, type, cx + Math.cos(a) * r, cy + Math.sin(a) * r);
   });
+  // Other races' buildings (kept in the data: the Vikings' pig farm), which no Roman can place: set
+  // down finished, so their models are seen too.
+  const others = (Object.keys(BUILDINGS) as BuildingType[]).filter((t) => BUILDINGS[t].playerBuildable && !buildableBy(t));
+  others.forEach((type, k) => placeNear(w, type, cx + 16, cy + 4 + k * 5, true));
   run(w, 9000);
   // Recruits ordered at the barracks (Settlers 4: nobody unasked); they come out and stand by it.
   w.orderRecruits('soldier', 0, 2);
@@ -456,7 +460,7 @@ export function buildShowcase(): World {
   }
   // Burnt ruins of every footprint size (Settlers 4's smouldering remains after a conquest): finished
   // buildings burnt on the spot, their remains kept smoking for good.
-  (['flowerbed', 'woodcutter', 'pigfarm', 'fortress'] as BuildingType[]).forEach((type, k) => {
+  (['flowerbed', 'woodcutter', 'sheepfarm', 'fortress'] as BuildingType[]).forEach((type, k) => {
     const b = placeNear(w, type, cx - 14 + k * 7, cy + 16, true);
     if (!b) return;
     w.removeBuilding(b, 'burn');

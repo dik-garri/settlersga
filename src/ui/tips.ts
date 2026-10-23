@@ -10,6 +10,7 @@ import {
   STRENGTH,
   TICKS_PER_SECOND,
   TRADE,
+  buildableBy,
   buildersOf,
   costOf,
   residentsOf,
@@ -62,6 +63,8 @@ const goods = (stock: Partial<Record<Resource, number>>): TipPart[] =>
   RESOURCES.filter((r) => (stock[r] ?? 0) > 0).map((r) => ({ res: r, n: stock[r] }));
 
 const ALL_TYPES = Object.keys(BUILDINGS) as BuildingType[];
+/** The types the played race builds (`buildableBy`): what makes and uses a good. */
+const OWN_TYPES = ALL_TYPES.filter((type) => buildableBy(type));
 /** What hunters bring home (`AnimalDef.game`). */
 const GAME: Resource[] = [...new Set((Object.values(ANIMALS) as AnimalDef[]).flatMap((a) => (a.game ? [a.game] : [])))];
 
@@ -162,7 +165,8 @@ export function buildingTip(type: BuildingType, opts: BuildingTipOptions = {}): 
   sub.push(t('tip.builders', { n: buildersOf(type) }));
   let hint: string | undefined;
   if (opts.locked) hint = t('tut.ui.locked');
-  else if (!opts.noHint) hint = opts.key !== undefined ? t('tip.buildHint', { n: opts.key }) : t('tip.buildHintNoKey');
+  // Another race's building (an older save's) is never placed: no build hint.
+  else if (!opts.noHint && buildableBy(type)) hint = opts.key !== undefined ? t('tip.buildHint', { n: opts.key }) : t('tip.buildHintNoKey');
   return { title: buildingName(type), sub: sub.join(' · '), lines, hint };
 }
 
@@ -222,7 +226,7 @@ export function recruitTip(kind: SettlerKind, level: number): Tip {
 
 /** Buildings that make `res`: recipes, gatherers, hunters, mines. */
 export function producersOf(res: Resource): BuildingType[] {
-  return ALL_TYPES.filter((type) => {
+  return OWN_TYPES.filter((type) => {
     const def = BUILDINGS[type];
     const r = def.recipe;
     if (def.mine?.res === res) return true;
@@ -235,7 +239,7 @@ export function producersOf(res: Resource): BuildingType[] {
 
 /** Buildings that use `res` up: recipe inputs, and the barracks for what recruits take. */
 export function usersOf(res: Resource): BuildingType[] {
-  return ALL_TYPES.filter((type) => {
+  return OWN_TYPES.filter((type) => {
     const def = BUILDINGS[type];
     const r = def.recipe;
     if (r && ((r.inputs[res] ?? 0) > 0 || r.inputsAnyOf?.includes(res))) return true;
@@ -255,7 +259,7 @@ export function goodsTip(res: Resource, hint?: string): Tip {
   const made = producersOf(res);
   if (made.length > 0) lines.push(text(list(made.map(buildingName)), t('tip.madeBy')));
   const used = usersOf(res).map(buildingName);
-  if (ALL_TYPES.some((type) => (BUILDINGS[type].cost[res] ?? 0) > 0)) used.unshift(t('tip.construction'));
+  if (OWN_TYPES.some((type) => (BUILDINGS[type].cost[res] ?? 0) > 0)) used.unshift(t('tip.construction'));
   if (used.length > 0) lines.push(text(list(used), t('tip.usedBy')));
   const holders = toolOf(res);
   if (holders.length > 0) lines.push(text(list(holders.map((k) => lower(profName(k)))), t('tip.toolFor')));

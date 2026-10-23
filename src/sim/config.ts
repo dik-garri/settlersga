@@ -140,11 +140,12 @@ export const CARRIER_RESERVE = { default: 5, min: 5, max: 999 };
  * demands first, then surplus to warehouses —, which matters when carriers are short. The player
  * moves goods up and down (`World.moveTransport`, `Player.economy.transport`). Unlike S4 there is no
  * limit of one transport per good per pass (the «coalbug»): we keep the community's Transport+.
- * Our goods only (no ammunition, wine or sulfur); every resource must be listed.
+ * Our goods only (no ammunition, wine or sulfur); every resource must be listed — goods the Romans
+ * do not use (the pig, `RESOURCE_INFO[…].races`) last.
  */
 export const TRANSPORT_PRIORITY: readonly Resource[] = [
-  'plank', 'stone', 'log', 'iron', 'ironore', 'coal', 'bread', 'fish', 'meat', 'flour', 'grain', 'pig', 'water',
-  'sword', 'bow', 'armor', 'shovel', 'hammer', 'axe', 'pickaxe', 'saw', 'rod', 'scythe', 'gold', 'goldore',
+  'plank', 'stone', 'log', 'iron', 'ironore', 'coal', 'bread', 'fish', 'meat', 'flour', 'grain', 'sheep', 'water',
+  'sword', 'bow', 'armor', 'shovel', 'hammer', 'axe', 'pickaxe', 'saw', 'rod', 'scythe', 'gold', 'goldore', 'pig',
 ];
 /**
  * Default distribution percentages, as Settlers 4 sets them for a new economy sector
@@ -347,7 +348,7 @@ export const GAME_MODES: readonly GameMode[] = ['conquest', 'economy', 'coop'];
 /**
  * Settlers 4's economic mode (decompiled `ScriptEconomyModeVictoryConditionCheck`,
  * `CStateLobbyGameSettings::CreateRandomGoods`): the lobby draws `goods` distinct goods at random from
- * `pool` (every good but S4's excluded ones — of ours the pig: S4 skips none, agave, ammo, battle axe,
+ * `pool` (every good but S4's excluded ones — of ours the sheep and the pig: S4 skips none, agave, ammo, battle axe,
  * blowgun, goat, gunpowder, honey, mead, pig, sheep, tequila, wine, backpack catapult, goose,
  * explosive arrow, sunflower and its oil); after `minutes` of play (S4: `ticks × 71 ms / 60 s ≥ 60`)
  * alliance 1 and all the others together compare, good by good, their current stock (`CStatistic::
@@ -582,12 +583,26 @@ export const STRENGTH = {
  */
 export type ResourceGroup = 'building' | 'food' | 'metal' | 'tools' | 'military';
 export const RESOURCE_GROUPS: readonly ResourceGroup[] = ['building', 'food', 'metal', 'tools', 'military'];
+
+/**
+ * Settlers 4's races (ids as the setup's `RACES`). Each has its own buildings and goods (the Romans
+ * keep sheep, the Vikings pigs); `BuildingDef.races` and `RESOURCE_INFO[…].races` say whose they
+ * are. Until phase 7 every player is a Roman (`PLAYED_RACE`); then the race becomes the player's.
+ */
+export type Race = 'romans' | 'vikings' | 'mayans' | 'trojans';
+/** The race every player plays (the only one the setup offers so far). */
+export const PLAYED_RACE: Race = 'romans';
+/** Whether a race has `races` (absent: every race has it). */
+const ofRace = (races: readonly Race[] | undefined, race: Race): boolean => !races || races.includes(race);
+
 /**
  * `storeLimit`: surplus is hauled to warehouses only while fewer than this many units are stored;
  * beyond that goods wait at the producer, whose full pile pauses it, so carriers are not spent on
  * goods nobody needs (water is unlimited and only used next door). Unset = no limit.
+ * `races`: the races that use the good (absent: all); the others' menus leave it out (`GOODS_SHOWN`).
+ * The key order is the menus' order of goods (`GOODS_ORDER`), whatever their `RESOURCES` index.
  */
-export const RESOURCE_INFO: Record<Resource, { group: ResourceGroup; storeLimit?: number }> = {
+export const RESOURCE_INFO: Record<Resource, { group: ResourceGroup; storeLimit?: number; races?: readonly Race[] }> = {
   log: { group: 'building' },
   plank: { group: 'building' },
   stone: { group: 'building' },
@@ -596,7 +611,9 @@ export const RESOURCE_INFO: Record<Resource, { group: ResourceGroup; storeLimit?
   grain: { group: 'food' },
   flour: { group: 'food' },
   bread: { group: 'food' },
-  pig: { group: 'food' },
+  sheep: { group: 'food' },
+  // Settlers 4: the Vikings' pig farm; the Romans keep sheep. Kept for them (and for older saves).
+  pig: { group: 'food', races: ['vikings'] },
   meat: { group: 'food' },
   coal: { group: 'metal' },
   ironore: { group: 'metal' },
@@ -614,6 +631,12 @@ export const RESOURCE_INFO: Record<Resource, { group: ResourceGroup; storeLimit?
   bow: { group: 'military' },
   armor: { group: 'military' },
 };
+/** Every good in the menus' order (`RESOURCE_INFO`'s). */
+export const GOODS_ORDER = Object.keys(RESOURCE_INFO) as Resource[];
+/** Whether a race uses the good (`RESOURCE_INFO[…].races`). */
+export const goodOfRace = (res: Resource, race: Race = PLAYED_RACE): boolean => ofRace(RESOURCE_INFO[res].races, race);
+/** The goods the menus offer to choose from (stock, warehouses, markets, transport): the played race's. */
+export const GOODS_SHOWN: readonly Resource[] = GOODS_ORDER.filter((r) => goodOfRace(r));
 
 /** Field plantings stored in `map.crop` (stage) with their kind in `map.cropKind` (index here). */
 export const CROP_KINDS: readonly PlantKind[] = ['grain'];
@@ -1069,6 +1092,7 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
   sawmiller: { behavior: 'workshop', tool: 'saw' },
   miller: { behavior: 'workshop' },
   baker: { behavior: 'workshop' },
+  shepherd: { behavior: 'workshop' },
   pigfarmer: { behavior: 'workshop' },
   butcher: { behavior: 'workshop', tool: 'axe' },
   miner: { behavior: 'workshop', tool: 'pickaxe' },
@@ -1202,7 +1226,7 @@ export interface Recipe {
   ticks: number;
   /**
    * Chance (world RNG) that a finished cycle, which always uses up its inputs, yields its outputs (or
-   * bred settler) — Settlers 4's animal ranches: a feeding adds a pig with 77 %, a donkey with 25 %
+   * bred settler) — Settlers 4's animal ranches: a feeding adds a sheep (or pig) with 77 %, a donkey with 25 %
    * (`CAnimalRanchRole::LogicUpdate`). Default 1.
    */
   outputChance?: number;
@@ -1235,6 +1259,14 @@ export interface BuildingDef {
   cost: Partial<Stock>;
   worker: SettlerKind | null;
   playerBuildable: boolean;
+  /**
+   * The races that build it (Settlers 4's buildings differ by race: the Romans' sheep farm, the
+   * Vikings' pig farm); absent: every race. A building of another race stays in the data — for that
+   * race, and for older saves, where it goes on working, can be stopped and demolished — but its
+   * owner cannot place it, and neither the build menu, the AI, the tips nor the tutorial offer it
+   * (`buildableBy`).
+   */
+  races?: readonly Race[];
   category?: Category;
   /** Warehouse: accepts goods (as the player allows, up to its capacity) and supplies them back. */
   storage?: StorageDef;
@@ -1356,7 +1388,7 @@ function mine(res: Resource, favourite: Resource, cost: Partial<Stock> = { plank
  * in `docs/TIMINGS.md`. Costs are the Roman buildings' (the-settlers fandom wiki), except the warehouse
  * and the market, which stay dearer by choice; territory radii are S4's in our tiles
  * (`docs/PROPORTIONS.md`). Footprints follow the original's on-screen widths
- * (barracks, pig farm and donkey ranch 3×3, the castle — our `fortress` — 4×4). There is no
+ * (barracks, sheep farm and donkey ranch 3×3, the castle — our `fortress` — 4×4). There is no
  * headquarters: players start with a small tower (`START_CONDITIONS`).
  */
 export const BUILDINGS: Record<BuildingType, BuildingDef> = {
@@ -1470,14 +1502,26 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     category: 'food',
     recipe: { inputs: { flour: 1, water: 1 }, outputs: { bread: 1 }, ticks: 347 },
   },
+  // Settlers 4's Roman sheep farm: a feeding every 421 of its ticks, a sheep with 77 % — a sheep
+  // every 39 s on average (`CAnimalRanchRole`, the same for every race's animal ranch).
+  sheepfarm: {
+    w: 3,
+    h: 3,
+    cost: { plank: 6, stone: 6 },
+    worker: 'shepherd',
+    playerBuildable: true,
+    category: 'food',
+    recipe: { inputs: { grain: 1, water: 1 }, outputs: { sheep: 1 }, ticks: 299, outputChance: 0.77 },
+  },
+  // The Vikings' animal ranch in Settlers 4 (the same numbers): not a Roman building, kept for them.
   pigfarm: {
     w: 3,
     h: 3,
     cost: { plank: 6, stone: 6 },
     worker: 'pigfarmer',
     playerBuildable: true,
+    races: ['vikings'],
     category: 'food',
-    // Settlers 4: a feeding every 421 of its ticks, a pig with 77 % — a pig every 39 s on average.
     recipe: { inputs: { grain: 1, water: 1 }, outputs: { pig: 1 }, ticks: 299, outputChance: 0.77 },
   },
   // Settlers 4 town buildings: carriers stay on their own land, donkeys carry goods between markets.
@@ -1508,8 +1552,8 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     worker: 'butcher',
     playerBuildable: true,
     category: 'food',
-    // Settlers 4: one animal, one meat, 178 of its ticks.
-    recipe: { inputs: { pig: 1 }, outputs: { meat: 1 }, ticks: 126 },
+    // Settlers 4: one animal (the Romans' sheep), one meat, 178 of its ticks.
+    recipe: { inputs: { sheep: 1 }, outputs: { meat: 1 }, ticks: 126 },
   },
 
   // Favourite foods as in Settlers 4: coal and stone bread, iron (and sulfur) meat, gold fish.
@@ -1649,6 +1693,12 @@ export function fullStock(partial: Partial<Stock>): Stock {
   return { ...emptyStock(), ...partial };
 }
 
+/** Whether a race builds the type (`BuildingDef.races`): what its owner may place and is offered. */
+export function buildableBy(type: BuildingType, race: Race = PLAYED_RACE): boolean {
+  const def = BUILDINGS[type];
+  return def.playerBuildable && ofRace(def.races, race);
+}
+
 export function costOf(type: BuildingType): Stock {
   return fullStock(BUILDINGS[type].cost);
 }
@@ -1684,6 +1734,7 @@ export const SITE_BUILDERS: Partial<Record<BuildingType, number>> = {
   farm: 4,
   mill: 4,
   bakery: 3,
+  sheepfarm: 4,
   pigfarm: 4,
   market: 2,
   donkeyranch: 4,
@@ -1765,8 +1816,8 @@ export const AI_PLAN: readonly { type: BuildingType; count: number; after?: Buil
   { type: 'infirmary', count: 1, after: 'barracks' },
   { type: 'goldmine', count: 1, after: 'toolsmith' },
   { type: 'goldsmelter', count: 1, after: 'goldmine' },
-  { type: 'pigfarm', count: 1 },
-  { type: 'slaughterhouse', count: 1, after: 'pigfarm' },
+  { type: 'sheepfarm', count: 1 },
+  { type: 'slaughterhouse', count: 1, after: 'sheepfarm' },
   { type: 'farm', count: 2 },
   { type: 'house_medium', count: 2 },
   { type: 'coalmine', count: 2, after: 'toolsmith' },
@@ -1781,8 +1832,8 @@ export const AI_PLAN: readonly { type: BuildingType; count: number; after?: Buil
   { type: 'stonecutter', count: 2, after: 'toolsmith' },
   { type: 'house_large', count: 1 },
   { type: 'ironmine', count: 2, after: 'toolsmith' },
-  // A pig is one meat now (Settlers 4): a second pig farm for the slaughterhouse (it keeps up with three).
-  { type: 'pigfarm', count: 2, after: 'slaughterhouse' },
+  // A sheep is one meat (Settlers 4): a second sheep farm for the slaughterhouse (it keeps up with three).
+  { type: 'sheepfarm', count: 2, after: 'slaughterhouse' },
   { type: 'weaponsmith', count: 2, after: 'ironsmelter' },
   { type: 'bigtower', count: 1, after: 'weaponsmith' },
   { type: 'tower', count: 8 },

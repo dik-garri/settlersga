@@ -2823,10 +2823,10 @@ def build_toolsmith():
     lib.tag(4)
 
 
-# ------------------------------------------------------------------------------------- pig farm (2×2)
+# ----------------------------------------------------------------------------------- sheep farm (3×3)
 
-def build_pigfarm():
-    """The Settlers 4 Roman sheep farm (our `pigfarm`: the Romans keep sheep): a barn of grey
+def build_sheepfarm():
+    """The Settlers 4 Roman sheep farm: a barn of grey
     fieldstone under a barrel roof of wooden shingles, its arched front gable boarded with a round
     window and a small door, a stone chimney on the ridge; beside it a low stone shed under deep
     golden thatch, open towards a strawy yard with a trough and a flock of white, black-faced sheep.
@@ -2918,6 +2918,77 @@ def build_pigfarm():
     for k, (x, y, a) in enumerate(flock):
         sheep(x, y, a, wool, black, s=1.45, seed=230 + k)
     lib.tag(4)
+
+
+# ------------------------------------------------------------------------------------- pig farm (3×3)
+
+def build_pigfarm():
+    """The pig farm (Settlers 4: the Vikings'; the Romans keep sheep, `build_sheepfarm`, and do not
+    build it — `BuildingDef.races`): a low half-timbered sty with a deep thatched roof running down
+    to the yard side, a small fieldstone house with a wooden-shingle roof and a chimney at its end,
+    and a fenced muddy yard in front with a feeding trough and a few pigs. 3×3 as the sheep farm:
+    modelled at 2×2 and scaled to 3×3, a little less in height."""
+    rnd = random.Random(201)
+    walls = stone_walls()
+    blocks = block_mats()
+    beam = beam_mat()
+    planks = boards_mats()
+    straw = straw_mat()
+    sh = shingle_mats('psh')
+    plaster = lib.mat_stones('pplaster', (0.86, 0.8, 0.66), (0.72, 0.64, 0.5), (0.6, 0.52, 0.4), scale=6, bump=0.3)
+    mud = lib.mat_grain('mud', (0.26, 0.17, 0.09), (0.44, 0.3, 0.17), scale=14, stretch=(1, 1, 1), bump=0.9)
+    pig = lib.mat_grain('pig', (0.86, 0.6, 0.54), (0.96, 0.74, 0.68), scale=20, stretch=(1, 1, 1), bump=0.2)
+    door = door_mat()
+    earth_pad((0.1, -0.2, 0), 0.98, 1.08, seed=201)
+    lib.tag(0)
+    corner_stakes(-0.85, 0.85, -0.85, 0.85)
+    lib.tag(0, until=0)
+    # Stone house at the back left.
+    hx0, hx1, hy0, hy1, H, rh = -0.85, -0.2, 0.05, 0.85, 0.6, 0.36
+    lib.box(((hx0 + hx1) / 2, (hy0 + hy1) / 2, 0.05), (hx1 - hx0 + 0.06, hy1 - hy0 + 0.06, 0.1), blocks[1], bevel=0.02)
+    # Sty along the back right.
+    sx0, sx1, sy0, sy1, sH = -0.2, 0.75, 0.15, 0.8, 0.42
+    lib.box(((sx0 + sx1) / 2, (sy0 + sy1) / 2, 0.04), (sx1 - sx0, sy1 - sy0, 0.08), blocks[3], bevel=0.02)
+    lib.tag(1)
+    stone_house(hx0, hx1, hy0, hy1, H * 0.5, rnd, walls, blocks, block=0.18)
+    half_timber(sx0, sx1, sy0, sy1, 0.08, sH, plaster, beam, rnd)
+    lib.tag(2)
+    stone_house(hx0, hx1, hy0, hy1, H, rnd, walls, blocks, z0=H * 0.5, block=0.18)
+    lib.gable(((hx0 + hx1) / 2, (hy0 + hy1) / 2, H), hx1 - hx0, rh - 0.02, hy0 + 0.01, walls, along='y')
+    lib.box((hx0 + 0.42, hy0 - 0.05, 0.2), (0.2, 0.04, 0.38), door, bevel=0.008)
+    window(hx0 + 0.15, hy0 - 0.04, 0.42, 0.12, 0.13, beam, lib.mat_flat('dark', (0.05, 0.04, 0.03)))
+    for k in range(3):  # low half-doors of the sty
+        lib.box((sx0 + 0.18 + k * 0.3, sy0 - 0.03, 0.17), (0.16, 0.03, 0.18), planks[k % len(planks)], bevel=0.006)
+    lib.tag(3)
+    scale_roof((hx0 + hx1) / 2, (hy0 + hy1) / 2, hx1 - hx0, hy1 - hy0, H, rh, sh, lib.mat_flat('psh-r', (0.36, 0.24, 0.12)),
+               axis='y', overhang=0.08, seed=202, size=0.11, shape='tile')
+    chimney((hx0 + hx1) / 2, hy1 - 0.15, H, H + rh + 0.18, blocks, rnd)
+    # Deep thatch over the sty, a lean-to sloping towards the yard (−Y).
+    tz_hi, tz_lo = sH + 0.34, sH - 0.06
+    lib.box(((sx0 + sx1) / 2, (sy0 + sy1) / 2 - 0.04, (tz_hi + tz_lo) / 2),
+            (sx1 - sx0 + 0.16, math.hypot(sy1 - sy0 + 0.22, tz_hi - tz_lo), 0.1), straw,
+            rot=(math.atan2(tz_hi - tz_lo, sy1 - sy0 + 0.22), 0, 0), bevel=0.03)
+    lib.tag(None, split=lambda o: 3 if o.location.x > 0.3 else 4)
+    # Fenced yard in front with mud, a trough and pigs.
+    lib.pad((0.25, -0.38, 0.004), 0.55, 0.36, mud, jitter=0.15, seed=203, core=0.8, reach=1.1)
+    fx0, fx1, fy0, fy1 = -0.4, 0.82, -0.85, sy0
+    for (xa, ya, xb, yb) in ((fx0, fy0, fx1, fy0), (fx1, fy0, fx1, fy1), (fx0, fy0, fx0, fy1 - 0.1)):
+        n = max(2, int(math.hypot(xb - xa, yb - ya) / 0.22))
+        for k in range(n + 1):
+            t = k / n
+            lib.box((xa + (xb - xa) * t, ya + (yb - ya) * t, 0.1), (0.035, 0.035, 0.2), beam)
+        for z in (0.08, 0.16):
+            rod((xa, ya, z), (xb, yb, z), 0.014, beam, verts=6)
+    lib.box((0.1, -0.2, 0.05), (0.42, 0.12, 0.08), planks[1], bevel=0.01)
+    for k, (x, y, a) in enumerate(((0.45, -0.5, 0.4), (-0.05, -0.55, 2.0), (0.6, -0.15, -1.2))):
+        body = lib.sphere((x, y, 0.09), 0.08, pig, scale=(1.5, 0.95, 0.9))
+        body.rotation_euler = (0, 0, a)
+        lib.sphere((x + math.cos(a) * 0.13, y + math.sin(a) * 0.13, 0.1), 0.05, pig, scale=(1.2, 1, 1))
+        for dx, dy in ((0.07, 0.04), (0.07, -0.04), (-0.07, 0.04), (-0.07, -0.04)):
+            c, s = math.cos(a), math.sin(a)
+            lib.cylinder((x + c * dx - s * dy, y + s * dx + c * dy, 0.025), 0.015, 0.05, pig, verts=6)
+    lib.tag(4)
+    scale_scene(1.45, kz=1.3)
 
 
 # ------------------------------------------------------------------------------------- forester (2×2)
