@@ -36,7 +36,9 @@ if ((raw as DesyncFile).kind === 'settlers-desync') {
   }
   console.log(`desync report of seat ${report.seat} (host ${report.host}), turns of ${report.turnTicks} ticks, delay ${report.delay}`);
   if (report.desync) console.log(`desync after turn ${report.desync.turn} (last agreed: ${report.desync.agreed ?? '—'}): ${JSON.stringify(report.desync.sums)}`);
-  console.log(`seed ${report.replay.seed} · ${report.replay.log.length} commands · ${report.replay.ticks} ticks · ${report.sums.length} sums to check`);
+  // A client restored from the host (docs/NETWORK.md section 17) replays from the host's state it loaded.
+  const from = report.base ? `the host's state at tick ${report.base.tick} (restore ${report.epoch ?? '?'})` : `seed ${report.replay.seed}`;
+  console.log(`${from} · ${report.replay.log.length} commands · ${report.replay.ticks} ticks · ${report.sums.length} sums to check`);
   const checks = replaySums(report, print);
   for (const c of checks) console.log(`turn ${c.turn} · tick ${c.tick} · ${c.ok ? 'matches' : `DIFFERS in ${c.differ.join(', ')}`}`);
   const bad = checks.find((c) => !c.ok);

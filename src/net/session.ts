@@ -12,6 +12,8 @@ import type { PeerId, Transport } from './transport';
 export interface LockstepEnvelope {
   ch: 'ls';
   m: LockstepMsg;
+  /** The restore count of the game (absent: 0): messages of an earlier lockstep are ignored. */
+  e?: number;
 }
 
 const isEnvelope = (x: unknown): x is LockstepEnvelope =>
@@ -29,6 +31,13 @@ export interface SessionOptions {
   resume?: LockstepOptions['resume'];
   /** The seats handing in batches now, when not every seat in `seats` does (a resumed game). */
   active?: Seat[];
+  /** A lockstep started over from the host's state after a desync (`LockstepOptions.restart`). */
+  restart?: LockstepOptions['restart'];
+  /**
+   * How many times the game started over (default 0): every envelope carries it, and one of
+   * another epoch — a batch or checksum sent before the restore, still on its way — is ignored.
+   */
+  epoch?: number;
   onDesync?: (report: DesyncReport) => void;
   /** Client: the host is gone. */
   onHostLost?: () => void;
@@ -50,15 +59,17 @@ export function bindLockstep(transport: Transport, opts: SessionOptions): Lockst
   const local = seatOf(transport.self);
   const host = seatOf(transport.host);
   if (local === undefined || host === undefined) throw new Error('lockstep session: this peer and the host need a seat');
+  const epoch = opts.epoch ?? 0;
   const lockstep = new Lockstep({
     seats: opts.active ?? [...opts.seats.keys()],
     local,
     host,
     delay: opts.delay,
     resume: opts.resume,
+    restart: opts.restart,
     onDesync: opts.onDesync,
     send: (to, m) => {
-      const env: LockstepEnvelope = { ch: 'ls', m };
+      const env: LockstepEnvelope = epoch ? { ch: 'ls', m, e: epoch } : { ch: 'ls', m };
       if (to === 'all') transport.broadcast(env);
       else {
         const peer = opts.seats.get(to);
@@ -68,7 +79,7 @@ export function bindLockstep(transport: Transport, opts: SessionOptions): Lockst
   });
   const offMessage = transport.on('message', (from, msg) => {
     const seat = seatOf(from);
-    if (seat !== undefined && isEnvelope(msg)) lockstep.receive(seat, msg.m);
+    if (seat !== undefined && isEnvelope(msg) && (msg.e ?? 0) === epoch) lockstep.receive(seat, msg.m);
   });
   const offLeave = transport.on('leave', (peer) => {
     const seat = seatOf(peer);

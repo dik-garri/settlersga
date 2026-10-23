@@ -4,10 +4,10 @@ import { applySeatControls, NetCore, type NetStartBase, type SeatControlKind } f
 import { DelayTuner, delayFor } from '../src/net/delay';
 import { Lockstep, type LockstepMsg } from '../src/net/lockstep';
 import { LoopbackNetwork, VirtualClock, type LinkConditions, type LoopbackTransport } from '../src/net/loopback';
-import { SAVE_EVERY_TICKS, type MatchEvent, type NetSave } from '../src/net/match';
+import { replaySums, SAVE_EVERY_TICKS, type MatchEvent, type NetSave } from '../src/net/match';
 import { VOICE_FRAME, type VoiceFrame } from '../src/net/voice';
 import { stateChecksum } from '../src/sim/checksum';
-import type { SaveData } from '../src/sim/save';
+import { saveWorld, type SaveData } from '../src/sim/save';
 import type { BuildingType, PlayerId } from '../src/sim/types';
 import { World, type WorldOptions } from '../src/sim/world';
 import { LobbyClient, LobbyHost, type StartInfo } from '../src/ui/lobby';
@@ -113,13 +113,13 @@ function run(g: Game, ms: number, step = 20, each?: (t: number) => void): void {
 function align(g: Game): void {
   g.clock.advance(1_000);
   const live = g.peers.filter((p) => !p.gone);
-  const tick = Math.max(...live.map((p) => p.world.tick));
-  for (const p of live) for (let guard = 0; p.world.tick < tick && guard < 4_000; guard++) p.core.match.advance(100, 1);
+  const tick = Math.max(...live.map((p) => p.core.world.tick));
+  for (const p of live) for (let guard = 0; p.core.world.tick < tick && guard < 4_000; guard++) p.core.match.advance(100, 1);
 }
 
 function sums(g: Game): string[] {
   align(g);
-  return g.peers.filter((p) => !p.gone).map((p) => `${p.world.tick}:${stateChecksum(p.world)}`);
+  return g.peers.filter((p) => !p.gone).map((p) => `${p.core.world.tick}:${stateChecksum(p.core.world)}`);
 }
 
 function spotFor(w: World, type: BuildingType, dx: number, dy: number, player: PlayerId) {
@@ -396,33 +396,33 @@ describe('network saves (6.6)', () => {
   });
 });
 
-describe('reconnect (6.7)', () => {
-  /** A browser that lost its game comes back with the code: lobby → seat → snapshot → its game. */
-  function rejoin(g: Game, name: string, seat: number, accept = true): Peer {
-    const t = g.net.connect('CORE22', name);
-    const lc = new LobbyClient(t, BUILD, () => g.clock.now(), { seat });
-    g.lobbies.push(lc);
-    const host = g.peers[0];
-    until(g, () => lc.ingame !== null);
-    expect(lc.ingame!.vacant).toContain(seat);
-    const asked = host.asked.length;
-    lc.rejoin(seat);
-    until(g, () => host.asked.length > asked && host.asked.at(-1) === seat);
-    if (!accept) {
-      host.core.refuseRejoin(seat);
-      until(g, () => lc.refused !== null);
-      g.lobbies = [];
-      return null as unknown as Peer;
-    }
-    expect(host.core.acceptRejoin(seat)).toBe(true);
-    until(g, () => lc.resumed !== null);
-    const r = lc.resumed!;
-    lc.dispose();
+/** A browser that lost its game comes back with the code: lobby → seat → snapshot → its game. */
+function rejoin(g: Game, name: string, seat: number, accept = true): Peer {
+  const t = g.net.connect('CORE22', name);
+  const lc = new LobbyClient(t, BUILD, () => g.clock.now(), { seat });
+  g.lobbies.push(lc);
+  const host = g.peers[0];
+  until(g, () => lc.ingame !== null);
+  expect(lc.ingame!.vacant).toContain(seat);
+  const asked = host.asked.length;
+  lc.rejoin(seat);
+  until(g, () => host.asked.length > asked && host.asked.at(-1) === seat);
+  if (!accept) {
+    host.core.refuseRejoin(seat);
+    until(g, () => lc.refused !== null);
     g.lobbies = [];
-    const world = World.load(r.data);
-    return makePeer(g, t, seat, world, { start: r.start, resume: r.resume, chat: r.chat } as never);
+    return null as unknown as Peer;
   }
+  expect(host.core.acceptRejoin(seat)).toBe(true);
+  until(g, () => lc.resumed !== null);
+  const r = lc.resumed!;
+  lc.dispose();
+  g.lobbies = [];
+  const world = World.load(r.data);
+  return makePeer(g, t, seat, world, { start: r.start, resume: r.resume, chat: r.chat } as never);
+}
 
+describe('reconnect (6.7)', () => {
   it('a dropped player comes back: the computer gave the seat back at one turn, every machine identical', () => {
     const g = coreGame({ humans: 3, seed: 9, world: { size: 64, players: 3 }, conditions: { latency: 30, jitter: 30, drop: 0.03 } });
     run(g, 8_000);
@@ -619,5 +619,147 @@ describe('robustness (6.7)', () => {
     expect(g.peers[0].core.match.waiting).toBe(false);
     // The kicked player may still come back if the host agrees.
     expect(g.peers[0].core.vacantSeats()).toEqual([2]);
+  });
+});
+
+describe('restore after a desync (6.7)', () => {
+  const saved = (p: Peer) => JSON.stringify(saveWorld(p.core.world));
+
+  it('every browser starts over from the host\'s state: identical worlds, orders land, the reports stay', () => {
+    const g = coreGame({ humans: 3, seed: 9, world: { size: 64, players: 3 }, conditions: { latency: 30, jitter: 30, drop: 0.03 } });
+    run(g, 8_000);
+    const [h, b, c] = g.peers;
+    const restored: [number, number][] = [];
+    for (const p of g.peers) p.core.hooks.restored = (_w, epoch, turn) => restored.push([p.seat, epoch * 100_000 + turn]);
+    // Nothing to restore from while the game agrees.
+    expect(b.core.requestRestore()).toBe(false);
+    // Something only one machine did.
+    const before = b.core.world;
+    before.settlers[3].x += 0.001;
+    run(g, 5_000);
+    for (const p of g.peers) expect(p.core.desynced).toBe(true);
+    for (const p of g.peers) expect(p.core.reports).toHaveLength(1);
+    const desyncTurn = h.core.reports[0].desync!.turn;
+    for (const p of g.peers) expect(p.core.reports[0].desync!.turn).toBe(desyncTurn);
+    const stopped = h.core.world.tick;
+    run(g, 2_000);
+    expect(h.core.world.tick).toBe(stopped);
+    // A player who agreed with the host asks; the host restores everybody at once.
+    expect(c.core.requestRestore()).toBe(true);
+    expect(c.core.restoring).toBe(true);
+    run(g, 6_000);
+    for (const p of g.peers) {
+      expect(p.core.epoch).toBe(1);
+      expect(p.core.restoring).toBe(false);
+      expect(p.core.desynced).toBe(false);
+      expect(p.core.match.stopped).toBe(false);
+    }
+    // Every machine started over at the same turn; the clients play new worlds, the host its own.
+    expect(new Set(restored.map(([, at]) => at)).size).toBe(1);
+    expect(restored.map(([s]) => s).sort()).toEqual([1, 2, 3]);
+    expect(b.core.world).not.toBe(before);
+    expect(h.core.world).toBe(h.world);
+    expect(before.sendAhead).toBeNull();
+    // The game goes on: identical states, byte for byte, and the checksums agree.
+    expect(new Set(sums(g)).size).toBe(1);
+    expect(new Set(g.peers.map(saved)).size).toBe(1);
+    const agreed = h.core.session.lockstep.agreed!;
+    expect(agreed).toBeGreaterThanOrEqual((restored[0][1] % 100_000) - 1);
+    // Orders of every player land in every world.
+    const spots = g.peers.map((p) => spotFor(p.core.world, 'woodcutter', 4, 1, p.seat));
+    g.peers.forEach((p, k) => expect(p.core.world.issue({ kind: 'placeBuilding', player: p.seat, type: 'woodcutter', x: spots[k].x, y: spots[k].y })).toBe(true));
+    run(g, 20_000);
+    for (const p of g.peers) for (const [k, at] of spots.entries()) expect(p.core.world.buildingAt(at.x, at.y)?.owner).toBe(k + 1);
+    expect(h.core.session.lockstep.agreed!).toBeGreaterThan(agreed);
+    for (const p of g.peers) expect(p.core.desynced).toBe(false);
+    expect(new Set(sums(g)).size).toBe(1);
+    expect(new Set(g.peers.map(saved)).size).toBe(1);
+    // The report of the desync is still there, as it was when the desync was found.
+    for (const p of g.peers) expect(p.core.reports).toHaveLength(1);
+    expect(replaySums(h.core.reports[0]).every((x) => x.ok)).toBe(true);
+    expect(replaySums(b.core.reports[0]).find((x) => !x.ok)?.differ).toContain('settlers');
+
+    // A second desync is found again; the host restores; a stale request changes nothing.
+    b.core.world.settlers[5].y += 0.001;
+    run(g, 5_000);
+    for (const p of g.peers) expect(p.core.desynced).toBe(true);
+    for (const p of g.peers) expect(p.core.reports).toHaveLength(2);
+    expect(b.core.reports[1].epoch).toBe(1);
+    // The client's world came from the host's state: its report replays from that save.
+    expect(b.core.reports[1].base).toBeDefined();
+    const checks = replaySums(b.core.reports[1]);
+    expect(checks.length).toBeGreaterThan(3);
+    expect(checks.find((x) => !x.ok)?.differ).toContain('settlers');
+    expect(replaySums(c.core.reports[1]).every((x) => x.ok)).toBe(true);
+    expect(h.core.requestRestore()).toBe(true);
+    // A request for that epoch still on its way starts no second restore.
+    b.transport.send(b.transport.host, { ch: 'rs', k: 'ask', epoch: 1 });
+    run(g, 16_000);
+    for (const p of g.peers) {
+      expect(p.core.epoch).toBe(2);
+      expect(p.core.desynced).toBe(false);
+    }
+    expect(new Set(sums(g)).size).toBe(1);
+    expect(new Set(g.peers.map(saved)).size).toBe(1);
+  });
+
+  it('the host restores even when the clients agree among themselves (it is the source of truth)', () => {
+    const g = coreGame({ humans: 3, seed: 5, world: { size: 64, players: 3 }, conditions: { latency: 20, jitter: 10 } });
+    run(g, 6_000);
+    const [h, b, c] = g.peers;
+    h.core.world.settlers[2].x += 0.001;
+    run(g, 5_000);
+    expect(b.core.desynced && c.core.desynced).toBe(true);
+    expect(b.core.requestRestore()).toBe(true);
+    run(g, 6_000);
+    for (const p of g.peers) expect(p.core.epoch).toBe(1);
+    run(g, 5_000);
+    // Everybody took the host's world.
+    expect(new Set(sums(g)).size).toBe(1);
+    expect(b.core.world.settlers[2].x).toBe(h.core.world.settlers[2].x);
+    // The chat goes on as before.
+    b.core.say('back in sync', 'all');
+    run(g, 2_000);
+    expect(c.chat.some((l) => l.text === 'back in sync')).toBe(true);
+  });
+
+  it('a restarted lockstep plays the turns sealed already, then empty ones up to the delay', () => {
+    const sealed = [{ turn: 10, inputs: [{ seat: 1, cmds: ['a'] }, { seat: 2, cmds: [] }], dropped: [], rejoined: [] }];
+    const ls = new Lockstep({ seats: [1, 2], local: 1, host: 1, delay: 3, send: () => {}, restart: { turn: 10, sealed } });
+    expect(ls.turn).toBe(10);
+    expect(ls.inputTurn).toBe(13);
+    expect(ls.next()!.inputs[0].cmds).toEqual(['a']);
+    expect(ls.next()!.inputs.map((i) => i.cmds)).toEqual([[], []]);
+    expect(ls.next()!.turn).toBe(12);
+    expect(ls.next()).toBeNull();
+    expect(ls.waitingFor()).toEqual([1, 2]);
+    // A turn sealed beyond the delay (the host had handed in its batch already): input goes on after it.
+    const far = [10, 11, 12, 13].map((turn) => ({ turn, inputs: [], dropped: [], rejoined: [] }));
+    expect(new Lockstep({ seats: [1, 2], local: 2, host: 1, delay: 3, send: () => {}, restart: { turn: 10, sealed: far } }).inputTurn).toBe(14);
+  });
+
+  it('a player who drops after a restore comes back into the restored game', () => {
+    const g = coreGame({ humans: 3, seed: 9, world: { size: 64, players: 3 }, conditions: { latency: 20, jitter: 20 } });
+    run(g, 6_000);
+    const [h, b, c] = g.peers;
+    b.core.world.settlers[3].x += 0.001;
+    run(g, 5_000);
+    expect(h.core.requestRestore()).toBe(true);
+    run(g, 8_000);
+    expect(new Set(sums(g)).size).toBe(1);
+    // Player 3 drops; the computer takes his seat; he comes back with the code.
+    g.net.disconnect('p3');
+    c.gone = true;
+    run(g, 15_000);
+    expect(h.core.world.aiLevel(3)).toBe('medium');
+    const back = rejoin(g, 'p3-again', 3);
+    g.peers[2] = back;
+    expect(back.core.epoch).toBe(1);
+    run(g, 15_000);
+    for (const p of g.peers) {
+      expect(p.core.world.aiLevel(3)).toBeNull();
+      expect(p.core.desynced).toBe(false);
+    }
+    expect(new Set(sums(g)).size).toBe(1);
   });
 });

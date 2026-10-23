@@ -49,6 +49,8 @@ export class InputController {
   private hintKey = '';
   private lastClick = { at: -Infinity, id: -1 };
   private lastRecall = { at: -Infinity, n: -1 };
+  /** Takes every listener off again (`dispose`: a network game restored from the host builds a new view). */
+  private readonly listening = new AbortController();
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -66,15 +68,23 @@ export class InputController {
     this.hint.className = 'order-hint';
     this.hint.hidden = true;
     canvas.parentElement?.appendChild(this.hint);
-    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-    canvas.addEventListener('pointerdown', (e) => this.onDown(e));
-    canvas.addEventListener('pointermove', (e) => this.onMove(e));
-    canvas.addEventListener('pointerup', (e) => this.onUp(e));
-    canvas.addEventListener('pointerleave', () => (this.pointer = null));
-    canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
-    window.addEventListener('keydown', (e) => this.onKey(e, true));
-    window.addEventListener('keyup', (e) => this.onKey(e, false));
-    window.addEventListener('blur', () => this.keys.clear());
+    const signal = this.listening.signal;
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault(), { signal });
+    canvas.addEventListener('pointerdown', (e) => this.onDown(e), { signal });
+    canvas.addEventListener('pointermove', (e) => this.onMove(e), { signal });
+    canvas.addEventListener('pointerup', (e) => this.onUp(e), { signal });
+    canvas.addEventListener('pointerleave', () => (this.pointer = null), { signal });
+    canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false, signal });
+    window.addEventListener('keydown', (e) => this.onKey(e, true), { signal });
+    window.addEventListener('keyup', (e) => this.onKey(e, false), { signal });
+    window.addEventListener('blur', () => this.keys.clear(), { signal });
+  }
+
+  /** Stops listening and takes the selection box and the order hint off the page. */
+  dispose(): void {
+    this.listening.abort();
+    this.box.remove();
+    this.hint.remove();
   }
 
   private get view(): [number, number] {

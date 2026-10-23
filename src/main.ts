@@ -1,4 +1,4 @@
-import { Application } from 'pixi.js';
+import { Application, type Ticker } from 'pixi.js';
 import { AudioEngine } from './audio/audio';
 import { loadArt3d } from './render/art3d';
 import { SpriteAtlas } from './render/atlas';
@@ -35,7 +35,7 @@ import type { NetLaunchExtra } from './ui/lobbyView';
 import { NetGame } from './ui/netGame';
 import { ownName } from './ui/playerNames';
 import { NAME_EVENT } from './ui/settingsPanel';
-import { downloadJson, NetPanel, netWindow } from './ui/netView';
+import { downloadJson, NetPanel, netWindow, type NetAction } from './ui/netView';
 import { Radio, VoicePlayer } from './ui/voice';
 
 /** A network game: the connections the lobby made, what the host decided at «Start», the chat so far. */
@@ -277,7 +277,25 @@ async function title(
   Object.assign(window, { scene, menu });
 }
 
-/** A running game: renderer, side panel, input, the game menu and the fixed-step loop. */
+/** What a game view keeps over a rebuild (a network game restored from the host): where the camera looks. */
+interface ViewKeep {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
+/** A game view over one world: renderer, side panel, input, the game menu and the loop; `dispose` takes it all down. */
+interface GameView {
+  camera: Camera;
+  dispose(): void;
+}
+
+/**
+ * A running game: renderer, side panel, input, the game menu and the fixed-step loop. A network
+ * game's connections, radio and sound controls live as long as the game; the view over the world is
+ * built again when a client starts over from the host's state after a desync (docs/NETWORK.md
+ * section 17), since it plays a new `World` then.
+ */
 function game(
   app: Application,
   atlas: SpriteAtlas,
@@ -290,19 +308,99 @@ function game(
   const net = opts.net
     ? new NetGame(world, opts.net.transport, opts.net.info, { slots, resume: opts.net.extra.resume?.resume, chat: opts.net.extra.chat })
     : null;
+  const hudEl = document.getElementById('hud')!;
+  // Made once: they listen for their keys (M) for as long as the page lives.
+  const sound = audioControls(audio, { voice: !!net });
+  hudEl.addEventListener('click', (e) => {
+    if (e.target instanceof Element && e.target.closest('button')) audio.ui('click');
+  });
+  // The view now (a network client builds a new one after a restore from the host).
+  let view: (GameView & { toast(text: string): void }) | null = null;
+  const toast = (text: string) => view?.toast(text);
+  // The radio of a network game (V allies, B everybody; ui/voice.ts), its plaque over the game.
+  let radio: Radio | null = null;
+  let voicePlayer: VoicePlayer | null = null;
+  if (net) {
+    // The others' voices go on in a hidden tab; the game's own sounds are silenced there.
+    audio.stayAwake = true;
+    voicePlayer = new VoicePlayer(audio);
+    const onAir = new Radio({
+      voice: net.core.voice,
+      audio,
+      toast,
+      talking: () => net.talking(),
+      nameOf: (seat) => net.nameOf(seat),
+      muted: (seat) => net.muted.has(seat),
+    });
+    radio = onAir;
+    hudEl.append(onAir.el);
+    window.addEventListener('pagehide', () => onAir.stop());
+    window.addEventListener(LANG_EVENT, () => onAir.show());
+    app.ticker.add(() => onAir.update(performance.now()));
+  }
+  const build = (w: World, keep: ViewKeep | null) => {
+    view = gameView({ app, atlas, audio, world: w, opts, net, slots, sound, hudEl, radio, voicePlayer, keep, rebuild });
+  };
+  // A client starting over from the host's state plays a new world: a new view over it, the camera
+  // where it was. (The host goes on with its own world and view.)
+  const rebuild = (w: World) => {
+    const old = view!;
+    const keep = { x: old.camera.x, y: old.camera.y, zoom: old.camera.zoom };
+    old.dispose();
+    build(w, keep);
+  };
+  build(world, null);
+  if (opts.seed) console.info(`Settlers prototype, seed ${opts.seed} (add ?seed=${opts.seed} to replay this map)`);
+  else console.info(`Game at tick ${world.tick}`);
+}
+
+/** Everything a game view is built from (`game` makes the parts that outlive a view). */
+interface ViewParts {
+  app: Application;
+  atlas: SpriteAtlas;
+  audio: AudioEngine;
+  world: World;
+  opts: { fog: boolean; seed: number; autosave: boolean; tutorial?: TutorialStart };
+  net: NetGame | null;
+  slots: ReturnType<typeof browserSlots>;
+  sound: HTMLElement;
+  hudEl: HTMLElement;
+  radio: Radio | null;
+  voicePlayer: VoicePlayer | null;
+  keep: ViewKeep | null;
+  /** A network client got a new world from the host: this view goes, a new one is built over it. */
+  rebuild: (w: World) => void;
+}
+
+/** The view over one world (see `game`). */
+function gameView(parts: ViewParts): GameView & { toast(text: string): void } {
+  const { app, atlas, audio, world, opts, net, slots, sound, hudEl, radio, voicePlayer } = parts;
+  // Every window listener of this view goes when it does.
+  const listening = new AbortController();
+  const signal = listening.signal;
+  const tickers: ((ticker: Ticker) => void)[] = [];
+  const everyFrame = (fn: (ticker: Ticker) => void) => {
+    tickers.push(fn);
+    app.ticker.add(fn);
+  };
   const state = createState(net?.local);
   // Player names (interface only): a network game's from the setup the host sent, else the own one.
   const own = new Map([[state.localPlayer, ownName()]]);
   state.names = net ? net.names : own;
   // On one machine a new name (the settings) or language (a default name is the language's) shows at once.
-  if (!net) window.addEventListener(NAME_EVENT, () => own.set(state.localPlayer, ownName()));
+  if (!net) window.addEventListener(NAME_EVENT, () => own.set(state.localPlayer, ownName()), { signal });
   state.fog = opts.fog;
   if (net) state.net = { pause: (on) => net.match.setPaused(on), speed: net.isHost ? (v) => net.match.setSpeed(v) : null };
   const renderer = new GameRenderer(app, world, atlas, state.fog, state.localPlayer);
   const camera = new Camera(renderer.world, renderer.bounds);
-  const mid = world.homeOf(state.localPlayer);
-  const home = toScreen(mid.x, mid.y);
-  camera.centerOn(home.x, home.y);
+  if (parts.keep) {
+    camera.zoom = parts.keep.zoom;
+    camera.centerOn(parts.keep.x, parts.keep.y);
+  } else {
+    const mid = world.homeOf(state.localPlayer);
+    const home = toScreen(mid.x, mid.y);
+    camera.centerOn(home.x, home.y);
+  }
   renderer.onSound = (id, x, y) => audio.at(id, x, y);
 
   // A tutorial mission under way (`src/tutorial`): its progress goes into the save slot's description.
@@ -330,10 +428,8 @@ function game(
   }, audio);
 
   // The minimap is framed at the top of the side panel, as wide as the panel's inside (--mm-w).
-  const hudEl = document.getElementById('hud')!;
   const mmWidth = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--mm-w')) || 252;
   const minimap = new Minimap(world, camera, state.fog, mmWidth, state.localPlayer, renderer.memory, renderer.tiles);
-  const sound = audioControls(audio, { voice: !!net });
   const jump = (x: number, y: number) => {
     const p = toScreen(x, y);
     camera.centerOn(p.x, p.y - world.map.heightAt(x, y));
@@ -381,27 +477,15 @@ function game(
     });
   }
   hudEl.append(pause.el);
-  // The radio of a network game (V allies, B everybody; ui/voice.ts), its plaque over the game.
-  let radio: Radio | null = null;
-  let voicePlayer: VoicePlayer | null = null;
-  if (net) {
-    // The others' voices go on in a hidden tab; the game's own sounds are silenced there.
-    audio.stayAwake = true;
-    const player = new VoicePlayer(audio);
-    voicePlayer = player;
-    radio = new Radio({
-      voice: net.core.voice,
-      audio,
-      toast: (text) => hud.toast(text),
-      talking: () => net.talking(),
-      nameOf: (seat) => net.nameOf(seat),
-      muted: (seat) => net.muted.has(seat),
-    });
+  /** What the network part of the view takes down with it. */
+  const cleanups: (() => void)[] = [];
+  if (net && radio && voicePlayer) {
     const onAir = radio;
-    // The network game's status under the speed strip, its messages on the ticker, its end windows.
+    const player = voicePlayer;
+    // The network game's status under the speed strip, its messages on the ticker, its windows.
     const panel = new NetPanel({
       world,
-      match: net.match,
+      match: () => net.match,
       status: net.status,
       seats: [...net.seats.keys()].sort((a, b) => a - b),
       local: net.local,
@@ -409,6 +493,7 @@ function game(
       nameOf: (seat) => net.nameOf(seat),
       kick: net.isHost ? (seat) => net.kick(seat) : null,
       chat: () => chat.toggle(),
+      reports: { count: () => net.reportCount, download: () => downloadReport() },
       rejoin: net.isHost
         ? {
             asked: () => net.core.askedSeats(),
@@ -430,12 +515,16 @@ function game(
       new ChatBox({ local: net.local, nameOf: (seat) => net.nameOf(seat), lines: () => net.core.chat.lines, say: (text, to) => net.say(text, to), toast: (text) => hud.toast(text) });
     let chat = makeChat();
     hudEl.append(panel.el, chat.el, onAir.el);
+    cleanups.push(() => {
+      panel.el.remove();
+      chat.el.remove();
+      hudEl.querySelector('.net-window')?.remove();
+    });
     window.addEventListener(LANG_EVENT, () => {
       const old = chat;
       chat = makeChat();
       old.el.replaceWith(chat.el);
-      onAir.show();
-    });
+    }, { signal });
     // V / B (by the key's place, any layout): the radio on to the allies / to everybody, the same key off.
     window.addEventListener('keydown', (e) => {
       if (e.code !== 'KeyV' && e.code !== 'KeyB') return;
@@ -443,19 +532,14 @@ function game(
       if (typing || e.repeat || e.ctrlKey || e.metaKey || e.altKey || state.menu || chat.isOpen || net.core.ended) return;
       e.preventDefault();
       onAir.press(e.code === 'KeyV' ? 'allies' : 'all');
-    });
-    window.addEventListener('pagehide', () => onAir.stop());
+    }, { signal });
     window.addEventListener('keydown', (e) => {
       const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
       if (e.key !== 'Enter' || typing || state.menu || chat.isOpen) return;
       e.preventDefault();
       chat.open();
-    });
-    app.ticker.add(() => {
-      const now = performance.now();
-      panel.update(now);
-      onAir.update(now);
-    });
+    }, { signal });
+    everyFrame(() => panel.update(performance.now()));
     const toMenu = () => {
       onAir.stop();
       net.close();
@@ -465,6 +549,16 @@ function game(
       hudEl.querySelector('.net-window')?.remove();
       hudEl.append(box);
     };
+    const downloadReport = () => {
+      const r = net.report();
+      downloadJson(`settlers-desync-p${net.local}-t${r.desync?.turn ?? r.tick}${r.epoch ? `-r${r.epoch}` : ''}.json`, r);
+    };
+    const leaveAction: NetAction = [t('net.leave'), t('net.leaveTip'), toMenu];
+    const reportAction: NetAction = [t('net.desync.report'), t('net.desync.reportTip'), downloadReport];
+    // «Восстановить с хоста» (the host: «Восстановить у всех», docs/NETWORK.md section 17).
+    const restoreAction: NetAction = net.isHost
+      ? [t('net.restoreAll'), t('net.restoreAllTip'), () => void net.requestRestore(), true]
+      : [t('net.restore'), t('net.restoreTip'), () => void net.requestRestore(), true];
     net.hooks = {
       toast: (text) => hud.toast(text),
       chat: (line) => {
@@ -475,21 +569,36 @@ function game(
       voice: (frame) => player.play(frame.seat, frame.samples, frame.transit),
       desync: (r) => {
         onAir.stop();
-        show(
-          netWindow(t('net.desync.title'), t('net.desync.text', { turn: r.turn }), [
-            [t('net.desync.report'), () => downloadJson(`settlers-desync-p${net.local}-t${r.turn}.json`, net.report()), true],
-            [t('net.toMenu'), toMenu],
-          ]),
-        );
+        const title = t(net.reportCount > 1 ? 'net.desync.again' : 'net.desync.title');
+        show(netWindow(title, t('net.desync.text', { turn: r.turn }), [restoreAction, reportAction, leaveAction]));
+      },
+      restoring: (progress, failed) => {
+        onAir.stop();
+        const text = failed
+          ? t('net.restoring.failed')
+          : progress === null
+            ? t('net.restoring.asked')
+            : t('net.restoring.loading', { n: Math.floor(progress * 100) });
+        show(netWindow(t('net.restoring.title'), text, failed ? [restoreAction, reportAction, leaveAction] : [reportAction, leaveAction]));
+      },
+      restored: (w) => {
+        // The host plays on in its own world; a client's new one gets a new view (`NetGame.onWorld`).
+        hudEl.querySelector('.net-window')?.remove();
+        if (w !== world) parts.rebuild(w);
       },
       hostLost: () => {
         onAir.stop();
         const saveIt = async () => {
           // A network save of the last turn played: loadable in the lobby with a new host.
-          const ok = await net.saveNow(t('net.savedName', { min: Math.floor(world.tick / (60 * TICKS_PER_SECOND)) }));
+          const ok = await net.saveNow(t('net.savedName', { min: Math.floor(net.world.tick / (60 * TICKS_PER_SECOND)) }));
           hud.toast(ok ? t('net.saved') : t('saves.failed'));
         };
-        show(netWindow(t('net.hostLost.title'), t('net.hostLost.text'), [[t('net.save'), () => void saveIt(), true], [t('net.toMenu'), toMenu]]));
+        show(
+          netWindow(t('net.hostLost.title'), t('net.hostLost.text'), [
+            [t('net.save'), t('net.saveTip'), () => void saveIt(), true],
+            [t('net.toMenu'), t('net.toMenuTip'), toMenu],
+          ]),
+        );
       },
     };
   }
@@ -502,10 +611,7 @@ function game(
     previous.dispose();
     hud = makeHud(previous);
     hudEl.append(pause.el);
-  });
-  hudEl.addEventListener('click', (e) => {
-    if (e.target instanceof Element && e.target.closest('button')) audio.ui('click');
-  });
+  }, { signal });
   const input = new InputController(app.canvas, camera, renderer, world, state, {
     onSelectBuildType: (type) => hud.selectBuildType(type),
     onHotkey: (n) => hud.hotkey(n),
@@ -528,13 +634,16 @@ function game(
 
   // Fixed-step simulation, rendering interpolates between the last two ticks.
   let acc = 0;
-  app.ticker.add((ticker) => {
+  let gone = false;
+  everyFrame((ticker) => {
     const dt = Math.min(ticker.deltaMS, 250);
     input.update(dt);
     if (net) {
       // The network game plays the sealed turns as they come (`NetGame.pump`); pause and speed are
       // everybody's, so the interface shows the match's.
       net.pump();
+      // A restore from the host may have replaced this view during the pump.
+      if (gone) return;
       state.paused = net.match.paused;
       state.speed = net.match.speed;
       acc = net.match.alpha * TICK_MS;
@@ -571,8 +680,22 @@ function game(
   });
 
   Object.assign(window, { world, seed: opts.seed, state, renderer, camera, audio, pause, tutorial, replay: replayTools(world), net, radio, voicePlayer });
-  if (opts.seed) console.info(`Settlers prototype, seed ${opts.seed} (add ?seed=${opts.seed} to replay this map)`);
-  else console.info(`Game at tick ${world.tick}`);
+  return {
+    camera,
+    toast: (text) => hud.toast(text),
+    dispose: () => {
+      gone = true;
+      listening.abort();
+      for (const fn of tickers) app.ticker.remove(fn);
+      input.dispose();
+      hud.dispose();
+      minimap.dispose();
+      pause.dispose();
+      for (const f of cleanups) f();
+      app.stage.removeChild(renderer.world);
+      renderer.world.destroy({ children: true });
+    },
+  };
 }
 
 /** The page's language and title. */

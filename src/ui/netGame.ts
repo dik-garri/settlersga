@@ -26,6 +26,9 @@ import { AUTO_ID, type NetSaveMeta, type SaveSlots } from './saves';
  * message from the network wakes it at once, and a wake-up plays everything that is due, up to
  * `HIDDEN_MAX_TICKS`). A browser far behind (a returning player) plays as much a frame. Network
  * saves (a request of any player, the autosave) land in this browser's save slots, marked as such.
+ * After a desync «Восстановить с хоста» (`requestRestore`, docs/NETWORK.md section 17) starts the game
+ * over from the host's state: a client then plays a new `world` (`hooks.restored`, `main.ts` builds a
+ * new view over it); the desync reports stay (`report`).
  */
 
 /** Ticks one call may play in a visible tab (as the single-player loop) and in a hidden one. */
@@ -41,8 +44,15 @@ const SAVE_WAIT_MS = 10_000;
 export interface NetGameHooks {
   /** A line for the message ticker (a player left, the pause, the speed, a save). */
   toast(text: string): void;
-  /** The game stopped for good on a desync. */
+  /** The game stopped on a desync (until it is restored from the host, or left). */
   desync(report: DesyncReport): void;
+  /**
+   * The game is being restored from the host's state (docs/NETWORK.md section 17): asked and waiting
+   * (`progress` null), or the state coming in (0…1); `failed` when what came could not be loaded.
+   */
+  restoring(progress: number | null, failed: boolean): void;
+  /** The game started over from the host's state: a client plays `world` from now on (a new one). */
+  restored(world: World): void;
   /** The host is gone: the game cannot go on. */
   hostLost(): void;
   /** A chat line this browser may read. */
@@ -67,7 +77,7 @@ export class NetGame {
   readonly hostSeat: Seat;
   /** The human players' names by seat, from the setup the host sent at «Start» (interface data only). */
   readonly names: ReadonlyMap<Seat, string>;
-  hooks: NetGameHooks = { toast: () => {}, desync: () => {}, hostLost: () => {}, chat: () => {}, voice: () => {} };
+  hooks: NetGameHooks = { toast: () => {}, desync: () => {}, restoring: () => {}, restored: () => {}, hostLost: () => {}, chat: () => {}, voice: () => {} };
   /** Seats whose voice this browser does not play (the panel's mute buttons; never saved or sent). */
   readonly muted = new Set<Seat>();
   private last = performance.now();
@@ -79,7 +89,7 @@ export class NetGame {
   private saveWaits: ((ok: boolean) => void)[] = [];
 
   constructor(
-    readonly world: World,
+    world: World,
     readonly transport: Transport,
     readonly info: StartInfo,
     private readonly opts: NetGameOptions,
@@ -107,6 +117,13 @@ export class NetGame {
           if (!this.muted.has(frame.seat)) this.hooks.voice(frame);
         },
         rejoinAsked: (seat, name) => this.hooks.toast(rejoinAskText(this.nameOf(seat), name)),
+        restoring: (progress) => this.hooks.restoring(progress, !this.core.restoring),
+        restoreAsked: (seat) => this.hooks.toast(t('net.restoreAsked', { who: this.nameOf(seat) })),
+        restored: (w) => {
+          // First the new view (a client's), then the line on its ticker.
+          this.hooks.restored(w);
+          this.hooks.toast(t(this.isHost ? 'net.restoredAll' : 'net.restored'));
+        },
       },
     });
     if (info.load && !opts.resume) this.core.match.speed = info.load.speed;
@@ -134,6 +151,11 @@ export class NetGame {
   /** A human seat's player for the screens: his name, else «Игрок N» (also while the computer plays it). */
   nameOf(seat: Seat): string {
     return seatName(this.names, seat);
+  }
+
+  /** The world played now (a client's is a new one after each restore). */
+  get world(): World {
+    return this.core.world;
   }
 
   get match(): NetMatch {
@@ -212,10 +234,31 @@ export class NetGame {
     return !!(await this.opts.slots.write(data, name, Date.now(), undefined, { net }));
   }
 
-  /** What a player downloads after a desync: the match's part plus the build, the browser and the setup. */
+  /**
+   * «Восстановить с хоста» (docs/NETWORK.md section 17): the host restores everybody at once, a
+   * client asks the host to. False when there is no desync to restore from.
+   */
+  requestRestore(): boolean {
+    return this.core.requestRestore();
+  }
+
+  /** Whether a restore was asked for or is coming in (the game stands meanwhile). */
+  get restoring(): boolean {
+    return this.core.restoring;
+  }
+
+  /** How many desync reports this game has (one per desync, kept after a restore). */
+  get reportCount(): number {
+    return this.core.reports.length;
+  }
+
+  /**
+   * What a player downloads after a desync: the match's part — taken when the desync was found, so
+   * the same after a restore — plus the build, the browser and the setup. The latest desync's.
+   */
   report(): DesyncFile & Record<string, unknown> {
     return {
-      ...this.match.report(),
+      ...(this.core.reports.at(-1) ?? this.match.report()),
       build: BUILD_ID,
       userAgent: navigator.userAgent,
       date: new Date().toISOString(),

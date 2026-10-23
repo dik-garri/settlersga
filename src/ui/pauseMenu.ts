@@ -28,6 +28,8 @@ export class PauseMenu {
   private readonly panel = el('div', 'menu-panel');
   private wasPaused = false;
   private readonly slots = browserSlots();
+  /** Takes the window listeners off again (`dispose`). */
+  private readonly listening = new AbortController();
 
   constructor(
     private readonly world: World,
@@ -42,9 +44,10 @@ export class PauseMenu {
       if (e.target === this.el) this.close();
     });
     // A language chosen in the settings: the open screen is drawn again in it.
+    const signal = this.listening.signal;
     window.addEventListener(LANG_EVENT, () => {
       if (this.state.menu && this.el.dataset.screen) this.show(this.el.dataset.screen as PauseScreen);
-    });
+    }, { signal });
     window.addEventListener('keydown', (e) => {
       if (!this.state.menu) return;
       if (e.key === 'Escape') {
@@ -53,7 +56,13 @@ export class PauseMenu {
         if (this.el.dataset.screen === 'main') this.close();
         else this.show('main');
       }
-    }, true);
+    }, { capture: true, signal });
+  }
+
+  /** Stops listening and takes the menu off the page (a network game restored from the host builds a new one). */
+  dispose(): void {
+    this.listening.abort();
+    this.el.remove();
   }
 
   get isOpen(): boolean {

@@ -1,7 +1,7 @@
 import { TICKS_PER_SECOND } from '../sim/config';
-import { CHECKSUM_SECTIONS, sectionChecksums } from '../sim/checksum';
+import { CHECKSUM_SECTIONS, sectionChecksums, stateChecksum } from '../sim/checksum';
 import { LOCAL_ONLY, type Command, type CommandRecord } from '../sim/commands';
-import { replayOf, type ReplayFile } from '../sim/replay';
+import { REPLAY_VERSION, replayOf, type ReplayFile } from '../sim/replay';
 import { saveWorld, type SaveData } from '../sim/save';
 import { World } from '../sim/world';
 import type { DesyncReport, Lockstep, Seat, Turn } from './lockstep';
@@ -37,6 +37,9 @@ import type { DesyncReport, Lockstep, Seat, Turn } from './lockstep';
  * - **Input delay** (6.7): the host's `delay` control sets `Lockstep.setDelay` at its turn everywhere.
  * - **A returning player** (6.7): the host asks for a `snapshot` — taken at the next turn boundary,
  *   before that turn's commands — for the returning browser, whose match starts with `resume`.
+ * - **Restore after a desync** («Восстановить с хоста», docs/NETWORK.md section 17): every machine
+ *   drops its stopped match and starts a new one from the host's state (`resume` + `verify`: the
+ *   first checksum confirms all hold the same; `base` keeps the report replayable).
  */
 
 /** Ticks per turn (`N` in docs/NETWORK.md): 200 ms at 1×. */
@@ -149,6 +152,18 @@ export interface MatchOptions {
   autosaveEvery?: number;
   /** A browser joining a game under way: the match's state from the snapshot (no turn −1 checksum). */
   resume?: MatchState;
+  /**
+   * With `resume`: hand in the world's checksum once before the first turn (as turn `turn − 1`), so
+   * every machine that started over from the host's state confirms it holds the same (a restore).
+   */
+  verify?: boolean;
+  /**
+   * The save this match's world was loaded from (a restore): the desync report then replays the
+   * commands from it, since such a world has no seed to start from.
+   */
+  base?: SaveData;
+  /** How many times the game started over from the host's state (for the report). */
+  epoch?: number;
 }
 
 /** One checksum the match handed in. */
@@ -175,8 +190,15 @@ export interface DesyncFile {
   /** The world's tick now and its sections now. */
   tick: number;
   now: Record<string, string>;
-  /** Seed, setup and every applied command: `tools/replay.ts` plays it again. */
+  /**
+   * Seed, setup and every applied command: `tools/replay.ts` plays it again. For a world restored
+   * from the host's state (seed 0, no options) the commands since `base`.
+   */
   replay: ReplayFile | null;
+  /** How many times the game had started over from the host's state (absent: never). */
+  epoch?: number;
+  /** The save a restored world started from: the replay starts here (absent: from the seed). */
+  base?: SaveData;
 }
 
 /** The default network checksum: every section's sum, joined (equal states give equal strings). */
@@ -232,6 +254,7 @@ export class NetMatch {
       this.lastSave = r.lastSave;
       this.nextAutosave = r.nextAutosave;
       this.openTurn = opts.lockstep.turn - 1;
+      if (opts.verify) this.handIn(this.openTurn);
       return;
     }
     if (opts.autosaveEvery) this.nextAutosave = this.world.tick + opts.autosaveEvery;
@@ -348,6 +371,10 @@ export class NetMatch {
 
   /** The desync report of this machine (docs/NETWORK.md section 5). */
   report(): DesyncFile {
+    const w = this.world;
+    const own = replayOf(w);
+    const base = own ? undefined : this.opts.base;
+    const replay = own ?? (base ? { version: REPLAY_VERSION, seed: 0, options: {}, ticks: w.tick, log: structuredClone(w.commandLog), checksum: stateChecksum(w) } : null);
     return {
       kind: 'settlers-desync',
       version: 1,
@@ -360,7 +387,9 @@ export class NetMatch {
       sums: this.sums.slice(),
       tick: this.world.tick,
       now: sectionChecksums(this.world),
-      replay: replayOf(this.world),
+      replay,
+      ...(this.opts.epoch ? { epoch: this.opts.epoch } : {}),
+      ...(base ? { base } : {}),
     };
   }
 
@@ -500,7 +529,8 @@ export function replaySums(file: DesyncFile, onTick?: (w: World) => void): SumCh
   if (!r) return [];
   const want = new Map(file.sums.map((s) => [s.tick, s]));
   const out: SumCheck[] = [];
-  const w = new World(r.seed, { ...r.options, replay: r.log });
+  // A restored world starts from the host's state it loaded, not from a seed.
+  const w = file.base ? new World(0, { from: file.base, replay: r.log }) : new World(r.seed, { ...r.options, replay: r.log });
   const check = () => {
     const s = want.get(w.tick);
     if (!s) return;

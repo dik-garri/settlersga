@@ -16,8 +16,9 @@ import { tip } from './tooltip';
  * stands waiting for somebody, «Ожидание: …» (the host can let the computer take a seat that keeps
  * everybody waiting, after `KICK_AFTER_MS`); the input delay in force (it adapts, roadmap 6.7); the
  * chat button (roadmap 6.6); on the host, a returning player's request for his seat with «Пустить» /
- * «Нет» (6.7); plus the windows that end a network game: a desync (with the report to download) and
- * the host gone.
+ * «Нет» (6.7); after a desync restored from the host, its report to download; plus the windows over
+ * the game: a desync («Восстановить с хоста», the report, «Выйти»), the restore under way, the host
+ * gone.
  */
 
 /** Waiting shorter than this is not shown (a late packet). */
@@ -27,7 +28,8 @@ export const KICK_AFTER_MS = 30_000;
 
 export interface NetPanelOptions {
   world: World;
-  match: NetMatch;
+  /** The match now (a new one after a restore from the host). */
+  match: () => NetMatch;
   status: NetStatus;
   /** Human seats at the start. */
   seats: readonly Seat[];
@@ -39,6 +41,8 @@ export interface NetPanelOptions {
   kick: ((seat: Seat) => void) | null;
   /** Opens or closes the chat box. */
   chat: () => void;
+  /** The desync reports kept (after a restore the game goes on; the report is still wanted). */
+  reports: { count: () => number; download: () => void };
   /** Host: the seats returning players ask for, and the answers. */
   rejoin: { asked: () => Seat[]; askerName: (seat: Seat) => string | null; accept: (seat: Seat) => void; refuse: (seat: Seat) => void } | null;
   /** The radio: who talks now (as heard here) and to whom, this browser's own air, muting here. */
@@ -62,7 +66,9 @@ export class NetPanel {
   update(nowMs: number): void {
     if (nowMs - this.last < 250) return;
     this.last = nowMs;
-    const { world, match, status, local, host, nameOf } = this.o;
+    const { world, status, local, host, nameOf } = this.o;
+    const match = this.o.match();
+    const reports = this.o.reports.count();
     const waiting = match.waitingMs >= SHOW_WAIT_MS ? status.waiting(true) : [];
     const talking = this.o.voice.talking();
     const own = this.o.voice.own();
@@ -78,7 +84,7 @@ export class NetPanel {
     const canKick = !!this.o.kick && match.waitingMs >= KICK_AFTER_MS;
     const delay = match.lockstep.delay;
     const asked = (this.o.rejoin?.asked() ?? []).map((s) => ({ seat: s, text: rejoinAskText(nameOf(s), this.o.rejoin?.askerName(s) ?? null) }));
-    const key = JSON.stringify([rows, waiting, canKick, match.paused, match.pausedBy, match.speed, match.stopped, delay, asked]);
+    const key = JSON.stringify([rows, waiting, canKick, match.paused, match.pausedBy, match.speed, match.stopped, delay, asked, reports]);
     if (key === this.key) return;
     this.key = key;
     this.el.replaceChildren();
@@ -138,6 +144,8 @@ export class NetPanel {
       box.append(row);
       this.el.append(box);
     }
+    // A desync restored from the host: the game goes on, its report is still to be had.
+    if (reports > 0 && !match.stopped) this.el.append(button(t('net.reports'), t('net.reportsTip'), () => this.o.reports.download(), 'np-kick'));
     const keys = el('div', 'np-note np-keys', t('voice.keys'));
     tip(keys, t('voice.keysTip'));
     this.el.append(keys);
@@ -145,13 +153,19 @@ export class NetPanel {
   }
 }
 
-/** A window over the game that ends it (desync, host gone): a title, a text and buttons. */
-export function netWindow(title: string, text: string, actions: [string, () => void, boolean?][]): HTMLElement {
+/** A button of a window over the game: its label, its hover help, what it does, whether it is the main one. */
+export type NetAction = [label: string, help: string, run: () => void, main?: boolean];
+
+/**
+ * A window over the game that stops it (desync, a restore under way, host gone): a title, a text and
+ * buttons.
+ */
+export function netWindow(title: string, text: string, actions: NetAction[]): HTMLElement {
   const box = el('div', 'panel end-screen net-window');
   box.setAttribute('role', 'alertdialog');
   box.append(el('h2', 'lost', title), el('p', '', text));
   const row = el('div', 'info-actions');
-  for (const [label, fn, main] of actions) row.append(button(label, '', fn, main ? 'active' : ''));
+  for (const [label, help, fn, main] of actions) row.append(button(label, help, fn, main ? 'active' : ''));
   box.append(row);
   return box;
 }

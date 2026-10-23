@@ -48,6 +48,8 @@ export class Minimap {
   private nextRow = 0;
   /** The tutorial's marks (tile points), blinking on the overview so a mark out of view is found. */
   private marks: readonly { x: number; y: number }[] = [];
+  /** Takes the language listener off again (`dispose`). */
+  private readonly listening = new AbortController();
 
   constructor(
     private readonly world: World,
@@ -106,8 +108,14 @@ export class Minimap {
     this.box.className = 'mm-box';
     this.box.append(this.el, this.controls);
     this.label();
-    window.addEventListener(LANG_EVENT, () => this.label());
+    window.addEventListener(LANG_EVENT, () => this.label(), { signal: this.listening.signal });
     this.rasterize(0, world.map.h);
+  }
+
+  /** Stops listening and takes the map off the page (a network game restored from the host builds a new one). */
+  dispose(): void {
+    this.listening.abort();
+    this.box.remove();
   }
 
   /** Hover help and accessible names in the current language (the tips themselves are built when shown). */

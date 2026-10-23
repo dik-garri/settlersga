@@ -23,7 +23,8 @@
  * (`rejoin`, announced as `rejoined`); its browser starts from a snapshot with `resume`. The host
  * keeps the turns it sealed for a while (`history`) and sends them again to a browser that asks
  * (`want`): one that was cut off for a moment, or that loaded a snapshot, catches up from there.
- * Duplicate and late messages are ignored.
+ * Duplicate and late messages are ignored. After a desync every machine may start over from the
+ * host's state (`restart`, docs/NETWORK.md section 17): a new lockstep from the host's next turn.
  *
  * The module does no I/O: `send` is a callback (bound to a transport by `session.ts`) and incoming
  * messages are fed to `receive`. Seats are player ids (1-based, as the simulation's `PlayerId`).
@@ -93,6 +94,14 @@ export interface LockstepOptions {
    * `sealed` the turns from `turn` on the host had sealed already.
    */
   resume?: { turn: number; input: number; sealed: Turn[] };
+  /**
+   * Every browser starting over from one state after a desync («Восстановить с хоста», docs/NETWORK.md
+   * section 17): `turn` is the next turn to play (the host's world at the start of it), `sealed` the
+   * turns from `turn` on the host had sealed already. Every machine builds the same lockstep from
+   * these: those turns, then empty turns up to `turn + delay − 1`, input from there (or after the last
+   * sealed turn). The host keeps them for resending.
+   */
+  restart?: { turn: number; sealed: Turn[] };
 }
 
 /** Sealed turns the host keeps for resending: two minutes at 1×. */
@@ -150,11 +159,20 @@ export class Lockstep {
       this.sealNo = r.input;
       return;
     }
-    this.inputNo = opts.delay;
     // The first `delay` turns carry nothing from anyone: everybody knows them sealed and empty.
+    // After a restore the turns the host had sealed already come first, in the order it sealed them.
+    const from = opts.restart?.turn ?? 0;
+    this.turnNo = from;
+    let next = from;
+    for (const t of [...(opts.restart?.sealed ?? [])].sort((a, b) => a.turn - b.turn)) {
+      if (t.turn !== next) break;
+      this.keep({ turn: t.turn, inputs: t.inputs, dropped: seatList(t.dropped), rejoined: seatList(t.rejoined) });
+      next++;
+    }
     const seats = [...opts.seats].sort((a, b) => a - b);
-    for (let t = 0; t < opts.delay; t++) this.keep({ turn: t, inputs: seats.map((seat) => ({ seat, cmds: [] })), dropped: [], rejoined: [] });
-    this.sealNo = opts.delay;
+    for (; next < from + opts.delay; next++) this.keep({ turn: next, inputs: seats.map((seat) => ({ seat, cmds: [] })), dropped: [], rejoined: [] });
+    this.inputNo = next;
+    this.sealNo = next;
   }
 
   /** The input delay now (turns). */
