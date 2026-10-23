@@ -156,6 +156,101 @@ def build_stones(variant=0):
                   strength=0.5, noise=0.9, seed=k, subdiv=2, flat=True)
 
 
+def build_meadow_flowers(variant):
+    """Meadow flowers of other kinds: red poppies with dark hearts (0), blue cornflowers (1), white
+    daisies with yellow hearts (2) — more, smaller heads on thin stems over a few grass blades."""
+    rnd = random.Random(700 + variant)
+    stem = lib.mat_flat('stem2', (0.26, 0.46, 0.12))
+    petal = lib.mat_flat(f'meadow{variant}', [(0.86, 0.1, 0.06), (0.28, 0.42, 0.92), (0.97, 0.97, 0.94)][variant % 3], rough=0.5)
+    heart = lib.mat_flat(f'meadowheart{variant}', [(0.12, 0.06, 0.05), (0.18, 0.2, 0.5), (0.95, 0.75, 0.1)][variant % 3])
+    blade = lib.mat_grain('blade-m', (0.36, 0.56, 0.12), (0.7, 0.78, 0.28), scale=8, stretch=(1, 1, 4), bump=0.2)
+    for k in range(8):
+        a = rnd.uniform(0, math.tau)
+        h = rnd.uniform(0.07, 0.13)
+        lib.box((math.cos(a) * 0.03, math.sin(a) * 0.03, h / 2), (0.016, 0.005, h), blade,
+                rot=(math.sin(a) * 0.5, -math.cos(a) * 0.5, a))
+    for k in range(7):
+        a = rnd.uniform(0, math.tau)
+        d = rnd.uniform(0.0, 0.075)
+        h = rnd.uniform(0.09, 0.17)
+        x, y = math.cos(a) * d, math.sin(a) * d
+        lib.cylinder((x, y, h / 2), 0.004, h, stem, verts=5)
+        lib.sphere((x, y, h + 0.008), 0.018, petal, scale=(1, 1, 0.4 if variant != 1 else 0.7), subdiv=1)
+        lib.sphere((x, y, h + 0.015), 0.007, heart, subdiv=1)
+
+
+def build_fern(variant):
+    """A fern: arching fronds from one crown, each a midrib with paired leaflets shrinking to the tip."""
+    rnd = random.Random(800 + variant)
+    frond = lib.mat_leaves(f'fern{variant}', (0.03, 0.14, 0.03), (0.12, 0.38, 0.08), (0.36, 0.6, 0.14), scale=30)
+    count = (7, 9)[variant % 2]
+    length = (0.2, 0.24)[variant % 2]
+    for k in range(count):
+        a = k / count * math.tau + rnd.uniform(-0.2, 0.2)
+        rise = rnd.uniform(0.5, 0.8)  # how steeply the frond starts up
+        seg = 7
+        for j in range(seg):
+            t = (j + 0.5) / seg
+            r = length * t
+            z = 0.02 + length * (rise * t - 0.75 * t * t)  # up, then arching over
+            x, y = math.cos(a) * r, math.sin(a) * r
+            size = 0.05 * (1 - 0.75 * t)
+            slope = math.atan(rise - 1.5 * t)
+            for side in (-1, 1):
+                ox, oy = -math.sin(a) * side * size * 0.45, math.cos(a) * side * size * 0.45
+                lib.box((x + ox, y + oy, z), (size * 0.38, size, 0.004), frond,
+                        rot=(side * 0.35, -slope, a))
+
+
+def build_bush(variant):
+    """A low leafy shrub of clustered leaves over a dark core; variant 1 bears red berries."""
+    rnd = random.Random(900 + variant)
+    foliage = leaves_mat(f'bush{variant}', variant + 1)
+    rx, ry, rz = [(0.2, 0.17, 0.15), (0.17, 0.2, 0.17)][variant % 2]
+    lib.lumpy((0, 0, rz * 0.8), min(rx, ry) * 0.8, foliage, scale=(rx / min(rx, ry), ry / min(rx, ry), rz / min(rx, ry)),
+              strength=0.35, noise=0.6, seed=40 + variant)
+    for k in range(60):
+        u = rnd.uniform(0, math.tau)
+        v = rnd.uniform(-0.3, 1.0)
+        rr = math.sqrt(max(0.0, 1 - v * v)) * rnd.uniform(0.85, 1.08)
+        leaf = lib.lumpy((math.cos(u) * rr * rx, math.sin(u) * rr * ry, rz * (0.85 + v * 0.95)), rnd.uniform(0.03, 0.05),
+                         foliage, scale=(1, 1, 0.7), strength=0.5, noise=0.3, seed=k, subdiv=1, flat=True)
+        leaf.rotation_euler = (rnd.uniform(0, 3), rnd.uniform(0, 3), rnd.uniform(0, 3))
+    if variant % 2:
+        berry = lib.mat_flat('berry', (0.72, 0.05, 0.06), rough=0.3)
+        for k in range(16):
+            u = rnd.uniform(0, math.tau)
+            v = rnd.uniform(0.0, 0.9)
+            rr = math.sqrt(max(0.0, 1 - v * v)) * 1.06
+            lib.sphere((math.cos(u) * rr * rx, math.sin(u) * rr * ry, rz * (0.85 + v * 0.95)), 0.014, berry, subdiv=1)
+
+
+def build_boletes(variant=0):
+    """Brown-capped boletes, stout pale stalks (variant 0); a ring of small pale caps (variant 1)."""
+    rnd = random.Random(1000 + variant)
+    if variant == 0:
+        stalk = lib.mat_grain('bolete-stalk', (0.78, 0.72, 0.6), (0.93, 0.89, 0.8), scale=12, stretch=(1, 1, 3), bump=0.3)
+        cap = lib.mat_grain('bolete-cap', (0.36, 0.2, 0.09), (0.56, 0.34, 0.16), scale=9, stretch=(1, 1, 1), bump=0.3)
+        for x, y, s in ((0, 0, 1.0), (0.055, -0.03, 0.75), (-0.04, 0.05, 0.6)):
+            h = 0.06 * s
+            lib.cylinder((x, y, h / 2), 0.02 * s, h, stalk, radius2=0.014 * s, verts=10)
+            lib.sphere((x, y, h + 0.005), 0.045 * s, cap, scale=(1, 1, 0.6), subdiv=2)
+        return
+    stalk = lib.mat_flat('small-stalk', (0.94, 0.92, 0.86))
+    cap = lib.mat_flat('small-cap', (0.88, 0.8, 0.62), rough=0.5)
+    for k in range(7):
+        a = k / 7 * math.tau + rnd.uniform(-0.2, 0.2)
+        r = rnd.uniform(0.06, 0.08)
+        s = rnd.uniform(0.6, 1.0)
+        x, y = math.cos(a) * r, math.sin(a) * r
+        h = 0.04 * s
+        lib.cylinder((x, y, h / 2), 0.006 * s, h, stalk, verts=6)
+        lib.sphere((x, y, h), 0.02 * s, cap, scale=(1, 1, 0.6), subdiv=1)
+
+
+#: Bigger canvas for the shrubs (logical w, h, anchor x, y).
+BUSH = (52, 44, 26, 30)
+
 #: Name → (builder, canvas). Trees 0–2 are conifers, 3–5 broadleaf trees.
 TREES = {
     'tree0': (lambda: build_conifer(0), TREE),
@@ -173,6 +268,15 @@ PROPS = {
     'prop-flowers2': (lambda: build_flowers(2), PROP),
     'prop-mushrooms': (lambda: build_mushrooms(0), PROP),
     'prop-stones': (lambda: build_stones(0), PROP),
+    'prop-poppies': (lambda: build_meadow_flowers(0), PROP),
+    'prop-cornflowers': (lambda: build_meadow_flowers(1), PROP),
+    'prop-daisies': (lambda: build_meadow_flowers(2), PROP),
+    'prop-boletes': (lambda: build_boletes(0), PROP),
+    'prop-ring': (lambda: build_boletes(1), PROP),
+    'prop-fern0': (lambda: build_fern(0), PROP),
+    'prop-fern1': (lambda: build_fern(1), PROP),
+    'prop-bush0': (lambda: build_bush(0), BUSH),
+    'prop-bush1': (lambda: build_bush(1), BUSH),
 }
 #: For build.py's `SINGLE` table: name → (builder, w, h, ax, ay).
 SINGLE = {name: (build, *canvas) for name, (build, canvas) in {**TREES, **PROPS}.items()}

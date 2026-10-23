@@ -48,7 +48,7 @@ import { holdFrames, setFrame, workFrames, type Settler3d } from './settler3d';
 import { maxHp } from '../sim/military';
 import { BODY_STAND, BODY_WORK, CARRY_AT } from './settlerArt';
 import { depthOf, HALF_H, HALF_W, toScreen, toTile } from './iso';
-import { ART3D_BANNERS, ART3D_STAGES, ART3D_YARDS, CARRIED_WARE_3D_SCALE, PILE_MAX, SETTLER_3D_SCALE, SIGN_VARIANTS } from './art3d';
+import { ART3D_BANNERS, ART3D_STAGES, ART3D_YARDS, CARRIED_WARE_3D_SCALE, PILE_MAX, PROP_PLACES, SETTLER_3D_SCALE, SIGN_VARIANTS } from './art3d';
 import { signEnds, signLevel } from '../sim/specialists';
 
 /** Piles shown on an open storage yard without a pile limit, and the ring they stand on (screen px from its centre). */
@@ -700,8 +700,9 @@ export class GameRenderer {
   }
 
   /**
-   * Decorative props on the grass of a chunk (3D art): tufts of tall grass, flowers, mushrooms,
-   * small stones on about one tile in `PROP_EVERY`, picked and placed by tile hash, so they are the
+   * Decorative props on the grass of a chunk (3D art): on about one tile in `PROP_EVERY` — ferns,
+   * mushrooms and tufts by trees, flowers, bushes, tufts and stones in the open (`PROP_PLACES`) —, picked
+   * and placed by tile hash, so they are the
    * same every time the chunk is (re)built. They are render-only and part of the ground layer, so
    * they never block anything, sit under everything standing, and go with the layer when the chunk
    * unloads. Tiles with something on them when the chunk is built are skipped; what is placed later
@@ -718,7 +719,18 @@ export class GameRenderer {
         if (h % PROP_EVERY !== 0 || map.terrain[i] !== Terrain.Grass) continue;
         const t = this.tiles;
         if (t.tree[i] || t.stone[i] || map.building[i] || map.door[i] || t.crop[i]) continue;
-        const s = new Sprite(this.atlas.get(`prop:${(h >>> 8) % n}`));
+        // Ferns and mushrooms on the forest floor (grass by a tree), flowers and bushes in the open.
+        let wood = false;
+        for (let dy = -1; dy <= 1 && !wood; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (map.inBounds(x + dx, y + dy) && t.tree[map.idx(x + dx, y + dy)]) {
+              wood = true;
+              break;
+            }
+          }
+        }
+        const place = PROP_PLACES[wood ? 'wood' : 'meadow'];
+        const s = new Sprite(this.atlas.get(`prop:${place[(h >>> 8) % place.length]}`));
         const ox = (((h >>> 12) % 100) / 100 - 0.5) * 0.6;
         const oy = (((h >>> 19) % 100) / 100 - 0.5) * 0.6;
         const p = this.surface(x + ox, y + oy);

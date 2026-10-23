@@ -257,7 +257,11 @@ export const ART3D_RUINS: Record<string, { w: number; h: number; ax: number; ay:
 /** Tree variants (`TREES` in art/blender/nature.py): 0–2 conifers, 3–5 broadleaf trees. */
 export const ART3D_TREES = 6;
 const TREE = { w: 84, h: 104, ax: 34, ay: 84 };
-/** Decorative ground props scattered on grass (`PROPS` in nature.py), render-only. */
+/**
+ * Decorative ground props scattered on grass (`PROPS` in nature.py), render-only: tufts of tall
+ * grass, flowers of six kinds, two bushes and field stones in the open meadow (`meadow`), ferns and
+ * mushrooms of three kinds on the forest floor — grass next to a tree (`wood`).
+ */
 export const ART3D_PROPS = [
   'prop-tuft0',
   'prop-tuft1',
@@ -266,8 +270,27 @@ export const ART3D_PROPS = [
   'prop-flowers2',
   'prop-mushrooms',
   'prop-stones',
+  'prop-poppies',
+  'prop-cornflowers',
+  'prop-daisies',
+  'prop-boletes',
+  'prop-ring',
+  'prop-fern0',
+  'prop-fern1',
+  'prop-bush0',
+  'prop-bush1',
 ] as const;
+export type PropName = (typeof ART3D_PROPS)[number];
+/** Where each prop grows (indices into `ART3D_PROPS`, as the atlas registers them, `prop:<k>`). */
+const WOOD_PROPS: ReadonlySet<PropName> = new Set(['prop-mushrooms', 'prop-boletes', 'prop-ring', 'prop-fern0', 'prop-fern1', 'prop-tuft0']);
+export const PROP_PLACES: Record<'meadow' | 'wood', readonly number[]> = {
+  meadow: ART3D_PROPS.flatMap((n, k) => (WOOD_PROPS.has(n) && n !== 'prop-tuft0' ? [] : [k])),
+  wood: ART3D_PROPS.flatMap((n, k) => (WOOD_PROPS.has(n) ? [k] : [])),
+};
 const PROP = { w: 32, h: 28, ax: 16, ay: 20 };
+/** The bushes' bigger canvas (`BUSH` in nature.py). */
+const BUSH = { w: 52, h: 44, ax: 26, ay: 30 };
+const propCanvas = (name: PropName) => (name.startsWith('prop-bush') ? BUSH : PROP);
 /**
  * Mountain rocks (`ROCKS` in art/blender/rocks.py): `rock-<size><v>`, registered as `rock:<size>:<v>`
  * and placed by `rockLayout` (rocks.ts) — loose stones on slopes, boulders and 2×2 outcrops on peaks.
@@ -291,7 +314,7 @@ export const ART3D_SPRITES: Record<string, { w: number; h: number; ax: number; a
     ),
   ),
   ...Object.fromEntries(Array.from({ length: ART3D_TREES }, (_, k) => [`tree${k}`, TREE])),
-  ...Object.fromEntries(ART3D_PROPS.map((name) => [name, PROP])),
+  ...Object.fromEntries(ART3D_PROPS.map((name) => [name, propCanvas(name)])),
   ...Object.fromEntries(
     Object.entries(ART3D_ROCKS).flatMap(([size, { count, ...c }]) =>
       Array.from({ length: count }, (_, k) => [`rock-${size}${k}`, c]),
