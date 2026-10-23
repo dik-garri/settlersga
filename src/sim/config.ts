@@ -1006,7 +1006,7 @@ export interface ProfessionDef {
    */
   dropsLoad?: boolean;
   combat?: CombatDef;
-  /** Walking speed relative to `SETTLER_SPEED` (Settlers 4: the squad leader rides, 9 ticks a tile against 7). */
+  /** Walking speed relative to `SETTLER_SPEED` (1 when unset; no profession uses another one now). */
   speed?: number;
   /** Walks faster on worn paths and roads (`PATHS`); in Settlers 4 only carriers and donkeys do. */
   roads?: boolean;
@@ -1144,13 +1144,13 @@ export const PROFESSIONS: Record<SettlerKind, ProfessionDef> = {
    * community: the leader costs 3 gold), a strong swordsman (215 hit points, 21 a blow every 13 ticks,
    * armour 2; one level only) whose presence lifts the fighters around him (`combat.leads`: +10 %
    * damage). He neither takes buildings nor goes into one (S4's tower slots take only swordsmen and
-   * bowmen); the barracks makes him first when it can (S4's priority level 4).
+   * bowmen); the barracks makes him first when it can (S4's priority level 4). He walks at everyone's
+   * pace, as the S4 wiki says (the walking code's faster «mounted» type 2 is not taken: owner's decision).
    */
   leader: {
     behavior: 'soldier',
     tool: 'armor',
     kit: { sword: 1, gold: 3 },
-    speed: 9 / 7,
     combat: {
       levels: [{ hp: 215, damage: 21 }],
       every: s4Ticks(13),
