@@ -114,12 +114,11 @@ describe('economic victory (Settlers 4 ScriptEconomyModeVictoryConditionCheck)',
     expect(economyTally(t).sideA).toEqual([2]);
   });
 
-  it('the goods: the given ones kept, the rest drawn from the pool (never the sheep or the pig), the same for a seed', () => {
-    expect(ECONOMY.pool).not.toContain('pig');
+  it('the goods: the given ones kept, the rest drawn from the pool (never the sheep), the same for a seed', () => {
     expect(ECONOMY.pool).not.toContain('sheep');
-    expect(economyGoods(['bread', 'pig', 'bread'] as Resource[], 5)).toHaveLength(7);
-    expect(economyGoods(['bread', 'pig'] as Resource[], 5)[0]).toBe('bread');
-    expect(economyGoods(['bread', 'pig'] as Resource[], 5)).not.toContain('pig');
+    expect(economyGoods(['bread', 'sheep', 'bread'] as Resource[], 5)).toHaveLength(7);
+    expect(economyGoods(['bread', 'sheep'] as Resource[], 5)[0]).toBe('bread');
+    expect(economyGoods(['bread', 'sheep'] as Resource[], 5)).not.toContain('sheep');
     const a = economyGoods(undefined, 9);
     expect(new Set(a).size).toBe(7);
     expect(economyGoods(undefined, 9)).toEqual(a);

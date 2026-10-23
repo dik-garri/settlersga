@@ -1,5 +1,5 @@
 import { buildingIcon, settlerIcon, wareIcon } from '../render/atlas';
-import { buildableBy, BUILDINGS, CARRIER_RESERVE, goodOfRace, INPUT_CAP, NETWORK_ONLY, ORDERABLE } from '../sim/config';
+import { BUILDINGS, CARRIER_RESERVE, INPUT_CAP, NETWORK_ONLY, ORDERABLE } from '../sim/config';
 import {
   carrierReserve,
   consumersOf,
@@ -113,8 +113,7 @@ export class TransportView implements View {
 
   update(): void {
     const w = this.world;
-    // Goods of other races (kept in the list, `TRANSPORT_PRIORITY`) are not shown.
-    const order = transportOrder(w, this.me).filter((r) => goodOfRace(r));
+    const order = transportOrder(w, this.me);
     const key = order.join();
     if (key === this.key) return;
     this.key = key;
@@ -164,14 +163,12 @@ export class DistributionView implements View {
     this.el.append(el('h4', '', t('eco.distribution')));
     this.el.append(el('p', 'muted', t('eco.distributionNote')));
     for (const res of distributableGoods()) {
-      // Consumers of the played race only (another race's building may stand in an older save).
-      const types = consumersOf(res).filter((type) => buildableBy(type));
-      if (types.length < 2) continue;
       const block = tag(el('div', 'eco-dist'), `distribution.${res}`);
       const head = el('div', 'eco-row');
       tip(head, () => goodsTip(res));
       head.append(wareIcon(res, 18), el('span', 'eco-name', nameOf(res)));
       block.append(head);
+      const types = consumersOf(res);
       const total = types.reduce((n, t) => n + distributionWeight(w, this.me, res, t), 0) || 1;
       for (const type of types) {
         const weight = distributionWeight(w, this.me, res, type);

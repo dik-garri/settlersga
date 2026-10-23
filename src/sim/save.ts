@@ -8,7 +8,12 @@ import { RESOURCES, type Building, type PlayerId, type Resource, type Settler } 
 import type { Player, World } from './world';
 
 /** Bump when the save layout changes incompatibly. */
-export const SAVE_VERSION = 32;
+export const SAVE_VERSION = 33;
+/**
+ * The previous version, still loaded (`upgradeFrom32`): its goods had a pig (`RESOURCES` index 8) and,
+ * in the latest of them, a sheep after the armour; its buildings a pig farm and its people pig farmers.
+ */
+export const PIG_SAVE_VERSION = 32;
 
 const MAP_LAYERS = [
   'terrain',
@@ -115,7 +120,7 @@ export function saveWorld(w: World): SaveData {
 }
 
 export function mapFromSave(data: SaveData): GameMap {
-  if (data.version !== SAVE_VERSION) {
+  if (data.version !== SAVE_VERSION && data.version !== PIG_SAVE_VERSION) {
     throw new Error(`unsupported save version ${data.version}, expected ${SAVE_VERSION}`);
   }
   const map = new GameMap(data.map.w, data.map.h);
@@ -124,50 +129,83 @@ export function mapFromSave(data: SaveData): GameMap {
     const text = data.map[layer];
     if (text !== undefined) decodeInto(text, map[layer]);
   }
+  if (data.version === PIG_SAVE_VERSION) recodeGoods(map.goods, PIG_GOODS);
   return map;
 }
 
 /**
- * Goods added to `RESOURCES` after saves of this version were first written — always at its end, so
- * goods on the ground (`map.goods`, index + 1) keep their codes. An older save lacks them in its
- * stocks and transport lists; `upgradeGoods` fills them in on load.
+ * Version 32's goods, by their index in its `RESOURCES` (goods on the ground are saved as index + 1):
+ * the pig at 8, and — in saves written after the Romans got their sheep farm — the sheep last.
  */
-export const LATER_GOODS: readonly Resource[] = ['sheep'];
-const EARLIER_GOODS = RESOURCES.filter((r) => !LATER_GOODS.includes(r));
+const PIG_GOODS: readonly string[] = [
+  'log', 'plank', 'stone', 'water', 'fish', 'grain', 'flour', 'bread', 'pig', 'meat', 'coal', 'ironore',
+  'goldore', 'iron', 'gold', 'axe', 'saw', 'pickaxe', 'shovel', 'scythe', 'rod', 'hammer', 'sword', 'bow',
+  'armor', 'sheep',
+];
+/**
+ * Ids version 32 knew and this one does not: the pig farm became the sheep farm (the same 3×3 animal
+ * ranch with the same recipe), its pig farmer a shepherd, its pigs sheep (the slaughterhouse takes them).
+ */
+const RENAMED: Readonly<Record<string, string>> = { pig: 'sheep', pigfarm: 'sheepfarm', pigfarmer: 'shepherd' };
+/** Keys whose numbers are settings (distribution weights, AI retry ticks): on a clash the larger stays. */
+const SETTING_KEYS: ReadonlySet<string> = new Set(['distribution', 'blockedUntil']);
+
+/** Rewrites the ground's goods codes (index + 1) from an older list of goods, through `RENAMED`. */
+function recodeGoods(goods: Uint8Array, old: readonly string[]): void {
+  const code = old.map((name) => RESOURCES.indexOf((RENAMED[name] ?? name) as Resource) + 1);
+  for (let i = 0; i < goods.length; i++) if (goods[i] > 0) goods[i] = code[goods[i] - 1];
+}
+
+/** Puts `value` under `key` of `o`, together with what is there: counts add up, settings keep the larger. */
+function mergeInto(o: Record<string, unknown>, key: string, value: unknown, setting: boolean): void {
+  const had = o[key];
+  if (had === undefined) o[key] = value;
+  else if (typeof had === 'number' && typeof value === 'number') o[key] = setting ? Math.max(had, value) : had + value;
+  else if (had && value && typeof had === 'object' && typeof value === 'object' && !Array.isArray(had)) {
+    for (const [k, v] of Object.entries(value)) mergeInto(had as Record<string, unknown>, k, v, setting);
+  }
+}
 
 /**
- * Brings an older save's goods up to date, in place: every full stock (an object counting every
- * earlier good — buildings' piles, reservations and deliveries, the statistics) gets the later goods
- * at 0, and every player's transport list gets the goods it lacks, in `TRANSPORT_PRIORITY`'s order,
- * at its end. A save that has them all is left as it is.
+ * Brings a version-32 save up to this one, in place (the ground's goods: `mapFromSave`): every id of
+ * `RENAMED` is replaced wherever it stands — building types, professions, goods in hands, in tasks,
+ * orders and pending commands, and as a key: stocks, a market's orders, distribution and tally,
+ * statistics —; a pig and a sheep under one key are added up (a setting keeps the larger), and a list
+ * that came to name a good twice keeps the first (the transport priority had both). Every transport
+ * list then names every good (missing ones at its end, in `TRANSPORT_PRIORITY`'s order).
  */
-export function upgradeGoods(data: SaveData): void {
-  const visit = (v: unknown): void => {
+export function upgradeFrom32(data: SaveData): void {
+  const fix = (v: unknown, setting: boolean): unknown => {
+    if (typeof v === 'string') return RENAMED[v] ?? v;
     if (Array.isArray(v)) {
-      for (const x of v) visit(x);
-      return;
+      const out = v.map((x) => fix(x, setting));
+      const renamed = out.some((x, i) => x !== v[i]);
+      return renamed && out.every((x) => typeof x === 'string') ? [...new Set(out)] : out;
     }
-    if (v === null || typeof v !== 'object') return;
+    if (v === null || typeof v !== 'object') return v;
     const o = v as Record<string, unknown>;
-    if (EARLIER_GOODS.every((r) => typeof o[r] === 'number')) {
-      for (const r of LATER_GOODS) if (typeof o[r] !== 'number') o[r] = 0;
+    const fixed: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(o)) {
+      const inner = setting || SETTING_KEYS.has(k);
+      mergeInto(fixed, RENAMED[k] ?? k, fix(x, inner), inner);
     }
-    for (const k of Object.keys(o)) visit(o[k]);
+    for (const k of Object.keys(o)) delete o[k];
+    return Object.assign(o, fixed);
   };
-  visit(data.buildings);
-  visit(data.stats);
-  visit(data.players);
+  const all = data as unknown as Record<string, unknown>;
+  for (const key of Object.keys(all)) if (key !== 'map') all[key] = fix(all[key], false);
   for (const p of data.players) {
     const list = p.economy?.transport;
     if (!list) continue;
     for (const r of TRANSPORT_PRIORITY) if (!list.includes(r)) list.push(r);
   }
+  data.version = SAVE_VERSION;
 }
 
 /** Copies everything except the map (built by `mapFromSave`) from the save into a fresh world. */
 export function restoreWorld(w: World, raw: SaveData): void {
   const data = structuredClone(raw);
-  upgradeGoods(data);
+  if (data.version === PIG_SAVE_VERSION) upgradeFrom32(data);
   w.tick = data.tick;
   w.nextId = data.nextId;
   w.rng.state = data.rngState;

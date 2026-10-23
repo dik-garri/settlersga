@@ -59,8 +59,6 @@ MATERIALS = {
     'sack': lambda: lib.mat_grain('sack', (0.84, 0.8, 0.7), (0.96, 0.94, 0.88), scale=40, stretch=(1, 1, 1), bump=0.5),
     'crust': lambda: lib.mat_grain('crust', (0.62, 0.36, 0.12), (0.82, 0.54, 0.22), scale=14, stretch=(1, 1, 1), bump=0.5),
     'score': lambda: lib.mat_flat('score', (0.94, 0.8, 0.52)),
-    'pig': lambda: lib.mat_grain('pig', (0.9, 0.62, 0.6), (0.98, 0.76, 0.72), scale=10, stretch=(1, 1, 1), bump=0.2),
-    'snout': lambda: lib.mat_flat('snout', (0.86, 0.48, 0.5)),
     'wool': lambda: lib.mat_grain('wool', (0.84, 0.84, 0.8), (0.98, 0.98, 0.95), scale=30, stretch=(1, 1, 1), bump=0.6),
     'face': lambda: lib.mat_flat('face', (0.08, 0.07, 0.07), rough=0.6),
     'horn': lambda: lib.mat_grain('horn', (0.5, 0.42, 0.3), (0.72, 0.64, 0.5), scale=20, stretch=(1, 1, 1), bump=0.5),
@@ -169,16 +167,6 @@ def item_bread(m, rnd):
     lib.sphere((0, 0, 0.03), 0.06, m['crust'], scale=(1.5, 1.0, 0.6))
     for k in (-1, 0, 1):
         lib.box((k * 0.035, 0, 0.064), (0.012, 0.05, 0.006), m['score'], rot=(0, 0, 0.5))
-
-
-def item_pig(m, rnd):
-    lib.sphere((0, 0, 0.075), 0.065, m['pig'], scale=(1.5, 1.0, 0.95))
-    lib.sphere((0.1, 0, 0.085), 0.045, m['pig'])
-    lib.cylinder((0.145, 0, 0.08), 0.02, 0.02, m['snout'], rot=X, verts=10)
-    for s in (-1, 1):
-        lib.cylinder((0.095, s * 0.03, 0.13), 0.015, 0.03, m['snout'], radius2=0.002, verts=6, rot=(s * 0.4, 0, 0))
-        for x in (-0.06, 0.05):
-            lib.cylinder((x, s * 0.035, 0.022), 0.014, 0.045, m['pig'], verts=8)
 
 
 def item_sheep(m, rnd):
@@ -332,7 +320,7 @@ def grid(spacing, height):
 
 
 def spread(spacing):
-    """Standing items side by side on the ground, 3 + 3 + 2 rows (buckets, pigs)."""
+    """Standing items side by side on the ground, 3 + 3 + 2 rows (buckets, sheep)."""
     out = []
     for k in range(PILE_MAX):
         row, i = divmod(k, 3)
@@ -375,7 +363,7 @@ GOODS = {
     'grain': (item_grain, rows(0.095, 0.08)),
     'flour': (item_flour, grid(0.15, 0.12)),
     'bread': (item_bread, heap(0.1, 0.04)),
-    'pig': (item_pig, spread(0.16)),
+    'sheep': (item_sheep, spread(0.17)),
     'meat': (item_meat, heap(0.11, 0.045)),
     'coal': (lump('coal'), heap(0.09, 0.05)),
     'ironore': (lump('ironore'), heap(0.09, 0.05)),
@@ -392,8 +380,6 @@ GOODS = {
     'sword': (item_sword, bundle(0.075)),
     'bow': (item_bow, bundle(0.08)),
     'armor': (item_armor, grid(0.15, 0.05)),
-    # Added after the others: goods lying on the ground keep their `RESOURCES` index (saves).
-    'sheep': (item_sheep, spread(0.17)),
 }
 
 
@@ -823,7 +809,7 @@ ICONS = {
     'grain': upright(icon_grain, roll=-70, turn=10, tilt=10),
     'flour': ground([(0, 0, 0, 0)], build=icon_flour),
     'bread': ground([(0, 0, 0, 0)], yaw=24),
-    'pig': ground([(0, 0, 0, 0)], yaw=-28),
+    'sheep': ground([(0, 0, 0, 0)], yaw=-28),
     'meat': ground([(0, 0, 0, 0)], yaw=16),
     'coal': ground(heap(0.09, 0.05), yaw=10),
     'ironore': ground(heap(0.09, 0.05), yaw=10),
@@ -840,7 +826,6 @@ ICONS = {
     'sword': upright(icon_sword),
     'bow': upright(icon_bow, turn=10),
     'armor': upright(icon_armor, roll=-90, turn=14, tilt=14),
-    'sheep': ground([(0, 0, 0, 0)], yaw=-28),
 }
 assert list(ICONS) == list(GOODS), 'ICONS must list every resource in GOODS order'
 

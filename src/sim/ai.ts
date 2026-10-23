@@ -34,7 +34,6 @@ import {
   BUILD_DIG_SLOPE,
   BUILD_MAX_SLOPE,
   BUILDINGS,
-  buildableBy,
   costOf,
   totalCost,
   gatheredBy,
@@ -173,7 +172,7 @@ export function updateAi(w: World): void {
 /** Retry a type with no spot after this many ticks (territory or resources may have changed). */
 const RETRY_TICKS = 600;
 const HOUSES: readonly BuildingType[] = ['house_small', 'house_medium', 'house_large'];
-const STORES = (Object.keys(BUILDINGS) as BuildingType[]).filter((t) => BUILDINGS[t].storage && buildableBy(t));
+const STORES = (Object.keys(BUILDINGS) as BuildingType[]).filter((t) => BUILDINGS[t].storage && BUILDINGS[t].playerBuildable);
 
 /**
  * Whether it should build a warehouse: it has none (lost it), or no warehouse site is open, it has
@@ -498,13 +497,13 @@ function pushesBorder(def: BuildingDef): boolean {
 /** Buildings with a sight of their own (lookout towers), for scouting. */
 /** Eyecatchers, the costliest first: the most settlement value per placement. */
 const EYECATCHERS = (Object.keys(BUILDINGS) as BuildingType[])
-  .filter((t) => BUILDINGS[t].eyecatcher && buildableBy(t))
+  .filter((t) => BUILDINGS[t].eyecatcher && BUILDINGS[t].playerBuildable)
   .sort((a, b) => totalCost(b) - totalCost(a));
-const LOOKOUTS = (Object.keys(BUILDINGS) as BuildingType[]).filter((t) => BUILDINGS[t].vision && buildableBy(t));
+const LOOKOUTS = (Object.keys(BUILDINGS) as BuildingType[]).filter((t) => BUILDINGS[t].vision && BUILDINGS[t].playerBuildable);
 
 /** Military buildings the AI pushes its border with, largest garrison first. */
 const FRONTIER = (Object.keys(BUILDINGS) as BuildingType[])
-  .filter((t) => BUILDINGS[t].garrison && buildableBy(t) && BUILDINGS[t].territory)
+  .filter((t) => BUILDINGS[t].garrison && BUILDINGS[t].playerBuildable && BUILDINGS[t].territory)
   .sort((a, b) => BUILDINGS[b].garrison!.capacity - BUILDINGS[a].garrison!.capacity);
 
 function tryPlace(ctx: Context, ai: AiState, type: BuildingType): Building | null {
@@ -589,8 +588,8 @@ function roomFor(w: World, me: PlayerId, victim: Building, need: BuildingDef): b
   return false;
 }
 
-const MARKETS = (Object.keys(BUILDINGS) as BuildingType[]).filter((t) => BUILDINGS[t].market && buildableBy(t));
-const RANCHES = (Object.keys(BUILDINGS) as BuildingType[]).filter((t) => BUILDINGS[t].breeds && buildableBy(t));
+const MARKETS = (Object.keys(BUILDINGS) as BuildingType[]).filter((t) => BUILDINGS[t].market && BUILDINGS[t].playerBuildable);
+const RANCHES = (Object.keys(BUILDINGS) as BuildingType[]).filter((t) => BUILDINGS[t].breeds && BUILDINGS[t].playerBuildable);
 /** Units of each input it keeps a cut-off workplace stocked with by donkey. */
 const TRADE_INPUTS = 4;
 
