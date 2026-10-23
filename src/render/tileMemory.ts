@@ -23,6 +23,14 @@ import { MEMORY_EVERY_MS, Sight } from './memory';
  * Nothing scales with the area in sight. The memory starts as a copy of the map: what is unexplored is
  * hidden anyway and is copied again the moment it is explored; after a load the player thus knows how
  * the explored land looks at the time of the load (as `BuildingMemory.seed`).
+ *
+ * Heights work the same way, per tile corner ((w+1)×(h+1), as `map.height`): a digger levelling a site
+ * in the dark does not reshape the player's ground. A corner counts as in sight when any of the (up to
+ * four) tiles sharing it is — a tile in sight is thus always drawn with its true corners, and the
+ * corners it shares with dark tiles go along. Chunks whose `map.heightVersion` moved are compared
+ * corner by corner (a changed corner in sight is copied, one out of sight goes on its own stale list,
+ * checked with the tiles'); a copied corner bumps the `heightVersion` of every chunk touching it, as
+ * `setVertexHeight` does, so the renderer rebuilds only ground that really changed on screen.
  */
 
 /** The tile layers the renderer and the minimap draw, as the local player knows them. */
@@ -39,6 +47,14 @@ export interface TileView {
   readonly chunkVersion: Uint32Array;
   /** Bumped when `owner` changed anywhere. */
   readonly ownerVersion: number;
+  /** Corner heights as known: (w+1)×(h+1), as `map.height`. */
+  readonly height: Uint8Array;
+  /** Per chunk: bumped when a remembered corner of one of its tiles changed height. */
+  readonly heightVersion: Uint32Array;
+  /** `GameMap.vertexHeight` over the remembered heights. */
+  vertexHeight(vx: number, vy: number): number;
+  /** `GameMap.heightAt` over the remembered heights. */
+  heightAt(fx: number, fy: number): number;
   /**
    * Whether the tile's last change was learnt only when it came into sight (it happened in the dark):
    * no fall, no sound — the tree is simply gone.
@@ -59,7 +75,16 @@ export class TileMemory implements TileView {
   readonly goodsAmount: Uint8Array;
   readonly wear: Uint8Array;
   readonly chunkVersion: Uint32Array;
+  readonly height: Uint8Array;
+  readonly heightVersion: Uint32Array;
   private ownerV = 0;
+  /** `map.heightVersion` per chunk when its corners were last compared. */
+  private readonly heightMapSeen: Uint32Array;
+  /** Corners that differ from the map but were out of sight (as `stale`, for heights). */
+  private staleCorners: number[] = [];
+  private readonly staleCornerFlag: Uint8Array;
+  private readonly mw: number;
+  private readonly mh: number;
   /** `map.chunkVersion` per chunk when its tiles were last compared. */
   private readonly mapSeen: Uint32Array;
   private territorySeen: number;
@@ -80,7 +105,10 @@ export class TileMemory implements TileView {
   ) {
     const m = world.map;
     this.sight = new Sight(world, me);
+    this.mw = m.w;
+    this.mh = m.h;
     this.mapSeen = Uint32Array.from(m.chunkVersion);
+    this.heightMapSeen = Uint32Array.from(m.heightVersion);
     this.territorySeen = world.territoryVersion;
     if (!on) {
       // The map's own arrays: nothing is copied, nothing differs.
@@ -93,8 +121,11 @@ export class TileMemory implements TileView {
       this.goodsAmount = m.goodsAmount;
       this.wear = m.wear;
       this.chunkVersion = m.chunkVersion;
+      this.height = m.height;
+      this.heightVersion = m.heightVersion;
       this.staleFlag = new Uint8Array(0);
       this.silentFlag = new Uint8Array(0);
+      this.staleCornerFlag = new Uint8Array(0);
       return;
     }
     this.owner = m.owner.slice();
@@ -106,8 +137,36 @@ export class TileMemory implements TileView {
     this.goodsAmount = m.goodsAmount.slice();
     this.wear = m.wear.slice();
     this.chunkVersion = new Uint32Array(m.chunkVersion.length);
+    this.height = m.height.slice();
+    this.heightVersion = new Uint32Array(m.heightVersion.length);
     this.staleFlag = new Uint8Array(m.w * m.h);
     this.silentFlag = new Uint8Array(m.w * m.h);
+    this.staleCornerFlag = new Uint8Array(m.height.length);
+  }
+
+  vertexHeight(vx: number, vy: number): number {
+    const x = Math.min(this.mw, Math.max(0, vx));
+    const y = Math.min(this.mh, Math.max(0, vy));
+    return this.height[y * (this.mw + 1) + x];
+  }
+
+  heightAt(fx: number, fy: number): number {
+    const w = this.mw;
+    const h = this.mh;
+    const u = Math.min(w, Math.max(0, fx + 0.5));
+    const v = Math.min(h, Math.max(0, fy + 0.5));
+    const x0 = Math.min(w - 1, Math.floor(u));
+    const y0 = Math.min(h - 1, Math.floor(v));
+    const tx = u - x0;
+    const ty = v - y0;
+    // Inline corner reads (x0 + 1 ≤ w, y0 + 1 ≤ h): called for every settler drawn every frame.
+    const row = w + 1;
+    const hs = this.height;
+    const a = hs[y0 * row + x0];
+    const b = hs[y0 * row + x0 + 1];
+    const c = hs[(y0 + 1) * row + x0];
+    const d = hs[(y0 + 1) * row + x0 + 1];
+    return (a + (b - a) * tx) * (1 - ty) + (c + (d - c) * tx) * ty;
   }
 
   get ownerVersion(): number {
@@ -121,6 +180,11 @@ export class TileMemory implements TileView {
   /** Tiles waiting out of sight with a change the player has not seen. */
   get staleCount(): number {
     return this.stale.length;
+  }
+
+  /** Corners waiting out of sight with a height change the player has not seen. */
+  get staleCornerCount(): number {
+    return this.staleCorners.length;
   }
 
   /**
@@ -141,6 +205,16 @@ export class TileMemory implements TileView {
       const y1 = Math.min(m.h, y0 + CHUNK);
       for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) this.look(y * m.w + x);
     }
+    for (let c = 0; c < this.heightMapSeen.length; c++) {
+      if (m.heightVersion[c] === this.heightMapSeen[c]) continue;
+      this.heightMapSeen[c] = m.heightVersion[c];
+      // The chunk's tiles' corners: x0..x1, y0..y1 inclusive of the far edge.
+      const x0 = (c % m.chunksX) * CHUNK;
+      const y0 = Math.floor(c / m.chunksX) * CHUNK;
+      const x1 = Math.min(m.w, x0 + CHUNK);
+      const y1 = Math.min(m.h, y0 + CHUNK);
+      for (let vy = y0; vy <= y1; vy++) for (let vx = x0; vx <= x1; vx++) this.lookCorner(vy * (m.w + 1) + vx);
+    }
     if (w.territoryVersion !== this.territorySeen) {
       this.territorySeen = w.territoryVersion;
       const own = m.owner;
@@ -159,6 +233,52 @@ export class TileMemory implements TileView {
     }
     list.length = k;
     this.stats.stale = k;
+    const hs = m.height;
+    const corners = this.staleCorners;
+    k = 0;
+    for (let j = 0; j < corners.length; j++) {
+      const v = corners[j];
+      if (hs[v] === this.height[v]) this.staleCornerFlag[v] = 0;
+      else if (this.cornerVisible(v)) this.copyCorner(v);
+      else corners[k++] = v;
+    }
+    corners.length = k;
+  }
+
+  /** A corner whose height may have changed: copied when in sight, else remembered as stale. */
+  private lookCorner(v: number): void {
+    if (this.world.map.height[v] === this.height[v]) return;
+    if (this.cornerVisible(v)) this.copyCorner(v);
+    else if (this.staleCornerFlag[v] === 0) {
+      this.staleCornerFlag[v] = 1;
+      this.staleCorners.push(v);
+    }
+  }
+
+  /** A corner is in sight when any tile sharing it is. */
+  private cornerVisible(v: number): boolean {
+    const w = this.mw;
+    const vx = v % (w + 1);
+    const vy = Math.floor(v / (w + 1));
+    for (let ty = vy - 1; ty <= vy; ty++) {
+      if (ty < 0 || ty >= this.mh) continue;
+      for (let tx = vx - 1; tx <= vx; tx++) {
+        if (tx >= 0 && tx < w && this.sight.visible(ty * w + tx)) return true;
+      }
+    }
+    return false;
+  }
+
+  /** Takes corner v's height in and marks every chunk whose tiles touch it (as `setVertexHeight`). */
+  private copyCorner(v: number): void {
+    const m = this.world.map;
+    this.height[v] = m.height[v];
+    this.staleCornerFlag[v] = 0;
+    const vx = v % (m.w + 1);
+    const vy = Math.floor(v / (m.w + 1));
+    for (let ty = vy - 1; ty <= vy; ty++) {
+      for (let tx = vx - 1; tx <= vx; tx++) if (m.inBounds(tx, ty)) this.heightVersion[m.chunkOf(tx, ty)]++;
+    }
   }
 
   /** A tile that may have changed: copied when in sight, else remembered as stale. */

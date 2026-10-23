@@ -432,7 +432,7 @@ function gameView(parts: ViewParts): GameView & { toast(text: string): void } {
   const minimap = new Minimap(world, camera, state.fog, mmWidth, state.localPlayer, renderer.memory, renderer.tiles);
   const jump = (x: number, y: number) => {
     const p = toScreen(x, y);
-    camera.centerOn(p.x, p.y - world.map.heightAt(x, y));
+    camera.centerOn(p.x, p.y - renderer.tiles.heightAt(x, y));
   };
   const makeHud = (previous?: Hud) =>
     new Hud(

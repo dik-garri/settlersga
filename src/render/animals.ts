@@ -16,6 +16,7 @@ import {
   paintPack,
 } from './animalArt';
 import type { Art3d } from './art3d';
+import type { TileView } from './tileMemory';
 import { depthOf, HALF_H, HALF_W } from './iso';
 
 type Add = (name: string, w: number, h: number, ax: number, ay: number, paint: (ctx: CanvasRenderingContext2D) => void) => void;
@@ -36,6 +37,25 @@ export function addAnimalSprites(add: Add, art: Art3d | null): void {
     }
   }
   add('pack', PACK.w, PACK.h, PACK.ax, PACK.ay, paintPack);
+}
+
+/** Highest a corner lifts the ground, in screen pixels (`GameMap.height` is a byte). */
+const MAX_LIFT = 255;
+
+/**
+ * Whether a figure at screen x `px` and unlifted y `flat` may be on screen (`onScreen`'s margins,
+ * whatever the height under it): the cheap test before the per-figure work.
+ */
+export function nearView(px: number, flat: number, view: { x: number; y: number; w: number; h: number }): boolean {
+  return px > view.x - 40 && px < view.x + view.w + 40 && flat > view.y - 20 && flat - MAX_LIFT < view.y + view.h + 60;
+}
+
+/**
+ * The distance walked since the last frame. `Math.sqrt`, not `Math.hypot`: V8 calls a builtin for
+ * the latter and boxes its result, a heap number per figure per frame.
+ */
+export function walkStep(dx: number, dy: number): number {
+  return Math.sqrt(dx * dx + dy * dy);
 }
 
 interface View {
@@ -76,6 +96,8 @@ export class AnimalLayer {
     private readonly wareTex: Record<Resource, Texture>,
     /** The player this browser plays: its own units are always drawn, others only in its sight. */
     private readonly me: PlayerId,
+    /** The ground as the local player knows it (`TileMemory`): animals stand on the drawn surface. */
+    private readonly ground: Pick<TileView, 'heightAt'>,
   ) {
     this.tex = Object.fromEntries(
       ANIMAL_KINDS.map((k) => [k, DIRS.map((_, d) => Array.from({ length: ANIMAL_COLUMNS }, (_, f) => get(`animal:${k}:${d}:${f}`)))]),
@@ -109,8 +131,8 @@ export class AnimalLayer {
     const x = s.px + (s.x - s.px) * alpha;
     const y = s.py + (s.y - s.py) * alpha;
     const px = (x - y) * HALF_W;
-    const py = (x + y) * HALF_H - this.sim.map.heightAt(x, y);
-    const step = Math.hypot(x - v.lastX, y - v.lastY);
+    const py = (x + y) * HALF_H - this.ground.heightAt(x, y);
+    const step = walkStep(x - v.lastX, y - v.lastY);
     if (step < 1.5) v.walked += step;
     v.lastX = x;
     v.lastY = y;
@@ -197,20 +219,30 @@ export class AnimalLayer {
   }
 
   sync(alpha: number, timeMs: number, view: { x: number; y: number; w: number; h: number }): void {
-    const { map } = this.sim;
     if (this.views.size > this.sim.animals.length) this.prune();
     for (const a of this.sim.animals) {
-      let v = this.views.get(a.id);
-      if (!v) {
-        v = { sprite: new Sprite(), dir: (a.id * 3) % DIRS.length, walked: 0, lastX: a.x, lastY: a.y };
-        v.sprite.scale.set(ANIMAL_SCALE[a.kind]);
-        this.views.set(a.id, v);
-      }
       const x = a.px + (a.x - a.px) * alpha;
       const y = a.py + (a.y - a.py) * alpha;
       const px = (x - y) * HALF_W;
-      const py = (x + y) * HALF_H - map.heightAt(x, y);
-      const step = Math.hypot(x - v.lastX, y - v.lastY);
+      const flat = (x + y) * HALF_H;
+      let v = this.views.get(a.id);
+      // Far off screen whatever the ground's height (`MAX_LIFT`): no height, sight or walk to work out,
+      // and no view made — a big map's thousands of animals cost a few comparisons a frame.
+      if (!nearView(px, flat, view)) {
+        if (v) {
+          if (v.sprite.parent === this.objects) this.objects.removeChild(v.sprite);
+          v.lastX = x;
+          v.lastY = y;
+        }
+        continue;
+      }
+      if (!v) {
+        v = { sprite: new Sprite(), dir: (a.id * 3) % DIRS.length, walked: 0, lastX: x, lastY: y };
+        v.sprite.scale.set(ANIMAL_SCALE[a.kind]);
+        this.views.set(a.id, v);
+      }
+      const py = flat - this.ground.heightAt(x, y);
+      const step = walkStep(x - v.lastX, y - v.lastY);
       if (step < 1.5) v.walked += step;
       v.lastX = x;
       v.lastY = y;

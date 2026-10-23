@@ -584,7 +584,7 @@ export class InputController {
       x /= ids.length;
       y /= ids.length;
       const p = toScreen(x, y);
-      this.camera.centerOn(p.x, p.y - this.world.map.heightAt(x, y));
+      this.camera.centerOn(p.x, p.y - this.renderer.tiles.heightAt(x, y));
       this.lastRecall = { at: -Infinity, n: -1 };
     } else {
       this.lastRecall = { at: now, n };

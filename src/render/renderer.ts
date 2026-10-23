@@ -41,7 +41,7 @@ import {
   type SoundId,
 } from './animConfig';
 import { Effects } from './effects';
-import { AnimalLayer } from './animals';
+import { AnimalLayer, nearView, walkStep } from './animals';
 import { isCutOff } from '../sim/land';
 import { UNIT_ANIMALS } from './animalArt';
 import { holdFrames, setFrame, workFrames, type Settler3d } from './settler3d';
@@ -63,6 +63,7 @@ import { WorkAreaLayer } from './workArea';
 import { GarrisonLayer } from './garrison';
 import { BuildingMemory, lookOf, type BuildingLook } from './memory';
 import { TileMemory } from './tileMemory';
+import { overlaySheet, PEBBLE_TONES, type OverlayFrame } from './overlays';
 import { pathLevel } from '../sim/paths';
 import { chatPartner } from '../sim/idle';
 import { BANNERS, EDGE_DIRS, RUIN_SIZES, siteSprite, GROUND_PRIORITY, groundVariants, PATH_VARIANTS, PLAYER_COLORS, type GroundKind } from './sprites';
@@ -95,6 +96,9 @@ const POOL_KEEP = { renderData: 64, batches: 4096 };
 /** Most sprites (`spritePool`) and fog canvases (`fogPool`) kept for reuse. */
 const SPRITE_POOL_MAX = 30_000;
 const FOG_POOL_MAX = 256;
+
+/** Fog alpha per state: unexplored, explored out of sight (0.42), in sight. */
+const FOG_ALPHA = [255, 107, 0];
 
 /** First-time chunk builds allowed per frame (see `syncVisibleChunks`). */
 const CHUNK_BUILDS_PER_FRAME = 6;
@@ -229,7 +233,7 @@ export class GameRenderer {
   private readonly groundLayers: (Container | null)[] = [];
   /** One texture over the ground atlas page, shared by all ground meshes. */
   private readonly groundSheet: Texture;
-  /** Last `map.heightVersion` the ground of each chunk was built for. */
+  /** Last `tiles.heightVersion` the ground of each chunk was built for (heights as the player knows them). */
   private readonly heightSeen: Uint32Array;
   /**
    * Scaling (512×512): a chunk's ground, boulders, territory overlay and tile objects are built the
@@ -254,6 +258,8 @@ export class GameRenderer {
    */
   private readonly spritePool: Sprite[] = [];
   private readonly groundTextures: Partial<Record<GroundKind, Texture[]>> = {};
+  /** Texture coordinates of each ground sprite's diamond (`buildChunkGround`). */
+  private readonly groundUV = new Map<Texture, Float32Array>();
   private readonly edgeTextures: Partial<Record<GroundKind, Texture[]>> = {};
   private readonly rockTextures: Partial<Record<RockSize, Texture[]>> = {};
   /** Fog canvases and their textures given back by unloaded chunks, reused by the next one. */
@@ -276,7 +282,8 @@ export class GameRenderer {
   private readonly tileSeen: Int32Array;
   private view: ViewRect = { x: 0, y: 0, w: 0, h: 0 };
   private readonly territory = new Container();
-  private readonly territoryChunks: Graphics[] = [];
+  /** Per chunk: a container holding the chunk's territory mesh (dimming and border posts), if any. */
+  private readonly territoryChunks: Container[] = [];
   /** Owner per tile as last drawn; 255 forces the first draw. */
   private readonly ownerSeen: Uint8Array;
   /** Last `tiles.ownerVersion` drawn. */
@@ -412,10 +419,10 @@ export class GameRenderer {
     this.tradeRoutes = new TradeRouteLayer(sim, me, (x, y) => this.surface(x, y), (p) => this.playerTint[(p - 1) % this.playerTint.length]);
     this.world.addChild(this.ground, this.territory, this.marks, this.workArea.g, this.tradeRoutes.g, this.hints, this.objects, this.settlerMark, this.badges, this.shots, this.fog, this.ghostLayer);
     this.settlerTex = atlas.settlerTextures();
-    this.animals = new AnimalLayer(sim, this.objects, (n) => atlas.get(n), fogOn, this.wareTex, me);
+    this.tiles = new TileMemory(sim, me, fogOn);
+    this.animals = new AnimalLayer(sim, this.objects, (n) => atlas.get(n), fogOn, this.wareTex, me, this.tiles);
     this.settler3d = atlas.art3d?.settlers ?? null;
     this.memory = new BuildingMemory(sim, me, fogOn);
-    this.tiles = new TileMemory(sim, me, fogOn);
     this.garrison = new GarrisonLayer(sim, this.settler3d, this.settlerTex, this.playerTint, (b) => this.memory.live(b));
     for (const r of RESOURCES) this.wareTex[r] = atlas.get(`ware:${r}`);
     this.effects = new Effects(atlas, sim, (x, y) => this.surface(x, y), this.sound);
@@ -447,7 +454,7 @@ export class GameRenderer {
     this.ownerSeen = new Uint8Array(n).fill(255);
     this.fogSeen = new Uint8Array(n).fill(255);
     for (let c = 0; c < chunks; c++) {
-      const g = new Graphics();
+      const g = new Container();
       g.visible = false;
       this.territoryChunks.push(g);
       this.territory.addChild(g);
@@ -486,7 +493,8 @@ export class GameRenderer {
     const x1 = Math.min(map.w, x0 + CHUNK) - 1;
     const y1 = Math.min(map.h, y0 + CHUNK) - 1;
     let lift = 0;
-    for (let vy = y0; vy <= y1 + 1; vy++) for (let vx = x0; vx <= x1 + 1; vx++) lift = Math.max(lift, map.vertexHeight(vx, vy));
+    const known = this.tiles;
+    for (let vy = y0; vy <= y1 + 1; vy++) for (let vx = x0; vx <= x1 + 1; vx++) lift = Math.max(lift, known.vertexHeight(vx, vy));
     this.chunkBounds.set(
       [
         (x0 - y1) * HALF_W - HALF_W,
@@ -507,14 +515,14 @@ export class GameRenderer {
   /** Screen position of a point on the terrain surface (tile coordinates, fractional allowed). */
   private surface(x: number, y: number): { x: number; y: number } {
     const p = toScreen(x, y);
-    p.y -= this.sim.map.heightAt(x, y);
+    p.y -= this.tiles.heightAt(x, y);
     return p;
   }
 
   /** Screen position of tile corner (vx, vy) of the vertex grid, i.e. tile coordinates (vx − ½, vy − ½). */
   private corner(vx: number, vy: number): { x: number; y: number } {
     const p = toScreen(vx - 0.5, vy - 0.5);
-    p.y -= this.sim.map.vertexHeight(vx, vy);
+    p.y -= this.tiles.vertexHeight(vx, vy);
     return p;
   }
 
@@ -524,7 +532,7 @@ export class GameRenderer {
    */
   pickTile(wx: number, wy: number): { x: number; y: number } {
     let t = toTile(wx, wy);
-    for (let k = 0; k < 4; k++) t = toTile(wx, wy + this.sim.map.heightAt(t.x, t.y));
+    for (let k = 0; k < 4; k++) t = toTile(wx, wy + this.tiles.heightAt(t.x, t.y));
     return t;
   }
 
@@ -545,7 +553,7 @@ export class GameRenderer {
     [...this.groundChunks.keys()]
       .sort((a, b) => (a % map.chunksX) + Math.floor(a / map.chunksX) - ((b % map.chunksX) + Math.floor(b / map.chunksX)))
       .forEach((c) => this.ground.addChild(this.groundChunks[c]));
-    for (let c = 0; c < this.groundChunks.length; c++) this.heightSeen[c] = map.heightVersion[c];
+    for (let c = 0; c < this.groundChunks.length; c++) this.heightSeen[c] = this.tiles.heightVersion[c];
   }
 
   /** First time a chunk comes into view: build its ground, boulders and pending overlays. */
@@ -650,11 +658,18 @@ export class GameRenderer {
       map.inBounds(x, y) ? TERRAIN_KIND[map.terrain[map.idx(x, y)] as Terrain] : undefined;
     const priority = (k: GroundKind | undefined) => (k ? GROUND_PRIORITY.indexOf(k) : -1);
     const q = QUAD;
+    // A ground sprite's texture coordinates, worked out once per sprite (`groundUV`): passing eight
+    // fresh doubles per quad boxed them, ~100 KB of garbage per chunk built.
     const quadOf = (tex: Texture) => {
-      if (tex.source !== source) throw new Error('ground sprites must share one atlas page');
-      // Sample slightly inside the painted diamond so antialiased edges never show as seams.
-      const f = tex.frame;
-      ground.quad(q, (f.x + 33) / sw, (f.y + 2) / sh, (f.x + 63.5) / sw, (f.y + 17) / sh, (f.x + 33) / sw, (f.y + 32) / sh, (f.x + 2.5) / sw, (f.y + 17) / sh);
+      let uv = this.groundUV.get(tex);
+      if (!uv) {
+        if (tex.source !== source) throw new Error('ground sprites must share one atlas page');
+        // Sample slightly inside the painted diamond so antialiased edges never show as seams.
+        const f = tex.frame;
+        uv = Float32Array.of((f.x + 33) / sw, (f.y + 2) / sh, (f.x + 63.5) / sw, (f.y + 17) / sh, (f.x + 33) / sw, (f.y + 32) / sh, (f.x + 2.5) / sw, (f.y + 17) / sh);
+        this.groundUV.set(tex, uv);
+      }
+      ground.quadUV(q, uv);
     };
     for (let d = x0 + y0; d <= x1 - 1 + y1 - 1; d++) {
       for (let x = Math.max(x0, d - (y1 - 1)); x <= Math.min(x1 - 1, d - y0); x++) {
@@ -666,7 +681,7 @@ export class GameRenderer {
           const vx = x + (k === 1 || k === 2 ? 1 : 0);
           const vy = y + (k >= 2 ? 1 : 0);
           q[2 * k] = (vx - vy) * HALF_W;
-          q[2 * k + 1] = (vx + vy - 1) * HALF_H - map.vertexHeight(vx, vy);
+          q[2 * k + 1] = (vx + vy - 1) * HALF_H - this.tiles.vertexHeight(vx, vy);
         }
         const period = this.atlas.groundPeriod[kind];
         const variant = period ? (x % period) + period * (y % period) : hash(i) % groundVariants(kind);
@@ -682,10 +697,7 @@ export class GameRenderer {
         }
 
         const level = this.slopeLight(x, y);
-        if (level !== 0) {
-          const u = (level - SHADE_MIN + 0.5) / SHADE_TEXELS;
-          shade.quad(q, u, 0.5, u, 0.5, u, 0.5, u, 0.5);
-        }
+        if (level !== 0) shade.quadUV(q, SHADE_UV[level - SHADE_MIN]);
       }
     }
     const layer = new Container();
@@ -694,7 +706,7 @@ export class GameRenderer {
     this.scatterProps(layer, x0, y0, x1, y1);
     this.streamBanks(layer, x0, y0, x1, y1);
     // The ground layer stays below the chunk's field decals.
-    disposeLayer(this.groundLayers[c]);
+    this.disposeGroundLayer(c);
     this.groundLayers[c] = layer;
     this.groundChunks[c].addChildAt(layer, 0);
   }
@@ -730,7 +742,7 @@ export class GameRenderer {
           }
         }
         const place = PROP_PLACES[wood ? 'wood' : 'meadow'];
-        const s = new Sprite(this.atlas.get(`prop:${place[(h >>> 8) % place.length]}`));
+        const s = this.takeSprite(this.atlas.get(`prop:${place[(h >>> 8) % place.length]}`));
         const ox = (((h >>> 12) % 100) / 100 - 0.5) * 0.6;
         const oy = (((h >>> 19) % 100) / 100 - 0.5) * 0.6;
         const p = this.surface(x + ox, y + oy);
@@ -751,7 +763,8 @@ export class GameRenderer {
     const { map } = this.sim;
     const water = (x: number, y: number) =>
       !map.inBounds(x, y) || TERRAIN[map.terrain[map.idx(x, y)] as Terrain].water;
-    let g: Graphics | null = null;
+    const sheet = overlaySheet();
+    const quads = OVERLAY_QUADS.reset();
     for (let y = y0; y < y1; y++) {
       for (let x = x0; x < x1; x++) {
         if (!water(x, y)) continue;
@@ -771,7 +784,6 @@ export class GameRenderer {
         for (const [dx, dy, ax, ay, bx, by] of edges) {
           // No pebbles where the bank is swamp: reeds and mud there.
           if (water(x + dx, y + dy) || map.terrain[map.idx(x + dx, y + dy)] === Terrain.Swamp) continue;
-          g ??= new Graphics();
           const i = map.idx(x, y);
           for (let k = 0; k < 11; k++) {
             const h = hash(i * 97 + (dx + 2) * 13 + (dy + 2) * 7 + k * 101);
@@ -782,29 +794,27 @@ export class GameRenderer {
             const ty = ay - 0.5 + (by - ay) * t + dy * into;
             const p = this.surface(tx, ty);
             const r = 0.8 + ((h >>> 15) % 12) / 10;
-            const grey = 0x8a8f94 + (((h >>> 20) % 5) - 2) * 0x0d0d0d;
-            g.ellipse(p.x + 0.6, p.y + 0.8, r * 1.2, r * 0.7).fill({ color: 0x20262a, alpha: 0.45 });
-            g.ellipse(p.x, p.y, r * 1.2, r * 0.75).fill({ color: grey });
-            g.ellipse(p.x - r * 0.35, p.y - r * 0.25, r * 0.45, r * 0.25).fill({ color: 0xe8ecef, alpha: 0.7 });
+            overlayQuad(quads, sheet.pebbles[((h >>> 20) % PEBBLE_TONES)], p.x, p.y, r);
           }
         }
       }
     }
-    if (g) layer.addChild(g);
+    if (quads.quads > 0) layer.addChild(quads.mesh(sheet.texture));
   }
 
   /**
    * Diggers change corner heights at runtime: rebuild the ground of the chunks they touched, redraw
    * their territory overlay, re-seat everything standing there and lift the culling bounds.
-   * Throttled, since a digger moves a corner a few times per second.
+   * Throttled, since a digger moves a corner a few times per second. Heights are the local player's
+   * (`tiles`, `TileMemory`): levelling in the dark reshapes nothing until he sees it.
    */
   private syncHeights(timeMs: number): void {
     if (timeMs - this.lastHeightSync < 120) return;
     this.lastHeightSync = timeMs;
     const { map } = this.sim;
     for (let c = 0; c < this.heightSeen.length; c++) {
-      if (map.heightVersion[c] === this.heightSeen[c]) continue;
-      this.heightSeen[c] = map.heightVersion[c];
+      if (this.tiles.heightVersion[c] === this.heightSeen[c]) continue;
+      this.heightSeen[c] = this.tiles.heightVersion[c];
       this.computeChunkBounds(c);
       if (!this.chunkReady[c]) continue; // built from the new heights when it comes into view
       this.buildChunkGround(c);
@@ -837,7 +847,7 @@ export class GameRenderer {
    * corner heights against a light from the top-left of the screen (tile −x) and above.
    */
   private slopeLight(x: number, y: number): number {
-    const m = this.sim.map;
+    const m = this.tiles;
     const top = m.vertexHeight(x, y);
     const right = m.vertexHeight(x + 1, y);
     const bottom = m.vertexHeight(x + 1, y + 1);
@@ -878,6 +888,17 @@ export class GameRenderer {
   }
 
   /** A plain sprite showing `texture`: from the pool when one is there, else new. */
+  /** Frees a chunk's ground layer, its props (sprites) going back to `spritePool`. */
+  private disposeGroundLayer(c: number): void {
+    const layer = this.groundLayers[c];
+    if (!layer) return;
+    for (let k = layer.children.length - 1; k >= 0; k--) {
+      const child = layer.children[k];
+      if (child instanceof Sprite) this.recycleStatic(child, c);
+    }
+    disposeLayer(layer);
+  }
+
   private takeSprite(texture: Texture): Sprite {
     const s = this.spritePool.pop();
     if (!s) return new Sprite(texture);
@@ -1215,42 +1236,48 @@ export class GameRenderer {
     }
     const ctx = canvas.getContext('2d')!;
     const img = (this.fogImage ??= ctx.createImageData(W, W));
-    const ALPHA = [255, 107, 0]; // unexplored, explored out of sight (0.42), in sight
     for (let k = 0; k < W * W; k++) {
       img.data[k * 4] = 5;
       img.data[k * 4 + 1] = 7;
       img.data[k * 4 + 2] = 10;
-      img.data[k * 4 + 3] = ALPHA[states[k]];
+      img.data[k * 4 + 3] = FOG_ALPHA[states[k]];
     }
     ctx.putImageData(img, 0, 0);
     let tex = this.fogTex[c];
     if (tex) tex.source.update();
     else tex = this.fogTex[c] = new Texture({ source: new CanvasSource({ resource: canvas, scaleMode: 'linear' }) });
     if (this.fogMesh[c]) return;
-    const vertices: number[] = [];
-    const uvs: number[] = [];
-    const indices: number[] = [];
+    // Straight into exact-size typed arrays (no number arrays or points to collect afterwards).
     const cols = x1 - x0 + 1;
+    const rows = y1 - y0 + 1;
+    const vertices = new Float32Array(cols * rows * 2);
+    const uvs = new Float32Array(cols * rows * 2);
+    const indices = new Uint32Array((cols - 1) * (rows - 1) * 6);
+    const known = this.tiles;
+    let n = 0;
     for (let vy = y0; vy <= y1; vy++) {
-      for (let vx = x0; vx <= x1; vx++) {
-        const p = this.corner(vx, vy);
-        vertices.push(p.x, p.y);
-        // Corner (vx, vy) sits at tile coordinate (vx − ½, vy − ½); texel k's centre is tile x0 − 1 + k.
-        uvs.push((vx - x0 + 1) / W, (vy - y0 + 1) / W);
+      for (let vx = x0; vx <= x1; vx++, n += 2) {
+        // As `corner`: corner (vx, vy) sits at tile coordinate (vx − ½, vy − ½).
+        vertices[n] = (vx - vy) * HALF_W;
+        vertices[n + 1] = (vx + vy - 1) * HALF_H - known.vertexHeight(vx, vy);
+        // Texel k's centre is tile x0 − 1 + k.
+        uvs[n] = (vx - x0 + 1) / W;
+        uvs[n + 1] = (vy - y0 + 1) / W;
       }
     }
-    for (let y = 0; y < y1 - y0; y++) {
-      for (let x = 0; x < x1 - x0; x++) {
+    n = 0;
+    for (let y = 0; y < rows - 1; y++) {
+      for (let x = 0; x < cols - 1; x++, n += 6) {
         const a = y * cols + x;
-        indices.push(a, a + 1, a + cols + 1, a, a + cols + 1, a + cols);
+        indices[n] = a;
+        indices[n + 1] = a + 1;
+        indices[n + 2] = a + cols + 1;
+        indices[n + 3] = a;
+        indices[n + 4] = a + cols + 1;
+        indices[n + 5] = a + cols;
       }
     }
-    const mesh = new MeshSimple({
-      texture: tex,
-      vertices: new Float32Array(vertices),
-      uvs: new Float32Array(uvs),
-      indices: new Uint32Array(indices),
-    });
+    const mesh = new MeshSimple({ texture: tex, vertices, uvs, indices });
     this.fogMesh[c] = mesh;
     this.fogChunks[c].addChild(mesh);
   }
@@ -1319,7 +1346,7 @@ export class GameRenderer {
   private unloadChunk(c: number): void {
     const { map } = this.sim;
     this.chunkReady[c] = 0;
-    disposeLayer(this.groundLayers[c]);
+    this.disposeGroundLayer(c);
     this.groundLayers[c] = null;
     for (const rock of this.boulders[c]) this.recycleStatic(rock, c);
     this.boulders[c] = [];
@@ -1331,15 +1358,19 @@ export class GameRenderer {
         const tree = this.treeSprites[i];
         if (tree) this.recycleStatic(tree, c);
         this.treeSprites[i] = null;
-        for (const list of [this.depositSprites, this.signSprites, this.goodsSprites]) {
-          const sprite = list[i];
-          if (sprite) this.removeStatic(sprite, x, y);
-          list[i] = null;
-        }
-        for (const list of [this.cropSprites, this.pathSprites]) {
-          list[i]?.destroy();
-          list[i] = null;
-        }
+        const deposit = this.depositSprites[i];
+        if (deposit) this.removeStatic(deposit, x, y);
+        this.depositSprites[i] = null;
+        const sign = this.signSprites[i];
+        if (sign) this.removeStatic(sign, x, y);
+        this.signSprites[i] = null;
+        const goods = this.goodsSprites[i];
+        if (goods) this.removeStatic(goods, x, y);
+        this.goodsSprites[i] = null;
+        this.cropSprites[i]?.destroy();
+        this.cropSprites[i] = null;
+        this.pathSprites[i]?.destroy();
+        this.pathSprites[i] = null;
         this.treeState[i] = 0;
         this.depositState[i] = 0;
         this.signState[i] = 0;
@@ -1352,13 +1383,7 @@ export class GameRenderer {
     // Tiles re-sync on the next view; territory is redrawn by `ensureChunk`.
     this.chunkSeen[c] = -1;
     this.tileSeen[c] = -1;
-    // A cleared Graphics keeps its GPU geometry: replace it with a fresh one.
-    const old = this.territoryChunks[c];
-    const fresh = new Graphics();
-    fresh.visible = false;
-    this.territory.addChildAt(fresh, this.territory.getChildIndex(old));
-    this.territoryChunks[c] = fresh;
-    old.destroy({ context: true });
+    disposeLayerChildren(this.territoryChunks[c]);
     this.territoryPending[c] = 1;
     disposeMesh(this.fogMesh[c]);
     this.fogMesh[c] = null;
@@ -1493,43 +1518,36 @@ export class GameRenderer {
 
   private drawTerritoryChunk(c: number): void {
     const { map } = this.sim;
-    const g = this.territoryChunks[c];
-    g.clear();
+    const holder = this.territoryChunks[c];
+    disposeLayerChildren(holder);
+    const sheet = overlaySheet();
+    const quads = OVERLAY_QUADS.reset();
     const x0 = (c % map.chunksX) * CHUNK;
     const y0 = Math.floor(c / map.chunksX) * CHUNK;
     const x1 = Math.min(map.w, x0 + CHUNK);
     const y1 = Math.min(map.h, y0 + CHUNK);
     const owner = this.tiles.owner;
     const ownerAt = (x: number, y: number) => (map.inBounds(x, y) ? owner[map.idx(x, y)] : 0);
-    // Dimming in strips: one polygon per run of foreign tiles along a row (following the corner
-    // heights), not one per tile — far fewer drawing instructions on big maps.
-    let dim = false;
+    // Dimming: one quad per foreign tile on its height-raised corners, one texel of the sheet.
+    const d = sheet.dim;
+    const q = QUAD;
     for (let y = y0; y < y1; y++) {
-      for (let x = x0; x < x1; ) {
-        if (ownerAt(x, y) === this.me) {
-          x++;
-          continue;
+      for (let x = x0; x < x1; x++) {
+        if (ownerAt(x, y) === this.me) continue;
+        for (let k = 0; k < 4; k++) {
+          const vx = x + (k === 1 || k === 2 ? 1 : 0);
+          const vy = y + (k >= 2 ? 1 : 0);
+          q[2 * k] = (vx - vy) * HALF_W;
+          q[2 * k + 1] = (vx + vy - 1) * HALF_H - this.tiles.vertexHeight(vx, vy);
         }
-        const a = x;
-        while (x < x1 && ownerAt(x, y) !== this.me) x++;
-        const pts: number[] = [];
-        for (let vx = a; vx <= x; vx++) {
-          const p = this.corner(vx, y);
-          pts.push(p.x, p.y);
-        }
-        for (let vx = x; vx >= a; vx--) {
-          const p = this.corner(vx, y + 1);
-          pts.push(p.x, p.y);
-        }
-        g.poly(pts);
-        dim = true;
+        quads.quadUV(q, d.uv);
       }
     }
-    if (dim) g.fill({ color: 0x0b1420, alpha: 0.3 });
     // Every player's border in its colour: edges between a tile it owns and one it does not.
     const owners = new Set<number>();
     for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) if (ownerAt(x, y)) owners.add(ownerAt(x, y));
-    for (const player of owners) this.drawBorder(g, player, x0, y0, x1, y1, ownerAt);
+    for (const player of owners) this.drawBorder(quads, sheet.posts, player, x0, y0, x1, y1, ownerAt);
+    if (quads.quads > 0) holder.addChild(quads.mesh(sheet.texture));
   }
 
   /**
@@ -1537,7 +1555,8 @@ export class GameRenderer {
    * colour, two on every border edge (between an owned tile and one that is not).
    */
   private drawBorder(
-    g: Graphics,
+    quads: QuadBuffer,
+    posts: readonly OverlayFrame[],
     player: number,
     x0: number,
     y0: number,
@@ -1546,8 +1565,7 @@ export class GameRenderer {
     ownerAt: (x: number, y: number) => number,
   ): void {
     const owned = (x: number, y: number) => ownerAt(x, y) === player;
-    const color = PLAYER_COLORS[(player - 1) % PLAYER_COLORS.length];
-    const posts: [number, number][] = [];
+    const post = posts[(player - 1) % PLAYER_COLORS.length];
     for (let y = y0; y < y1; y++) {
       for (let x = x0; x < x1; x++) {
         if (!owned(x, y)) continue;
@@ -1563,32 +1581,11 @@ export class GameRenderer {
           // Two posts per edge, at a quarter and three quarters of its length.
           const a = this.corner(ax, ay);
           const b = this.corner(bx, by);
-          for (const t of [0.25, 0.75]) posts.push([a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t]);
+          // The post's picture (shadow, post and cube in the player's colour, `overlays.ts`).
+          for (const t of [0.25, 0.75]) overlayQuad(quads, post, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, 1);
         }
       }
     }
-    if (posts.length === 0) return;
-    // Shadows, then posts, then the cubes (three faces each: lit top, left side, darker right side).
-    for (const [px, py] of posts) g.ellipse(px + 2, py + 0.8, 3, 1.4);
-    g.fill({ color: 0x000000, alpha: 0.35 });
-    for (const [px, py] of posts) g.rect(px - 0.9, py - 6, 1.8, 6);
-    g.fill({ color: 0x2a2620 });
-    const s = 2.6;
-    for (const [px, py] of posts) {
-      const top = py - 7.5;
-      g.poly([px, top - s * 0.5, px + s, top, px, top + s * 0.5, px - s, top]);
-    }
-    g.fill({ color: shadeColor(color, 1.25) });
-    for (const [px, py] of posts) {
-      const top = py - 7.5;
-      g.poly([px - s, top, px, top + s * 0.5, px, top + s * 0.5 + s, px - s, top + s]);
-    }
-    g.fill({ color });
-    for (const [px, py] of posts) {
-      const top = py - 7.5;
-      g.poly([px, top + s * 0.5, px + s, top, px + s, top + s, px, top + s * 0.5 + s]);
-    }
-    g.fill({ color: shadeColor(color, 0.65) });
   }
 
   /** Fields are flat, so they live in the ground layer of their chunk rather than among sorted objects. */
@@ -2145,13 +2142,16 @@ export class GameRenderer {
         x += ox;
         y += oy;
       }
-      // Screen point on the terrain (inline `surface`, no allocation per settler).
+      // Screen point on the terrain (inline `surface`, no allocation per settler); the height and
+      // sight only for settlers that may be on screen (`nearView`).
       const px = (x - y) * HALF_W;
-      const py = (x + y) * HALF_H - this.sim.map.heightAt(x, y);
+      const flat = (x + y) * HALF_H;
       const view = this.view;
+      const near = nearView(px, flat, view);
+      const py = near ? flat - this.tiles.heightAt(x, y) : flat;
       // Other players' settlers show only where the local player has sight.
       const seen =
-        !this.fogOn || s.owner === this.me || this.sim.isVisible(Math.round(x), Math.round(y), this.me);
+        near && (!this.fogOn || s.owner === this.me || this.sim.isVisible(Math.round(x), Math.round(y), this.me));
       const onScreen =
         seen &&
         s.inside === null &&
@@ -2167,7 +2167,7 @@ export class GameRenderer {
       v.hp = s.hp;
       // Walked distance drives the walk cycle; jumps (entering, leaving, loading) do not count.
       const step = Math.abs(x - v.lastX) + Math.abs(y - v.lastY);
-      if (step < 1.5) v.walked += Math.hypot(x - v.lastX, y - v.lastY);
+      if (step < 1.5) v.walked += walkStep(x - v.lastX, y - v.lastY);
       v.lastX = x;
       v.lastY = y;
       if (!onScreen) continue;
@@ -2458,13 +2458,6 @@ export class GameRenderer {
   }
 }
 
-/** A colour (0xRRGGBB, or a CSS hex string) scaled in brightness, clamped. */
-function shadeColor(color: number | string, k: number): number {
-  const c = typeof color === 'string' ? parseInt(color.replace('#', ''), 16) : color;
-  const ch = (v: number) => Math.min(255, Math.round(v * k));
-  return (ch((c >> 16) & 255) << 16) | (ch((c >> 8) & 255) << 8) | ch(c & 255);
-}
-
 /**
  * Quads of a mesh being built (four corners, their texture coordinates, two triangles each), in
  * buffers that grow and are reused by every chunk built; `mesh` copies out exactly what was added.
@@ -2503,6 +2496,12 @@ class QuadBuffer {
     this.quads++;
   }
 
+  /** A quad with corners `q` and texture coordinates `uv` (u0, v0 … u3, v3). */
+  quadUV(q: Float32Array, uv: Float32Array): void {
+    this.quad(q, 0, 0, 0, 0, 0, 0, 0, 0);
+    this.u.set(uv, (this.quads - 1) * 8);
+  }
+
   mesh(texture: Texture): MeshSimple {
     const n = this.quads;
     const indices = new Uint32Array(n * 6);
@@ -2519,12 +2518,37 @@ class QuadBuffer {
 }
 const GROUND_QUADS = new QuadBuffer();
 const SHADE_QUADS = new QuadBuffer();
+/** Territory dimming and posts, pebbles: pictures of `overlaySheet`. */
+const OVERLAY_QUADS = new QuadBuffer();
+
+/** A picture of the overlay sheet at (x, y), scaled by k round its anchor. */
+function overlayQuad(quads: QuadBuffer, f: OverlayFrame, x: number, y: number, k: number): void {
+  const q = QUAD;
+  const l = x + f.x0 * k;
+  const r = x + f.x1 * k;
+  const t = y + f.y0 * k;
+  const b = y + f.y1 * k;
+  q[0] = l;
+  q[1] = t;
+  q[2] = r;
+  q[3] = t;
+  q[4] = r;
+  q[5] = b;
+  q[6] = l;
+  q[7] = b;
+  quads.quadUV(q, f.uv);
+}
 /** One tile's four corners while a chunk is built. */
 const QUAD = new Float32Array(8);
 
 /** Slope shading levels (`slopeLight`): −7 … 5, one texel each in `shadeSheet`. */
 const SHADE_MIN = -7;
 const SHADE_TEXELS = 13;
+/** Each shading level's texture coordinates: its texel's centre at all four corners. */
+const SHADE_UV = Array.from({ length: SHADE_TEXELS }, (_, k) => {
+  const u = (k + 0.5) / SHADE_TEXELS;
+  return Float32Array.of(u, 0.5, u, 0.5, u, 0.5, u, 0.5);
+});
 let shadeTexture: Texture | null = null;
 
 /**
@@ -2577,10 +2601,16 @@ function disposeMesh(mesh: MeshSimple | null | undefined): void {
  */
 function disposeLayer(layer: Container | null | undefined): void {
   if (!layer) return;
-  for (const child of [...layer.children]) {
+  disposeLayerChildren(layer);
+  layer.destroy();
+}
+
+/** Frees a layer's children as `disposeLayer` does, keeping the (now empty) layer. */
+function disposeLayerChildren(layer: Container): void {
+  for (let k = layer.children.length - 1; k >= 0; k--) {
+    const child = layer.children[k];
     if (child instanceof MeshSimple) disposeMesh(child);
     else if (child instanceof Graphics) child.destroy({ context: true });
     else child.destroy();
   }
-  layer.destroy();
 }
