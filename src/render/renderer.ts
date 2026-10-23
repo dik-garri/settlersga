@@ -1,4 +1,5 @@
 import {
+  AlphaFilter,
   BatchableGraphics,
   BigPool,
   CanvasSource,
@@ -6,6 +7,7 @@ import {
   Graphics,
   GraphicsContextRenderData,
   MeshSimple,
+  Rectangle,
   Sprite,
   Text,
   Texture,
@@ -64,6 +66,7 @@ import { GarrisonLayer } from './garrison';
 import { BuildingMemory, lookOf, type BuildingLook } from './memory';
 import { TileMemory } from './tileMemory';
 import { overlaySheet, PEBBLE_TONES, type OverlayFrame } from './overlays';
+import { occluderDepth, occludes } from './occlusion';
 import { pathLevel } from '../sim/paths';
 import { chatPartner } from '../sim/idle';
 import { BANNERS, EDGE_DIRS, RUIN_SIZES, siteSprite, GROUND_PRIORITY, groundVariants, PATH_VARIANTS, PLAYER_COLORS, type GroundKind } from './sprites';
@@ -203,6 +206,8 @@ export interface ViewRect {
 /** Sprites reach this far above their tile (tall towers) and below it (shadows), in world pixels. */
 const OVERDRAW_UP = 260;
 const OVERDRAW_DOWN = 40;
+/** How far below an occluding tile its cut reaches (world px): the shadows things cast below their feet. */
+const OCCLUDER_SKIRT = OVERDRAW_DOWN;
 
 /** Highlighted circle of tiles, e.g. where a geologist would look. */
 export interface Area {
@@ -252,6 +257,23 @@ export class GameRenderer {
   private rockKeys: Uint32Array;
   /** Chunks whose rocks may have to move: tiles changed, a building came or went (`syncRocks`). */
   private readonly rocksDirty = new Set<number>();
+  /**
+   * Ground that hides what stands behind it (`occlusion.ts`): per chunk, one mesh per diagonal of its
+   * occluding tiles, among the objects at `occluderDepth`, drawn with the erase blend — it cuts its
+   * shape out of everything drawn before it (what stands behind), and the ground drawn under the
+   * objects shows through the cut. The objects are drawn through `cutFilter` (into a texture of their
+   * own, then onto the screen) while any of these meshes is in the scene, so the cut never reaches the
+   * ground. Rebuilt with the chunk's ground, when heights behind change and when a building comes or
+   * goes (its footprint and door never occlude: `occludersDirty`), released in `unloadChunk`.
+   */
+  private readonly occluders: MeshSimple[][] = [];
+  /** Per tile: 1 where the tile is an occluder now (`groundCovers`, for picking). */
+  private readonly occluderAt: Uint8Array;
+  /** Chunks that have occluder meshes. */
+  private readonly occluderChunks = new Set<number>();
+  private readonly occludersDirty = new Set<number>();
+  private readonly cutFilter = new AlphaFilter({ alpha: 1, resolution: 'inherit' });
+  private cutting = false;
   /**
    * Plain sprites (trees, boulders) given back by unloaded chunks, reused by the next chunk built
    * (`takeSprite`): a fly-over of a big map otherwise makes and drops a forest's worth every second.
@@ -450,6 +472,7 @@ export class GameRenderer {
     this.goodsSprites = new Array(n).fill(null);
     this.goodsState = new Uint16Array(n);
     this.cropState = new Uint8Array(n);
+    this.occluderAt = new Uint8Array(n);
     const chunks = map.chunksX * map.chunksY;
     this.ownerSeen = new Uint8Array(n).fill(255);
     this.fogSeen = new Uint8Array(n).fill(255);
@@ -480,9 +503,16 @@ export class GameRenderer {
     for (let c = 0; c < chunks; c++) {
       this.chunkObjects.push(new Set());
       this.boulders.push([]);
+      this.occluders.push([]);
       this.computeChunkBounds(c);
     }
     this.buildGround();
+    // The objects' own texture spans the map (clipped to the screen), so no bounds are measured.
+    const [bx0, by0, bx1, by1] = this.bounds;
+    this.objects.filterArea = new Rectangle(bx0 - 2 * HALF_W, by0 - OVERDRAW_UP - 300, bx1 - bx0 + 4 * HALF_W, by1 - by0 + OVERDRAW_UP + 300 + OVERDRAW_DOWN);
+    // On for the first frame, so its shader is compiled while the game loads, not at the first crest.
+    this.objects.filters = [this.cutFilter];
+    this.cutting = true;
   }
 
   /** Screen bounds of a chunk for culling, lifted by its highest corner (raised ground shows higher). */
@@ -562,6 +592,7 @@ export class GameRenderer {
     this.chunkReady[c] = 1;
     this.buildChunkGround(c);
     this.placeBoulders(c);
+    this.buildOccluders(c);
     if (this.territoryPending[c]) {
       this.territoryPending[c] = 0;
       this.drawTerritoryChunk(c);
@@ -629,9 +660,133 @@ export class GameRenderer {
     const [x0, y0, x1, y1] = foot;
     for (let cy = Math.floor(y0 / CHUNK); cy <= Math.floor(y1 / CHUNK); cy++) {
       for (let cx = Math.floor(x0 / CHUNK); cx <= Math.floor(x1 / CHUNK); cx++) {
-        if (cx >= 0 && cy >= 0 && cx < map.chunksX && cy < map.chunksY) this.rocksDirty.add(cx + cy * map.chunksX);
+        if (cx >= 0 && cy >= 0 && cx < map.chunksX && cy < map.chunksY) {
+          this.rocksDirty.add(cx + cy * map.chunksX);
+          this.occludersDirty.add(cx + cy * map.chunksX);
+        }
       }
     }
+  }
+
+  /**
+   * (Re)builds a chunk's occluders (see `occluders`): its tiles that hide ground behind them
+   * (`occludes`, over the heights as the player knows them), but no building's footprint or door —
+   * the building is sorted behind its own front tiles —, one erase mesh per diagonal, at the depth
+   * where what stands behind it goes under it. Quads as the ground's, corner for corner, so the cut
+   * follows the drawn slope exactly.
+   */
+  private buildOccluders(c: number): void {
+    const { map } = this.sim;
+    this.disposeOccluders(c);
+    const x0 = (c % map.chunksX) * CHUNK;
+    const y0 = Math.floor(c / map.chunksX) * CHUNK;
+    const x1 = Math.min(map.w, x0 + CHUNK);
+    const y1 = Math.min(map.h, y0 + CHUNK);
+    const known = this.tiles;
+    const q = QUAD;
+    const list = this.occluders[c];
+    for (let d = x0 + y0; d <= x1 - 1 + y1 - 1; d++) {
+      const quads = OCCLUDER_QUADS.reset();
+      for (let x = Math.max(x0, d - (y1 - 1)); x <= Math.min(x1 - 1, d - y0); x++) {
+        const y = d - x;
+        const i = map.idx(x, y);
+        if (map.building[i] || map.door[i] || !occludes(known, map.w, map.h, x, y)) continue;
+        this.occluderAt[i] = 1;
+        for (let k = 0; k < 4; k++) {
+          const vx = x + (k === 1 || k === 2 ? 1 : 0);
+          const vy = y + (k >= 2 ? 1 : 0);
+          q[2 * k] = (vx - vy) * HALF_W;
+          q[2 * k + 1] = (vx + vy - 1) * HALF_H - known.vertexHeight(vx, vy);
+        }
+        quads.quad(q, 0, 0, 0, 0, 0, 0, 0, 0);
+        // The skirt: what stands behind casts its shadow below its feet, onto ground that lies in
+        // front of this tile on screen (the slope going down from the crest); cut at this tile's
+        // depth, it takes only that, never what stands on the slope in front.
+        const [, , rx, ry, bx, by, lx, ly] = q;
+        const s = SKIRT;
+        s.set([lx, ly, bx, by, bx, by + OCCLUDER_SKIRT, lx, ly + OCCLUDER_SKIRT]);
+        quads.quad(s, 0, 0, 0, 0, 0, 0, 0, 0);
+        s.set([bx, by, rx, ry, rx, ry + OCCLUDER_SKIRT, bx, by + OCCLUDER_SKIRT]);
+        quads.quad(s, 0, 0, 0, 0, 0, 0, 0, 0);
+      }
+      if (quads.quads === 0) continue;
+      const mesh = quads.mesh(Texture.WHITE);
+      mesh.blendMode = 'erase';
+      mesh.zIndex = occluderDepth(d);
+      list.push(mesh);
+      this.chunkObjects[c].add(mesh);
+      if (this.chunkVisible[c]) this.objects.addChild(mesh);
+    }
+    if (list.length > 0) this.occluderChunks.add(c);
+  }
+
+  /** Frees a chunk's occluder meshes and clears its tiles' marks. */
+  private disposeOccluders(c: number): void {
+    const list = this.occluders[c];
+    if (list.length > 0) {
+      for (const mesh of list) {
+        this.chunkObjects[c].delete(mesh);
+        disposeMesh(mesh);
+      }
+      list.length = 0;
+      const { map } = this.sim;
+      const x0 = (c % map.chunksX) * CHUNK;
+      const y0 = Math.floor(c / map.chunksX) * CHUNK;
+      const x1 = Math.min(map.w, x0 + CHUNK);
+      for (let y = y0; y < Math.min(map.h, y0 + CHUNK); y++) this.occluderAt.fill(0, map.idx(x0, y), map.idx(x1 - 1, y) + 1);
+    }
+    this.occluderChunks.delete(c);
+  }
+
+  private syncOccluders(): void {
+    for (const c of this.occludersDirty) if (this.chunkReady[c]) this.buildOccluders(c);
+    this.occludersDirty.clear();
+    // The objects go through their own texture only while an occluder is in the scene: an erase
+    // drawn straight onto the screen would cut a hole through the ground.
+    let cut = false;
+    for (const c of this.occluderChunks) {
+      if (this.chunkVisible[c]) {
+        cut = true;
+        break;
+      }
+    }
+    if (cut !== this.cutting) {
+      this.cutting = cut;
+      this.objects.filters = cut ? [this.cutFilter] : null;
+    }
+  }
+
+  /**
+   * Whether world point (wx, wy) shows ground in front of something at depth `z` there: an occluder
+   * sorted over that depth whose quad holds the point (what the erase blend cuts). Looks only at the
+   * tiles in the point's screen column, from that depth to where even the highest ground could not
+   * reach the point.
+   */
+  groundCovers(wx: number, wy: number, z: number): boolean {
+    const { map } = this.sim;
+    const known = this.tiles;
+    const col = wx / HALF_W;
+    for (let k = Math.floor(col); k <= Math.ceil(col); k++) {
+      // Tiles with x − y = k from the depth of `z` forward; x + y has the parity of k.
+      let d = Math.ceil(z + 0.98);
+      if ((((d + k) % 2) + 2) % 2 !== 0) d++;
+      for (; (d - 1) * HALF_H - 255 <= wy; d += 2) {
+        if (occluderDepth(d) <= z) continue;
+        const x = (d + k) / 2;
+        const y = (d - k) / 2;
+        if (!map.inBounds(x, y) || !this.occluderAt[map.idx(x, y)]) continue;
+        const t = Math.abs(wx - k * HALF_W) / HALF_W;
+        if (t > 1) continue;
+        // The quad's two triangles meet on its vertical top–bottom diagonal.
+        const top = (d - 1) * HALF_H - known.vertexHeight(x, y);
+        const bottom = (d + 1) * HALF_H - known.vertexHeight(x + 1, y + 1);
+        const side = wx >= k * HALF_W ? d * HALF_H - known.vertexHeight(x + 1, y) : d * HALF_H - known.vertexHeight(x, y + 1);
+        const a = top + (side - top) * t;
+        const b = bottom + (side - bottom) * t;
+        if (wy >= Math.min(a, b) && wy <= Math.max(a, b)) return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -816,6 +971,14 @@ export class GameRenderer {
       if (this.tiles.heightVersion[c] === this.heightSeen[c]) continue;
       this.heightSeen[c] = this.tiles.heightVersion[c];
       this.computeChunkBounds(c);
+      // Occluders look back over the ground behind them: this chunk's and those in front of it.
+      const cx = c % map.chunksX;
+      const cy = Math.floor(c / map.chunksX);
+      for (let dy = 0; dy <= 1; dy++) {
+        for (let dx = 0; dx <= 1; dx++) {
+          if (cx + dx < map.chunksX && cy + dy < map.chunksY) this.occludersDirty.add(c + dx + dy * map.chunksX);
+        }
+      }
       if (!this.chunkReady[c]) continue; // built from the new heights when it comes into view
       this.buildChunkGround(c);
       this.drawTerritoryChunk(c);
@@ -955,6 +1118,7 @@ export class GameRenderer {
     this.sweepSigns();
     this.syncBuildings();
     this.syncRocks();
+    this.syncOccluders();
     this.syncRuins();
     this.syncSettlers(alpha, timeMs);
     this.animals.sync(alpha, timeMs, view);
@@ -997,10 +1161,13 @@ export class GameRenderer {
    * wins. Only settlers drawn on screen count, so the fog of war is respected.
    */
   settlerAt(sx: number, sy: number): number | null {
+    // A figure behind a crest is cut where the slope in front hides it (`groundCovers`): not there.
+    const at = this.occluderChunks.size > 0 ? this.world.toLocal({ x: sx, y: sy }) : null;
+    const hidden = (z: number) => at !== null && this.groundCovers(at.x, at.y, z);
     // Settlers drawn as animals (pack donkeys) compete by depth like the figures.
     const animal = this.animals.unitAt(sx, sy);
-    let best: number | null = animal ? animal.id : null;
-    let bestZ = animal ? animal.z : -Infinity;
+    let best: number | null = animal && !hidden(animal.z) ? animal.id : null;
+    let bestZ = best !== null && animal ? animal.z : -Infinity;
     for (const [id, v] of this.settlerViews) {
       if (!v.root.parent || !v.root.visible || !v.body.visible) continue;
       const b = v.body.getBounds();
@@ -1009,7 +1176,7 @@ export class GameRenderer {
       const top = b.y + b.height * 0.12;
       const bottom = b.y + b.height * 0.92;
       if (sx < cx - halfW || sx > cx + halfW || sy < top || sy > bottom) continue;
-      if (v.root.zIndex > bestZ) {
+      if (v.root.zIndex > bestZ && !hidden(v.root.zIndex)) {
         bestZ = v.root.zIndex;
         best = id;
       }
@@ -1350,6 +1517,7 @@ export class GameRenderer {
     this.groundLayers[c] = null;
     for (const rock of this.boulders[c]) this.recycleStatic(rock, c);
     this.boulders[c] = [];
+    this.disposeOccluders(c);
     const x0 = (c % map.chunksX) * CHUNK;
     const y0 = Math.floor(c / map.chunksX) * CHUNK;
     for (let y = y0; y < Math.min(map.h, y0 + CHUNK); y++) {
@@ -2520,6 +2688,8 @@ const GROUND_QUADS = new QuadBuffer();
 const SHADE_QUADS = new QuadBuffer();
 /** Territory dimming and posts, pebbles: pictures of `overlaySheet`. */
 const OVERLAY_QUADS = new QuadBuffer();
+/** One diagonal of a chunk's occluding tiles (`buildOccluders`). */
+const OCCLUDER_QUADS = new QuadBuffer();
 
 /** A picture of the overlay sheet at (x, y), scaled by k round its anchor. */
 function overlayQuad(quads: QuadBuffer, f: OverlayFrame, x: number, y: number, k: number): void {
@@ -2540,6 +2710,8 @@ function overlayQuad(quads: QuadBuffer, f: OverlayFrame, x: number, y: number, k
 }
 /** One tile's four corners while a chunk is built. */
 const QUAD = new Float32Array(8);
+/** One quad of an occluder's skirt (`buildOccluders`). */
+const SKIRT = new Float32Array(8);
 
 /** Slope shading levels (`slopeLight`): −7 … 5, one texel each in `shadeSheet`. */
 const SHADE_MIN = -7;
