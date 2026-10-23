@@ -29,8 +29,11 @@ export const HAT_STYLES: readonly HatStyle[] = ['cap', 'straw', 'helmet', 'hood'
  * 3D outfits (`art/blender/figures.py` `OUTFITS`): what a profession wears over the tunic, rendered
  * as their own pose groups (`hold:<tool>@<outfit>`, `work:<action>@<outfit>`); professions without
  * one use the plain groups. Fighters' armour and shields by level (`legion1..3`, `archer1..3`, as in
- * Settlers 4 their gear changes with the level), the healer's robe, the watchman's cape and the
- * saboteur's dark jerkin.
+ * Settlers 4 their gear changes with the level), the healer's robe, the watchman's cape, the
+ * saboteur's dark jerkin, and Settlers 4's Roman builder (leather apron, big mallet on the shoulder),
+ * digger (leather jerkin, broad spade on the shoulder), pioneer (long green apron, spade), geologist
+ * (leather coat, puffed shoulders and a hat band in the player's colour, brimmed leather hat) and
+ * thief (black cap with a band in the player's colour, dark puffed shoulders, black breeches).
  */
 export type Outfit =
   | 'legion1'
@@ -42,7 +45,12 @@ export type Outfit =
   | 'leader'
   | 'healer'
   | 'watch'
-  | 'saboteur';
+  | 'saboteur'
+  | 'builder'
+  | 'digger'
+  | 'pioneer'
+  | 'geologist'
+  | 'thief';
 
 /** Synthesised sound effects (see `audio/sounds.ts`). */
 export type SoundId =
@@ -131,16 +139,20 @@ const SWORD_HELMETS: readonly HatStyle[] = ['galea1', 'galea2', 'galea3'];
 const BOW_HELMETS: readonly HatStyle[] = ['galea1t', 'galea2', 'galea3'];
 
 const STYLES: Partial<Record<SettlerKind, Partial<SettlerStyle>>> = {
-  carrier: { tunic: '#3f6fb5', hat: '#6b4423', hatStyle: 'cap' },
-  builder: { tunic: '#d08a2c', hat: '#c23b2b', hatStyle: 'cap', work: 'hammer', holds: 'hammer' },
-  digger: { tunic: '#8a6a3c', hat: '#5a4636', hatStyle: 'straw', work: 'dig', holds: 'shovel' },
+  // Settlers 4's Roman carriers, builders and diggers go bare-headed under their black curls (the
+  // classic art tints the hair with `hat`); the builder and the digger wear leather over the tunic
+  // and carry their tools up on the shoulder.
+  carrier: { tunic: '#3f6fb5', hat: '#1e1a18', hatStyle: 'bare' },
+  builder: { tunic: '#d08a2c', hat: '#1e1a18', hatStyle: 'bare', work: 'hammer', holds: 'hammer', outfit: 'builder' },
+  digger: { tunic: '#8a6a3c', hat: '#1e1a18', hatStyle: 'bare', work: 'dig', holds: 'shovel', outfit: 'digger' },
   // A carrier called by a barracks on his way to it, still in plain clothes.
-  recruit: { tunic: '#8a7f6a', hat: '#5a4636' },
+  recruit: { tunic: '#8a7f6a', hat: '#1e1a18', hatStyle: 'bare' },
   woodcutter: { tunic: '#3d7d3a', hat: '#2e4d22', hatStyle: 'hood', work: 'chop', holds: 'axe' },
   forester: { tunic: '#7a9a3a', hat: '#5a4020', hatStyle: 'straw', work: 'dig', holds: 'shovel' },
   stonecutter: { tunic: '#7d7f86', hat: '#4a3b2c', hatStyle: 'cap', work: 'mine', holds: 'pick' },
   miner: { tunic: '#555b66', hat: '#d9b44a', hatStyle: 'helmet', work: 'mine', holds: 'pick' },
-  geologist: { tunic: '#7a5c3a', hat: '#3b2b1a', hatStyle: 'straw', work: 'hammer', holds: 'hammer' },
+  // The geologist's brimmed leather hat is part of his outfit (its band takes the player's colour).
+  geologist: { tunic: '#7a5c3a', hat: '#3b2b1a', hatStyle: 'bare', work: 'knock', holds: 'hammer', outfit: 'geologist' },
   waterman: { tunic: '#4a90c2', hat: '#e0d6c0', hatStyle: 'cap', work: 'draw', holds: 'bucket' },
   fisher: { tunic: '#2f6f8f', hat: '#c9b27a', hatStyle: 'straw', work: 'fish', holds: 'rod' },
   hunter: { tunic: '#4f6a32', hat: '#6b4a2a', hatStyle: 'hood', work: 'shoot', holds: 'bow' },
@@ -178,9 +190,11 @@ const STYLES: Partial<Record<SettlerKind, Partial<SettlerStyle>>> = {
   },
   /** Squad leader: a gilded helmet with a crest side to side, gilded cuirass, round gilded shield, cloak. */
   leader: { hat: '#d23a2a', hatStyle: 'plume', work: 'sword', holds: 'sword', fighter: true, outfit: 'leader' },
-  // Specialists: the pioneer digs border stones in, the thief goes about in a dark hood, hands free.
-  pioneer: { tunic: '#a8743a', hat: '#6b4a2a', hatStyle: 'straw', work: 'dig', holds: 'shovel' },
-  thief: { tunic: '#2e2a30', hat: '#1e1b20', hatStyle: 'hood', work: 'sow' },
+  // Specialists, as Settlers 4's Romans: the pioneer in a long green apron digs border stones in with
+  // his spade; the thief goes about in a black cap (its band in the player's colour, part of his
+  // outfit), dark puffed shoulders and black breeches, hands free, his loot on the shoulder.
+  pioneer: { tunic: '#a8743a', hat: '#1e1a18', hatStyle: 'bare', work: 'dig', holds: 'shovel', outfit: 'pioneer' },
+  thief: { tunic: '#2e2a30', hat: '#1e1b20', hatStyle: 'bare', work: 'sow', outfit: 'thief' },
   // The saboteur (network games): a knitted cap, a dark close-fitting jerkin with a sash of pouches,
   // dark leg wraps, and the pickaxe he hacks at enemy walls with (`smash`). Unlike the thief (a hood,
   // hands free) he goes about with his tool.

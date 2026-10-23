@@ -53,10 +53,28 @@ OUTFITS = {
     'healer': (['none'], []),  # infirmary's healer: long linen robe, stole, satchel of herbs
     'watch': (['spear'], []),  # lookout's watchman: short wool cape, horn at the hip (and his spear)
     'saboteur': (['pick'], ['smash']),  # saboteur: dark jerkin, sash with pouches, leg wraps (and a pick)
+    # Settlers 4's Roman builders and diggers carry their tools up on the shoulder.
+    'builder': (['hammer'], ['hammer']),  # leather apron and girdle, a big mallet
+    'digger': (['shovel'], ['dig']),  # brown leather jerkin, a broad spade
+    'pioneer': (['shovel'], ['dig']),  # a long green apron, a broad spade, a pouch of border pegs
+    'geologist': (['hammer'], ['knock']),  # leather coat, puffed shoulders, brimmed leather hat, satchel
+    'thief': (['none', 'carry'], ['sow']),  # black cap, dark puffed shoulders, black breeches; loot on the shoulder
 }
-#: Bumped when a look changes, so its cached groups are rendered again.
+#: The fighters keep the body they were rendered with (`Figure.build_classic`); everybody else wears
+#: the Roman civilian's (`Figure.build_civil`).
+FIGHTERS = {'legion1', 'legion2', 'legion3', 'archer1', 'archer2', 'archer3', 'leader'}
+#: Outfits with a cap of their own over the crown (the hair on top is hidden under it).
+CAPPED = {'geologist', 'thief'}
+#: Bumped when a look changes, so its cached groups are rendered again; `PLAIN_REV` for the plain
+#: (civilian) groups and hats.
 LOOK_REV = {'legion1': 1, 'legion2': 1, 'legion3': 1, 'archer1': 1, 'archer2': 1, 'archer3': 1, 'leader': 3,
-            'healer': 1, 'watch': 1, 'saboteur': 1}
+            'healer': 2, 'watch': 2, 'saboteur': 2, 'builder': 1, 'digger': 1, 'pioneer': 1, 'geologist': 1,
+            'thief': 1}
+PLAIN_REV = 2
+#: Hat styles worn by the fighters (rendered with their body); the rest sit on the civilian's
+#: bigger mop of hair and are drawn a little larger (`CIVIL_HAT_SCALE`).
+FIGHTER_HATS = {'galea1', 'galea2', 'galea3', 'galea1t', 'plume'}
+CIVIL_HAT_SCALE = 1.1
 ACTIONS = {
     'chop': ('axe', [0.95, 0.62, 0.2, 0.1], None),
     'hammer': ('hammer', [0.82, 0.5, 0.16, 0.34], None),
@@ -80,6 +98,9 @@ BEND = {
     'knock': [30, 42, 50, 46],
     'smash': [-4, 4, 14, 8],  # leaning back on the swing, into the blow
 }
+#: Actions only ever done in an outfit (the geologist's knock, the saboteur's smash, the fighters'
+#: sword): no plain group (the game falls back to the tool held still, which nobody sees).
+OUTFIT_ONLY = {'knock', 'smash', 'sword'}
 #: Where the torso bends (the belt), in figure space.
 WAIST_Z = 0.44
 
@@ -101,6 +122,12 @@ HOLD = {
     # Upright at the side, the butt near the ground: the tilt cancels the arm's angle.
     'spear': (0.06, 7),
 }
+#: Tools carried on the shoulder (arm angle in turns, tool tilt in degrees) by outfit.
+SHOULDERED = {'builder': (0.3, 8), 'digger': (0.3, -4), 'pioneer': (0.3, -4)}
+#: The carrier's near arm up at the load on his shoulder (turns, inward yaw in degrees), and where
+#: the load sits (figure space: on top of the near shoulder, against the head).
+CARRY_ARM, CARRY_YAW = 0.93, -14
+LOAD_AT = (0.0, -0.155, 0.635)
 #: At work the tool continues the arm, its head at the far end.
 WORK_TILT = 180
 #: Tools swung with both hands at work (the other arm follows the tool arm).
@@ -159,6 +186,7 @@ class Figure:
         # Everything above the belt hangs from the waist, so a work pose can bend the torso (`BEND`).
         self.waist = pivot('waist', (0, 0, WAIST_Z))
         self.head_ref = pivot('head', (0.005, 0, 0.76 - WAIST_Z), self.waist)
+        self.load_ref = pivot('load', (LOAD_AT[0], LOAD_AT[1], LOAD_AT[2] - WAIST_Z), self.waist)
         self.legs = []
         for side in (-1, 1):
             p = pivot(f'hip{side}', (0, side * 0.062, hip_z))
@@ -167,37 +195,15 @@ class Figure:
             # Leather straps of the sandals.
             self.attach(lib.cylinder((0, side * 0.062, 0.08), 0.047, 0.025, self.leather, verts=10), p)
             self.legs.append(p)
-        tunic = [
-            # A short tunic flaring to the knee, a belt and a strap across the chest.
-            lib.cylinder((0, 0, 0.42), 0.155, 0.32, self.tunic, radius2=0.112, verts=18),
-            lib.cylinder((0, 0, 0.615), 0.112, 0.07, self.tunic, radius2=0.085, verts=18),
-        ]
-        for obj in tunic:
-            obj['mask'] = 1
-            self.attach(obj, self.waist)
-        # Bent over, the tunic is two parts: the skirt below the belt stays with the legs, the bodice
-        # above it bends with the torso (the whole tunic would swing its hem up behind). Hidden upright.
-        self.tunic_whole = tunic[0]
-        self.skirt = lib.cylinder((0, 0, 0.35), 0.155, 0.18, self.tunic, radius2=0.131, verts=18)
-        self.bodice = lib.cylinder((0, 0, 0.49), 0.134, 0.18, self.tunic, radius2=0.112, verts=18)
-        for obj, parent in ((self.skirt, self.root), (self.bodice, self.waist)):
-            obj['mask'] = 1
-            obj.hide_render = True
-            self.attach(obj, parent)
-        for obj in (
-            lib.cylinder((0, 0, 0.45), 0.118, 0.045, self.leather, verts=18),
-            lib.box((0.0, 0.0, 0.55), (0.24, 0.035, 0.03), self.leather, rot=(0.9, 0, 0)),
-            lib.sphere((0.005, 0, 0.76), 0.122, self.skin),
-            # A mop of black hair, a big nose, ears.
-            lib.sphere((-0.018, 0, 0.8), 0.128, self.hair, scale=(1.0, 1.04, 0.78)),
-            lib.sphere((-0.04, 0, 0.74), 0.11, self.hair, scale=(0.9, 1.05, 0.75)),
-            lib.sphere((0.122, 0, 0.745), 0.028, self.skin, scale=(1, 0.9, 1.2)),
-            lib.sphere((0.0, 0.118, 0.75), 0.026, self.skin),
-            lib.sphere((0.0, -0.118, 0.75), 0.026, self.skin),
-            lib.sphere((0.108, 0.04, 0.775), 0.012, self.dark),
-            lib.sphere((0.108, -0.04, 0.775), 0.012, self.dark),
-        ):
-            self.attach(obj, self.waist)
+        # Two bodies share the limbs, the tools and the outfits: the fighters keep the body they were
+        # rendered with (`FIGHTERS`, `classic`); everybody else wears Settlers 4's Roman civilian
+        # (`civil`, `build_civil`). Each body: {'always': parts, 'upright': whole tunic, 'bent': skirt
+        # and bodice, 'crown': hair a cap hides}.
+        self.bodies = {'classic': self.build_classic(), 'civil': self.build_civil()}
+        self.body = 'classic'
+        self.bend = 0.0
+        self.capped = False
+        self.hair_hidden = False
         self.arms = []
         self.hands = []
         self.grips = []
@@ -205,7 +211,11 @@ class Figure:
             p = pivot(f'shoulder{side}', (0, side * 0.145, 0.62 - WAIST_Z), self.waist)
             sleeve = lib.cylinder((0, side * 0.145, 0.59), 0.055, 0.08, self.tunic, verts=10)
             sleeve['mask'] = 1
-            self.attach(sleeve, p)
+            self.bodies['classic']['always'].append(self.attach(sleeve, p))
+            # The civilian's tunic is all but sleeveless: a short cap over the shoulder.
+            sleeve = lib.cylinder((0, side * 0.147, 0.6), 0.052, 0.05, self.tunic, radius2=0.048, verts=12)
+            sleeve['mask'] = 1
+            self.bodies['civil']['always'].append(self.attach(sleeve, p))
             self.attach(lib.cylinder((0, side * 0.145, 0.49), 0.041, 0.19, self.skin, verts=10), p)
             hand = lib.sphere((0, side * 0.145, 0.38), 0.045, self.skin)
             self.attach(hand, p)
@@ -223,6 +233,146 @@ class Figure:
         obj.parent = parent
         obj.matrix_world = world
         return obj
+
+    def build_classic(self):
+        """The body the fighters were rendered with (kept as it was, so their frames stay
+        reproducible): a short tunic flaring to the knee, a belt and a strap across the chest, a round
+        head under a mop of black hair."""
+        tunic = [
+            lib.cylinder((0, 0, 0.42), 0.155, 0.32, self.tunic, radius2=0.112, verts=18),
+            lib.cylinder((0, 0, 0.615), 0.112, 0.07, self.tunic, radius2=0.085, verts=18),
+        ]
+        for obj in tunic:
+            obj['mask'] = 1
+            self.attach(obj, self.waist)
+        # Bent over, the tunic is two parts: the skirt below the belt stays with the legs, the bodice
+        # above it bends with the torso (the whole tunic would swing its hem up behind). Hidden upright.
+        skirt = lib.cylinder((0, 0, 0.35), 0.155, 0.18, self.tunic, radius2=0.131, verts=18)
+        bodice = lib.cylinder((0, 0, 0.49), 0.134, 0.18, self.tunic, radius2=0.112, verts=18)
+        for obj, parent in ((skirt, self.root), (bodice, self.waist)):
+            obj['mask'] = 1
+            self.attach(obj, parent)
+        always = [tunic[1]]
+        for obj in (
+            lib.cylinder((0, 0, 0.45), 0.118, 0.045, self.leather, verts=18),
+            lib.box((0.0, 0.0, 0.55), (0.24, 0.035, 0.03), self.leather, rot=(0.9, 0, 0)),
+            lib.sphere((0.005, 0, 0.76), 0.122, self.skin),
+            # A mop of black hair, a big nose, ears.
+            lib.sphere((-0.018, 0, 0.8), 0.128, self.hair, scale=(1.0, 1.04, 0.78)),
+            lib.sphere((-0.04, 0, 0.74), 0.11, self.hair, scale=(0.9, 1.05, 0.75)),
+            lib.sphere((0.122, 0, 0.745), 0.028, self.skin, scale=(1, 0.9, 1.2)),
+            lib.sphere((0.0, 0.118, 0.75), 0.026, self.skin),
+            lib.sphere((0.0, -0.118, 0.75), 0.026, self.skin),
+            lib.sphere((0.108, 0.04, 0.775), 0.012, self.dark),
+            lib.sphere((0.108, -0.04, 0.775), 0.012, self.dark),
+        ):
+            always.append(self.attach(obj, self.waist))
+        return {'always': always, 'upright': [tunic[0]], 'bent': [skirt, bodice], 'crown': [], 'hair': []}
+
+    def build_civil(self):
+        """Settlers 4's Roman civilian: a big round head under a thick mop of tousled black hair —
+        locks sticking out at the sides and the back, a fringe over the brow —, a round face with a
+        big nose, brows and ears; an all but sleeveless tunic to the knee (the player's colour) with a
+        rolled hem, belted low with a pale cord; sandal straps wound up the shins. Stockier than the
+        fighters' body, the same height (hats, rank marks and goods in hand keep their places)."""
+        S = self.skin
+        hair = lib.mat_grain('civhair', (0.035, 0.035, 0.045), (0.17, 0.17, 0.21), scale=44, stretch=(1, 1, 3), bump=0.8)
+        cord = lib.mat_grain('cord', (0.6, 0.56, 0.48), (0.82, 0.78, 0.68), scale=50, stretch=(1, 1, 1), bump=0.6)
+        tunic = [
+            # The tunic hangs straight from the shoulders and flares a little to a rolled hem.
+            lib.cylinder((0, 0, 0.43), 0.16, 0.32, self.tunic, radius2=0.118, verts=22),
+            lib.cylinder((0, 0, 0.62), 0.12, 0.07, self.tunic, radius2=0.09, verts=22),
+            lib.cylinder((0, 0, 0.278), 0.164, 0.03, self.tunic, verts=22),
+        ]
+        for obj in tunic:
+            obj['mask'] = 1
+            self.attach(obj, self.waist)
+        skirt = lib.cylinder((0, 0, 0.36), 0.16, 0.18, self.tunic, radius2=0.136, verts=22)
+        hem = lib.cylinder((0, 0, 0.278), 0.164, 0.03, self.tunic, verts=22)
+        bodice = lib.cylinder((0, 0, 0.5), 0.138, 0.18, self.tunic, radius2=0.118, verts=22)
+        for obj, parent in ((skirt, self.root), (hem, self.root), (bodice, self.waist)):
+            obj['mask'] = 1
+            self.attach(obj, parent)
+        always = [tunic[1]]
+        parts = [
+            lib.cylinder((0, 0, 0.455), 0.141, 0.03, cord, verts=24),
+            lib.sphere((0.138, 0.035, 0.452), 0.02, cord),
+            lib.cylinder((0.145, 0.045, 0.41), 0.008, 0.07, cord, rot=(0.15, -0.1, 0), verts=6),
+            lib.cylinder((0, 0, 0.665), 0.052, 0.06, S, verts=12),
+            # A big round head: face, nose, brows, eyes, ears.
+            lib.sphere((0.005, 0, 0.765), 0.128, S, scale=(1.0, 1.0, 1.02)),
+            lib.sphere((0.13, 0, 0.748), 0.031, S, scale=(1.0, 0.9, 1.2)),
+            lib.sphere((0.0, 0.126, 0.752), 0.028, S, scale=(0.7, 1, 1.15)),
+            lib.sphere((0.0, -0.126, 0.752), 0.028, S, scale=(0.7, 1, 1.15)),
+            lib.sphere((0.112, 0.044, 0.778), 0.014, self.dark),
+            lib.sphere((0.112, -0.044, 0.778), 0.014, self.dark),
+            lib.box((0.112, 0.046, 0.805), (0.016, 0.045, 0.013), hair, rot=(0.2, -0.3, 0)),
+            lib.box((0.112, -0.046, 0.805), (0.016, 0.045, 0.013), hair, rot=(-0.2, -0.3, 0)),
+        ]
+        crown = []
+        # The mop: a cap of hair over the crown and the back of the head, down to the nape …
+        crown.append(lib.lumpy((-0.02, 0, 0.82), 0.142, hair, scale=(1.0, 1.06, 0.72), strength=0.5, noise=0.7, seed=61))
+        parts.append(lib.lumpy((-0.055, 0, 0.75), 0.13, hair, scale=(0.86, 1.06, 0.86), strength=0.45, noise=0.7, seed=62))
+
+        def lock(theta, phi, length, radius, seed, droop=0.35):
+            """A tapering lock of hair from the head's surface, pointing out and a little down
+            (theta from the top, phi round from the face)."""
+            c = Vector((-0.02, 0, 0.785))
+            d = Vector((math.sin(theta) * math.cos(phi), math.sin(theta) * math.sin(phi), math.cos(theta)))
+            d.z -= droop * math.sin(theta)
+            d.normalize()
+            base = c + d * 0.112
+            mid = base + d * length / 2
+            rot = d.to_track_quat('Z', 'Y').to_euler()
+            obj = lib.cylinder(tuple(mid), radius, length, hair, radius2=radius * 0.22, rot=tuple(rot), verts=7)
+            return obj
+
+        k = 0
+        # … tousled locks all round below the crown (none in front of the face) …
+        for phi in range(40, 330, 26):
+            if 150 < phi < 210:  # the back of the head
+                theta, length = 1.55, 0.085
+            else:
+                theta, length = 1.3, 0.075
+            a = math.radians(phi + (7 if k % 2 else -7))
+            parts.append(lock(theta + (0.18 if k % 2 else 0), a, length, 0.034, k))
+            k += 1
+        # … spikes on top (hidden under a cap) …
+        for phi, theta in ((0, 0.55), (60, 0.6), (120, 0.62), (180, 0.65), (240, 0.62), (300, 0.6), (30, 0.2), (200, 0.25)):
+            crown.append(lock(theta, math.radians(phi), 0.07, 0.036, k, droop=0.1))
+            k += 1
+        # … and a fringe of short locks over the brow.
+        for y in (-0.06, -0.02, 0.02, 0.06):
+            parts.append(lock(0.95, math.atan2(y, 0.11), 0.06, 0.03, k, droop=0.9))
+            k += 1
+        for obj in parts + crown:
+            self.attach(obj, self.waist)
+        always += parts
+        hair_parts = [o for o in parts + crown if hair.name in [m.name for m in o.data.materials]]
+        # Sandal straps wound up the shins.
+        for i, side in enumerate((-1, 1)):
+            for j in range(3):
+                strap = lib.cylinder((0.003, side * 0.062, 0.115 + 0.042 * j), 0.05 - 0.002 * j, 0.012, self.leather,
+                                     rot=((0.22 if j % 2 else -0.22), 0, 0), verts=12)
+                always.append(self.attach(strap, self.legs[i]))
+        return {'always': always, 'upright': [tunic[0], tunic[2]], 'bent': [skirt, hem, bodice], 'crown': crown,
+                'hair': hair_parts}
+
+    def show_body(self):
+        """Shows the current body (`self.body`), upright or bent, its crown hair unless a cap covers it."""
+        for name, parts in self.bodies.items():
+            on = name == self.body
+            for o in parts['always']:
+                o.hide_render = not on
+            for o in parts['upright']:
+                o.hide_render = not on or self.bend != 0
+            for o in parts['bent']:
+                o.hide_render = not on or self.bend == 0
+            for o in parts['crown']:
+                o.hide_render = not on or self.capped
+            if self.hair_hidden:
+                for o in parts['hair']:
+                    o.hide_render = True
 
     # ------------------------------------------------------------------------------------- tools
 
@@ -410,7 +560,110 @@ class Figure:
             'healer': robe + stole + satchel,
             'watch': cape + horn,
             'saboteur': doublet + sash + pouches + wraps,
+            **self.build_workers(on_body, masked),
         }
+
+    def build_workers(self, on_body, masked):
+        """The Roman workers and specialists of Settlers 4 who look their trade (`OUTFITS`), over the
+        civilian's tunic: the builder's leather apron and girdle with a big mallet, the digger's brown
+        leather jerkin with a broad spade, the pioneer's long green apron with the same spade and a
+        pouch of pegs, the geologist's leather coat with puffed shoulders in the player's colour and a
+        brimmed leather hat, the thief's black cap with a band in the player's colour, dark puffed
+        shoulders and black breeches. Returns outfit → parts."""
+        r = self.grips[0]
+        L = self.leather
+        hide = lib.mat_grain('workhide', (0.36, 0.2, 0.09), (0.55, 0.33, 0.15), scale=22, stretch=(1, 1, 1), bump=0.5)
+        dark_hide = lib.mat_grain('darkhide', (0.24, 0.14, 0.07), (0.4, 0.25, 0.12), scale=22, stretch=(1, 1, 1), bump=0.5)
+        green = lib.mat_grain('apron', (0.2, 0.36, 0.12), (0.34, 0.52, 0.2), scale=18, stretch=(1, 1, 4), bump=0.4)
+        black = lib.mat_grain('black', (0.05, 0.05, 0.06), (0.16, 0.15, 0.16), scale=26, stretch=(1, 1, 3), bump=0.45)
+        iron = lib.mat_flat('bigiron', (0.86, 0.88, 0.9), rough=0.3)
+        iron.node_tree.nodes['Principled BSDF'].inputs['Metallic'].default_value = 0.8
+        brass = lib.mat_flat('workbrass', BRASS, rough=0.3)
+        brass.node_tree.nodes['Principled BSDF'].inputs['Metallic'].default_value = 0.9
+        lean = math.atan(0.13)  # a garment's front leans in towards the shoulders
+
+        def on_grip(parts):
+            for obj in parts:
+                obj.parent = r
+            return parts
+
+        def mallet():
+            """The builder's big mallet (Settlers 4's builders carry a hammer with a head as big as
+            their fist): a rounded iron head round the plain hammer's, iron bands at the faces."""
+            return on_grip([lib.box((0, 0, 0.3), (0.23, 0.115, 0.115), iron, bevel=0.035),
+                            lib.cylinder((0, 0, 0.12), 0.02, 0.3, self.wood, verts=8)])
+
+        def spade():
+            """A broad, rounded iron spade round the plain shovel's blade, a socket on the haft."""
+            return on_grip([lib.sphere((0, 0, 0.52), 1.0, iron, scale=(0.085, 0.016, 0.12)),
+                            lib.cylinder((0, 0, 0.43), 0.024, 0.06, iron, verts=10),
+                            lib.cylinder((0, 0, -0.03), 0.026, 0.04, self.wood, rot=(math.pi / 2, 0, 0), verts=8)])
+
+        def belt(mat, z=0.45, r=0.14, depth=0.05, buckle=True):
+            parts = [lib.cylinder((0, 0, z), r, depth, mat, verts=22)]
+            if buckle:
+                parts.append(lib.box((r + 0.004, 0, z), (0.012, 0.04, 0.036), brass, bevel=0.004))
+            return parts
+
+        def jerkin(mat, top=0.64, puffs=None):
+            """A sleeveless jerkin over the tunic from the belt to the shoulders; `puffs` (a material,
+            or 'mask' for the player's colour) gives it round puffed shoulders."""
+            parts = [lib.cylinder((0, 0, 0.53), 0.146, 0.2, mat, radius2=0.124, verts=22),
+                     lib.cylinder((0, 0, top), 0.125, 0.05, mat, radius2=0.096, verts=22)]
+            if puffs:
+                for side in (-1, 1):
+                    m = self.tunic if puffs == 'mask' else puffs
+                    p = lib.lumpy((0, side * 0.148, 0.615), 0.07, m, scale=(1.1, 0.95, 0.72), strength=0.3, noise=1.4,
+                                  seed=70 + side)
+                    if puffs == 'mask':
+                        masked(p)
+                    parts.append(p)
+            return parts
+
+        # The builder: a leather apron from the belt to the knee in front, a broad girdle and a strap
+        # over the shoulder, leather bracers; the tunic shows at the chest and the sides.
+        builder = on_body(belt(L, depth=0.06) +
+                          [lib.box((0.152, 0, 0.36), (0.014, 0.17, 0.2), hide, rot=(0, -0.1, 0), bevel=0.01),
+                           lib.box((0.0, 0.0, 0.55), (0.29, 0.04, 0.03), L, rot=(0.9, 0, 0)),
+                           lib.cylinder((0, 0, 0.54), 0.131, 0.03, L, verts=22)])
+        builder += mallet()
+        # The digger: a brown leather jerkin, a girdle, leather bracers; the red skirt shows below.
+        digger = on_body(jerkin(hide, puffs=hide) + belt(dark_hide, z=0.44) +
+                         [lib.box((0.136 - 0.012 * k, 0, 0.5 + 0.045 * k), (0.01, 0.05, 0.008), dark_hide, rot=(0, -lean, 0))
+                          for k in range(3)])
+        digger += spade()
+        # The pioneer: a long green apron from the chest to below the knee, on a neck strap, tied at
+        # the waist, and a leather pouch of border pegs at the hip.
+        pioneer = on_body([lib.box((0.158, 0, 0.42), (0.016, 0.2, 0.36), green, rot=(0, -0.09, 0), bevel=0.012),
+                           lib.box((0.13, 0, 0.6), (0.014, 0.15, 0.06), green, rot=(0, -0.35, 0), bevel=0.01),
+                           lib.cylinder((0, 0, 0.635), 0.11, 0.016, L, rot=(0, 0.35, 0), verts=20)] +
+                          belt(L, z=0.455, r=0.138, depth=0.03, buckle=False) +
+                          [lib.box((0.0, 0.16, 0.42), (0.08, 0.04, 0.09), L, bevel=0.012),
+                           lib.cylinder((-0.015, 0.165, 0.475), 0.008, 0.06, self.wood, verts=6),
+                           lib.cylinder((0.02, 0.165, 0.48), 0.008, 0.07, self.wood, verts=6)])
+        pioneer += spade()
+        # The geologist: a leather coat over the tunic, puffed shoulders in the player's colour, a
+        # satchel on a strap, and a round leather hat with a brim and a band in the player's colour
+        # (worn over the hair: a cap of his own, `CAPPED`).
+        geo = on_body(jerkin(hide, puffs='mask') + belt(dark_hide, z=0.45) +
+                      [lib.box((0.0, -0.165, 0.41), (0.1, 0.045, 0.09), dark_hide, bevel=0.015),
+                       lib.cylinder((0, 0, 0.53), 0.148, 0.02, dark_hide, rot=(0.55, 0, 0), verts=24),
+                       lib.sphere((-0.012, 0, 0.845), 0.138, dark_hide, scale=(1.02, 1.04, 0.74)),
+                       lib.cylinder((-0.005, 0, 0.83), 0.205, 0.016, dark_hide, verts=28),
+                       masked(lib.cylinder((-0.01, 0, 0.855), 0.145, 0.03, self.tunic, verts=26))])
+        # The thief: a black round cap with a band in the player's colour, black puffed shoulders on a
+        # black jerkin open over the tunic, a leather belt, black breeches to the knee (over the
+        # tunic's skirt, on the legs so they walk).
+        thief = on_body([lib.sphere((-0.02, 0, 0.835), 0.138, black, scale=(1.0, 1.05, 0.68)),
+                         masked(lib.cylinder((-0.01, 0, 0.815), 0.141, 0.035, self.tunic, rot=(0, -0.15, 0), verts=26))] +
+                        [lib.lumpy((0, side * 0.148, 0.615), 0.072, black, scale=(1.1, 0.95, 0.72), strength=0.3,
+                                   noise=1.4, seed=80 + side) for side in (-1, 1)] +
+                        belt(L, z=0.45, r=0.138, depth=0.04))
+        for i, side in enumerate((-1, 1)):
+            for obj in (lib.cylinder((0, side * 0.064, 0.27), 0.068, 0.15, black, radius2=0.058, verts=14),):
+                thief.append(self.attach(obj, self.legs[i]))
+        thief.append(self.attach(lib.cylinder((0, 0, 0.36), 0.168, 0.14, black, radius2=0.142, verts=22), self.root))
+        return {'builder': builder, 'digger': digger, 'pioneer': pioneer, 'geologist': geo, 'thief': thief}
 
     def build_fighters(self, steel, gold, brass, on_grip, on_body, masked):
         """The Roman fighters by level, after Settlers 4: their gear changes with the level, not only
@@ -623,6 +876,9 @@ class Figure:
         for objs in self.extras.values():
             for o in objs:
                 o.hide_render = o not in worn
+        self.body = 'classic' if outfit in FIGHTERS else 'civil'
+        self.capped = outfit in CAPPED
+        self.show_body()
 
     # ------------------------------------------------------------------------------------- poses
 
@@ -633,8 +889,8 @@ class Figure:
         hand's tool across the body (the bowman's bow held low); `bend` (degrees) bows the torso forward."""
         self.root.rotation_euler = (0, 0, yaw)
         self.waist.rotation_euler = (0, math.radians(bend), 0)
-        self.tunic_whole.hide_render = bend != 0
-        self.skirt.hide_render = self.bodice.hide_render = bend == 0
+        self.bend = bend
+        self.show_body()
         for side, p in zip((-1, 1), self.legs):
             p.rotation_euler = (0, math.radians(side * leg), 0)
         for side, p, a, y in ((-1, self.arms[0], right, right_yaw), (1, self.arms[1], left, left_yaw)):
@@ -665,7 +921,13 @@ def hold_frames(shape, outfit=None):
     for f in range(WALK_FRAMES + 1):
         leg, sw = WALK[f] if f < WALK_FRAMES else (0, 0)
         if shape == 'carry':
-            kw = dict(leg=leg * 0.8, right=0.42, left=0.42, right_yaw=26, left_yaw=26)
+            # Settlers 4's carriers bear the load on the shoulder, steadied by the raised near hand,
+            # the free arm swinging (the ware itself is drawn by the game at `carryAt`).
+            kw = dict(leg=leg * 0.85, right=CARRY_ARM, right_yaw=CARRY_YAW, left=swing(sw))
+        elif outfit in SHOULDERED and shape == OUTFITS[outfit][0][0]:
+            # Builders, diggers and pioneers carry their tools up on the shoulder, head behind.
+            arm, tilt = SHOULDERED[outfit]
+            kw = dict(leg=leg, right=arm + swing(-sw) * 0.1, right_yaw=16, left=swing(sw), tilt=tilt)
         elif shape == 'bow' and outfit and outfit.startswith('archer'):
             # Settlers 4's bowman carries the bow low before him, slanting across the body.
             kw = dict(leg=leg, right=swing(-sw) + 0.04, left=0.16, left_yaw=18, left_roll=-62, left_tilt=-12)
@@ -710,7 +972,7 @@ def poses():
     for `Figure.pose`. Hold groups have 4 walk frames and a standing one; work groups 4 frames. The
     plain groups come first, then each outfit's own (`hold:<tool>@<outfit>`, `work:<action>@<outfit>`)."""
     groups = [(f'hold:{shape}', hold_frames(shape), None) for shape in TOOLS]
-    groups += [(f'work:{action}', work_frames(action), None) for action in ACTIONS]
+    groups += [(f'work:{action}', work_frames(action), None) for action in ACTIONS if action not in OUTFIT_ONLY]
     for outfit, (tools, actions) in OUTFITS.items():
         groups += [(f'hold:{shape}@{outfit}', hold_frames(shape, outfit), outfit) for shape in tools]
         groups += [(f'work:{action}@{outfit}', work_frames(action), outfit) for action in actions]
@@ -776,7 +1038,7 @@ def build_hat_proxy(fig):
     z = 0.76
     objs = [
         lib.sphere((-0.01, 0, z + 0.06), 0.16, None, scale=(1.05, 1.05, 0.85)),
-        lib.cylinder((0, 0, z + 0.07), 0.25, 0.03, None, verts=24),
+        lib.cylinder((0, 0, z + 0.075), 0.275, 0.035, None, verts=24),
         lib.cylinder((-0.01, 0, z + 0.16), 0.15, 0.26, None, verts=18),
         lib.cylinder((-0.02, 0, z - 0.1), 0.17, 0.1, None, verts=18),
         # Fighters' helmets: their crests front to back (down the back at level 3) and the squad
@@ -867,18 +1129,19 @@ class Packer:
         self.row = max(self.row, h)
         return len(self.frames) - 1
 
-    def save(self, out, prefix, first=0):
-        """Writes pages `first`… (the earlier ones are kept as they are on disk); returns their names."""
-        names = []
+    def save(self, out, prefix, first=0, names=None):
+        """Writes pages `first`… (the earlier ones are kept as they are on disk) as `prefix-<k>.png`,
+        or under `names`; returns their names."""
+        written = []
         for k, page in enumerate(self.pages):
             if k < first:
                 continue
             # The last page is cut down to the rows it uses.
             used = self.y + self.row + 1 if k == len(self.pages) - 1 else PAGE
-            name = f'{prefix}-{k}.png'
+            name = names[k - first] if names else f'{prefix}-{k}.png'
             save_rgba(page[:used], os.path.join(out, name))
-            names.append(name)
-        return names
+            written.append(name)
+        return written
 
 
 def save_rgba(px, path):
@@ -891,11 +1154,15 @@ def save_rgba(px, path):
     bpy.data.images.remove(img)
 
 
-def build_settlers(out, tmp, only=None, hats=None, add=False):
+def build_settlers(out, tmp, only=None, hats=None, add=False, civil=False):
     """Renders every pose group in every direction plus the hat layers; writes settlers-*.png and
     settlers.json into `out`. `only`: a list of group keys to render (for quick looks). With `add`,
     keeps the existing sheet as it is and renders only the groups it lacks (a new action or outfit),
-    packed after the frames on its last page (re-quantize that page afterwards)."""
+    packed after the frames on its last page (re-quantize that page afterwards). With `civil`
+    (`settlers:civil`), keeps the fighters' groups and helmets with the pages they lie on, file and
+    pixels as they are, and renders everything else — the plain groups, every other outfit, the
+    other hats and the goods in hand — onto new pages (quantize only those, then run
+    art/tools/blank_unused.py, which clears what is left of the old frames on the kept pages)."""
     scene = lib.reset_scene(samples=14)
     # Small frames render fine on the CPU; it keeps the GPU (and the machine) cool, and Metal kernel
     # compilation has crashed long runs.
@@ -916,7 +1183,26 @@ def build_settlers(out, tmp, only=None, hats=None, add=False):
         'walk': WALK_FRAMES, 'groups': {}, 'hats': {}, 'carryAt': [], 'carryBehind': [],
         'rankY': -round(1.02 * FIGURE_SCALE * lib.PX_PER_UNIT * math.cos(math.radians(30)) + 6),
     }
-    kept = 0  # pages of an existing sheet left untouched (`add`)
+    kept = 0  # pages of an existing sheet left untouched (`add`, `civil`)
+    names = None  # the kept pages' file names (`civil`)
+    if civil:
+        with open(os.path.join(out, 'settlers.json')) as f:
+            old = json.load(f)
+        groups = {k: v for k, v in old['groups'].items() if k.partition('@')[2] in FIGHTERS}
+        hat_rows = {k: v for k, v in old['hats'].items() if k in FIGHTER_HATS}
+        ids = sorted({i for rows in groups.values() for row in rows for fr in row for i in fr if i >= 0} |
+                     {i for row in hat_rows.values() for i in row if i >= 0})
+        pages = sorted({old['frames'][i][0] for i in ids})
+        names = [old['pages'][p] for p in pages]
+        new_id = {i: k for k, i in enumerate(ids)}
+        pack.frames = [[pages.index(old['frames'][i][0])] + old['frames'][i][1:] for i in ids]
+        remap = lambda i: new_id[i] if i >= 0 else -1  # noqa: E731
+        meta['groups'] = {k: [[[remap(i) for i in fr] for fr in row] for row in rows] for k, rows in groups.items()}
+        meta['hats'] = {k: [remap(i) for i in row] for k, row in hat_rows.items()}
+        meta['heads'] = {k: v for k, v in old.get('heads', {}).items() if k in groups}
+        kept = len(pages)
+        pack.pages = [None] * kept
+        pack.new_page()
     if add:
         with open(os.path.join(out, 'settlers.json')) as f:
             meta = json.load(f)
@@ -935,7 +1221,7 @@ def build_settlers(out, tmp, only=None, hats=None, add=False):
         gx, gy = lib.ground_dir(d * math.pi / 4)
         yaws.append(math.atan2(gy, gx))
     for key, frames, outfit in poses():
-        if only and key not in only or add and key in meta['groups']:
+        if only and key not in only or (add or civil) and key in meta['groups']:
             continue
         # Where the head is when the pose bends the torso, against standing (the hat layer follows).
         heads = None
@@ -945,7 +1231,7 @@ def build_settlers(out, tmp, only=None, hats=None, add=False):
         # Each group is cached (uint8) once rendered, so an interrupted run resumes where it stopped.
         work = key.startswith('work:')
         per = 3 if work else 2  # work poses add the arm-over-hat pass
-        rev = f'-r{LOOK_REV[outfit]}' if outfit else ''
+        rev = f'-r{LOOK_REV[outfit]}' if outfit else f'-p{PLAIN_REV}'
         cached = os.path.join(cache, key.replace(':', '-').replace('@', '_') + f'-{DIRS}-{per}{rev}.npz')
         if os.path.exists(cached):
             data = np.load(cached)['frames'].astype(np.float32) / 255
@@ -991,14 +1277,27 @@ def build_settlers(out, tmp, only=None, hats=None, add=False):
         row = []
         for _, kw in hold_frames('carry'):
             fig.pose(yaws[d], **kw)
-            sx, sy = lib.screen_point(scene, fig.hand_point())
+            sx, sy = lib.screen_point(scene, fig.load_ref.matrix_world.translation)
             row.append([round(sx - ANCHOR_X, 1), round(sy - ANCHOR_Y, 1)])
         meta['carryAt'].append(row)
-        behind = lib.camera_depth(scene, fig.hand_point()) > lib.camera_depth(scene, (0, 0, 0.45))
+        # The load on the far shoulder is drawn behind the figure (the head hides part of it): further
+        # from the camera than the body's axis at its height.
+        behind = lib.camera_depth(scene, fig.load_ref.matrix_world.translation) > \
+            lib.camera_depth(scene, fig.root.matrix_world @ Vector((0, 0, LOAD_AT[2])))
         meta['carryBehind'].append(bool(behind))
-    if hats if hats is not None else not only:
-        meta['hats'] = render_hats(scene, fig, yaws, pack, path)
-    meta['pages'] = pack.save(out, 'settlers')
+    if civil:
+        meta['hats'].update(render_hats(scene, fig, yaws, pack, path, [h for h in HAT_STYLES if h not in FIGHTER_HATS]))
+        # New pages take the free names; the old ones nothing refers to any more are removed.
+        free = (f'settlers-{k}.png' for k in range(10 ** 4) if f'settlers-{k}.png' not in names)
+        fresh = [next(free) for _ in pack.pages[kept:]]
+        for name in os.listdir(out):
+            if name.startswith('settlers-') and name.endswith('.png') and name not in names + fresh:
+                os.remove(os.path.join(out, name))
+        meta['pages'] = names + pack.save(out, 'settlers', first=kept, names=fresh)
+    else:
+        if hats if hats is not None else not only:
+            meta['hats'] = render_hats(scene, fig, yaws, pack, path)
+        meta['pages'] = pack.save(out, 'settlers')
     meta['frames'] = pack.frames
     with open(os.path.join(out, 'settlers.json'), 'w') as f:
         json.dump(meta, f, separators=(',', ':'))
@@ -1092,7 +1391,7 @@ def build_hat(style, fig):
         'helmet': lambda: [lib.sphere((-0.005, 0, z + 0.05), 0.135, shiny, scale=(1.05, 1.05, 0.85)),
                            lib.cylinder((0, 0, z + 0.0), 0.15, 0.025, shiny, verts=20),
                            lib.box((-0.01, 0, z + 0.19), (0.2, 0.025, 0.04), shiny, bevel=0.01)],
-        'hood': lambda: [lib.sphere((-0.03, 0, z + 0.03), 0.15, white, scale=(1.05, 1.05, 1.0)),
+        'hood': lambda: [lib.sphere((-0.058, 0, z + 0.035), 0.15, white, scale=(1.05, 1.05, 1.0)),
                          lib.cylinder((-0.02, 0, z - 0.12), 0.16, 0.08, white, radius2=0.12, verts=18)],
         'chef': lambda: [lib.cylinder((-0.01, 0, z + 0.14), 0.12, 0.2, white, radius2=0.14, verts=18),
                          lib.sphere((-0.01, 0, z + 0.25), 0.15, white, scale=(1, 1, 0.5))],
@@ -1116,6 +1415,12 @@ def build_hat(style, fig):
         'galea3': lambda: galea(steel, (0.6, -1.8, 0.2, 15)),
     }
     objs = parts[style]()
+    if style not in FIGHTER_HATS:
+        # Civilians' hats sit on the bigger mop of hair: a little larger, about the head's centre.
+        c = Vector((0.005, 0, 0.775))
+        for o in objs:
+            o.location = c + (o.location - c) * CIVIL_HAT_SCALE
+            o.scale = o.scale * CIVIL_HAT_SCALE
     for o in objs:
         fig.attach(o, fig.waist)
     return objs
@@ -1132,6 +1437,12 @@ def render_hats(scene, fig, yaws, pack, path, styles=HAT_STYLES):
         o.is_holdout = True
     scale = fig.root.scale.copy()
     for style in styles:
+        # A hat is cut by the head it sits on: the fighters' body for theirs, the civilian's for the rest.
+        fig.body, fig.capped, fig.bend = ('classic' if style in FIGHTER_HATS else 'civil'), False, 0.0
+        # The civilian's hair is left out of the cut: the hat is drawn over it in the game, so locks
+        # under the hat are covered and only those sticking out from under it show.
+        fig.hair_hidden = True
+        fig.show_body()
         fig.root.scale = (1, 1, 1)
         fig.root.rotation_euler = (0, 0, 0)
         fig.waist.rotation_euler = (0, 0, 0)
@@ -1151,4 +1462,6 @@ def render_hats(scene, fig, yaws, pack, path, styles=HAT_STYLES):
         print('settlers: hat', style, flush=True)
     for o in body:
         o.is_holdout = False
+    fig.hair_hidden = False
+    fig.show_body()
     return hats
