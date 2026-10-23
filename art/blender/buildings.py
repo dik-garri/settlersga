@@ -181,10 +181,11 @@ def torus(loc, major, minor, mat, rot=(0, 0, 0)):
     return obj
 
 
-def stone_course(x0, x1, y0, y1, z0, z1, mats, rnd, block=0.16, depth=0.05, faces=('y', 'x')):
+def stone_course(x0, x1, y0, y1, z0, z1, mats, rnd, block=0.16, depth=0.05, faces=('y', 'x'), holes=()):
     """Rugged blocks proud of a wall's two visible faces (−Y and +X, or those of them in `faces`),
     between heights z0 and z1: the lumpy masonry of Settlers 4 stone buildings. Every block gets its
-    own tone, size, depth and tilt, with dark gaps between them."""
+    own tone, size, depth and tilt, with dark gaps between them. `holes` are openings left free of
+    blocks, each (face, a0, a1, hz0, hz1): along X from a0 to a1 on face 'y', along Y on face 'x'."""
     if not isinstance(mats, list):
         mats = [mats]
     rows = max(1, round((z1 - z0) / (block * 0.7)))
@@ -193,12 +194,23 @@ def stone_course(x0, x1, y0, y1, z0, z1, mats, rnd, block=0.16, depth=0.05, face
     def one(loc, size, rot):
         lib.box(loc, size, mats[rnd.randrange(len(mats))], rot=rot, bevel=0.02)
 
+    def clip(p, w, cuts):  # (start, width) cut short before an opening; width 0 inside one
+        for (a0, a1) in cuts:
+            if a0 <= p < a1:
+                return a1, 0.0
+            if p < a0 < p + w:
+                w = a0 - p
+        return p, w
+
     for r in range(rows):
         z = z0 + (r + 0.5) * h
         shift = (r % 2) * block / 2
+        cuts = {f: [(a0, a1) for (g, a0, a1, hz0, hz1) in holes if g == f and hz0 < z + h / 2 and hz1 > z - h / 2]
+                for f in ('y', 'x')}
         x = x0 - shift
         while 'y' in faces and x < x1:
             w = min(block * rnd.uniform(0.65, 1.35), x1 - x)
+            x, w = clip(x, w, cuts['y'])
             if w > 0.04:
                 d = depth * rnd.uniform(0.6, 1.4)
                 one((x + w / 2, y0 - d / 2, z + rnd.uniform(-0.01, 0.01)), (w - 0.035, d, h * rnd.uniform(0.74, 0.88)),
@@ -207,6 +219,7 @@ def stone_course(x0, x1, y0, y1, z0, z1, mats, rnd, block=0.16, depth=0.05, face
         y = y0 - shift
         while 'x' in faces and y < y1:
             w = min(block * rnd.uniform(0.65, 1.35), y1 - y)
+            y, w = clip(y, w, cuts['x'])
             if w > 0.04:
                 d = depth * rnd.uniform(0.6, 1.4)
                 one((x1 + d / 2, y + w / 2, z + rnd.uniform(-0.01, 0.01)), (d, w - 0.035, h * rnd.uniform(0.74, 0.88)),
@@ -4170,60 +4183,217 @@ def build_lookout():
     lib.tag(4)
 
 
+def healer_column(x, y, H, z_cut, shaft, stone, band, red, dark, face, part):
+    """A round stone column at a corner of the healer's house, built in two parts: 'low' two rings
+    for a base and the shaft up to `z_cut`; 'high' the rest of the shaft, a capital under the eaves
+    and, high up, a white band with a red cross turned to `face` (radians in the ground plane)."""
+    r = 0.084
+    if part == 'low':
+        lib.cylinder((x, y, 0.095), r + 0.045, 0.05, stone, verts=28, bevel=0.012)
+        lib.cylinder((x, y, 0.14), r + 0.025, 0.04, stone, verts=28, bevel=0.01)
+        lib.cylinder((x, y, (0.16 + z_cut) / 2), r, z_cut - 0.16, shaft, verts=24)
+        return
+    lib.cylinder((x, y, (z_cut + H) / 2), r, H - z_cut, shaft, verts=24)
+    lib.cylinder((x, y, H - 0.075), r + 0.02, 0.03, stone, verts=28, bevel=0.008)
+    lib.box((x, y, H - 0.03), (0.23, 0.23, 0.06), stone, bevel=0.014)
+    zb0, zb1 = H * 0.55, H * 0.73
+    lib.cylinder((x, y, zb0 - 0.012), r + 0.007, 0.024, dark, verts=24)
+    lib.cylinder((x, y, (zb0 + zb1) / 2), r + 0.008, zb1 - zb0, band, verts=24)
+    zc, rc = (zb0 + zb1) / 2, r + 0.016
+    lib.box((x + math.cos(face) * rc, y + math.sin(face) * rc, zc), (0.036, 0.012, (zb1 - zb0) * 0.8), red,
+            rot=(0, 0, face + math.pi / 2))
+    for da in (-0.36, 0.0, 0.36):
+        a = face + da
+        lib.box((x + math.cos(a) * rc, y + math.sin(a) * rc, zc), (0.033, 0.012, 0.036), red, rot=(0, 0, a + math.pi / 2))
+
+
+def wall_basin(x, y, z, stone, water, dark):
+    """A stone wash basin on the wall: a flared bowl with a rounded lip and water in it, on a
+    tapering bracket."""
+    lib.cylinder((x, y, z - 0.05), 0.055, 0.1, stone, radius2=0.1, verts=28)
+    torus((x, y, z), 0.098, 0.015, stone)
+    lib.cylinder((x, y, z - 0.01), 0.09, 0.01, water, verts=28)
+    lib.cylinder((x, y + 0.03, z - 0.17), 0.012, 0.15, dark, radius2=0.045, verts=12)
+
+
+def checker_floor(x0, x1, y0, y1, keep, black, white, z, s=0.07):
+    """Square black and white floor tiles between x0..x1, y0..y1 wherever `keep(x, y)` holds."""
+    nx, ny = max(1, round((x1 - x0) / s)), max(1, round((y1 - y0) / s))
+    sx, sy = (x1 - x0) / nx, (y1 - y0) / ny
+    for i in range(nx):
+        for j in range(ny):
+            px, py = x0 + (i + 0.5) * sx, y0 + (j + 0.5) * sy
+            if keep(px, py):
+                lib.box((px, py, z), (sx - 0.005, sy - 0.005, 0.014), black if (i + j) % 2 else white)
+
+
+def rounded_outline(x0, x1, yf, yb, r, step):
+    """Points (x, y, tangent angle) every `step` along a U from (x0, yb) down to the front yf, round
+    the front corners (radius r) and back up to (x1, yb): where a curb's stones go."""
+    pts = []
+    segs = (('line', (x0, yb), (x0, yf + r)), ('arc', (x0 + r, yf + r), math.pi, 1.5 * math.pi),
+            ('line', (x0 + r, yf), (x1 - r, yf)), ('arc', (x1 - r, yf + r), 1.5 * math.pi, 2 * math.pi),
+            ('line', (x1, yf + r), (x1, yb)))
+    for seg in segs:
+        if seg[0] == 'line':
+            (ax, ay), (bx, by) = seg[1], seg[2]
+            n = max(1, round(math.hypot(bx - ax, by - ay) / step))
+            ang = math.atan2(by - ay, bx - ax)
+            pts += [(ax + (bx - ax) * (k + 0.5) / n, ay + (by - ay) * (k + 0.5) / n, ang) for k in range(n)]
+        else:
+            (ox, oy), a0, a1 = seg[1], seg[2], seg[3]
+            n = max(1, round(r * (a1 - a0) / step))
+            for k in range(n):
+                a = a0 + (a1 - a0) * (k + 0.5) / n
+                pts.append((ox + math.cos(a) * r, oy + math.sin(a) * r, a + math.pi / 2))
+    return pts
+
+
 def build_infirmary():
-    """A calm limewashed house of healing on a stone socle under a terracotta hipped roof, a porch on
-    posts over the door, a sign with a bronze bowl and a leaf (our own motif), and raised herb beds
-    with a low fence in front."""
+    """The Settlers 4 Roman healer's house: a long block of small grey-brown squared stones under a
+    steep hipped roof of big azure slates, a raised lantern along the ridge (a strip of pale stone
+    under its own little hipped roof); a round stone column at each corner, a white band with a red
+    cross high on it; in the long wall the doorway in a chunky stone frame, a curb of blue-grey stone
+    round a black-and-white chequered threshold before it, a stone wash basin on the wall either side;
+    an arched, shuttered window in the short wall."""
+    import goods
+
     rnd = random.Random(61)
-    walls, blocks = stone_walls(), block_mats()
-    plaster = lib.mat_grain('lime', (0.84, 0.81, 0.72), (0.95, 0.93, 0.86), scale=12, stretch=(1, 1, 1), bump=0.3)
-    tiles = terracotta_mats('itc')
-    beam, door = beam_mat(), door_mat()
-    glass = lib.mat_flat('iglass', (0.38, 0.52, 0.56), rough=0.25)
-    bronze = lib.mat_flat('bronze', (0.62, 0.42, 0.18), rough=0.35)
-    herb = lib.mat_leaves('herb', (0.08, 0.24, 0.05), (0.2, 0.46, 0.1), (0.42, 0.66, 0.2), scale=18)
-    bloom = [lib.mat_flat(f'bloom{k}', c, 0.6) for k, c in enumerate(((0.62, 0.42, 0.78), (0.95, 0.85, 0.35), (0.95, 0.95, 0.92)))]
-    soil = lib.mat_grain('soil', (0.24, 0.13, 0.06), (0.4, 0.24, 0.12), scale=20, stretch=(1, 1, 1), bump=0.8)
-    earth_pad((0.05, -0.2, 0), 1.0, 1.1, seed=61)
+    walls = stone_walls()
+    blocks = grain_set('ifw', (((0.42, 0.38, 0.34), (0.68, 0.63, 0.56)), ((0.48, 0.43, 0.38), (0.75, 0.69, 0.61)),
+                               ((0.36, 0.33, 0.31), (0.6, 0.56, 0.52)), ((0.5, 0.46, 0.41), (0.78, 0.73, 0.66))),
+
+                       scale=7, bump=1.0)
+    pale = pale_blocks('ifp')
+    slates = grain_set('ifs', (((0.27, 0.4, 0.57), (0.5, 0.65, 0.84)), ((0.33, 0.47, 0.63), (0.6, 0.75, 0.9)),
+                               ((0.2, 0.3, 0.45), (0.38, 0.5, 0.66)), ((0.38, 0.5, 0.64), (0.68, 0.79, 0.9))),
+                       scale=10, bump=0.5)
+    ridge = lib.mat_flat('ifs-r', (0.26, 0.38, 0.52))
+    shaft = lib.mat_grain('if-shaft', (0.56, 0.53, 0.48), (0.8, 0.77, 0.71), scale=6, stretch=(1, 1, 6), bump=0.5)
+    blue = grain_set('ifb', (((0.36, 0.42, 0.5), (0.6, 0.67, 0.76)), ((0.42, 0.48, 0.56), (0.68, 0.74, 0.82)),
+                             ((0.3, 0.35, 0.42), (0.52, 0.58, 0.66))), scale=7, bump=0.8)
+    white = lib.mat_flat('if-white', (0.92, 0.91, 0.87), rough=0.6)
+    black = lib.mat_flat('if-black', (0.07, 0.07, 0.08), rough=0.5)
+    red = lib.mat_flat('if-red', (0.8, 0.06, 0.05), rough=0.6)
+    darkstone = lib.mat_flat('if-dark', (0.16, 0.16, 0.18), rough=0.7)
+    water = lib.mat_flat('if-water', (0.36, 0.62, 0.52), rough=0.15)
+    inside = lib.mat_flat('if-inside', (0.3, 0.46, 0.42), rough=0.8)
+    shutter = grain_set('ifsh', (((0.58, 0.44, 0.26), (0.8, 0.66, 0.44)), ((0.52, 0.38, 0.22), (0.74, 0.6, 0.38))),
+                        scale=4, stretch=(1, 1, 9), bump=0.6)
+    beam = beam_mat()
+    earth_pad((0.0, -0.22, 0), 1.05, 1.15, seed=61)
     lib.tag(0)
-    cx, cy, L, W, H = -0.1, 0.22, 1.05, 0.88, 0.62
+
+    cx, cy, L, W, H, rh = -0.05, 0.08, 1.62, 0.98, 0.96, 0.6
     x0, x1, y0, y1 = cx - L / 2, cx + L / 2, cy - W / 2, cy + W / 2
-    corner_stakes(x0, x1, y0, y1)
+    dx, dw, dh, rec = 0.05, 0.34, 0.58, 0.1        # the doorway and how deep it goes in
+    wy, wzs, ww, wr = cy + 0.08, 0.56, 0.24, 0.12   # the side window: centre, springing, width, arch
+    px0, px1, pyf, pr = dx - 0.34, dx + 0.34, y0 - 0.42, 0.16  # the threshold's curb
+    hz = H * 0.48                                   # where the walls stand at stage 2
+    cols = ((x0 - 0.04, y0 - 0.04, -1.4), (x1 + 0.04, y0 - 0.04, -math.pi / 4), (x1 + 0.04, y1 + 0.04, -0.2),
+            (x0 - 0.04, y1 + 0.04, -math.pi / 4))
+    corner_stakes(x0 - 0.05, x1 + 0.05, y0 - 0.05, y1 + 0.05)
     lib.tag(0, until=0)
-    lib.box((cx, cy, 0.05), (L + 0.08, W + 0.08, 0.1), blocks[1], bevel=0.02)
+
+    # Stage 1: footing, the curb's base, the column plinths, a timber frame to raise the walls round.
+    lib.box((cx, cy, 0.03), (L + 0.08, W + 0.08, 0.06), blocks[2], bevel=0.015)
+
+    def slab(grow, z0, z1, mat):  # the threshold's rounded slab, `grow` wider than the curb
+        a, b, f, rr = px0 - grow, px1 + grow, pyf - grow, pr + grow
+        outline = [(a, y0)]
+        for ccx, a0 in ((a + rr, math.pi), (b - rr, 1.5 * math.pi)):
+            outline += [(ccx + math.cos(a0 + k * math.pi / 24) * rr, f + rr + math.sin(a0 + k * math.pi / 24) * rr)
+                        for k in range(13)]
+        outline.append((b, y0))
+        goods.prism(outline, z0, z1, mat, bevel=0.01)  # one mesh: a box and corner cylinders rendered black
+
+
+    slab(0.06, 0.0, 0.05, blue[2])
+    for (x, y, _) in cols:
+        lib.box((x, y, 0.035), (0.25, 0.25, 0.07), blue[1], bevel=0.016)
     lib.tag(1)
-    stone_house(x0, x1, y0, y1, 0.26, rnd, walls, blocks, z0=0.1, block=0.17)
+    _b().timber_frame(cx, cy, L, W, H, rh, beam, axis='x')
+    lib.tag(1, until=2)
+
+    # Stage 2: the walls half up, the curb and the chequered threshold, the columns' bases.
+    door_hole = ('y', dx - dw / 2 - 0.04, dx + dw / 2 + 0.04, 0.0, dh + 0.06)
+    win_hole = ('x', wy - ww / 2 - 0.05, wy + ww / 2 + 0.05, wzs - 0.26, wzs + wr + 0.05)
+    lib.box((cx, (y0 + rec + y1) / 2, hz / 2), (L, y1 - y0 - rec, hz), walls)
+    for (a, b) in ((x0, dx - dw / 2), (dx + dw / 2, x1)):
+        lib.box(((a + b) / 2, y0 + rec / 2, hz / 2), (b - a, rec, hz), walls)
+    stone_course(x0, x1, y0, y1, 0.06, hz, blocks, rnd, block=0.105, depth=0.032, holes=(door_hole, win_hole))
+    slab(0.0, 0.05, 0.075, blue[0])
+    for (x, y, a) in rounded_outline(px0 + 0.035, px1 - 0.035, pyf + 0.035, y0 - 0.02, pr - 0.035, 0.085):
+        lib.box((x, y, 0.1), (0.082, 0.075, 0.06), blue[rnd.randrange(len(blue))],
+                rot=(0, 0, a + rnd.uniform(-0.05, 0.05)), bevel=0.014)
+
+    def on_floor(x, y):
+        if y > y0:  # in the doorway
+            return dx - dw / 2 + 0.01 < x < dx + dw / 2 - 0.01
+        if x < px0 + 0.07 or x > px1 - 0.07 or y < pyf + 0.07:
+            return False
+        for ccx in (px0 + pr, px1 - pr):
+            outer = x < ccx if ccx < dx else x > ccx
+            if y < pyf + pr and outer and math.hypot(x - ccx, y - pyf - pr) > pr - 0.07:
+                return False
+        return True
+    checker_floor(px0 + 0.07, px1 - 0.07, pyf + 0.07, y0 + rec, on_floor, black, white, 0.082)
+    lib.box((dx, y0 + rec - 0.004, dh / 2 + 0.04), (dw, 0.008, dh), inside)
+    for (x, y, face) in cols:
+        healer_column(x, y, H, hz, shaft, blue[0], white, red, darkstone, face, 'low')
     lib.tag(2)
-    lib.box((cx, cy, 0.26 + (H - 0.26) / 2), (L, W, H - 0.26), plaster)
-    quoins(x0, x1, y0, y1, 0.1, H, blocks, rnd, block=0.2, row=0.16)
-    for wx in (cx - 0.3, cx + 0.32):
-        window(wx, y0, 0.44, 0.16, 0.18, beam, glass)
-    window(x1, cy + 0.05, 0.44, 0.16, 0.18, beam, glass, face='x')
-    lib.box((cx + 0.02, y0 - 0.02, 0.3), (0.22, 0.04, 0.4), door, bevel=0.008)
+
+    # Stage 3: the walls to the eaves, doorway, window, basins, the columns, the roof's rafters.
+    lib.box((cx, (y0 + rec + y1) / 2, (hz + H) / 2), (L, y1 - y0 - rec, H - hz), walls)
+    for (a, b) in ((x0, dx - dw / 2), (dx + dw / 2, x1)):
+        lib.box(((a + b) / 2, y0 + rec / 2, (hz + H) / 2), (b - a, rec, H - hz), walls)
+    lib.box((dx, y0 + rec / 2, (dh + 0.06 + H) / 2), (dw, rec, H - dh - 0.06), walls)
+    stone_course(x0, x1, y0, y1, hz, H, blocks, rnd, block=0.105, depth=0.032, holes=(door_hole, win_hole))
+    # The doorway: chunky light jambs, a lintel, the reveals.
+    for s_ in (-1, 1):
+        jx = dx + s_ * (dw / 2 + 0.035)
+        lib.box((jx, y0 - 0.01, (dh + 0.06) / 2 + 0.04), (0.075, 0.1, dh + 0.02), pale[s_ % 2],
+                rot=(0, s_ * 0.025, 0), bevel=0.014)
+        lib.box((dx + s_ * (dw / 2 - 0.005), y0 + rec / 2, dh / 2 + 0.06), (0.012, rec, dh), walls)
+    lib.box((dx, y0 - 0.015, dh + 0.1), (dw + 0.22, 0.11, 0.09), pale[0], rot=(0, -0.02, 0), bevel=0.016)
+    lib.box((dx, y0 - 0.025, dh + 0.165), (dw + 0.14, 0.08, 0.04), pale[3], bevel=0.01)
+    # The wash basins either side of the door.
+    wall_basin((x0 + dx - dw / 2 - 0.07) / 2, y0 - 0.12, 0.42, pale[0], water, darkstone)
+    wall_basin((dx + dw / 2 + 0.07 + x1) / 2, y0 - 0.12, 0.42, pale[0], water, darkstone)
+    # The side window: shutters of light boards under a round head, jambs, voussoirs and a sill.
+    nb = 4
+    for k in range(nb):
+        u = -ww / 2 + (k + 0.5) * ww / nb
+        top = wzs + math.sqrt(max(wr * wr - u * u, 0.0))
+        z0 = wzs - 0.22
+        lib.box((x1 + 0.012, wy + u, (z0 + top) / 2), (0.02, ww / nb - 0.01, top - z0), shutter[k % 2], bevel=0.004)
+    lib.box((x1 + 0.024, wy, wzs - 0.1), (0.01, ww, 0.02), beam)
+    for s_ in (-1, 1):
+        for k, z in enumerate((wzs - 0.18, wzs - 0.07)):
+            lib.box((x1 + 0.03, wy + s_ * (ww / 2 + 0.04), z), (0.08, 0.08, 0.1), pale[(k + s_) % 4], bevel=0.012)
+    for k in range(7):
+        a = math.pi * k / 6
+        R = wr + 0.04
+        lib.box((x1 + 0.03, wy + math.cos(a) * R, wzs + math.sin(a) * R), (0.08, 0.075, 0.085), pale[k % 4],
+                rot=(a - math.pi / 2, 0, 0), bevel=0.012)
+    lib.box((x1 + 0.05, wy, wzs - 0.25), (0.1, ww + 0.16, 0.05), pale[0], bevel=0.012)
+    for (x, y, face) in cols:
+        healer_column(x, y, H, hz, shaft, blue[0], white, red, darkstone, face, 'high')
     lib.tag(3)
-    hip_roof(cx, cy, L, W, H, 0.42, tiles, lib.mat_flat('iridge', (0.55, 0.2, 0.08)), rnd, overhang=0.12, size=0.12,
-             shape='tile', ridge_frac=0.35)
-    for px in (cx - 0.16, cx + 0.2):
-        lib.cylinder((px, y0 - 0.26, 0.26), 0.025, 0.52, beam, verts=8)
-    lib.box((cx + 0.02, y0 - 0.14, 0.55), (0.5, 0.32, 0.03), tiles[0], rot=(-0.35, 0, 0), bevel=0.006)
-    # Sign on a bracket: a pale board with a bronze bowl and a leaf.
-    sx = x1 + 0.03
-    lib.box((sx + 0.12, y0 + 0.05, 0.62), (0.26, 0.02, 0.02), beam)
-    lib.box((sx + 0.2, y0 + 0.05, 0.5), (0.02, 0.2, 0.18), lib.mat_flat('signb', (0.86, 0.82, 0.7)), bevel=0.004)
-    lib.sphere((sx + 0.215, y0 + 0.05, 0.47), 0.05, bronze, scale=(0.4, 1.0, 0.5))
-    lib.sphere((sx + 0.215, y0 + 0.08, 0.54), 0.035, herb, scale=(0.3, 1.0, 0.5))
-    chimney(cx - 0.3, cy + 0.2, H + 0.1, H + 0.55, blocks, rnd)
-    lib.tag(4)
-    for (bx, by) in ((cx - 0.45, y0 - 0.55), (cx + 0.22, y0 - 0.6), (x1 + 0.35, cy - 0.35)):
-        lib.box((bx, by, 0.04), (0.42, 0.24, 0.08), soil, bevel=0.01)
-        for k in range(5):
-            p = (bx - 0.16 + k * 0.08 + rnd.uniform(-0.01, 0.01), by + rnd.uniform(-0.06, 0.06), 0.12)
-            lib.lumpy(p, 0.05, herb, scale=(1, 1, 0.9), strength=0.5, noise=0.6, seed=k, subdiv=1)
-            if k % 2 == 0:
-                lib.sphere((p[0], p[1], p[2] + 0.05), 0.018, bloom[rnd.randrange(len(bloom))])
-    for k in range(10):
-        lib.cylinder((x0 - 0.15 + k * 0.17, y0 - 0.82, 0.08), 0.012, 0.16, beam, verts=6)
-    rod((x0 - 0.15, y0 - 0.82, 0.13), (x0 - 0.15 + 9 * 0.17, y0 - 0.82, 0.13), 0.01, beam)
+    faces, _, _ = hip_faces(cx, cy, L, W, H, rh, overhang=0.15, ridge_frac=0.42)
+    for (a, b, p, q) in faces:
+        face_rafters(a, b, p, q, beam)
+    lib.tag(3, until=3)
+
+    # Stage 4: the slate roof and the lantern on its ridge.
+    hip_roof(cx, cy, L, W, H, rh, slates, ridge, rnd, overhang=0.15, size=0.15, shape='tile', ridge_frac=0.42)
+    zr = H + rh
+    lcx, lL, lw, Hl = cx - 0.06, 0.92, 0.5, zr + 0.06
+    lib.box((lcx, cy, (zr - 0.36 + Hl) / 2), (lL, lw, Hl - zr + 0.36), walls)
+    stone_course(lcx - lL / 2, lcx + lL / 2, cy - lw / 2, cy + lw / 2, zr - 0.34, Hl, pale, rnd, block=0.1,
+                 depth=0.03)
+    hip_roof(lcx, cy, lL, lw, Hl, 0.2, slates, ridge, rnd, overhang=0.07, size=0.14, shape='tile', ridge_frac=0.45)
+
     lib.tag(4)
 
 
