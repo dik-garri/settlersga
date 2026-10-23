@@ -3,7 +3,8 @@
     blender -b --factory-startup -P art/blender/build.py -- [names...]
 
 Names: settlers (every figure, see figures.py), settlers:add (only the pose groups settlers.json
-lacks, appended to its last page), signs (the geologist's signs, see signs.py), woodcutter, sawmill, stonecutter, tower, house_large, tree, deposit, piles (or piles:fish,coal), stacks (or stacks:fish,coal: goods lying on the ground), tower:front / bigtower:front / fortress:front (only the parts standing before the garrison on the top, `<name>-front.png`; a full render of those buildings writes it too), tower:posts (prints the garrison posts and banner point, renders nothing), ruins (ruin1..ruin4), rocks (mountain stones and outcrops, see rocks.py), wares (or wares:sheep: those carried wares only, the rest of the strip kept), icons (or icons:axe,saw: the menu icons) (default: all). Every sprite keeps the size and anchor
+lacks, appended to its last page), settlers:civil (everything but the fighters, on new pages; the
+fighters' pages kept as they are), signs (the geologist's signs, see signs.py), woodcutter, sawmill, stonecutter, tower, house_large, tree, deposit, piles (or piles:fish,coal), stacks (or stacks:fish,coal: goods lying on the ground), tower:front / bigtower:front / fortress:front (only the parts standing before the garrison on the top, `<name>-front.png`; a full render of those buildings writes it too), tower:posts (prints the garrison posts and banner point, renders nothing), ruins (ruin1..ruin4), rocks (mountain stones and outcrops, see rocks.py), wares (or wares:sheep: those carried wares only, the rest of the strip kept), icons (or icons:axe,saw: the menu icons) (default: all). Every sprite keeps the size and anchor
 of the procedural sprite it replaces (src/render/sprites.ts, settlerArt.ts), so the game can swap
 them in without other changes.
 """
@@ -390,6 +391,10 @@ def main():
             if n == 'settlers:add':
                 # Only the pose groups the sheet lacks, appended to its last page.
                 figures.build_settlers(OUT, TMP, add=True)
+                continue
+            if n == 'settlers:civil':
+                # Every civilian look again, the fighters' frames and pages kept as they are.
+                figures.build_settlers(OUT, TMP, civil=True)
                 continue
             if n == 'piles' or n.startswith('piles:'):
                 # `piles` renders every resource's piles, `piles:fish,coal` only those.
