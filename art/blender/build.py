@@ -337,7 +337,6 @@ SINGLE = {
     'slaughterhouse': (buildings.build_slaughterhouse, 150, 140, 75, 100),
     'toolsmith': (buildings.build_toolsmith, 150, 140, 75, 100),
     'sheepfarm': (buildings.build_sheepfarm, 220, 190, 110, 135),
-    'pigfarm': (buildings.build_pigfarm, 220, 190, 110, 135),
     'forester': (buildings.build_forester, 150, 140, 75, 100),
     'market': (buildings.build_market, 150, 140, 75, 100),
     'donkeyranch': (buildings.build_donkeyranch, 220, 190, 110, 135),

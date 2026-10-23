@@ -149,7 +149,6 @@ const STYLES: Partial<Record<SettlerKind, Partial<SettlerStyle>>> = {
   miller: { tunic: '#e8e4da', hat: '#9a8f80', hatStyle: 'cap' },
   baker: { tunic: '#f0ece2', hat: '#ffffff', hatStyle: 'chef' },
   shepherd: { tunic: '#9a8a64', hat: '#5a4636', hatStyle: 'hood' },
-  pigfarmer: { tunic: '#8a6d4b', hat: '#5a4636', hatStyle: 'hood' },
   butcher: { tunic: '#b83c3c', hat: '#e8e4da', hatStyle: 'cap' },
   smelter: { tunic: '#6e4a33', hat: '#3b2b1a', hatStyle: 'hood' },
   toolsmith: { tunic: '#5a5048', hat: '#8c4a3a', hatStyle: 'cap', work: 'hammer', holds: 'hammer' },

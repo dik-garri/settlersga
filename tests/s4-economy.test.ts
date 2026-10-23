@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import { addBuilding, spawnSettler, updateBuilding } from '../src/sim/buildings';
 import { recomputeTerritory } from '../src/sim/territory';
-import { buildableBy, BUILDINGS, CARRIER_RESERVE, DISPATCH_EVERY, PROFESSIONS, SITE, TRADE, TRANSPORT_PRIORITY } from '../src/sim/config';
+import { BUILDINGS, CARRIER_RESERVE, DISPATCH_EVERY, PROFESSIONS, SITE, TRADE, TRANSPORT_PRIORITY } from '../src/sim/config';
 import { carrierReserve, spareCarriers, transportOrder } from '../src/sim/economy';
 import { landOf } from '../src/sim/land';
 import { siteNeeds, sitePile } from '../src/sim/logistics';
@@ -16,7 +16,7 @@ import { saveWorld } from '../src/sim/save';
 import { RESOURCES, Terrain, type Building, type BuildingType } from '../src/sim/types';
 import { World } from '../src/sim/world';
 import { placeNear } from '../tools/scenario';
-import { base, clearGround, depot, placeForeign, startTower } from './helpers';
+import { base, clearGround, depot, startTower } from './helpers';
 
 function run(w: World, ticks: number) {
   for (let i = 0; i < ticks; i++) w.step();
@@ -230,9 +230,8 @@ describe('transport priority (Settlers 4’s list)', () => {
     expect([...transportOrder(w, 1)]).toEqual([...TRANSPORT_PRIORITY]);
     expect([...TRANSPORT_PRIORITY].sort()).toEqual([...RESOURCES].sort());
     expect(transportOrder(w, 1).slice(0, 3)).toEqual(['plank', 'stone', 'log']);
-    // S4's Roman list: … flour, grain, sheep, water …; the Vikings' pig (not a Roman good) last.
+    // S4's Roman list: … flour, grain, sheep, water …
     expect(TRANSPORT_PRIORITY.slice(9, 13)).toEqual(['flour', 'grain', 'sheep', 'water']);
-    expect(TRANSPORT_PRIORITY.at(-1)).toBe('pig');
     expect(w.moveTransport('coal', 'top')).toBe(true);
     expect(transportOrder(w, 1)[0]).toBe('coal');
     expect(w.moveTransport('coal', 'up')).toBe(false);
@@ -272,8 +271,7 @@ describe('transport priority (Settlers 4’s list)', () => {
 /** A finished workshop of `type` with its worker inside, fed `n` of each input. */
 function workshop(w: World, type: BuildingType, n: number): Building {
   const c = base(w);
-  // Another race's building (the pig farm) cannot be placed by a Roman: laid down directly.
-  const b = (buildableBy(type) ? placeNear(w, type, c.x + 6, c.y + 4) : placeForeign(w, type, c.x + 6, c.y + 4))!;
+  const b = placeNear(w, type, c.x + 6, c.y + 4)!;
   b.done = true;
   b.levelled = true;
   const worker = spawnSettler(w, BUILDINGS[type].worker!, b);
@@ -295,27 +293,22 @@ describe('meat (Settlers 4)', () => {
     expect(b.output.meat).toBe(5);
   });
 
-  for (const [type, animal] of [
-    ['sheepfarm', 'sheep'],
-    ['pigfarm', 'pig'],
-  ] as const) {
-    it(`a ${type}’s feeding (grain + water) adds a ${animal} 77 % of the time`, () => {
-      const w = new World(42);
-      const b = workshop(w, type, 400);
-      const ticks = BUILDINGS[type].recipe!.ticks;
-      let born = 0;
-      for (let t = 0; t < ticks * 300; t++) {
-        updateBuilding(w, b);
-        born += b.output[animal];
-        b.output[animal] = 0;
-      }
-      const fed = 400 - b.input.grain;
-      expect(fed).toBe(300);
-      expect(400 - b.input.water).toBe(fed);
-      expect(born / fed).toBeGreaterThan(0.7);
-      expect(born / fed).toBeLessThan(0.84);
-    });
-  }
+  it('a sheep farm’s feeding (grain + water) adds a sheep 77 % of the time', () => {
+    const w = new World(42);
+    const b = workshop(w, 'sheepfarm', 400);
+    const ticks = BUILDINGS.sheepfarm.recipe!.ticks;
+    let born = 0;
+    for (let t = 0; t < ticks * 300; t++) {
+      updateBuilding(w, b);
+      born += b.output.sheep;
+      b.output.sheep = 0;
+    }
+    const fed = 400 - b.input.grain;
+    expect(fed).toBe(300);
+    expect(400 - b.input.water).toBe(fed);
+    expect(born / fed).toBeGreaterThan(0.7);
+    expect(born / fed).toBeLessThan(0.84);
+  });
 });
 
 describe('donkeys (Settlers 4)', () => {

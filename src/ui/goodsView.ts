@@ -1,7 +1,7 @@
 import { wareIcon } from '../render/atlas';
-import { BUILDINGS, GOODS_SHOWN, RESOURCE_GROUPS, RESOURCE_INFO } from '../sim/config';
+import { BUILDINGS, RESOURCE_GROUPS, RESOURCE_INFO } from '../sim/config';
 import { groundStock } from '../sim/ground';
-import type { PlayerId, Resource } from '../sim/types';
+import { RESOURCES, type PlayerId, type Resource } from '../sim/types';
 import type { World } from '../sim/world';
 import { button, el, type View } from './dom';
 import { DistributionView, TransportView } from './economyPanel';
@@ -49,7 +49,7 @@ export class GoodsView implements View {
     for (const group of RESOURCE_GROUPS) {
       this.stock.append(el('h4', '', groupName(group)));
       const grid = el('div', 'stock-grid');
-      for (const r of GOODS_SHOWN) {
+      for (const r of RESOURCES) {
         if (RESOURCE_INFO[r].group !== group) continue;
         const value = el('b', '', '0');
         const row = el('span', 'stock-row');

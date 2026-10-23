@@ -644,7 +644,6 @@ export const BUILDING_CANVAS: Record<BuildingType | SiteSprite, BuildingCanvas> 
   mill: { w: 150, h: 210, ax: 75, ay: 165 },
   bakery: SMALL,
   sheepfarm: LARGE,
-  pigfarm: LARGE,
   slaughterhouse: SMALL,
   coalmine: SMALL,
   ironmine: SMALL,
@@ -1120,8 +1119,9 @@ type Deco =
   | 'chimney'
   | 'well'
   | 'nets'
+  /** A fenced pen with a donkey in it. */
   | 'pen'
-  /** A pen with a sheep (white, black-faced) instead of a pig. */
+  /** A pen with a sheep (white, black-faced) instead of a donkey. */
   | 'fold'
   | 'sacks'
   | 'oven'
@@ -1244,11 +1244,11 @@ function paintDeco(ctx: Ctx, st: Style, deco: Deco): void {
       ];
       poly(ctx, pts, '#8a6a3c');
       const [px, py] = P(-hw * 0.45, hh + 0.4, 0);
-      ctx.fillStyle = sheep ? '#f2efe6' : '#e8a0a0';
+      ctx.fillStyle = sheep ? '#f2efe6' : '#8c8070';
       ctx.beginPath();
       ctx.ellipse(px, py - 4, 6, 3.5, 0, 0, Math.PI * 2);
       ctx.fill();
-      if (sheep) ctx.fillStyle = '#2a2420';
+      ctx.fillStyle = sheep ? '#2a2420' : '#6e6355';
       ctx.beginPath();
       ctx.arc(px + 6, py - 5, 2.5, 0, Math.PI * 2);
       ctx.fill();
@@ -1475,7 +1475,6 @@ const STYLES: Partial<Record<BuildingType, Style>> = {
   },
   // The Roman sheep farm: a grey stone barn, a pen with a sheep.
   sheepfarm: { hw: 1.15, hh: 0.8, H: 24, wall: '#9d978a', roof: '#8a6a44', rise: 26, doorDx: 1, deco: ['fold', 'chimney'] },
-  pigfarm: { hw: 1.15, hh: 0.8, H: 24, wall: '#a07a50', roof: '#c4a35a', rise: 24, doorDx: 1, deco: ['pen'] },
   slaughterhouse: { hw: 0.7, hh: 0.7, H: 24, wall: '#c9c0ae', roof: '#7a2e24', rise: 22, doorDx: 0.5, deco: ['meat'] },
   // Our own trade buildings: an open-sided market hall on posts, a stable with a fenced paddock.
   market: { hw: 0.65, hh: 0.65, H: 14, wall: '#c9b48a', roof: '#a8432e', rise: 18, doorDx: 0.5, timber: true, deco: ['crates', 'sacks'] },
@@ -1765,7 +1764,6 @@ export const BUILDING_PAINTERS: Record<BuildingType | SiteSprite, (ctx: Ctx) => 
   mill: paintMill,
   bakery: styled('bakery'),
   sheepfarm: styled('sheepfarm'),
-  pigfarm: styled('pigfarm'),
   slaughterhouse: styled('slaughterhouse'),
   coalmine: (ctx) => paintMine(ctx, ORE_COLORS.coal),
   ironmine: (ctx) => paintMine(ctx, ORE_COLORS.ironore),
@@ -1994,10 +1992,6 @@ function paintFood(ctx: Ctx, res: Resource): void {
         ctx.lineTo(k + 1, 1);
         ctx.stroke();
       }
-      return;
-    case 'pig':
-      blob(ctx, -1, 0, 5.5, 3.5, '#e8a0a0', '#b86e6e');
-      blob(ctx, 4.5, -1, 2.5, 2.2, '#e8a0a0', '#b86e6e');
       return;
     case 'sheep':
       blob(ctx, -1, 0, 5.5, 3.8, '#f2efe6', '#a8a294');
