@@ -322,13 +322,13 @@ export const GROUND = {
 };
 
 /**
- * Defeat in a free game: a player is out once he has no occupied military building left (Settlers 4's
- * `Game.DefaultPlayerLostCheck`: «keine besetzten Türme mehr») and — with `fighters`, the project's
- * rule — no fighter either (outdoors, homeless, in the field, in an infirmary; a recruit still in
- * training does not count). S4's own check counts only the buildings: set `fighters` to false for it.
- * Checked every `checkEvery` ticks once `afterTick` has passed (S4: every 8 of its ticks after 140).
+ * Defeat in a free game, as Settlers 4's `Game.DefaultPlayerLostCheck` («keine besetzten Türme mehr»;
+ * `CBuildingMgr::CheckNumberOfOccupiedMilitaryBuildings`): a player is out once he has no occupied
+ * military building left — a finished one (tower, big tower, castle) with at least one fighter
+ * inside. Fighters outdoors do not hold the game, nor do buildings without a garrison. Checked every
+ * `checkEvery` ticks once `afterTick` has passed (S4: every 8 of its ticks after 140).
  */
-export const DEFEAT = { checkEvery: Math.round(s4Ticks(8)), afterTick: Math.round(s4Ticks(140)), fighters: true };
+export const DEFEAT = { checkEvery: Math.round(s4Ticks(8)), afterTick: Math.round(s4Ticks(140)) };
 
 /**
  * Victory modes of a free game (`modes.ts`), after Settlers 4's (manual §4.4; `CGameType::m_iMode`:
@@ -2010,14 +2010,6 @@ export const AI = {
   defendMargin: 0,
   defendRatio: 1.5,
   defendRange: 16,
-  /**
-   * The hunt (`DEFEAT.fighters`: a player is out only once his last fighter is): fighters of an enemy
-   * it knows no military building of — stragglers left standing when his towers fell — seen outdoors by
-   * its buildings are hunted by a field squad `huntRatio` times their number (at least `huntMin`), from
-   * the spares of its military buildings nearest them; back into garrisons when none are left in sight.
-   */
-  huntRatio: 1.5,
-  huntMin: 2,
   /**
    * Trade (`AiState.trade`): every `tradeEvery` ticks it checks for own workplaces on land cut off
    * from its warehouses; for the first such piece it builds a market there and one at home, a donkey

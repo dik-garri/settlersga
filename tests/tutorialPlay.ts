@@ -212,17 +212,16 @@ export const SOLUTIONS: Partial<Record<MissionId, Record<string, Solution>>> = {
       if (target && ids.length > 0) w.orderAttack(ids, target.id);
     },
     infirmary: build('infirmary'),
-    // Everyone outside at the rival's last tower; with none left, at his last fighters.
-    victory: (w) => {
+    // Everyone outside at the rival's last tower (taking it puts him out, Settlers 4's defeat rule);
+    // not seen yet, towards the arrow at it.
+    victory: (w, _ui, m) => {
       if (w.tick % 300 !== 0) return;
       const ids = [...fieldUnits(w), ...freeFighters(w)].filter((s) => !s.tasks.some((t) => t.t === 'assault' || t.t === 'engage')).map((s) => s.id);
       if (ids.length === 0) return;
       const target = enemyBuildingNear(w);
+      const at = m.marks[0];
       if (target) w.orderAttack(ids, target.id);
-      else {
-        const foe = w.settlers.find((s) => s.owner === 2 && isFighter(s) && !w.dying.has(s.id));
-        if (foe) w.orderMove(ids, Math.round(foe.x), Math.round(foe.y));
-      }
+      else if (at) w.orderMove(ids, Math.round(at.x), Math.round(at.y));
     },
   },
 };

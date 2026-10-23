@@ -3,7 +3,7 @@ import { inBuildingSight } from './fog';
 import { canGarrison, isArcher, isFighter, isMilitary, keepOf, slotsOf } from './military';
 import type { AiState } from './ai';
 import type { Building, PlayerId, Point, Settler } from './types';
-import { startPositions, type World } from './world';
+import type { World } from './world';
 import { hypot } from './fmath';
 
 /**
@@ -17,8 +17,8 @@ import { hypot } from './fmath';
  *   `updateStrike`) instead of trickling out of several buildings one by one;
  * - hostile field units on or near its land, in its buildings' sight, are met by a field squad
  *   (`defend`);
- * - a scout walks to an enemy castle its buildings cannot see (`sendScout`, `updateScout`);
- * - an enemy's last fighters, left standing when his towers fell, are hunted down (`hunt`).
+ * - a scout walks to an enemy castle its buildings cannot see (`sendScout`, `updateScout`).
+ * It hunts no stragglers: an enemy is out with his last occupied military building (`DEFEAT`).
  * Squads take fighters from the rally first, then the spares of military buildings; done, they go
  * back to the rally. Its squads are plain ids in the saved `AiState`; a squad leader comes along when
  * one is free or sits in a building the group comes from (`orderMove` then forms the squad round him).
@@ -35,12 +35,11 @@ function alive(w: World, me: PlayerId, ids: readonly number[]): Settler[] {
   return out;
 }
 
-/** Ids in the AI's squads (strike, defence, hunt, scout): not for the rally or for garrisons. */
+/** Ids in the AI's squads (strike, defence, scout): not for the rally or for garrisons. */
 function held(ai: AiState): Set<number> {
   return new Set([
     ...(ai.strike?.ids ?? []),
     ...(ai.defense?.ids ?? []),
-    ...(ai.hunt?.ids ?? []),
     ...(ai.scout ? [ai.scout.id] : []),
   ]);
 }
@@ -257,69 +256,6 @@ export function defend(w: World, ai: AiState, own: Building[]): void {
   if (ids.length === 0) return;
   w.orderMove(ids, c.x, c.y, me);
   ai.defense = { ids, x: c.x, y: c.y };
-}
-
-/**
- * Hunts an enemy's last fighters (`DEFEAT.fighters`: he is out only when they are gone): his fighters
- * seen outdoors in its buildings' sight, when it knows no military building of his (explored doors
- * only, as `knownEnemies`) — stragglers left standing when his towers fell; field units near its land
- * are left to `defend`. A field squad of `AI.huntRatio` times their number (at least `AI.huntMin`) of
- * spares from its military buildings nearest them — only if its spares at least match them — is sent
- * to the nearest one; field units engage what they meet (`field.ts`). Back into garrisons when none
- * are left in sight. Public commands only (`releaseFighters`, `orderMove`, `orderGarrison`).
- */
-export function hunt(w: World, ai: AiState, own: Building[]): void {
-  const me = ai.player;
-  const m = w.map;
-  const holding = new Set<PlayerId>();
-  for (const b of w.buildings.values()) {
-    if (b.owner === me || !isMilitary(b) || w.allied(b.owner, me) || !w.isExplored(b.door.x, b.door.y, me)) continue;
-    holding.add(b.owner);
-  }
-  // Their presumed home (the start position nearest them that is not its own or an ally's — public,
-  // like the map size) must be explored: Settlers 4's fighters stand free round their towers, and
-  // seeing them is no sign their towers are gone until it has looked where the towers would be.
-  const friendly = [...w.buildings.values()].filter((b) => w.allied(b.owner, me)).map((b) => b.door);
-  const starts = startPositions(m.w, w.players.length).filter((st) => !friendly.some((f) => dist(f, st) < 8));
-  const homeSeen = (s: Settler) => {
-    // Every start lies by its own or an ally's buildings: theirs has been taken, so seen.
-    if (starts.length === 0) return true;
-    let best = starts[0];
-    for (const st of starts) if (dist(st, s) < dist(best, s)) best = st;
-    return w.isExplored(best.x, best.y, me);
-  };
-  const prey: Settler[] = [];
-  for (const s of w.settlers) {
-    if (s.inside !== null || w.allied(s.owner, me) || holding.has(s.owner) || w.isDefeated(s.owner)) continue;
-    if (!isFighter(s) || w.dying.has(s.id)) continue;
-    const x = Math.round(s.x);
-    const y = Math.round(s.y);
-    if (!m.inBounds(x, y) || !inBuildingSight(w, m.idx(x, y), me) || !homeSeen(s)) continue;
-    // Field units near its land are `defend`'s.
-    if (s.post && nearOwnLand(w, x, y, me, AI.defendMargin)) continue;
-    prey.push(s);
-  }
-  const squad = ai.hunt ? alive(w, me, ai.hunt.ids) : [];
-  if (prey.length === 0) {
-    ai.hunt = undefined;
-    return;
-  }
-  const from: Point = squad.length > 0 ? squad[0] : w.homeOf(me);
-  let goal = prey[0];
-  for (const s of prey) if (dist(s, from) < dist(goal, from) || (dist(s, from) === dist(goal, from) && s.id < goal.id)) goal = s;
-  const at = { x: Math.round(goal.x), y: Math.round(goal.y) };
-  const need = Math.max(AI.huntMin, Math.ceil(prey.length * AI.huntRatio));
-  let ids = squad.map((s) => s.id);
-  if (ids.length < need) {
-    // Too few to outnumber them: not yet.
-    if (ids.length + spareCount(w, ai, own) < prey.length) return;
-    const out = takeFighters(w, ai, own, at, need - ids.length);
-    if (out.length > 0 && ids.length === 0) ai.stats.hunts = (ai.stats.hunts ?? 0) + 1;
-    ids = [...ids, ...out];
-  } else if (ai.hunt && dist(ai.hunt, at) <= 2) return; // on its way there already
-  if (ids.length === 0) return;
-  w.orderMove(ids, at.x, at.y, me);
-  ai.hunt = { ids, x: at.x, y: at.y };
 }
 
 /**

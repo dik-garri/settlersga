@@ -81,6 +81,11 @@ export function isMilitary(b: Building): boolean {
   return !!BUILDINGS[b.type].garrison;
 }
 
+/** A finished military building with at least one fighter inside: what keeps its owner in the game (`DEFEAT`). */
+export function isOccupiedMilitary(b: Building): boolean {
+  return b.done && isMilitary(b) && b.garrison.length > 0;
+}
+
 function garrisonOf(b: Building): GarrisonDef {
   return BUILDINGS[b.type].garrison!;
 }
@@ -912,7 +917,7 @@ function conquer(w: World, b: Building, s: Settler): void {
   b.wish = { melee: 0, ranged: 0 };
   s.tasks.shift();
   // Burnt as in Settlers 4: no materials back, the goods lying at them stay on the ground (`GROUND`).
-  // A player left with nothing to fight with is out at the next `checkDefeats`.
+  // A player left with no occupied military building is out at the next `checkDefeats`.
   enterGarrison(w, b, s);
   claimChanged(w, b);
 }

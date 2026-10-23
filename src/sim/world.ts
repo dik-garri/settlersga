@@ -40,6 +40,7 @@ import {
   enterGarrison,
   isFighter,
   isMilitary,
+  isOccupiedMilitary,
   leaveGarrison,
   pruneShots,
   removeDead,
@@ -533,7 +534,7 @@ export class World {
   }
 
   /**
-   * A player with nothing left to fight with is out (`DEFEAT`, `checkDefeats`): its buildings burn —
+   * A player with no occupied military building left is out (`DEFEAT`, `checkDefeats`): its buildings burn —
    * the goods lying at them stay on the ground (`GROUND`) —, its land goes back to nobody (and to
    * whoever's towers cover it, `territory.ts`), and its settlers drop what they were doing and wander
    * off until they die (`flee.ts`).
@@ -556,22 +557,28 @@ export class World {
     }
   }
 
-  /** Whether the player still has something to fight with: an occupied military building, or (`DEFEAT.fighters`) a fighter. */
-  holdsOn(player: PlayerId): boolean {
-    for (const b of this.buildings.values()) if (b.owner === player && b.done && isMilitary(b) && b.garrison.length > 0) return true;
-    if (!DEFEAT.fighters) return false;
-    return this.settlers.some((s) => s.owner === player && isFighter(s) && !this.dying.has(s.id));
+  /**
+   * Occupied military buildings of the player (Settlers 4's `CheckNumberOfOccupiedMilitaryBuildings`):
+   * finished, with at least one fighter inside. With `except`, that building is not counted (the
+   * demolish button asks whether it is the last one).
+   */
+  occupiedMilitary(player: PlayerId, except?: Building): number {
+    let n = 0;
+    for (const b of this.buildings.values()) if (b !== except && b.owner === player && isOccupiedMilitary(b)) n++;
+    return n;
   }
 
-  /**
-   * Every `DEFEAT.checkEvery` ticks: players with no occupied military building — and no fighter
-   * left, with `DEFEAT.fighters` — are defeated.
-   */
+  /** Whether the player still holds on (`DEFEAT`): he has an occupied military building. */
+  holdsOn(player: PlayerId): boolean {
+    for (const b of this.buildings.values()) if (b.owner === player && isOccupiedMilitary(b)) return true;
+    return false;
+  }
+
+  /** Every `DEFEAT.checkEvery` ticks: players with no occupied military building are defeated. */
   private checkDefeats(): void {
     if (this.tick < DEFEAT.afterTick || this.tick % DEFEAT.checkEvery !== 0) return;
     const holding = new Set<PlayerId>();
-    for (const b of this.buildings.values()) if (b.done && isMilitary(b) && b.garrison.length > 0) holding.add(b.owner);
-    if (DEFEAT.fighters) for (const s of this.settlers) if (isFighter(s) && !this.dying.has(s.id)) holding.add(s.owner);
+    for (const b of this.buildings.values()) if (isOccupiedMilitary(b)) holding.add(b.owner);
     for (const p of this.players) if (!holding.has(p.id) && !this.isDefeated(p.id)) this.defeatPlayer(p.id);
   }
 

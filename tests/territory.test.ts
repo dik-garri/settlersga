@@ -192,51 +192,42 @@ describe('territory as in Settlers 4 (CWorldManager::SetOwner)', () => {
   });
 });
 
-describe('defeat (DEFEAT.fighters)', () => {
-  it('a player with no occupied military building is out only once his last fighter is gone', () => {
-    expect(DEFEAT.fighters).toBe(true);
+describe('defeat as in Settlers 4 (DEFEAT: no occupied military building)', () => {
+  const alive = (w: World, p: PlayerId) => w.settlers.filter((s) => s.owner === p && isFighter(s) && !w.dying.has(s.id));
+
+  it('one occupied tower holds on with no other fighter; fighters without an occupied tower do not', () => {
     const w = new World(42, { players: 2 });
     const t2 = startTower(w, 2);
-    const fighters = () => w.settlers.filter((s) => s.owner === 2 && isFighter(s) && !w.dying.has(s.id));
-    // His start tower emptied; one fighter of his still stands by it.
-    for (const id of [...t2.garrison]) killSettler(w, w.getSettler(id)!);
-    for (const s of fighters().slice(1)) killSettler(w, s);
+    // Player 2: only the swordsman in his start tower is left.
+    for (const s of alive(w, 2)) if (!t2.garrison.includes(s.id)) killSettler(w, s);
     run(w, DEFEAT.afterTick + 5 * DEFEAT.checkEvery);
-    expect(fighters().length).toBe(1);
-    expect(w.isDefeated(2)).toBe(false);
+    expect(t2.garrison.length).toBe(1);
+    expect(alive(w, 2).length).toBe(1);
     expect(w.holdsOn(2)).toBe(true);
-    // His land stays his meanwhile (no tower of anyone else covers it).
-    expect(owned(w, 2)).toBeGreaterThan(0);
-    killSettler(w, fighters()[0]);
-    run(w, 2 * DEFEAT.checkEvery);
-    expect(w.isDefeated(2)).toBe(true);
-    expect(w.outcome(1)).toBe('won');
-    // A defeated player's land goes back to nobody.
-    expect(owned(w, 2)).toBe(0);
-  });
-});
+    expect(w.isDefeated(2)).toBe(false);
+    expect(w.occupiedMilitary(2)).toBe(1);
+    expect(w.occupiedMilitary(2, t2)).toBe(0);
 
-describe('the AI hunts an enemy\'s last fighters', () => {
-  it('fighters left standing when their towers are gone are hunted down, and their player is out', { timeout: 120_000 }, () => {
-    const w = new World(42, { players: 2, ai: [2] });
+    // Player 1: his start tower emptied, his other fighters still stand by it.
+    const t1 = startTower(w, 1);
+    for (const id of [...t1.garrison]) killSettler(w, w.getSettler(id)!);
+    expect(alive(w, 1).length).toBeGreaterThan(0);
+    expect(w.holdsOn(1)).toBe(false);
+    run(w, DEFEAT.checkEvery);
+    expect(w.isDefeated(1)).toBe(true);
+    expect(w.outcome(2)).toBe('won');
+    // A defeated player's land goes back to nobody.
+    expect(owned(w, 1)).toBe(0);
+  });
+
+  it('demolishing the last occupied tower is defeat, though every fighter lives', () => {
+    const w = new World(42, { players: 2 });
+    run(w, DEFEAT.afterTick);
     const home = startTower(w, 1);
-    // Player 1 tears down his only tower: his fighters come out homeless, his land stays his.
+    const fighters = alive(w, 1).length;
+    expect(fighters).toBe(START_CONDITIONS.medium.soldiers + START_CONDITIONS.medium.archers);
     expect(w.demolish(home.id, 1)).toBe(true);
-    const left = () => w.settlers.filter((s) => s.owner === 1 && isFighter(s) && !w.dying.has(s.id));
-    expect(left().length).toBe(START_CONDITIONS.medium.soldiers + START_CONDITIONS.medium.archers);
-    expect(owned(w, 1)).toBeGreaterThan(0);
-    // The AI has a strong tower in sight of them (test setup), and knows no military building of his.
-    const watch = tower(w, 2, home.x + 7, home.y + 7, 1);
-    for (let k = 0; k < 24; k++) {
-      const s = spawnSettler(w, 'soldier', watch);
-      s.level = 2;
-      s.hp = 1e6;
-      enterGarrison(w, watch, s);
-    }
-    for (let i = 0; i < 20 * 600 && !w.isDefeated(1); i++) w.step();
-    const ai = w.ai.find((a) => a.player === 2)!;
-    expect(ai.stats.hunts ?? 0).toBeGreaterThanOrEqual(1);
-    expect(left().length).toBe(0);
+    run(w, DEFEAT.checkEvery);
     expect(w.isDefeated(1)).toBe(true);
     expect(w.outcome(2)).toBe('won');
   });

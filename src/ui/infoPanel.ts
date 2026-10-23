@@ -12,7 +12,7 @@ import {
 } from '../sim/config';
 import { available, chooseOutput, oreLeft, residents } from '../sim/buildings';
 import { diggersWanted } from '../sim/digging';
-import { keepOf, recruitNeeds, FIGHTERS } from '../sim/military';
+import { isOccupiedMilitary, keepOf, recruitNeeds, FIGHTERS } from '../sim/military';
 import { hasGatherTargetNear } from '../sim/nature';
 import { RESOURCES, type Building, type BuildingType, type PlayerId, type Resource, type Settler, type SettlerKind } from '../sim/types';
 import type { World } from '../sim/world';
@@ -273,11 +273,9 @@ export class InfoView implements View {
       actions.append(stop);
     }
     const confirming = this.confirmDemolish === b.id;
-    // Warn before the last occupied military building goes: its fighters come out homeless, and once
-    // they are gone too the player is out (`DEFEAT`). The land stays (Settlers 4).
-    const last =
-      b.garrison.length > 0 &&
-      ![...this.world.buildings.values()].some((o) => o !== b && o.owner === b.owner && o.done && o.garrison.length > 0);
+    // Warn before the last occupied military building goes: as in Settlers 4, that is defeat
+    // (`DEFEAT`) — its fighters outdoors do not hold the game.
+    const last = isOccupiedMilitary(b) && this.world.occupiedMilitary(b.owner, b) === 0;
     const demolish = el(
       'button',
       confirming ? 'danger' : '',

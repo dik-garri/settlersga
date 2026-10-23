@@ -42,7 +42,7 @@ import {
   type AiLevel,
   type BuildingDef,
 } from './config';
-import { defend, hunt, idleFighters, muster, sendScout, stageStrike, updateScout, updateStrike } from './aiField';
+import { defend, idleFighters, muster, sendScout, stageStrike, updateScout, updateStrike } from './aiField';
 import { ENDLESS, recruitOrder } from './economy';
 import { economyEndTick } from './modes';
 import { canStop } from './stop';
@@ -79,8 +79,6 @@ export interface AiState {
   strike?: { target: number; ids: number[]; until: number };
   /** A field squad out against hostile field units near its land, and where it was sent. */
   defense?: { ids: number[]; x: number; y: number };
-  /** A field squad hunting an enemy's last fighters (`hunt`, `AI.huntRatio`), and where it was sent. */
-  hunt?: { ids: number[]; x: number; y: number };
   /**
    * Since when its siege towards a castle it has not seen finds no spot to push on (forest, water or
    * swamp in the way); cleared when the siege places a building.
@@ -120,7 +118,6 @@ export interface AiState {
     /** Strikes gathered in the field, defence squads sent out, trade goods ordered, scouts sent. */
     staged?: number;
     scouts?: number;
-    hunts?: number;
     defended?: number;
     traded?: number;
     /** Counterattacks on buildings taken from it. */
@@ -260,7 +257,6 @@ function think(w: World, ai: AiState): void {
     }
   }
   if (AI.fieldDefense) defend(w, ai, own);
-  hunt(w, ai, own);
   const attacked = counterAttack(w, ai, own) || attackIfStrong(w, ai);
   scoutIfStuck(w, ai, own);
   muster(w, ai, own, frontline(w, me, own), rallyPoint(w, me, own));

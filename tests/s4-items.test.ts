@@ -359,8 +359,11 @@ describe('computer players: Settlers 4 help and counterattack (S4-AUDIT 29)', ()
     const ai = w.ai[0];
     run(w, AI.thinkEvery * 2);
     expect(ai.held).toContain(startTower(w, 2).id);
-    // Player 1 takes its start tower (test setup: as `conquer` does it).
     const t = startTower(w, 2);
+    // A second occupied tower keeps it in the game (`DEFEAT`: out with its last one).
+    const second = built(w, 'tower', { x: t.x - 5, y: t.y - 5 }, 2);
+    enterGarrison(w, second, spawnSettler(w, 'soldier', second));
+    // Player 1 takes its start tower (test setup: as `conquer` does it).
     for (const id of [...t.garrison]) killSettler(w, w.getSettler(id)!);
     t.owner = 1;
     t.wish = { melee: 0, ranged: 0 };
