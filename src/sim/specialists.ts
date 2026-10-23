@@ -476,11 +476,12 @@ export function stealTick(w: World, s: Settler, task: Extract<Task, { t: 'steal'
 // ---------------------------------------------------------------- saboteur
 
 /**
- * Whether a saboteur of `player` may attack `b` (Settlers 4 `CFindEnemyBuildings`): a building of a
- * player hostile to him — finished or a site —, unless it is immune (`BuildingDef.sabotageImmune`).
+ * Whether a saboteur of `player` may attack `b` (Settlers 4 `CFindEnemyBuildings`): a finished
+ * building of a player hostile to him (S4 leaves sites alone), unless it is immune
+ * (`BuildingDef.sabotageImmune`).
  */
 export function sabotageable(w: World, b: Building, player: PlayerId): boolean {
-  return w.buildings.get(b.id) === b && b.owner !== player && !w.allied(b.owner, player) && !BUILDINGS[b.type].sabotageImmune;
+  return w.buildings.get(b.id) === b && b.done && b.owner !== player && !w.allied(b.owner, player) && !BUILDINGS[b.type].sabotageImmune;
 }
 
 /** Builder spots of `b` other saboteurs of `s`'s owner hold or are heading for (tile indices). */
@@ -628,6 +629,8 @@ export function sabotageTick(w: World, s: Settler, task: Extract<Task, { t: 'sab
   if (--task.n > 0) return;
   task.n += SABOTEUR.every;
   postMessage(w, 'attacked', b.owner, b.door, { b: b.id });
+  // As in S4 not every blow lands (world RNG).
+  if (w.rng() >= SABOTEUR.hitChance) return;
   const hp = (b.hp ?? buildingHp(b.type)) - buildingDamage(SABOTEUR.damage);
   if (hp > 0) {
     b.hp = hp;

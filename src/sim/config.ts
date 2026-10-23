@@ -398,20 +398,23 @@ export const ECONOMY = {
  * 0 the building is destroyed (`DestroyBuilding`: it burns). After a target falls he goes for the
  * nearest enemy building within `scan` of himself (S4 `WarriorAttackScanSaboteur`: 21 S4 tiles, a
  * builder spot within 12), else he stays where he is.
- * Unverified, ours: `every` (the swordsman's cadence, 13 S4 ticks; S4's saboteur hit chance
- * `g_uSaboteurHitChange` comes from data we do not have — every blow lands) and the buildings' hit
- * points (`buildingHp`: S4 keeps them per building type in data we do not have — a building stands
- * as long as it was dear, 10 per unit of its cost, between 20 and 255, S4's byte; the big tower
- * «holds twice as long» as the small one, siedler-games: 140 against 50).
+ * As in S4 he attacks finished buildings only (sites since Settlers United 0.9.210), and a blow lands
+ * with `hitChance` (75 %, world RNG). Buildings' hit points (Settlers United changelog 0.9.210, the
+ * values before its change): castle 250, big tower 125, small tower 75 (`BuildingDef.hp`), every
+ * other building 4 a unit of its cost (`buildingHp`), at most 255 (S4's byte).
+ * Unverified, ours: `every` (the swordsman's cadence, 13 S4 ticks).
  */
 export const SABOTEUR = {
   damage: 6,
   armor: 5,
+  /** Chance a blow lands (S4 `g_uSaboteurHitChange`: 75 %, Settlers United changelog 0.9.201). */
+  hitChance: 0.75,
   every: s4Ticks(13),
   scan: 21 / S4_TILES_PER_TILE,
   spot: 12 / S4_TILES_PER_TILE,
-  hpPerCost: 10,
-  hp: { min: 20, max: 255 },
+  /** Hit points of a building without its own `hp`: 4 a unit of its cost, at most 255 (S4's byte). */
+  hpPerCost: 4,
+  hpMax: 255,
 };
 
 /** Hit points a blow of `damage` takes from a building (Settlers 4 `IBuildingRole::Decrease`). */
@@ -1562,6 +1565,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     w: 2,
     h: 2,
     cost: { plank: 3, stone: 2 },
+    hp: 75,
     worker: null,
     playerBuildable: true,
     category: 'military',
@@ -1576,6 +1580,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     w: 2,
     h: 2,
     cost: { plank: 7, stone: 7 },
+    hp: 125,
     worker: null,
     playerBuildable: true,
     category: 'military',
@@ -1600,6 +1605,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     w: 4,
     h: 4,
     cost: { plank: 8, stone: 12 },
+    hp: 250,
     worker: null,
     playerBuildable: true,
     category: 'military',
@@ -1624,17 +1630,18 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     alarm: { radius: 32 / 3, every: Math.round(s4Ticks(31)) },
   },
   infirmary: {
-    // Settlers 4's healer's hut («Lazarett»): 3 planks, 3 stone, a healer. It looks for patients
-    // every 31 of its ticks; its radius and how fast it heals are in the game data, not in the code
-    // [оценка]: 8 tiles (24 of S4's), a hit point every 4 ticks (a swordsman of level 1 in 40 s,
-    // «gemächlich», siedlercommunity).
+    // Settlers 4's healer's hut («Дом лекаря» in the Russian edition): 3 planks, 3 stone, a healer.
+    // It looks for patients every 31 of its ticks within 8 S4 tiles of its work centre (Settlers
+    // United changelog 0.9.215: «the workingarea has been increased from 8 to 11»), calls them to its
+    // door and heals one there. How fast it heals is in no source [оценка]: a hit point every 4 ticks
+    // (a swordsman of level 1 in 40 s, «gemächlich», siedlercommunity).
     w: 2,
     h: 2,
     cost: { plank: 3, stone: 3 },
     worker: 'healer',
     playerBuildable: true,
     category: 'military',
-    infirmary: { radius: 8, heal: 1, every: 4, scanEvery: Math.round(s4Ticks(31)) },
+    infirmary: { radius: 8 / S4_TILES_PER_TILE, heal: 1, every: 4, scanEvery: Math.round(s4Ticks(31)) },
   },
 
   // Eyecatchers, as in Settlers 4: built for show, they raise the settlement value and so the army's
@@ -1664,7 +1671,7 @@ export function totalCost(type: BuildingType): number {
 export function buildingHp(type: BuildingType): number {
   const def = BUILDINGS[type];
   if (def.hp !== undefined) return def.hp;
-  return Math.max(SABOTEUR.hp.min, Math.min(SABOTEUR.hp.max, Math.round(SABOTEUR.hpPerCost * totalCost(type))));
+  return Math.max(1, Math.min(SABOTEUR.hpMax, Math.round(SABOTEUR.hpPerCost * totalCost(type))));
 }
 
 /**

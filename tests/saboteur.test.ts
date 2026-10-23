@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { addBuilding, spawnSettler } from '../src/sim/buildings';
-import { BUILDINGS, buildersOf, buildingDamage, buildingHp, PROFESSIONS, SABOTEUR } from '../src/sim/config';
+import { BUILDINGS, buildersOf, buildingDamage, buildingHp, PROFESSIONS, SABOTEUR, totalCost } from '../src/sim/config';
 import { killSettler } from '../src/sim/military';
 import { saveWorld } from '../src/sim/save';
 import { canSabotage } from '../src/sim/specialists';
@@ -43,12 +43,17 @@ function target(): { w: World; hut: Building } {
 }
 
 describe('saboteur (Settlers 4, network games only)', () => {
-  it('a blow does (6 − 5) / 2, at least 1; buildings stand by their cost', () => {
+  it('a blow does (6 − 5) / 2, at least 1; buildings stand as long as in Settlers 4', () => {
     expect(buildingDamage(SABOTEUR.damage)).toBe(1);
     expect(buildingDamage(24)).toBe(9); // a level-1 axe warrior
     expect(buildingDamage(0)).toBe(0);
-    expect(buildingHp('bigtower')).toBeGreaterThan(2 * buildingHp('tower') - 1);
-    expect(buildingHp('fortress')).toBeLessThanOrEqual(255);
+    expect(SABOTEUR.hitChance).toBe(0.75);
+    // S4 (Settlers United changelog 0.9.210, the values before its change): towers and the castle by type…
+    expect(buildingHp('tower')).toBe(75);
+    expect(buildingHp('bigtower')).toBe(125);
+    expect(buildingHp('fortress')).toBe(250);
+    // …every other building 4 a unit of its cost.
+    expect(buildingHp('woodcutter')).toBe(4 * totalCost('woodcutter'));
     expect(PROFESSIONS.saboteur.tool).toBe('pickaxe');
     expect(PROFESSIONS.saboteur.hp).toBe(25);
     expect(PROFESSIONS.saboteur.cloaked).toBe(true);
@@ -102,6 +107,13 @@ describe('saboteur (Settlers 4, network games only)', () => {
     const theirs = [...allies.buildings.values()].find((b) => b.owner === 2)!;
     allies.map.explored[allies.map.idx(theirs.door.x, theirs.door.y)] |= 1;
     expect(canSabotage(allies, theirs, 1)).toBe(false);
+  });
+
+  it('leaves construction sites alone, as in Settlers 4', () => {
+    const { w, hut } = target();
+    expect(canSabotage(w, hut, 1)).toBe(true);
+    hut.done = false;
+    expect(canSabotage(w, hut, 1)).toBe(false);
   });
 
   it('no more saboteurs on a building than it has builder spots', () => {

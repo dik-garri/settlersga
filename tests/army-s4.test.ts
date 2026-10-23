@@ -276,7 +276,7 @@ describe('infirmary (Settlers 4 healer\'s hut)', () => {
     const w = rich(new World(42));
     dismissStandby(w);
     const inf = infirmary(w);
-    woundedOutside(w, inf, 3).hp = 5;
+    woundedOutside(w, inf, 2).hp = 5;
     for (let i = 0; i < 2000 && !w.settlers.some((s) => s.tasks[0]?.t === 'heal'); i++) w.step();
     expect(w.settlers.some((s) => s.tasks[0]?.t === 'heal')).toBe(true);
     const l = World.load(JSON.parse(JSON.stringify(saveWorld(w))));

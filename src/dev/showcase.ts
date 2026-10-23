@@ -427,7 +427,7 @@ export function buildShowcase(): World {
       s.hp = 8 + 6 * k;
       s.inside = null;
       s.home = null;
-      const at = formationSpots(w, infirmary.door.x + 2, infirmary.door.y + 2, 3)[k] ?? infirmary.door;
+      const at = formationSpots(w, infirmary.door.x + 1, infirmary.door.y + 1, 3)[k] ?? infirmary.door;
       s.x = s.px = at.x;
       s.y = s.py = at.y;
     });
