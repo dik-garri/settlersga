@@ -16,6 +16,7 @@ import {
   paintPack,
 } from './animalArt';
 import type { Art3d } from './art3d';
+import type { TileView } from './tileMemory';
 import { depthOf, HALF_H, HALF_W } from './iso';
 
 type Add = (name: string, w: number, h: number, ax: number, ay: number, paint: (ctx: CanvasRenderingContext2D) => void) => void;
@@ -76,6 +77,8 @@ export class AnimalLayer {
     private readonly wareTex: Record<Resource, Texture>,
     /** The player this browser plays: its own units are always drawn, others only in its sight. */
     private readonly me: PlayerId,
+    /** The ground as the local player knows it (`TileMemory`): animals stand on the drawn surface. */
+    private readonly ground: Pick<TileView, 'heightAt'>,
   ) {
     this.tex = Object.fromEntries(
       ANIMAL_KINDS.map((k) => [k, DIRS.map((_, d) => Array.from({ length: ANIMAL_COLUMNS }, (_, f) => get(`animal:${k}:${d}:${f}`)))]),
@@ -109,7 +112,7 @@ export class AnimalLayer {
     const x = s.px + (s.x - s.px) * alpha;
     const y = s.py + (s.y - s.py) * alpha;
     const px = (x - y) * HALF_W;
-    const py = (x + y) * HALF_H - this.sim.map.heightAt(x, y);
+    const py = (x + y) * HALF_H - this.ground.heightAt(x, y);
     const step = Math.hypot(x - v.lastX, y - v.lastY);
     if (step < 1.5) v.walked += step;
     v.lastX = x;
@@ -197,7 +200,6 @@ export class AnimalLayer {
   }
 
   sync(alpha: number, timeMs: number, view: { x: number; y: number; w: number; h: number }): void {
-    const { map } = this.sim;
     if (this.views.size > this.sim.animals.length) this.prune();
     for (const a of this.sim.animals) {
       let v = this.views.get(a.id);
@@ -209,7 +211,7 @@ export class AnimalLayer {
       const x = a.px + (a.x - a.px) * alpha;
       const y = a.py + (a.y - a.py) * alpha;
       const px = (x - y) * HALF_W;
-      const py = (x + y) * HALF_H - map.heightAt(x, y);
+      const py = (x + y) * HALF_H - this.ground.heightAt(x, y);
       const step = Math.hypot(x - v.lastX, y - v.lastY);
       if (step < 1.5) v.walked += step;
       v.lastX = x;

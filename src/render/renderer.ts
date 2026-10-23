@@ -229,7 +229,7 @@ export class GameRenderer {
   private readonly groundLayers: (Container | null)[] = [];
   /** One texture over the ground atlas page, shared by all ground meshes. */
   private readonly groundSheet: Texture;
-  /** Last `map.heightVersion` the ground of each chunk was built for. */
+  /** Last `tiles.heightVersion` the ground of each chunk was built for (heights as the player knows them). */
   private readonly heightSeen: Uint32Array;
   /**
    * Scaling (512×512): a chunk's ground, boulders, territory overlay and tile objects are built the
@@ -412,10 +412,10 @@ export class GameRenderer {
     this.tradeRoutes = new TradeRouteLayer(sim, me, (x, y) => this.surface(x, y), (p) => this.playerTint[(p - 1) % this.playerTint.length]);
     this.world.addChild(this.ground, this.territory, this.marks, this.workArea.g, this.tradeRoutes.g, this.hints, this.objects, this.settlerMark, this.badges, this.shots, this.fog, this.ghostLayer);
     this.settlerTex = atlas.settlerTextures();
-    this.animals = new AnimalLayer(sim, this.objects, (n) => atlas.get(n), fogOn, this.wareTex, me);
+    this.tiles = new TileMemory(sim, me, fogOn);
+    this.animals = new AnimalLayer(sim, this.objects, (n) => atlas.get(n), fogOn, this.wareTex, me, this.tiles);
     this.settler3d = atlas.art3d?.settlers ?? null;
     this.memory = new BuildingMemory(sim, me, fogOn);
-    this.tiles = new TileMemory(sim, me, fogOn);
     this.garrison = new GarrisonLayer(sim, this.settler3d, this.settlerTex, this.playerTint, (b) => this.memory.live(b));
     for (const r of RESOURCES) this.wareTex[r] = atlas.get(`ware:${r}`);
     this.effects = new Effects(atlas, sim, (x, y) => this.surface(x, y), this.sound);
@@ -486,7 +486,8 @@ export class GameRenderer {
     const x1 = Math.min(map.w, x0 + CHUNK) - 1;
     const y1 = Math.min(map.h, y0 + CHUNK) - 1;
     let lift = 0;
-    for (let vy = y0; vy <= y1 + 1; vy++) for (let vx = x0; vx <= x1 + 1; vx++) lift = Math.max(lift, map.vertexHeight(vx, vy));
+    const known = this.tiles;
+    for (let vy = y0; vy <= y1 + 1; vy++) for (let vx = x0; vx <= x1 + 1; vx++) lift = Math.max(lift, known.vertexHeight(vx, vy));
     this.chunkBounds.set(
       [
         (x0 - y1) * HALF_W - HALF_W,
@@ -507,14 +508,14 @@ export class GameRenderer {
   /** Screen position of a point on the terrain surface (tile coordinates, fractional allowed). */
   private surface(x: number, y: number): { x: number; y: number } {
     const p = toScreen(x, y);
-    p.y -= this.sim.map.heightAt(x, y);
+    p.y -= this.tiles.heightAt(x, y);
     return p;
   }
 
   /** Screen position of tile corner (vx, vy) of the vertex grid, i.e. tile coordinates (vx − ½, vy − ½). */
   private corner(vx: number, vy: number): { x: number; y: number } {
     const p = toScreen(vx - 0.5, vy - 0.5);
-    p.y -= this.sim.map.vertexHeight(vx, vy);
+    p.y -= this.tiles.vertexHeight(vx, vy);
     return p;
   }
 
@@ -524,7 +525,7 @@ export class GameRenderer {
    */
   pickTile(wx: number, wy: number): { x: number; y: number } {
     let t = toTile(wx, wy);
-    for (let k = 0; k < 4; k++) t = toTile(wx, wy + this.sim.map.heightAt(t.x, t.y));
+    for (let k = 0; k < 4; k++) t = toTile(wx, wy + this.tiles.heightAt(t.x, t.y));
     return t;
   }
 
@@ -545,7 +546,7 @@ export class GameRenderer {
     [...this.groundChunks.keys()]
       .sort((a, b) => (a % map.chunksX) + Math.floor(a / map.chunksX) - ((b % map.chunksX) + Math.floor(b / map.chunksX)))
       .forEach((c) => this.ground.addChild(this.groundChunks[c]));
-    for (let c = 0; c < this.groundChunks.length; c++) this.heightSeen[c] = map.heightVersion[c];
+    for (let c = 0; c < this.groundChunks.length; c++) this.heightSeen[c] = this.tiles.heightVersion[c];
   }
 
   /** First time a chunk comes into view: build its ground, boulders and pending overlays. */
@@ -666,7 +667,7 @@ export class GameRenderer {
           const vx = x + (k === 1 || k === 2 ? 1 : 0);
           const vy = y + (k >= 2 ? 1 : 0);
           q[2 * k] = (vx - vy) * HALF_W;
-          q[2 * k + 1] = (vx + vy - 1) * HALF_H - map.vertexHeight(vx, vy);
+          q[2 * k + 1] = (vx + vy - 1) * HALF_H - this.tiles.vertexHeight(vx, vy);
         }
         const period = this.atlas.groundPeriod[kind];
         const variant = period ? (x % period) + period * (y % period) : hash(i) % groundVariants(kind);
@@ -784,15 +785,16 @@ export class GameRenderer {
   /**
    * Diggers change corner heights at runtime: rebuild the ground of the chunks they touched, redraw
    * their territory overlay, re-seat everything standing there and lift the culling bounds.
-   * Throttled, since a digger moves a corner a few times per second.
+   * Throttled, since a digger moves a corner a few times per second. Heights are the local player's
+   * (`tiles`, `TileMemory`): levelling in the dark reshapes nothing until he sees it.
    */
   private syncHeights(timeMs: number): void {
     if (timeMs - this.lastHeightSync < 120) return;
     this.lastHeightSync = timeMs;
     const { map } = this.sim;
     for (let c = 0; c < this.heightSeen.length; c++) {
-      if (map.heightVersion[c] === this.heightSeen[c]) continue;
-      this.heightSeen[c] = map.heightVersion[c];
+      if (this.tiles.heightVersion[c] === this.heightSeen[c]) continue;
+      this.heightSeen[c] = this.tiles.heightVersion[c];
       this.computeChunkBounds(c);
       if (!this.chunkReady[c]) continue; // built from the new heights when it comes into view
       this.buildChunkGround(c);
@@ -825,7 +827,7 @@ export class GameRenderer {
    * corner heights against a light from the top-left of the screen (tile −x) and above.
    */
   private slopeLight(x: number, y: number): number {
-    const m = this.sim.map;
+    const m = this.tiles;
     const top = m.vertexHeight(x, y);
     const right = m.vertexHeight(x + 1, y);
     const bottom = m.vertexHeight(x + 1, y + 1);
@@ -2135,7 +2137,7 @@ export class GameRenderer {
       }
       // Screen point on the terrain (inline `surface`, no allocation per settler).
       const px = (x - y) * HALF_W;
-      const py = (x + y) * HALF_H - this.sim.map.heightAt(x, y);
+      const py = (x + y) * HALF_H - this.tiles.heightAt(x, y);
       const view = this.view;
       // Other players' settlers show only where the local player has sight.
       const seen =

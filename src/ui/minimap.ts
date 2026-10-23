@@ -69,7 +69,7 @@ export class Minimap {
      * What the player knows of the tiles (the renderer's, `tileMemory.ts`): land, trees, deposits and
      * fields under the fog as last seen. Without it the map as it is.
      */
-    private readonly tiles: Pick<TileView, 'owner' | 'tree' | 'stone' | 'crop'> | null = null,
+    private readonly tiles: Pick<TileView, 'owner' | 'tree' | 'stone' | 'crop' | 'heightAt'> | null = null,
   ) {
     const { w, h } = world.map;
     this.sx = (width - 2 * this.pad) / (w + h);
@@ -152,7 +152,7 @@ export class Minimap {
       else if (known.stone[i]) [r, g, b] = [200, 192, 176];
       else if (known.crop[i]) [r, g, b] = [184, 160, 80];
       // Higher ground is brighter, so mountains read on the overview too.
-      let light = 0.85 + Math.min(1, map.heightAt(i % map.w, Math.floor(i / map.w)) / 100) * 0.45;
+      let light = 0.85 + Math.min(1, known.heightAt(i % map.w, Math.floor(i / map.w)) / 100) * 0.45;
       const land = this.layers.land;
       if (land && known.owner[i] !== this.me) light *= 0.6;
       r = Math.min(255, r * light);
